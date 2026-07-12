@@ -14,6 +14,7 @@
 #include <compare>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <type_traits>
 #include <cmath>
@@ -325,7 +326,7 @@ namespace jai {
         // cross-thread refcount touch aborts AT the racing site
         void diag_tag_single_thread() {
             if (storage_.index() == TYPEID_STRING) {
-                if (auto* s = std::get<strong_ptr<script_string>>(storage_).get()) {
+                if (auto* s = storage_.get<strong_ptr<script_string>>().get()) {
                     detail::cb_from_object(s)->diag_tag();
                 }
             }
@@ -383,7 +384,7 @@ namespace jai {
             const size_t idx = raw_storage_index();
             if (idx == TYPEID_CPP_BOUND) return true;
             if (idx == TYPEID_OBJECT) {
-                auto* h = std::get_if<TYPEID_OBJECT>(&storage_);
+                auto* h = storage_.get_if<TYPEID_OBJECT>();
                 return *h && (*h)->bound_ptr != nullptr;
             }
             return false;
@@ -392,14 +393,14 @@ namespace jai {
         bool is_cpp_bound_primitive() const noexcept { return raw_storage_index() == TYPEID_CPP_BOUND; }
 
         bool is_non_owning_object() const {
-            auto* h = std::get_if<TYPEID_OBJECT>(&storage_);
+            auto* h = storage_.get_if<TYPEID_OBJECT>();
             return h && *h && (*h)->bound_ptr != nullptr && !(*h)->data;
         }
 
         // Returns nullptr if not cpp_bound. Caller is responsible for type safety.
         void* get_cpp_bound_ptr() const {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) return *b ? (*b)->ptr : nullptr;
-            if (auto* h = std::get_if<TYPEID_OBJECT>(&storage_)) return *h ? (*h)->bound_ptr : nullptr;
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) return *b ? (*b)->ptr : nullptr;
+            if (auto* h = storage_.get_if<TYPEID_OBJECT>()) return *h ? (*h)->bound_ptr : nullptr;
             return nullptr;
         }
 
@@ -451,7 +452,7 @@ namespace jai {
         // Invoke these ON THE DEREF'D value: a reference-to-bound holds a reference_holder
         // (index 10), so a bare-this lookup would answer null/false.
         const cpp_bound_holder* bound_box() const noexcept {
-            auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_);
+            auto* b = storage_.get_if<TYPEID_CPP_BOUND>();
             return b ? b->get() : nullptr;
         }
         bool bound_semantic_is(size_t idx) const noexcept {
@@ -539,15 +540,15 @@ namespace jai {
         // ============================================================================
 
         inline script_bool unchecked_as_bool() const noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 return *static_cast<const bool*>((*b)->ptr);
             }
-            return *std::get_if<TYPEID_BOOL>(&storage_);
+            return *storage_.get_if<TYPEID_BOOL>();
         }
 
         // WPR at 99deff47: 56k µs of out-of-line calls in the vm window
         JAI_FORCEINLINE script_int unchecked_as_int() const noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 const void* p = (*b)->ptr;
                 const uint8_t ss = (*b)->size_and_sign;
                 const uint8_t size = ss & 0x7F;
@@ -566,93 +567,93 @@ namespace jai {
                     default: return *static_cast<const script_int*>(p);
                 }
             }
-            return *std::get_if<TYPEID_INT>(&storage_);
+            return *storage_.get_if<TYPEID_INT>();
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
         // Caller MUST be dominated by a raw-index gate: no bound decode is possible through a script_int&
         inline script_int& unchecked_as_int_ref() noexcept {
-            return *std::get_if<TYPEID_INT>(&storage_);
+            return *storage_.get_if<TYPEID_INT>();
         }
 
         inline script_float unchecked_as_float() const noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 if (((*b)->size_and_sign & 0x7F) == sizeof(script_float))
                     return *static_cast<const script_float*>((*b)->ptr);
                 return static_cast<script_float>(*static_cast<const float*>((*b)->ptr));
             }
-            return *std::get_if<TYPEID_FLOAT>(&storage_);
+            return *storage_.get_if<TYPEID_FLOAT>();
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
         // Caller MUST be dominated by a raw-index gate: no bound decode is possible through a script_float&
         inline script_float& unchecked_as_float_ref() noexcept {
-            return *std::get_if<TYPEID_FLOAT>(&storage_);
+            return *storage_.get_if<TYPEID_FLOAT>();
         }
 
         inline const script_string& unchecked_as_string() const noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 // string bindings are only ever created over std::string/script_string - exact type
                 return *static_cast<const script_string*>((*b)->ptr);
             }
-            return **std::get_if<TYPEID_STRING>(&storage_);
+            return **storage_.get_if<TYPEID_STRING>();
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead)
         // Bound strings return the LIVE C++ string (write-through)
         inline script_string& unchecked_as_string_ref() noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 return *static_cast<script_string*>((*b)->ptr);
             }
-            return **std::get_if<TYPEID_STRING>(&storage_);
+            return **storage_.get_if<TYPEID_STRING>();
         }
 
         inline script_char unchecked_as_char() const noexcept {
-            if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 return *static_cast<const script_char*>((*b)->ptr);
             }
-            return *std::get_if<TYPEID_CHAR>(&storage_);
+            return *storage_.get_if<TYPEID_CHAR>();
         }
 
         // Unchecked array accessor - caller must verify is_array() first.
         // HETERO surface: a typed node reaching here means a path missing its kind
         // dispatch (typed_array_design.md stage 2) - loud in Debug, empty in Release.
         inline const std::vector<script_value>& unchecked_as_array() const noexcept {
-            assert(!(*std::get_if<TYPEID_ARRAY>(&storage_))->is_typed() &&
+            assert(!(*storage_.get_if<TYPEID_ARRAY>())->is_typed() &&
                    "typed array reached a hetero-only path (missing kind dispatch)");
-            return (*std::get_if<TYPEID_ARRAY>(&storage_))->values();
+            return (*storage_.get_if<TYPEID_ARRAY>())->values();
         }
 
         // Unchecked mutable array NODE handle - caller must verify is_array() first
         inline strong_ptr<script_array>& unchecked_get_array_storage() noexcept {
-            return *std::get_if<TYPEID_ARRAY>(&storage_);
+            return *storage_.get_if<TYPEID_ARRAY>();
         }
 
         // Unchecked const array NODE pointer - the array's identity (node-alias keys,
         // borrow tags). Caller must verify is_array() first.
         inline const script_array* unchecked_array_node() const noexcept {
-            return std::get_if<TYPEID_ARRAY>(&storage_)->get();
+            return storage_.get_if<TYPEID_ARRAY>()->get();
         }
 
 
         // Unchecked function accessor - caller must verify is_function() first
         inline const script_function& unchecked_as_function() const noexcept {
-            return **std::get_if<TYPEID_FUNCTION>(&storage_);
+            return **storage_.get_if<TYPEID_FUNCTION>();
         }
 
         // Unchecked map accessor - caller must verify is_map() first
         inline const script_map& unchecked_as_map() const noexcept {
-            return **std::get_if<TYPEID_MAP>(&storage_);
+            return **storage_.get_if<TYPEID_MAP>();
         }
 
         // Unchecked mutable map storage accessor - caller must verify is_map() first
         inline strong_ptr<script_map>& unchecked_get_map_storage() noexcept {
-            return *std::get_if<TYPEID_MAP>(&storage_);
+            return *storage_.get_if<TYPEID_MAP>();
         }
 
         // Unchecked mutable string storage accessor - caller must verify raw string storage first
         inline strong_ptr<script_string>& unchecked_get_string_storage() noexcept {
-            return *std::get_if<TYPEID_STRING>(&storage_);
+            return *storage_.get_if<TYPEID_STRING>();
         }
 
         inline const std::vector<script_value>& as_array() const {
@@ -669,9 +670,9 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            assert(!std::get<strong_ptr<script_array>>(storage_)->is_typed() &&
+            assert(!storage_.get<strong_ptr<script_array>>()->is_typed() &&
                    "typed array reached a hetero-only path (missing kind dispatch)");
-            return std::get<strong_ptr<script_array>>(storage_)->values();
+            return storage_.get<strong_ptr<script_array>>()->values();
         }
         
         inline const script_map& as_map() const {
@@ -686,7 +687,7 @@ namespace jai {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return *std::get<strong_ptr<script_map>>(storage_);
+            return *storage_.get<strong_ptr<script_map>>();
         }
 
         const script_function& as_function() const;
@@ -706,7 +707,7 @@ namespace jai {
                 }
                 throw runtime_error("cannot bind a non-const script reference to a C++-bound variable of a different width");
             }
-            return std::get<script_int>(val.storage_);
+            return val.storage_.get<script_int>();
         }
 
         inline script_float& as_float_ref() {
@@ -720,7 +721,7 @@ namespace jai {
                 }
                 throw runtime_error("cannot bind a non-const script reference to a C++-bound variable of a different width");
             }
-            return std::get<script_float>(val.storage_);
+            return val.storage_.get<script_float>();
         }
 
         inline script_bool& as_bool_ref() {
@@ -734,7 +735,7 @@ namespace jai {
                 }
                 throw runtime_error("cannot bind a non-const script reference to a C++-bound variable of a different width");
             }
-            return std::get<script_bool>(val.storage_);
+            return val.storage_.get<script_bool>();
         }
 
         inline script_char& as_char_ref() {
@@ -748,7 +749,7 @@ namespace jai {
                 }
                 throw runtime_error("cannot bind a non-const script reference to a C++-bound variable of a different width");
             }
-            return std::get<script_char>(val.storage_);
+            return val.storage_.get<script_char>();
         }
 
         inline script_string& as_string_ref() {
@@ -760,7 +761,7 @@ namespace jai {
                 // string bindings are only ever created over std::string/script_string - exact type
                 return *static_cast<script_string*>(box->ptr);
             }
-            return *std::get<strong_ptr<script_string>>(val.storage_);
+            return *val.storage_.get<strong_ptr<script_string>>();
         }
         
         // Generic extraction with type checking
@@ -819,14 +820,14 @@ namespace jai {
                             }
                             // Non-owning C++ reference (registered class): verify the holder's
                             // registered type before reinterpreting.
-                            if (auto* boundHolder = std::get_if<strong_ptr<object_holder>>(&storage_);
+                            if (auto* boundHolder = storage_.get_if<strong_ptr<object_holder>>();
                                 boundHolder && *boundHolder && (*boundHolder)->bound_ptr) {
                                 if (!engine_holder_matches_type(engine_, (*boundHolder)->type_name, typeid(base_type))) {
                                     throw runtime_error("Object type mismatch");
                                 }
                                 return *static_cast<base_type*>((*boundHolder)->bound_ptr);
                             }
-                            if (auto* holderPtr = std::get_if<strong_ptr<object_holder>>(&storage_); holderPtr && *holderPtr) {
+                            if (auto* holderPtr = storage_.get_if<strong_ptr<object_holder>>(); holderPtr && *holderPtr) {
                                 if (!engine_holder_matches_type(engine_, (*holderPtr)->type_name, typeid(base_type))) {
                                     throw runtime_error("Object type mismatch");
                                 }
@@ -871,7 +872,7 @@ namespace jai {
             if (auto* box = val.bound_box()) {
                 return checked_result<const script_string*>(static_cast<const script_string*>(box->ptr));
             }
-            return checked_result<const script_string*>(std::get<strong_ptr<script_string>>(val.storage_).get());
+            return checked_result<const script_string*>(val.storage_.get<strong_ptr<script_string>>().get());
         }
 
         inline checked_result<const std::vector<script_value>*> checked_as_array() const {
@@ -881,9 +882,9 @@ namespace jai {
                     "script_value is not an array"
                 );
             }
-            assert(!std::get<strong_ptr<script_array>>(storage_)->is_typed() &&
+            assert(!storage_.get<strong_ptr<script_array>>()->is_typed() &&
                    "typed array reached a hetero-only path (missing kind dispatch)");
-            return checked_result<const std::vector<script_value>*>(&std::get<strong_ptr<script_array>>(storage_)->values());
+            return checked_result<const std::vector<script_value>*>(&storage_.get<strong_ptr<script_array>>()->values());
         }
 
         inline checked_result<const script_map*> checked_as_map() const {
@@ -893,7 +894,7 @@ namespace jai {
                     "script_value is not a map"
                 );
             }
-            return checked_result<const script_map*>(std::get<strong_ptr<script_map>>(storage_).get());
+            return checked_result<const script_map*>(storage_.get<strong_ptr<script_map>>().get());
         }
 
         inline checked_result<script_int> checked_as_int() const {
@@ -902,12 +903,12 @@ namespace jai {
                 if (val.is_cpp_bound_primitive()) {
                     return checked_result<script_int>(val.unchecked_as_int());
                 }
-                return checked_result<script_int>(std::get<script_int>(val.storage_));
+                return checked_result<script_int>(val.storage_.get<script_int>());
             } else if (val.type() == script_value_type::jai_float_type) {
                 if (val.is_cpp_bound_primitive()) {
                     return checked_result<script_int>(float_to_script_int(val.unchecked_as_float()));
                 }
-                return checked_result<script_int>(float_to_script_int(std::get<script_float>(val.storage_)));
+                return checked_result<script_int>(float_to_script_int(val.storage_.get<script_float>()));
             }
             return checked_result<script_int>(
                 make_error_code(runtime_error_code::type_mismatch),
@@ -924,7 +925,7 @@ namespace jai {
                 if (val.is_cpp_bound_primitive()) {
                     return checked_result<script_float>(val.unchecked_as_float());
                 }
-                return checked_result<script_float>(std::get<script_float>(val.storage_));
+                return checked_result<script_float>(val.storage_.get<script_float>());
             } else if (val.type() == script_value_type::jai_int_type) {
                 // Int to float conversion. unchecked_as_int() decodes the bound
                 // integer's true size/signedness; the old `const int*` cast read a
@@ -932,7 +933,7 @@ namespace jai {
                 if (val.is_cpp_bound_primitive()) {
                     return checked_result<script_float>(static_cast<script_float>(val.unchecked_as_int()));
                 }
-                return checked_result<script_float>(static_cast<script_float>(std::get<script_int>(val.storage_)));
+                return checked_result<script_float>(static_cast<script_float>(val.storage_.get<script_int>()));
             }
             return checked_result<script_float>(
                 make_error_code(runtime_error_code::type_mismatch),
@@ -951,7 +952,7 @@ namespace jai {
             if (auto* box = val.bound_box()) {
                 return checked_result<script_bool>(*static_cast<const script_bool*>(box->ptr));
             }
-            return checked_result<script_bool>(std::get<script_bool>(val.storage_));
+            return checked_result<script_bool>(val.storage_.get<script_bool>());
         }
 
         inline checked_result<script_char> checked_as_char() const {
@@ -965,7 +966,7 @@ namespace jai {
             if (auto* box = val.bound_box()) {
                 return checked_result<script_char>(*static_cast<const script_char*>(box->ptr));
             }
-            return checked_result<script_char>(std::get<script_char>(val.storage_));
+            return checked_result<script_char>(val.storage_.get<script_char>());
         }
 
         // ============================================================================
@@ -996,9 +997,9 @@ namespace jai {
                     return checked_result<T>(val.unchecked_as_int());
                 }
                 if (val.type() == script_value_type::jai_int_type) {
-                    return checked_result<T>(std::get<script_int>(val.storage_));
+                    return checked_result<T>(val.storage_.get<script_int>());
                 } else if (val.type() == script_value_type::jai_float_type) {
-                    return checked_result<T>(float_to_script_int(std::get<script_float>(val.storage_)));
+                    return checked_result<T>(float_to_script_int(val.storage_.get<script_float>()));
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1014,11 +1015,11 @@ namespace jai {
                 // floats as doubles (wrong value, and an out-of-bounds read for float).
                 if (val.type() == script_value_type::jai_float_type) {
                     return checked_result<T>(val.is_cpp_bound_primitive() ? val.unchecked_as_float()
-                                                                          : std::get<script_float>(val.storage_));
+                                                                          : val.storage_.get<script_float>());
                 } else if (val.type() == script_value_type::jai_int_type) {
                     return checked_result<T>(static_cast<script_float>(
                         val.is_cpp_bound_primitive() ? val.unchecked_as_int()
-                                                     : std::get<script_int>(val.storage_)));
+                                                     : val.storage_.get<script_int>()));
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1032,7 +1033,7 @@ namespace jai {
                     return checked_result<T>(*static_cast<const script_bool*>(box->ptr));
                 }
                 if (val.type() == script_value_type::jai_bool_type) {
-                    return checked_result<T>(std::get<script_bool>(val.storage_));
+                    return checked_result<T>(val.storage_.get<script_bool>());
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1046,7 +1047,7 @@ namespace jai {
                     return checked_result<T>(*static_cast<const script_char*>(box->ptr));
                 }
                 if (val.type() == script_value_type::jai_char_type) {
-                    return checked_result<T>(std::get<script_char>(val.storage_));
+                    return checked_result<T>(val.storage_.get<script_char>());
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1082,12 +1083,12 @@ namespace jai {
                     if (val.is_cpp_bound_primitive()) {
                         return checked_result<T>(static_cast<float>(val.unchecked_as_float()));
                     }
-                    return checked_result<T>(static_cast<float>(std::get<script_float>(val.storage_)));
+                    return checked_result<T>(static_cast<float>(val.storage_.get<script_float>()));
                 } else if (val.type() == script_value_type::jai_int_type) {
                     if (val.is_cpp_bound_primitive()) {
                         return checked_result<T>(static_cast<float>(val.unchecked_as_int()));
                     }
-                    return checked_result<T>(static_cast<float>(std::get<script_int>(val.storage_)));
+                    return checked_result<T>(static_cast<float>(val.storage_.get<script_int>()));
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1114,7 +1115,7 @@ namespace jai {
                                 "script_value is not an integer"
                             );
                         }
-                        return checked_result<T>(std::get<script_int>(storage_));
+                        return checked_result<T>(storage_.get<script_int>());
                     } else if constexpr (std::is_same_v<base_type, script_float>) {
                         if (type() != script_value_type::jai_float_type) {
                             return checked_result<T>(
@@ -1122,7 +1123,7 @@ namespace jai {
                                 "script_value is not a float"
                             );
                         }
-                        return checked_result<T>(std::get<script_float>(storage_));
+                        return checked_result<T>(storage_.get<script_float>());
                     } else if constexpr (std::is_same_v<base_type, script_bool>) {
                         if (type() != script_value_type::jai_bool_type) {
                             return checked_result<T>(
@@ -1130,7 +1131,7 @@ namespace jai {
                                 "script_value is not a boolean"
                             );
                         }
-                        return checked_result<T>(std::get<script_bool>(storage_));
+                        return checked_result<T>(storage_.get<script_bool>());
                     } else if constexpr (std::is_same_v<base_type, script_char>) {
                         if (type() != script_value_type::jai_char_type) {
                             return checked_result<T>(
@@ -1138,7 +1139,7 @@ namespace jai {
                                 "script_value is not a character"
                             );
                         }
-                        return checked_result<T>(std::get<script_char>(storage_));
+                        return checked_result<T>(storage_.get<script_char>());
                     } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
                         auto str_result = checked_as_string();
                         if (!str_result) {
@@ -1422,15 +1423,25 @@ namespace jai {
                         type_id()
                     );
                 }
-                auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
-                if (!objHolder->is_class_instance_wrapper) {
+                // type() reports the DECLARED type: a class-typed variable legally holds
+                // null (and references wrap), so probe the deref'd storage — the old
+                // std::get threw bad_variant_access through the host boundary here
+                auto* objHolder = deref().storage_.get_if<strong_ptr<object_holder>>();
+                if (!objHolder) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::not_an_object),
+                        "script_value is not an object. Actual type: {0}",
+                        type_id()
+                    );
+                }
+                if (!(*objHolder)->is_class_instance_wrapper) {
                     return checked_result<T>(
                         make_error_code(runtime_error_code::not_a_class),
                         "Object is not a class_instance. Actual type: {0}",
                         type_id()
                     );
                 }
-                return checked_result<T>(std::static_pointer_cast<class_instance>(objHolder->data));
+                return checked_result<T>(std::static_pointer_cast<class_instance>((*objHolder)->data));
             }
             // Support for shared_ptr<void> extraction
             else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
@@ -1440,8 +1451,16 @@ namespace jai {
                         "script_value is not an object"
                     );
                 }
-                auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
-                return checked_result<T>(objHolder->data);
+                // Declared-type guard: null-valued / reference-wrapped variables probe
+                // the deref'd storage (see the class_instance branch above)
+                auto* objHolder = deref().storage_.get_if<strong_ptr<object_holder>>();
+                if (!objHolder) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::not_an_object),
+                        "script_value is not an object"
+                    );
+                }
+                return checked_result<T>((*objHolder)->data);
             }
             // Support for other shared_ptr types
             else if constexpr (is_specialization_v<T, std::shared_ptr>) {
@@ -1468,7 +1487,7 @@ namespace jai {
                 // Fall back to default shared_ptr extraction
                 auto t = type();
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
+                    auto objHolder = storage_.get<strong_ptr<object_holder>>();
 
                     // Check for non-owning C++ reference (holder bound_ptr set, data null)
                     // Cannot safely return shared_ptr from non-owning reference
@@ -1530,7 +1549,7 @@ namespace jai {
                 // For custom classes, try to extract shared_ptr and dereference
                 auto t = type();
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
+                    auto objHolder = storage_.get<strong_ptr<object_holder>>();
 
                     // Handle non-owning C++ reference via the holder's bound_ptr
                     if (objHolder->bound_ptr && !objHolder->data) {
@@ -1614,7 +1633,7 @@ namespace jai {
         operator int() const {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_int_type) {
-                auto int_val = std::get<script_int>(val.storage_);
+                auto int_val = val.storage_.get<script_int>();
                 if (int_val < std::numeric_limits<int>::min() || 
                     int_val > std::numeric_limits<int>::max()) {
                     throw runtime_error("script_int value out of range for int");
@@ -1627,7 +1646,7 @@ namespace jai {
         operator int64_t() const {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_int_type) {
-                return std::get<script_int>(val.storage_);
+                return val.storage_.get<script_int>();
             }
             throw runtime_error("script_value is not an integer");
         }
@@ -1635,9 +1654,9 @@ namespace jai {
         operator double() const {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_float_type) {
-                return std::get<script_float>(val.storage_);
+                return val.storage_.get<script_float>();
             } else if (val.type() == script_value_type::jai_int_type) {
-                return static_cast<double>(std::get<script_int>(val.storage_));
+                return static_cast<double>(val.storage_.get<script_int>());
             }
             throw runtime_error("script_value is not a numeric type");
         }
@@ -1645,9 +1664,9 @@ namespace jai {
         operator float() const {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_float_type) {
-                return static_cast<float>(std::get<script_float>(val.storage_));
+                return static_cast<float>(val.storage_.get<script_float>());
             } else if (val.type() == script_value_type::jai_int_type) {
-                return static_cast<float>(std::get<script_int>(val.storage_));
+                return static_cast<float>(val.storage_.get<script_int>());
             }
             throw runtime_error("script_value is not a numeric type");
         }
@@ -1841,31 +1860,199 @@ namespace jai {
         static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
     private:
 
-        // Type-erased storage using variant for efficiency
-        // NOTE: string and function are wrapped in strong_ptr for cheap non-atomic copies
-        // This shrinks the variant (all complex types are now 16-byte pointers)
-        // and makes copies O(1) instead of O(n) for strings
-        // strong_ptr uses non-atomic ref counting (fast!) until lock() is called
-        using storage = std::variant<
-            std::monostate,                               // 0 - Null
-            script_int,                                   // 1 - script_int
-            script_float,                                 // 2 - script_float
-            strong_ptr<script_string>,                    // 3 - script_string (wrapped for cheap copies)
-            script_char,                                  // 4 - script_char
-            script_bool,                                  // 5 - script_bool
-            strong_ptr<script_array>,                     // 6 - Array<T> (script_array node = identity)
-            strong_ptr<script_map>, // 7 - Map<K,V>
-            strong_ptr<object_holder>,                    // 8 - Object<T>
-            strong_ptr<script_function>,                  // 9 - Function (wrapped for cheap copies)
-            strong_ptr<reference_holder>,                 // 10 - T&
-            strong_ptr<shared_value_holder>,              // 11 - shared_ptr<T> (boxed; never runtime-constructed - real shared_ptr values are alt 8 + type_info marker)
-            jai::weaker_ptr<object_holder>,                 // 12 - weak_ptr<T>
-            invalid_tag,                                  // 13 - Invalid value marker
-            strong_ptr<cpp_bound_holder>,                 // 14 - C++ primitive/string/opaque binding box
-            parallel_borrow_tag                           // 15 - parallel captured-read borrow (region-internal)
-        >;
+        // Type-erased storage: a hand-rolled tagged union with the EXACT layout and
+        // alternative indexes std::variant had (8B max payload + index, 16B total).
+        // The variant's runtime-dispatched member machinery (visitor _Destroy, generic
+        // operator=) was the vm's #1 WPR bucket; here every special member is a
+        // raw-index switch, scalar paths are a single mask test, and moves are word
+        // relocations — every alternative is a steal-and-null single-pointer handle or
+        // a trivial scalar, so relocation runs no effectful ctor/dtor. RAII on OWNED
+        // payloads is exact: handle copies increment, destroys decrement, in the same
+        // places the variant did them. get<I>/get_if<I> callers keep the check-then-get
+        // discipline (never bad_variant_access — the D12/S9 ruling stands).
+        class storage {
+        public:
+            storage() noexcept : index_(TYPEID_NULL) {}
+            storage(std::monostate) noexcept : index_(TYPEID_NULL) {}
+            storage(script_int v) noexcept : index_(TYPEID_INT) { p_.i = v; }
+            storage(script_float v) noexcept : index_(TYPEID_FLOAT) { p_.f = v; }
+            storage(script_char v) noexcept : index_(TYPEID_CHAR) { p_.c = v; }
+            storage(script_bool v) noexcept : index_(TYPEID_BOOL) { p_.b = v; }
+            storage(invalid_tag) noexcept : index_(TYPEID_INVALID) {}
+            storage(parallel_borrow_tag v) noexcept : index_(TYPEID_PARALLEL_BORROW) { p_.pb = v; }
+            storage(strong_ptr<script_string> v) noexcept : index_(TYPEID_STRING) { new (&p_.s) strong_ptr<script_string>(std::move(v)); }
+            storage(strong_ptr<script_array> v) noexcept : index_(TYPEID_ARRAY) { new (&p_.a) strong_ptr<script_array>(std::move(v)); }
+            storage(strong_ptr<script_map> v) noexcept : index_(TYPEID_MAP) { new (&p_.m) strong_ptr<script_map>(std::move(v)); }
+            storage(strong_ptr<object_holder> v) noexcept : index_(TYPEID_OBJECT) { new (&p_.o) strong_ptr<object_holder>(std::move(v)); }
+            storage(strong_ptr<script_function> v) noexcept : index_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function>(std::move(v)); }
+            storage(strong_ptr<reference_holder> v) noexcept : index_(TYPEID_REFERENCE) { new (&p_.r) strong_ptr<reference_holder>(std::move(v)); }
+            storage(strong_ptr<shared_value_holder> v) noexcept : index_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
+            storage(jai::weaker_ptr<object_holder> v) noexcept : index_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
+            storage(strong_ptr<cpp_bound_holder> v) noexcept : index_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
+
+            storage(const storage& o) noexcept : index_(o.index_) {
+                switch (index_) {
+                    case TYPEID_STRING: new (&p_.s) strong_ptr<script_string>(o.p_.s); break;
+                    case TYPEID_ARRAY: new (&p_.a) strong_ptr<script_array>(o.p_.a); break;
+                    case TYPEID_MAP: new (&p_.m) strong_ptr<script_map>(o.p_.m); break;
+                    case TYPEID_OBJECT: new (&p_.o) strong_ptr<object_holder>(o.p_.o); break;
+                    case TYPEID_FUNCTION: new (&p_.fn) strong_ptr<script_function>(o.p_.fn); break;
+                    case TYPEID_REFERENCE: new (&p_.r) strong_ptr<reference_holder>(o.p_.r); break;
+                    case TYPEID_SHARED_PTR: new (&p_.sh) strong_ptr<shared_value_holder>(o.p_.sh); break;
+                    case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
+                    case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
+                    default: std::memcpy(&p_, &o.p_, sizeof(p_)); break;   // trivial payloads
+                }
+            }
+            // Relocating move: every alternative is a trivial scalar or a steal-and-null
+            // single-pointer handle, so the payload word moves and the source demotes to
+            // null — no effectful ctor/dtor is elided, refcounts are untouched (one live
+            // handle before, one after). Source lands at TYPEID_NULL (script_value's
+            // move contract nulls the source anyway).
+            storage(storage&& o) noexcept : index_(o.index_) {
+                std::memcpy(&p_, &o.p_, sizeof(p_));
+                o.index_ = TYPEID_NULL;
+            }
+            storage& operator=(const storage& o) noexcept {
+                if (this != &o) {
+                    destroy();
+                    new (this) storage(o);
+                }
+                return *this;
+            }
+            storage& operator=(storage&& o) noexcept {
+                if (this != &o) {
+                    destroy();
+                    index_ = o.index_;
+                    std::memcpy(&p_, &o.p_, sizeof(p_));
+                    o.index_ = TYPEID_NULL;
+                }
+                return *this;
+            }
+            template <typename T>
+                requires (!std::is_same_v<std::remove_cvref_t<T>, storage> &&
+                          std::is_constructible_v<storage, T&&>)
+            storage& operator=(T&& v) noexcept {
+                destroy();
+                new (this) storage(std::forward<T>(v));
+                return *this;
+            }
+            ~storage() { destroy(); }
+
+            JAI_FORCEINLINE size_t index() const noexcept { return index_; }
+
+            template <size_t I> JAI_FORCEINLINE auto* get_if() noexcept {
+                return index_ == I ? &alt<I>() : nullptr;
+            }
+            template <size_t I> JAI_FORCEINLINE const auto* get_if() const noexcept {
+                return index_ == I ? &alt<I>() : nullptr;
+            }
+            template <typename T> JAI_FORCEINLINE T* get_if() noexcept {
+                return index_ == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
+            }
+            template <typename T> JAI_FORCEINLINE const T* get_if() const noexcept {
+                return index_ == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
+            }
+            // Precondition: the alternative is engaged (callers keep check-then-get)
+            template <size_t I> JAI_FORCEINLINE auto& get() noexcept { assert(index_ == I); return alt<I>(); }
+            template <size_t I> JAI_FORCEINLINE const auto& get() const noexcept { assert(index_ == I); return alt<I>(); }
+            template <typename T> JAI_FORCEINLINE T& get() noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
+            template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
+
+        private:
+            union payload {
+                payload() noexcept {}
+                ~payload() noexcept {}
+                script_int i;
+                script_float f;
+                script_char c;
+                script_bool b;
+                strong_ptr<script_string> s;
+                strong_ptr<script_array> a;
+                strong_ptr<script_map> m;
+                strong_ptr<object_holder> o;
+                strong_ptr<script_function> fn;
+                strong_ptr<reference_holder> r;
+                strong_ptr<shared_value_holder> sh;
+                jai::weaker_ptr<object_holder> w;
+                strong_ptr<cpp_bound_holder> cb;
+                parallel_borrow_tag pb;              // tagged raw pointer, trivially copyable
+            };
+
+            static constexpr uint32_t k_trivial_mask =
+                (1u << TYPEID_NULL) | (1u << TYPEID_INT) | (1u << TYPEID_FLOAT) |
+                (1u << TYPEID_CHAR) | (1u << TYPEID_BOOL) | (1u << TYPEID_INVALID) |
+                (1u << TYPEID_PARALLEL_BORROW);
+
+            JAI_FORCEINLINE void destroy() noexcept {
+                if ((k_trivial_mask >> index_) & 1u) {
+                    return;                                // scalars: one test, no dispatch
+                }
+                switch (index_) {
+                    case TYPEID_STRING: p_.s.~strong_ptr(); break;
+                    case TYPEID_ARRAY: p_.a.~strong_ptr(); break;
+                    case TYPEID_MAP: p_.m.~strong_ptr(); break;
+                    case TYPEID_OBJECT: p_.o.~strong_ptr(); break;
+                    case TYPEID_FUNCTION: p_.fn.~strong_ptr(); break;
+                    case TYPEID_REFERENCE: p_.r.~strong_ptr(); break;
+                    case TYPEID_SHARED_PTR: p_.sh.~strong_ptr(); break;
+                    case TYPEID_WEAK_PTR: p_.w.~weaker_ptr(); break;
+                    case TYPEID_CPP_BOUND: p_.cb.~strong_ptr(); break;
+                    default: break;
+                }
+            }
+
+            // The index -> alternative map (monostate and invalid_tag are EMPTY types;
+            // statics stand in so get_if<0/13> stays expressible)
+            static inline std::monostate null_alt_{};
+            static inline invalid_tag invalid_alt_{};
+            template <size_t I> JAI_FORCEINLINE auto& alt() noexcept {
+                if constexpr (I == TYPEID_NULL) { return null_alt_; }
+                else if constexpr (I == TYPEID_INT) { return p_.i; }
+                else if constexpr (I == TYPEID_FLOAT) { return p_.f; }
+                else if constexpr (I == TYPEID_STRING) { return p_.s; }
+                else if constexpr (I == TYPEID_CHAR) { return p_.c; }
+                else if constexpr (I == TYPEID_BOOL) { return p_.b; }
+                else if constexpr (I == TYPEID_ARRAY) { return p_.a; }
+                else if constexpr (I == TYPEID_MAP) { return p_.m; }
+                else if constexpr (I == TYPEID_OBJECT) { return p_.o; }
+                else if constexpr (I == TYPEID_FUNCTION) { return p_.fn; }
+                else if constexpr (I == TYPEID_REFERENCE) { return p_.r; }
+                else if constexpr (I == TYPEID_SHARED_PTR) { return p_.sh; }
+                else if constexpr (I == TYPEID_WEAK_PTR) { return p_.w; }
+                else if constexpr (I == TYPEID_INVALID) { return invalid_alt_; }
+                else if constexpr (I == TYPEID_CPP_BOUND) { return p_.cb; }
+                else { return p_.pb; }
+            }
+            template <size_t I> JAI_FORCEINLINE const auto& alt() const noexcept {
+                return const_cast<storage*>(this)->alt<I>();
+            }
+            template <typename T> static constexpr size_t index_of() noexcept {
+                if constexpr (std::is_same_v<T, std::monostate>) { return TYPEID_NULL; }
+                else if constexpr (std::is_same_v<T, script_int>) { return TYPEID_INT; }
+                else if constexpr (std::is_same_v<T, script_float>) { return TYPEID_FLOAT; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_string>>) { return TYPEID_STRING; }
+                else if constexpr (std::is_same_v<T, script_char>) { return TYPEID_CHAR; }
+                else if constexpr (std::is_same_v<T, script_bool>) { return TYPEID_BOOL; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_array>>) { return TYPEID_ARRAY; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_map>>) { return TYPEID_MAP; }
+                else if constexpr (std::is_same_v<T, strong_ptr<object_holder>>) { return TYPEID_OBJECT; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_function>>) { return TYPEID_FUNCTION; }
+                else if constexpr (std::is_same_v<T, strong_ptr<reference_holder>>) { return TYPEID_REFERENCE; }
+                else if constexpr (std::is_same_v<T, strong_ptr<shared_value_holder>>) { return TYPEID_SHARED_PTR; }
+                else if constexpr (std::is_same_v<T, jai::weaker_ptr<object_holder>>) { return TYPEID_WEAK_PTR; }
+                else if constexpr (std::is_same_v<T, invalid_tag>) { return TYPEID_INVALID; }
+                else if constexpr (std::is_same_v<T, strong_ptr<cpp_bound_holder>>) { return TYPEID_CPP_BOUND; }
+                else { static_assert(std::is_same_v<T, parallel_borrow_tag>, "not a storage alternative"); return TYPEID_PARALLEL_BORROW; }
+            }
+
+            payload p_;
+            uint8_t index_;
+        };
         static_assert(std::is_nothrow_move_constructible_v<storage> && std::is_nothrow_move_assignable_v<storage>,
-                      "every alternative must stay nothrow-move (valueless_by_exception + noexcept move depend on it)");
+                      "every alternative must stay nothrow-move (the noexcept move contract depends on it)");
+        static_assert(sizeof(storage) == 16 && alignof(storage) == 8,
+                      "storage must keep the variant's exact 16-byte layout");
 
         storage storage_;
 
@@ -1886,7 +2073,7 @@ namespace jai {
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior
-                return std::get<strong_ptr<object_holder>>(storage_);
+                return storage_.get<strong_ptr<object_holder>>();
             }
             return nullptr;
         }
@@ -1896,7 +2083,7 @@ namespace jai {
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior
-                return std::get<strong_ptr<object_holder>>(storage_);
+                return storage_.get<strong_ptr<object_holder>>();
             }
             return nullptr;
         }
@@ -1911,7 +2098,7 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            return std::get<strong_ptr<script_array>>(storage_);
+            return storage_.get<strong_ptr<script_array>>();
         }
 
         // Get raw map storage for interpreter operations
@@ -1919,7 +2106,7 @@ namespace jai {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return std::get<strong_ptr<script_map>>(storage_);
+            return storage_.get<strong_ptr<script_map>>();
         }
 
         // Get raw weak_ptr storage for interpreter operations
@@ -1927,7 +2114,7 @@ namespace jai {
             if (type() != script_value_type::jai_weak_ptr_type) {
                 throw runtime_error("script_value is not a weak_ptr");
             }
-            return std::get<jai::weaker_ptr<object_holder>>(storage_);
+            return storage_.get<jai::weaker_ptr<object_holder>>();
         }
         
         // ===== Safe Public APIs for Interpreter Operations =====
@@ -1949,14 +2136,14 @@ namespace jai {
         // Use storage_type() because references may have type_info with different base_type
         reference_holder* get_reference_holder() {
             if (storage_type() == script_value_type::jai_reference_type) {
-                return std::get<strong_ptr<reference_holder>>(storage_).get();
+                return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;
         }
 
         const reference_holder* get_reference_holder() const {
             if (storage_type() == script_value_type::jai_reference_type) {
-                return std::get<strong_ptr<reference_holder>>(storage_).get();
+                return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;
         }
@@ -1966,7 +2153,7 @@ namespace jai {
         // commit_typed_element_scratch() after writing (typed_array_design.md).
         reference_holder* typed_element_holder() noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
-            auto& holder = *std::get_if<TYPEID_REFERENCE>(&storage_);
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
             return holder && holder->typed_element() ? holder.get() : nullptr;
         }
         
@@ -1974,10 +2161,10 @@ namespace jai {
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {
-                const auto& ptr = std::get<strong_ptr<script_array>>(storage_);
+                const auto& ptr = storage_.get<strong_ptr<script_array>>();
                 return ptr.use_count() == 1;
             } else if (type() == script_value_type::jai_map_type) {
-                const auto& ptr = std::get<strong_ptr<script_map>>(storage_);
+                const auto& ptr = storage_.get<strong_ptr<script_map>>();
                 return ptr.use_count() == 1;
             }
             return false;
@@ -1986,7 +2173,7 @@ namespace jai {
         // Safe weak_ptr access
         jai::weaker_ptr<object_holder> get_weak_ptr() const {
             if (type() == script_value_type::jai_weak_ptr_type) {
-                return std::get<jai::weaker_ptr<object_holder>>(storage_);
+                return storage_.get<jai::weaker_ptr<object_holder>>();
             }
             return jai::weaker_ptr<object_holder>();
         }
@@ -1994,7 +2181,7 @@ namespace jai {
         // Unchecked mutable object storage accessor - caller must verify raw object storage first
         // (count inspection without the handle copy get_object_holder() takes)
         inline strong_ptr<object_holder>& unchecked_get_object_storage() noexcept {
-            return *std::get_if<TYPEID_OBJECT>(&storage_);
+            return *storage_.get_if<TYPEID_OBJECT>();
         }
 
         // Safe class_instance extraction from object_holder
@@ -2028,7 +2215,7 @@ namespace jai {
         // Get the wrapped value from a shared_ptr
         script_value get_shared_ptr_value() const {
             if (type() == script_value_type::jai_shared_ptr_type) {
-                auto holder = std::get<strong_ptr<shared_value_holder>>(storage_);
+                auto holder = storage_.get<strong_ptr<shared_value_holder>>();
                 if (holder && holder->inner) {
                     return *holder->inner;
                 }
@@ -2054,7 +2241,7 @@ namespace jai {
             // (identity + contents preserved), merely losing the raw-buffer form.
             if (type && type->base_type == script_value_type::jai_any_type &&
                 raw_storage_index() == TYPEID_ARRAY) {
-                auto& node = *std::get_if<TYPEID_ARRAY>(&storage_);
+                auto& node = *storage_.get_if<TYPEID_ARRAY>();
                 if (node && node->is_typed()) {
                     node->demote_to_hetero(engine_);
                 }

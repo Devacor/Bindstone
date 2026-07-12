@@ -82,6 +82,9 @@ namespace jai::vm {
         // Statement-position stores/incdecs whose result is discarded compile to a
         // no-result form (no push, no op_pop). Returns false if the shape doesn't apply.
         bool compile_no_result_expression(const expression_ptr& expr);
+        // Fused subscript store shared by the expression and statement (no_result) forms;
+        // false = the shape doesn't fuse and the caller compiles the unfused sequence
+        bool try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result);
 
         void compile_identifier_load(identifier_expr* ident);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);

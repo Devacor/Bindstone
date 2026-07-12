@@ -2911,6 +2911,9 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 // ============================================================
 
 op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+#endif
 	const uint64_t sym = f.code->symbols[ins.b];
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		stack_.push_back(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
@@ -4174,6 +4177,9 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 }
 
 op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.ip + 1 < f.code->code.size()) { ++profile_binary_fused_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+#endif
 	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
 }
 
@@ -5376,12 +5382,38 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	return exec_index(f, index_ins);
 }
 
-// Fused a[i] = v: container+index resolve as operands, value from the stack. The
+// Fused a[i] = v: container+index resolve as operands; the value rides the stack, or —
+// statement position (ins.c=1, result push elided) — as an ident/literal operand. The
 // committed paths mirror exec_index_store's fast paths verbatim; every other shape
 // pushes the operands above the value and replays the unfused sequence.
 op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	std::optional<script_value> cscratch, mscratch, iscratch;
+	std::optional<script_value> cscratch, mscratch, iscratch, vscratch;
+	const bool no_result = ins.c != 0;
+	const bool value_operand = p.store_value.const_index != k_invalid_u32 ||
+	                           p.store_value.symbol != k_invalid_u32;
+	const script_value* value_ptr = nullptr;
+	if (value_operand) {
+		// Value resolves FIRST — the unfused sequence evaluated it before the container,
+		// so undefined-variable errors keep their position
+		if (p.store_value.const_index != k_invalid_u32) {
+			vscratch.emplace(materialize_constant(f.code->constants[p.store_value.const_index]));
+			value_ptr = &*vscratch;
+		} else {
+			auto resolved = fused_ident_value(f, p.store_value, vscratch,
+			                                  p.index_binary != k_invalid_u32 ? SIZE_MAX : f.ip * 3 + 2);
+			if (!resolved) return raise_from(resolved);
+			value_ptr = resolved.value();
+		}
+		// Member getters / boxed index steps can run user code before the value is
+		// consumed — and value_ptr may target a frame slot, which stack growth moves
+		// (invariant 2b). Snapshot exactly like the unfused push did. Pure ident/lit
+		// index sites (the hot shape) keep the zero-copy pointer.
+		if (!vscratch && (p.container.member_node != k_invalid_u32 || p.index_binary != k_invalid_u32)) {
+			vscratch.emplace(*value_ptr);
+			value_ptr = &*vscratch;
+		}
+	}
 	const script_value* container_ptr;
 	if (p.container.const_index != k_invalid_u32) {
 		container_ptr = &f.code->constants[p.container.const_index];
@@ -5395,6 +5427,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
 			if (is_unwinding_) [[unlikely]] {
 				// pair parity: [value, GET_MEMBER's out] stay pushed, INDEX_STORE never runs
+				if (value_operand) { stack_.push_back(*value_ptr); }
 				stack_.push_back(*container_ptr);
 				return {};
 			}
@@ -5454,6 +5487,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			VM_TRY(binary_fused_compute(f, p.index_binary,
 			                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
 			if (is_unwinding_) [[unlikely]] {
+				if (value_operand) { stack_.push_back(*value_ptr); }
 				stack_.push_back(*container_ptr);
 				if (computed_index) {
 					stack_.push_back(std::move(*computed_index));
@@ -5465,6 +5499,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		if (chain_pos < chain.size() || (!chain.empty() && !have_raw_index)) {
 			// Boxed chain tail above the pending value: [value, container, acc] then one
 			// op_binary per remaining step, finished by the real op_index_store
+			if (value_operand) { stack_.push_back(*value_ptr); }
 			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 			else { stack_.push_back(*container_ptr); }
 			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
@@ -5486,7 +5521,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				}
 			}
 			const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
-			return exec_index_store(f, store_ins);
+			const op_status st = exec_index_store(f, store_ins);
+			if (st == op_status::failed) { return st; }
+			if (no_result && !is_unwinding_) { stack_.pop_back(); }
+			return st;
 		}
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
@@ -5504,27 +5542,34 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		index_is_int = index_v.is_int();
 		if (index_is_int) { index_int = index_v.unchecked_as_int(); }
 	}
-	if (!stack_.empty() && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_is_int) {
+	if ((value_operand || !stack_.empty()) && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_is_int) {
 		const script_int index = index_int;
 		auto storage = container.get_array_storage();
 		// TYPED raw store (mirrors exec_index_store): numeric rhs coerces straight into
-		// the buffer; non-numeric rhs replays for the exact mismatch error
+		// the buffer; non-numeric rhs replays for the exact mismatch error. set() runs
+		// no user code, so operand/stack sources read in place.
 		if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
-			const script_value& rhs_peek = stack_.back().deref();
+			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 			const size_t ri = rhs_peek.raw_storage_index();
 			if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
-				script_value value = std::move(stack_.back());
-				stack_.pop_back();
-				storage->set(static_cast<size_t>(index), value.deref());
-				stack_.push_back(std::move(value));   // assignment expression result
+				storage->set(static_cast<size_t>(index), rhs_peek);
+				if (value_operand) {
+					if (!no_result) { stack_.push_back(*value_ptr); }
+				} else {
+					script_value value = std::move(stack_.back());
+					stack_.pop_back();
+					if (!no_result) { stack_.push_back(std::move(value)); }   // assignment expression result
+				}
 				return {};
 			}
 		}
 		if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 			auto container_type_info = container.get_type_info();
 			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
-			script_value value = std::move(stack_.back());
-			stack_.pop_back();
+			// Element-type conversion can run user code: pop/copy the value into a local
+			// first (invariant 2b — value_ptr may target a frame slot the stack can move)
+			script_value value = value_operand ? script_value(*value_ptr) : std::move(stack_.back());
+			if (!value_operand) { stack_.pop_back(); }
 			script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 			if (element_type) {
 				if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
@@ -5543,10 +5588,11 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				// No element type constraint - values deep-copy, shared_ptr handles share
 				*target_ptr = clone_for_assignment(value);
 			}
-			stack_.push_back(std::move(value));   // assignment expression result
+			if (!no_result) { stack_.push_back(std::move(value)); }   // assignment expression result
 			return {};
 		}
 	}
+	if (value_operand) { stack_.push_back(*value_ptr); }
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
@@ -5554,7 +5600,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
-	return exec_index_store(f, store_ins);
+	const op_status st = exec_index_store(f, store_ins);
+	if (st == op_status::failed) { return st; }
+	if (no_result && !is_unwinding_) { stack_.pop_back(); }
+	return st;
 }
 
 // Fused a[i] op= v: the numeric plain-array shape (int/float element, raw int/float rhs,
@@ -10168,6 +10217,22 @@ void vm_backend::dump_opcode_profile() const {
 			if (++shown >= 15) break;
 		}
 	}
+	auto dump_next_histogram = [](const char* label, const uint64_t (&hist)[256]) {
+		std::vector<std::pair<int, uint64_t>> rows;
+		for (int i = 0; i < 256; ++i) if (hist[i]) rows.push_back({i, hist[i]});
+		if (rows.empty()) return;
+		std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] %s result consumers (next opcode):\n", label);
+		size_t shown = 0;
+		for (const auto& [op, count] : rows) {
+			fprintf(stderr, "  %-24.*s %10llu\n",
+				(int)opcode_name(static_cast<opcode>(op)).size(), opcode_name(static_cast<opcode>(op)).data(),
+				(unsigned long long)count);
+			if (++shown >= 12) break;
+		}
+	};
+	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
+	dump_next_histogram("LOAD", profile_load_next_);
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
 	if (total == 0) return;

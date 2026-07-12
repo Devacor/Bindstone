@@ -1313,20 +1313,32 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
-		if (assign->target->get_type() != node_type::identifier_expr) return false;
-		auto* ident = static_cast<identifier_expr*>(assign->target.get());
-		compile_expression(assign->value);
-		if (assign->op.type == token_type::equal) {
-			uint32_t flags = store_flag_no_result;
-			if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
-			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
-			else if (assign->typed_store_provable) flags |= store_flag_type_provable;
-			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
-		} else {
-			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
-			     compound_kind_for(assign->op.type) | compound_flag_no_result, assign->value.get());
+		if (assign->target->get_type() == node_type::identifier_expr) {
+			auto* ident = static_cast<identifier_expr*>(assign->target.get());
+			compile_expression(assign->value);
+			if (assign->op.type == token_type::equal) {
+				uint32_t flags = store_flag_no_result;
+				if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
+				if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+				else if (assign->typed_store_provable) flags |= store_flag_type_provable;
+				emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+			} else {
+				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
+				     compound_kind_for(assign->op.type) | compound_flag_no_result, assign->value.get());
+			}
+			return true;
 		}
-		return true;
+		// Statement-position subscript store: the fused op elides the result push
+		// (c=1) and an ident/literal RHS rides as an operand — no LOAD, no pushes
+		if (assign->op.type == token_type::equal &&
+		    assign->target->get_type() == node_type::binary_expr) {
+			auto* sub = static_cast<binary_expr*>(assign->target.get());
+			if (sub->op.type == token_type::left_bracket &&
+			    try_emit_fused_index_store(sub, assign->value, true)) {
+				return true;
+			}
+		}
+		return false;
 	}
 	if (expr->get_type() == node_type::unary_expr) {
 		auto* un = static_cast<unary_expr*>(expr.get());
@@ -1674,6 +1686,67 @@ void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {
 	emit(opcode::op_unary, static_cast<uint32_t>(expr->op.type));
 }
 
+bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result) {
+	const uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
+	const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
+	                           sub->right->get_type() == node_type::literal_expr;
+	const bool ident_container = sub->left->get_type() == node_type::identifier_expr;
+	member_expr* mc = fusable_member_container(sub->left.get());
+
+	fused_index_proto p;
+	bool fused = false;
+	if (ident_container && operand_index) {
+		p.container = make_fused_operand(sub->left.get());
+		p.index = make_fused_operand(sub->right.get());
+		fused = true;
+	} else if (mc && operand_index) {
+		// Member-base container `base.member[i] = v` (see the read-site twin)
+		p.container = make_fused_operand(mc->object.get());
+		p.container.member_node = add_node(sub->left);
+		p.index = make_fused_operand(sub->right.get());
+		fused = true;
+	} else if (binary_expr* rb = ident_container ? index_binary_candidate(sub->right.get()) : nullptr) {
+		// Computed-index chain on an ident container (see the read-site twin)
+		binary_expr* spine[8];
+		const int depth = index_chain_spine(rb, spine);
+		if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
+			p.container = make_fused_operand(sub->left.get());
+			binary_expr* inner = spine[depth - 1];
+			fused_binary_proto bp;
+			bp.op = static_cast<uint8_t>(inner->op.type);
+			bp.left = make_fused_operand(inner->left.get());
+			bp.right = make_fused_operand(inner->right.get());
+			chunk_->fused_binary_protos.push_back(bp);
+			p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+			for (int i = depth - 2; i >= 0; --i) {
+				fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
+				sp.op = static_cast<uint8_t>(spine[i]->op.type);
+				sp.right = make_fused_operand(spine[i]->right.get());
+				chunk_->fused_binary_protos.push_back(sp);
+				p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
+			}
+			fused = true;
+		}
+	}
+	if (!fused) return false;
+
+	// Statement position rides an ident/literal RHS as an operand (no LOAD dispatch,
+	// no pushes); every other shape keeps the value on the stack
+	bool value_operand = false;
+	if (no_result && (value->get_type() == node_type::identifier_expr ||
+	                  value->get_type() == node_type::literal_expr)) {
+		p.store_value = make_fused_operand(value.get());
+		value_operand = true;
+	}
+	if (!value_operand) {
+		compile_expression(value);
+	}
+	chunk_->fused_index_protos.push_back(p);
+	emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape,
+	     no_result ? 1u : 0u);
+	return true;
+}
+
 void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement) {
 	const bool compound = expr->op.type != token_type::equal;
 	if (expr->target->get_type() == node_type::identifier_expr) {
@@ -1726,57 +1799,8 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		if (!compound) {
 			// Fused store: the array fast path writes in place (no reference mint);
 			// other shapes replay the INDEX(lvalue_write)+INDEX_ASSIGN semantics inside
-			compile_expression(expr->value);
-			// Operand-fused shape: ident container + ident/literal index (kills both
-			// LOAD dispatches; the exec replays op_index_store for non-array shapes)
-			const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
-			                           sub->right->get_type() == node_type::literal_expr;
-			member_expr* mc = fusable_member_container(sub->left.get());
-			binary_expr* rb = sub->left->get_type() == node_type::identifier_expr
-				? index_binary_candidate(sub->right.get()) : nullptr;
-			if (sub->left->get_type() == node_type::identifier_expr && operand_index) {
-				fused_index_proto p;
-				p.container = make_fused_operand(sub->left.get());
-				p.index = make_fused_operand(sub->right.get());
-				chunk_->fused_index_protos.push_back(p);
-				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
-			} else if (mc && operand_index) {
-				// Member-base container `base.member[i] = v` (see the read-site twin)
-				fused_index_proto p;
-				p.container = make_fused_operand(mc->object.get());
-				p.container.member_node = add_node(sub->left);
-				p.index = make_fused_operand(sub->right.get());
-				chunk_->fused_index_protos.push_back(p);
-				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
-			} else if (binary_expr* spine_ok = rb; spine_ok != nullptr) {
-				// Computed-index chain on an ident container (see the read-site twin)
-				binary_expr* spine[8];
-				const int depth = index_chain_spine(rb, spine);
-				if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
-					fused_index_proto p;
-					p.container = make_fused_operand(sub->left.get());
-					binary_expr* inner = spine[depth - 1];
-					fused_binary_proto bp;
-					bp.op = static_cast<uint8_t>(inner->op.type);
-					bp.left = make_fused_operand(inner->left.get());
-					bp.right = make_fused_operand(inner->right.get());
-					chunk_->fused_binary_protos.push_back(bp);
-					p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
-					for (int i = depth - 2; i >= 0; --i) {
-						fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
-						sp.op = static_cast<uint8_t>(spine[i]->op.type);
-						sp.right = make_fused_operand(spine[i]->right.get());
-						chunk_->fused_binary_protos.push_back(sp);
-						p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
-					}
-					chunk_->fused_index_protos.push_back(p);
-					emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
-				} else {
-					compile_expression(sub->left);
-					compile_expression(sub->right);
-					emit(opcode::op_index_store, shape);
-				}
-			} else {
+			if (!try_emit_fused_index_store(sub, expr->value, false)) {
+				compile_expression(expr->value);
 				compile_expression(sub->left);
 				compile_expression(sub->right);
 				emit(opcode::op_index_store, shape);

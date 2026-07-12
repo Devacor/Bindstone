@@ -77,6 +77,10 @@ namespace jai::vm {
         // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
         uint64_t profile_env_resolve_[6] = {};
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
+        // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
+        // each BINARY_FUSED / LOAD dispatch — who eats the pushed value
+        uint64_t profile_binary_fused_next_[256] = {};
+        uint64_t profile_load_next_[256] = {};
 #else
         ~vm_backend() override = default;
 #endif

@@ -160,9 +160,12 @@ namespace jai::vm {
         // Pins this instance to a worker context built at the region barrier: root
         // environment (parent = nullptr, the hard partition), a private env-epoch sink
         // (worker env churn never bumps the shared engine epoch), the worker's own
-        // limits, and an armed budget clock. cached_global_env_ goes null so the per-ip
-        // env-lookup caches never engage (workers never run top-level frames either) -
-        // no epoch reads, no cache writes into chunks. Workers never call
+        // limits, and an armed budget clock. cached_global_env_ goes null so the SHARED
+        // per-chunk env-lookup caches never engage (no epoch reads, no cache writes into
+        // chunks); lookups memoize instead in this instance's worker-private tables
+        // (worker_env_caches_) against worker_root_env_ - the slot root every capture is
+        // defined into, whose identity is slot-lifetime and whose epoch survives calls
+        // (per-region capture redefines update in place, no bump). Workers never call
         // prepare_for_execution, so nothing here is ever repointed at shared state.
         void configure_parallel_worker(std::shared_ptr<environment> root_env,
                                        string_symbolizer* env_epoch_sink,
@@ -170,6 +173,7 @@ namespace jai::vm {
                                        std::chrono::nanoseconds budget) {
             environment_ = std::move(root_env);
             cached_global_env_ = nullptr;
+            worker_root_env_ = environment_.get();
             env_symbolizer_ = env_epoch_sink;
             limits_ = worker_limits;
             scope_env_pool_.clear();   // pooled envs minted earlier carry the shared sink
@@ -207,6 +211,21 @@ namespace jai::vm {
         bool parallel_worker_ = false;
         // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
+        // Worker-private env-lookup cache (workers may not touch the SHARED
+        // chunk::env_lookup_cache): same entries and validation as the main path but
+        // stored per chunk in THIS instance, resolve target = worker_root_env_. The pin
+        // keeps the chunk alive for the backend's life, so the raw key can never be a
+        // recycled address (a false identity hit would alias another chunk's ip space).
+        // Created only at push_script_frame_pinned (where the owning shared_ptr is in
+        // hand) - method/coroutine frames keep today's full walk.
+        struct worker_chunk_env_cache {
+            std::shared_ptr<void> pin;
+            const chunk* code = nullptr;
+            std::vector<env_lookup_cache_entry> entries;
+        };
+        std::vector<worker_chunk_env_cache> worker_env_caches_;
+        size_t worker_env_mru_ = 0;
+        environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
 
         // Compile a per-worker function copy's body on the MAIN thread at the region
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on
@@ -720,6 +739,12 @@ namespace jai::vm {
         // Transparency-walk bail tail: chain-agnostic storage-prefix walk from the
         // CURRENT env (real shadowing), arming the entry's fast head for env-local hits
         script_value* env_arm_fast_head(env_lookup_cache_entry* fast_entry, uint64_t symbol_id);
+        // Worker-private cache row for this chunk+slot (nullptr = chunk never pinned
+        // here - caller falls through to the full walk). MRU compare first.
+        env_lookup_cache_entry* worker_env_cache_slot(const chunk* code, size_t cache_slot);
+        // find-or-create the worker cache record for a chunk (called where the owning
+        // shared_ptr is in hand; the pin makes the raw-pointer key sound forever)
+        void worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code);
         // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
         op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
 

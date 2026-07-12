@@ -6431,7 +6431,31 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 	pending_callee pc = std::move(pending_callees_.back());
 	pending_callees_.pop_back();
 
+#ifdef JAISCRIPT_VM_PROFILE
+	// Path-bucketed self-cost (see profile_cfs_cycles_): dtor charges the bucket the
+	// taken path selected; the opaque tail keeps the default and splits by callee name
+	struct cfs_probe {
+		vm_backend* vm;
+		int bucket = 2;
+		std::string opaque_name;
+		uint64_t t0 = __rdtsc();
+		~cfs_probe() {
+			const uint64_t dt = __rdtsc() - t0;
+			vm->profile_cfs_cycles_[bucket] += dt;
+			++vm->profile_cfs_counts_[bucket];
+			if (bucket == 2 && !opaque_name.empty()) { vm->profile_cfs_opaque_cycles_[opaque_name] += dt; }
+		}
+	} cfs_probe_{this};
+	if (site.callee.symbol != k_invalid_u32) {
+		cfs_probe_.opaque_name = std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]));
+	}
+#endif
+
 	if (pc.fn) {
+#ifdef JAISCRIPT_VM_PROFILE
+		cfs_probe_.bucket = 0;
+		if (!cfs_probe_.opaque_name.empty()) { profile_cfs_inloop_names_[cfs_probe_.opaque_name]++; }
+#endif
 		const size_t args_base = stack_.size() - argc;
 		try {
 			return push_script_frame_pinned(f, *pc.fn, std::move(pc.pin), args_base, argc, &site);
@@ -6469,6 +6493,9 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 				auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id,
 					stack_.vec().data() + slice_base, argc);
 				if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+#ifdef JAISCRIPT_VM_PROFILE
+					cfs_probe_.bucket = 1;
+#endif
 					script_value method_val = *bthunk->payload.bound_dispatch;
 					script_value receiver = *bthunk->payload.this_obj;
 					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
@@ -10600,6 +10627,34 @@ void vm_backend::dump_opcode_profile() const {
 			profile_cycles_[i] / 1e6,
 			(double)profile_cycles_[i] / (double)profile_counts_[i],
 			100.0 * (double)profile_cycles_[i] / (double)total);
+	}
+	if (profile_cfs_counts_[0] + profile_cfs_counts_[1] + profile_cfs_counts_[2]) {
+		fprintf(stderr, "[vm-profile] CALL_FROM_SCRATCH exec decomposition (cycles exclude in-loop callee bodies; opaque INCLUDES the native execution):\n");
+		static constexpr const char* cfs_names[3] = { "pinned in-loop", "sliced bound-method", "opaque invoke" };
+		for (int i = 0; i < 3; ++i) {
+			if (!profile_cfs_counts_[i]) continue;
+			fprintf(stderr, "  %-20s %10llu calls %12.1f Mcyc %10.1f avg\n", cfs_names[i],
+				(unsigned long long)profile_cfs_counts_[i], profile_cfs_cycles_[i] / 1e6,
+				(double)profile_cfs_cycles_[i] / (double)profile_cfs_counts_[i]);
+		}
+	}
+	if (!profile_cfs_inloop_names_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_inloop_names_.begin(), profile_cfs_inloop_names_.end());
+		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] call_from_scratch pinned in-loop callees:\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : callees) {
+			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
+			if (++shown >= 12) break;
+		}
+	}
+	if (!profile_cfs_opaque_cycles_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_opaque_cycles_.begin(), profile_cfs_opaque_cycles_.end());
+		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] call_from_scratch opaque cycles by callee:\n");
+		for (const auto& [name, cyc] : callees) {
+			fprintf(stderr, "  %-32s %12.1f Mcyc\n", name.c_str(), cyc / 1e6);
+		}
 	}
 	if (!profile_native_callees_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> callees(profile_native_callees_.begin(), profile_native_callees_.end());

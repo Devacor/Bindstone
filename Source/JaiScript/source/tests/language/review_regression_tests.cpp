@@ -256,6 +256,57 @@ public:
             auto e = make_engine();
             check_eq((int64_t)0, e->execute("auto x = -9223372036854775807 - 1; auto d = -1; x % d").as_int());
         });
+
+        // ---- shift semantics CONTRACT (policy-independent, both overflow builds):
+        // bitwise ops including << >> operate on the 64-bit pattern mod 2^64 by DESIGN —
+        // bits shifted past bit 63 are discarded, never an overflow error (matching
+        // Rust/C#: checked arithmetic excludes bit operations). Only the COUNT is
+        // guarded (0..63, catchable runtime error). GLOOM/demoreel/crawler xorshift
+        // RNGs and the (0x9E3779B9 << 32) seed idiom depend on every pin here. ----
+        test("shift_left_wraps_mod_2_64", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)INT64_MIN, e->execute("auto x = 1; auto s = 63; x << s").as_int());
+            check_eq((int64_t)INT64_MIN, e->execute("1 << 63").as_int());   // literal spelling too
+            check_eq((int64_t)-2, e->execute("auto y = 9223372036854775807; y << 1").as_int());
+            auto g = e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; g");   // the GLOOM seed idiom
+            check_true(g.as_int() < 0, "shift into the sign bit wraps negative, no error");
+            check_eq((int64_t)0x9E3779B9, e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; (g >> 32) & 0xFFFFFFFF").as_int());
+            check_eq((int64_t)0x7F4A7C15, e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; g & 0xFFFFFFFF").as_int());
+        });
+        test("shift_left_vs_mul_contrast", [this]() {   // the checked-overflow boundary, pinned
+            auto e = make_engine();
+            const char* shl = "auto x = 4611686018427387904; x << 1";   // 2^62 << 1 wraps to INT64_MIN
+            const char* mul = "auto x = 4611686018427387904; x * 2";    // same math, ARITHMETIC op
+            check_eq((int64_t)INT64_MIN, e->execute(shl).as_int());
+            if (e->throw_on_overflow()) {
+                check_throws([&]() { e->execute(mul); });
+            } else {
+                check_eq((int64_t)INT64_MIN, e->execute(mul).as_int());
+            }
+        });
+        test("shift_right_is_arithmetic", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)-4, e->execute("auto x = -8; auto s = 1; x >> s").as_int());
+            check_eq((int64_t)-1, e->execute("auto x = -9223372036854775807 - 1; x >> 63").as_int());
+        });
+        test("shift_count_range_errors_text_parity", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                check_throws([&]() { e->execute("auto x = 1; auto s = 64; x << s;"); });
+                check_throws([&]() { e->execute("auto x = 1; auto s = -1; x << s;"); });
+                check_throws([&]() { e->execute("auto x = 1; auto s = 64; x >> s;"); });
+                try { e->execute("auto x = 1; auto s = 64; x << s;"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                check_eq((int64_t)3, e->execute("1 + 2").as_int());   // engine stays usable
+                ++idx;
+            }
+            check_eq(msg[0], msg[1], "shift-count error text is byte-identical across backends");
+            check_true(msg[0].find("Shift amount must be between 0 and 63") != std::string::npos,
+                "the count guard names its range");
+        });
         // ---- fuzz FZ-SPACESHIP-OVERFLOW-SWALLOW (seed 9336): the parser wrap-folds
         // 1 + INT64_MAX into a literal INT64_MIN; the interpreter's literal unary-minus
         // fast path then negated it UNCHECKED (silent wrap) while the VM raised ----
@@ -1623,6 +1674,61 @@ public:
                 total;
             )");
             check_eq((int64_t)145, r.as_int());
+        });
+
+        // ---- math::wrap_add / wrap_sub / wrap_mul: explicit mod-2^64 arithmetic,
+        // POLICY-INDEPENDENT (identical in checked and wrap overflow builds) — the
+        // sanctioned replacement for the 16-bit limb products GLOOM/demoreel/crawler
+        // hand-roll around the checked '*'. No throw_on_overflow() gate anywhere here:
+        // unconditional values ARE the policy-independence pin. ----
+        test("wrap_trio_values", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)INT64_MIN, e->execute("math::wrap_add(9223372036854775807, 1)").as_int());
+            check_eq((int64_t)INT64_MAX, e->execute("math::wrap_sub(-9223372036854775807 - 1, 1)").as_int());
+            check_eq((int64_t)-2, e->execute("math::wrap_mul(9223372036854775807, 2)").as_int());
+            check_eq((int64_t)1, e->execute("math::wrap_mul(-1, -1)").as_int());
+            check_eq((int64_t)8589934593LL, e->execute("math::wrap_mul(4294967297, 4294967297)").as_int());   // (2^32+1)^2 mod 2^64 = 2^33+1
+            // Agrees exactly with checked ops when nothing overflows
+            check_eq((int64_t)4000000000LL, e->execute("math::wrap_mul(2000000000, 2)").as_int());
+            check_eq((int64_t)-5, e->execute("math::wrap_add(-2, -3)").as_int());
+        });
+        // Equivalence proof against INDEPENDENT arithmetic: a 16-bit limb multiply
+        // (crawler.jai's u64_mul shape — masked columns, no op ever near overflow)
+        // must agree with wrap_mul across seeded full-range operands and edge pairs.
+        test("wrap_mul_matches_limb_multiply", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function limb_mul(int a, int b) -> int {
+                    int a0 = a & 0xFFFF; int a1 = (a >> 16) & 0xFFFF; int a2 = (a >> 32) & 0xFFFF; int a3 = (a >> 48) & 0xFFFF;
+                    int b0 = b & 0xFFFF; int b1 = (b >> 16) & 0xFFFF; int b2 = (b >> 32) & 0xFFFF; int b3 = (b >> 48) & 0xFFFF;
+                    int c0 = a0 * b0;
+                    int c1 = a1 * b0 + a0 * b1;
+                    int c2 = a2 * b0 + a1 * b1 + a0 * b2;
+                    int c3 = a3 * b0 + a2 * b1 + a1 * b2 + a0 * b3;
+                    int r0 = c0 & 0xFFFF; int t1 = c1 + (c0 >> 16);
+                    int r1 = t1 & 0xFFFF; int t2 = c2 + (t1 >> 16);
+                    int r2 = t2 & 0xFFFF; int t3 = c3 + (t2 >> 16);
+                    return r0 | (r1 << 16) | (r2 << 32) | ((t3 & 0xFFFF) << 48);
+                }
+                math::random_seed(666);
+                auto ok = limb_mul(9223372036854775807, 2) == math::wrap_mul(9223372036854775807, 2) &&
+                          limb_mul(-1, -1) == math::wrap_mul(-1, -1) &&
+                          limb_mul(-9223372036854775807 - 1, 3) == math::wrap_mul(-9223372036854775807 - 1, 3);
+                for (int i = 0; i < 20; ++i) {
+                    auto a = math::random(-9223372036854775807 - 1, 9223372036854775807);
+                    auto b = math::random(-9223372036854775807 - 1, 9223372036854775807);
+                    if (limb_mul(a, b) != math::wrap_mul(a, b)) { ok = false; }
+                }
+                ok;
+            )");
+            check(r.as_bool());
+        });
+        test("wrap_trio_errors", [this]() {
+            auto e = make_engine();
+            check_throws([&]() { e->execute("math::wrap_add(1);"); });          // arity
+            check_throws([&]() { e->execute("math::wrap_mul(1.5, 2);"); });     // float rejected
+            check_throws([&]() { e->execute("math::wrap_sub(\"a\", 2);"); });   // type
+            check_eq((int64_t)3, e->execute("1 + 2").as_int());                 // engine stays usable
         });
     }
 };

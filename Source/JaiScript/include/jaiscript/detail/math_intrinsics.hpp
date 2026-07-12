@@ -35,6 +35,10 @@ namespace jai::detail {
         lerp_, mix_, unmix_,
         mix_in_, mix_out_, mix_in_out_, mix_out_in_,
         unmix_in_, unmix_out_, unmix_in_out_, unmix_out_in_,
+        // Explicit mod-2^64 integer arithmetic (policy-independent: identical in checked
+        // and wrap overflow builds) - the sanctioned spelling for hash folds and RNG steps
+        // that would otherwise hand-roll limb products around the checked-overflow error.
+        wrap_add_, wrap_sub_, wrap_mul_,
         count,
         none = count
     };
@@ -92,6 +96,11 @@ namespace jai::detail {
                 return math_fn::none;
             case 't':
                 return name == "tan" ? math_fn::tan_ : math_fn::none;
+            case 'w':
+                if (name == "wrap_add") return math_fn::wrap_add_;
+                if (name == "wrap_sub") return math_fn::wrap_sub_;
+                if (name == "wrap_mul") return math_fn::wrap_mul_;
+                return math_fn::none;
             default:
                 return math_fn::none;
         }
@@ -323,6 +332,28 @@ namespace jai::detail {
                 if (!a.ok) return bad_type("math::random_seed expects a numeric argument");
                 rng.seed(a.is_int ? static_cast<uint64_t>(a.i) : static_cast<uint64_t>(a.f));
                 return checked_result<script_value>(script_value(std::monostate{}, eng));
+            }
+            case math_fn::wrap_add_:
+            case math_fn::wrap_sub_:
+            case math_fn::wrap_mul_: {
+                // Two's-complement wraparound computed in unsigned (UB-free), integer-only:
+                // silently truncating a float would defeat the point of explicit wrap math.
+                if (argc != 2) {
+                    return bad_arity(fn == math_fn::wrap_add_ ? "math::wrap_add expects 2 arguments"
+                                   : fn == math_fn::wrap_sub_ ? "math::wrap_sub expects 2 arguments"
+                                                              : "math::wrap_mul expects 2 arguments");
+                }
+                const num a = read(*args[0]), b = read(*args[1]);
+                if (!a.ok || !b.ok || !a.is_int || !b.is_int) {
+                    return bad_type(fn == math_fn::wrap_add_ ? "math::wrap_add expects integer arguments"
+                                  : fn == math_fn::wrap_sub_ ? "math::wrap_sub expects integer arguments"
+                                                             : "math::wrap_mul expects integer arguments");
+                }
+                const uint64_t ua = static_cast<uint64_t>(a.i), ub = static_cast<uint64_t>(b.i);
+                const uint64_t r = fn == math_fn::wrap_add_ ? ua + ub
+                                 : fn == math_fn::wrap_sub_ ? ua - ub
+                                                            : ua * ub;
+                return checked_result<script_value>(script_value(static_cast<script_int>(r), eng));
             }
 
             // ---- interpolation family (formulas verbatim from the stdlib registrations) ----

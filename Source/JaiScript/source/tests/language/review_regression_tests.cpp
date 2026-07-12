@@ -1941,8 +1941,237 @@ public:
     }
 };
 
+// Char integral promotion (Dev ruling 2026-07-12, the DOOM WAD-parser feedback):
+// a char operand enters ARITHMETIC and BITWISE binary operators as int64 in 0..255
+// (unsigned by spec). Strictly additive: char+string concat, native char comparisons,
+// and object custom operators keep their pre-promotion meaning. One shared kernel,
+// detail/char_promotion.hpp, feeds both backends.
+class char_promotion_tests : public suite {
+public:
+    char_promotion_tests() : suite("Char Promotion") {}
+
+    void forge_tests() override {
+        test("char_minus_char", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)25, e->execute("'z' - 'a'").as_int());
+        });
+        test("char_plus_int", [this]() {
+            auto e = make_engine();
+            auto r = e->execute("'a' + 1");
+            check(r.is_int());
+            check_eq((int64_t)98, r.as_int());
+        });
+        test("digit_parse_shape", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)42, e->execute(R"(
+                var s = "42";
+                (s[0] - '0') * 10 + (s[1] - '0')
+            )").as_int());
+        });
+        test("typed_char_local_promotes", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)1, e->execute("char c = 'b'; c - 'a'").as_int());
+        });
+        test("char_bitwise_and_mask", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)0, e->execute("'A' & 0x20").as_int());
+            check_eq((int64_t)32, e->execute("'a' & 0x20").as_int());
+            check_eq((int64_t)96, e->execute("'a' & 'b'").as_int());
+        });
+        test("char_shift_and_modulo", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)194, e->execute("'a' << 1").as_int());
+            check_eq((int64_t)1, e->execute("'a' % 2").as_int());
+        });
+        test("char_float_mix_promotes_to_float", [this]() {
+            auto e = make_engine();
+            check_near(145.5, e->execute("'a' * 1.5").as_float(), 1e-9);
+        });
+        test("unsigned_high_bit_byte", [this]() {
+            auto e = make_engine();
+            // Script string contains one raw 0xC3 byte; s[0] must promote as 195, never -61.
+            check_eq((int64_t)195, e->execute("var s = \"\xC3\"; s[0] + 0").as_int());
+            check_eq((int64_t)195, e->execute("var s = \"\xC3\"; s[0] * 1").as_int());
+        });
+        test("compound_assign_through_promotion", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)102, e->execute("var x = 5; x += 'a'; x").as_int());
+        });
+        // The additive guarantees: everything that worked before promotion still means
+        // the same thing.
+        test("string_concat_preserved", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("prex"), e->execute("\"pre\" + 'x'").as_string());
+            check_eq(std::string("xpost"), e->execute("'x' + \"post\"").as_string());
+        });
+        test("no_implicit_int_to_char", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            // The promoted result is an int; it does not sneak back into the char domain.
+            check_eq(std::string("int"), e->execute("type_of('a' + 1)").as_string());
+            check_eq(std::string("char"), e->execute("type_of('a')").as_string());
+        });
+        // Comparison inting (second ruling, same day): comparisons promote exactly like
+        // arithmetic, so the char domain has ONE rule instead of two.
+        test("char_equals_int", [this]() {
+            auto e = make_engine();
+            check(e->execute("'a' == 97").as_bool());
+            check(e->execute("97 == 'a'").as_bool());
+            check(e->execute("'a' != 98").as_bool());
+            check_false(e->execute("'a' == 98").as_bool());
+            // The pre-ruling silent-false binary idiom, now truthful:
+            check(e->execute("var s = \"\\x1A\"; s[0] == 0x1A").as_bool());
+        });
+        test("char_equals_string_stays_false", [this]() {
+            auto e = make_engine();
+            // Promotion never crosses into the string domain.
+            check_false(e->execute("'a' == \"a\"").as_bool());
+        });
+        test("char_ordered_vs_int", [this]() {
+            auto e = make_engine();
+            check(e->execute("'a' < 98").as_bool());
+            check(e->execute("'a' >= 97").as_bool());
+            check(e->execute("64 < 'A'").as_bool());
+            check(e->execute("'a' < 'b'").as_bool());
+            check(e->execute("'a' == 'a'").as_bool());
+        });
+        test("char_spaceship_promotes", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)1, e->execute("'a' <=> 65").as_int());
+            check_eq((int64_t)0, e->execute("'b' <=> 'b'").as_int());
+            check_eq((int64_t)-1, e->execute("'A' <=> 'a'").as_int());
+        });
+        test("high_bit_comparisons_unsigned", [this]() {
+            auto e = make_engine();
+            // Byte 0xC3 must order as 195, not -61 — signed-native ordering is gone.
+            check(e->execute("var s = \"\\xC3\"; s[0] > 'a'").as_bool());
+            check(e->execute("var s = \"\\xC3\"; s[0] > 127").as_bool());
+            check_eq((int64_t)1, e->execute("var s = \"\\xC3\"; s[0] <=> 'a'").as_int());
+        });
+        // Byte minting: \xNN escapes (exactly two hex digits) + stdlib to_char.
+        test("hex_escapes_in_literals", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("AB"), e->execute("\"\\x41\\x42\"").as_string());
+            check(e->execute("'\\x41' == 'A'").as_bool());
+            check_eq((int64_t)0, e->execute("\"\\x00\"[0] + 0").as_int());
+            check_eq((int64_t)3, e->execute("\"a\\x00b\".size()").as_int());
+            // Exactly two digits: the third hex char is literal text, not part of the escape.
+            check_eq(std::string("A5"), e->execute("\"\\x415\"").as_string());
+        });
+        test("hex_escape_malformed_rejected", [this]() {
+            auto e = make_engine();
+            check_throws([&]() { e->execute("\"\\xZZ\""); });
+            check_throws([&]() { e->execute("\"\\x4\""); });
+            check_eq((int64_t)3, e->execute("1 + 2").as_int());   // engine stays usable
+        });
+        test("to_char_mints_bytes", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check(e->execute("to_char(65) == 'A'").as_bool());
+            check_eq(std::string("char"), e->execute("type_of(to_char(200))").as_string());
+            check_eq((int64_t)200, e->execute("to_char(200) + 0").as_int());
+            // The BMP-writer shape: computed bytes append onto a binary string.
+            check_eq(std::string("BC"), e->execute("var out = \"\"; out += to_char(66); out += to_char(67); out").as_string());
+            check_throws([&]() { e->execute("to_char(256)"); });
+            check_throws([&]() { e->execute("to_char(-1)"); });
+        });
+    }
+};
+
+// Constructor-call semantics pinned around the in-loop ctor-body entry (op_new slice
+// B): the body runs on the dispatch loop for vm class/shared_ptr mints and direct
+// class-name calls; every observable below must read identically on both backends and
+// match the pre-slice probes.
+class constructor_semantics_tests : public suite {
+public:
+    constructor_semantics_tests() : suite("Constructor Semantics") {}
+    void forge_tests() override {
+        test("ctor_falloff_returns_instance", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)5, e->execute("class A { int x = 1; A() { x = 5; } } auto a = A(); a.x").as_int());
+        });
+        test("ctor_explicit_valued_return_wins", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            // Pinned by probe before the in-loop entry existed: `return 99` in a ctor
+            // yields 99 (an int) to the call site, not the instance.
+            check_eq(std::string("int"), e->execute(
+                "class B { int x = 2; B() { x = 7; return 99; } } type_of(B())").as_string());
+            check_eq((int64_t)99, e->execute(
+                "class B { int x = 2; B() { x = 7; return 99; } } B() + 0").as_int());
+        });
+        test("ctor_bare_return_yields_null", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            // Also pinned by probe: bare `return;` yields null (errors at typed use)
+            check_eq(std::string("null"), e->execute(
+                "class A { int x = 1; A() { return; } } type_of(A())").as_string());
+        });
+        test("shared_ptr_mint_stamps_type", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            // type_of reports the value category ("object") on both backends; the
+            // shared_ptr stamp's observable is weak_ptr minting from the result
+            check_eq(std::string("object"), e->execute(
+                "class C { int x = 3; C(int v) { x = v; } } var c = new shared_ptr<C>(9); type_of(c)").as_string());
+            check_eq((int64_t)9, e->execute(
+                "class C { int x = 3; C(int v) { x = v; } } var c = new shared_ptr<C>(9); c.x").as_int());
+        });
+        test("ctor_throw_is_catchable_at_call_site", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("caught:boom"), e->execute(R"(
+                class T { T() { throw "boom"; } }
+                var msg = "";
+                try { var t = T(); } catch (ex) { msg = "caught:" + ex; }
+                msg
+            )").as_string());
+        });
+        test("ctor_super_and_delegation_compose", [this]() {
+            auto e = make_engine();
+            // 43 = the pre-slice both-backend answer (pinned, not derived): the
+            // delegation runs the target's body, then the delegating body composes
+            check_eq((int64_t)43, e->execute(R"(
+                class Base { int b = 0; Base(int v) { b = v; } }
+                class D : Base {
+                    int d = 0;
+                    D(int v) : super(v * 2) { d = v; }
+                    D() : this(3) { d = d + 40; }
+                }
+                auto x = D();
+                x.b + x.d
+            )").as_int());
+            // super alone, no delegation: both fields observable
+            check_eq((int64_t)9, e->execute(R"(
+                class Base { int b = 0; Base(int v) { b = v; } }
+                class E : Base { int d = 0; E(int v) : super(v * 2) { d = v; } }
+                auto x = E(3);
+                x.b + x.d
+            )").as_int());
+        });
+        test("ctor_recursion_in_body", [this]() {
+            auto e = make_engine();
+            // A ctor body calling the class recursively exercises reentrant in-loop
+            // ctor frames (the transient-function/window discipline)
+            check_eq((int64_t)3, e->execute(R"(
+                class N {
+                    int depth = 0;
+                    N(int d) {
+                        depth = d;
+                        if (d > 0) { auto child = N(d - 1); depth = child.depth + 1; }
+                    }
+                }
+                N(3).depth
+            )").as_int());
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
+using constructor_semantics_tests = jai::foundry::tests::constructor_semantics_tests;
+FOUNDRY_REGISTER(constructor_semantics_tests)
+using char_promotion_tests = jai::foundry::tests::char_promotion_tests;
+FOUNDRY_REGISTER(char_promotion_tests)
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
 FOUNDRY_REGISTER(review_regression_tests)
 using typed_store_proof_tests = jai::foundry::tests::typed_store_proof_tests;

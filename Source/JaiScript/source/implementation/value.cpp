@@ -890,7 +890,7 @@ std::string script_value::to_string() const {
     }
 }
 
-const script_value& script_value::deref() const {
+const script_value& script_value::deref_slow() const {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
         // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
@@ -940,7 +940,7 @@ const script_value& script_value::deref() const {
     return *this;
 }
 
-script_value& script_value::deref() {
+script_value& script_value::deref_slow() {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
         // See const overload: bind, don't copy, the strong_ptr (avoids refcount churn).

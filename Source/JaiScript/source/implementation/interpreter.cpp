@@ -3470,7 +3470,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
                 script_value ref_value = script_value::make_element_reference(
                     left.get_array_storage(), static_cast<size_t>(index), engine_, element_type);
-                push_value(ref_value);
+                push_value(std::move(ref_value));
             } else if (node->is_typed()) {
                 push_value(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
             } else {
@@ -3522,7 +3522,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
                     // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
                     script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
-                    push_value(ref_value);
+                    push_value(std::move(ref_value));
                 } else if (is_lvalue && !transient_read) {
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
                     // of m[k][i] / m[k].field): return a reference to the EXISTING
@@ -3550,7 +3550,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                         if (!val.has_valid_engine()) {
                             val.set_engine(engine_);
                         }
-                        push_value(val);
+                        push_value(std::move(val));
                     } else {
                         push_value(script_value(std::monostate{}, engine_));
                     }
@@ -3565,7 +3565,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     if (!val.has_valid_engine()) {
                         val.set_engine(engine_);
                     }
-                    push_value(val);
+                    push_value(std::move(val));
                 } else {
                     push_value(script_value(std::monostate{}, engine_));
                 }
@@ -5002,7 +5002,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // kernel deep-copies values and shares shared_ptr handles
                         *storage = clone_for_assignment(value);
                     }
-                    push_value(value);
+                    push_value(std::move(value));
                     return {};
                 }
             }
@@ -5519,7 +5519,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
 
-                push_value(value);
+                push_value(std::move(value));
                 return {};
             }
 
@@ -6608,7 +6608,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                 return {};
             } else {  // shared_from_this
                 // Just return the shared_ptr (which is already 'this')
-                push_value(this_val);
+                push_value(std::move(this_val));
                 return {};
             }
         }
@@ -7143,7 +7143,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     // Try to get the static method (use pre-computed member_id from parser)
                     script_value static_method = class_def->get_static_method(expr->member_id, false);
                     if (!static_method.is_null()) {
-                        push_value(static_method);
+                        push_value(std::move(static_method));
                         return {};
                     }
 
@@ -7310,7 +7310,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // get_static_method with false doesn't throw - returns null if not found
         script_value static_method = class_def->get_static_method(expr->member_id, false);
         if (!static_method.is_null()) {
-            push_value(static_method);
+            push_value(std::move(static_method));
             return {};
         }
 
@@ -7318,7 +7318,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // get_static_field returns null if not found
         script_value static_value = class_def->get_static_field(expr->member_id);
         if (!static_value.is_null()) {
-            push_value(static_value);
+            push_value(std::move(static_value));
             return {};
         }
 
@@ -7336,7 +7336,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return result.error_value();
             }
             script_value static_value = std::move(result.value());
-            push_value(static_value);
+            push_value(std::move(static_value));
             return {};
         }
 
@@ -8543,7 +8543,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
             if (obj.is_weak_ptr()) {
                 // Copy constructor - just return the weak_ptr as-is
-                push_value(obj);
+                push_value(std::move(obj));
                 return {};
             }
 
@@ -11194,7 +11194,7 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     auto result = engine_ptr->execute_source(content, jai::instance_variables{}, resolved_path);
 
     // Push the result onto the value stack
-    push_value(result);
+    push_value(std::move(result));
     return {};
 }
 
@@ -11243,7 +11243,7 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     auto result = engine_ptr->execute_import(resolved_path);
 
     // Push the result onto the value stack
-    push_value(result);
+    push_value(std::move(result));
     return {};
 }
 

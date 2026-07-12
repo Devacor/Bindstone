@@ -213,6 +213,12 @@ namespace jai::vm {
         // Cache roles at these sites: binary left/right own ip*3/ip*3+1, container parks
         // at ip*3+2 (entries are provenance-checked by {env, epoch} but not symbol).
         uint32_t index_binary = k_invalid_u32;
+        // Left-spine arithmetic chain continuing index_binary: ((step0) op1 r1) op2 r2 …
+        // fused_binary_protos entries whose LEFT is EMPTY (the accumulator stands in;
+        // no resolver may touch it) — only op + right are read. Arithmetic ops only,
+        // rights ident/literal. All-int chains fold to a raw index in-op; any other
+        // shape replays the verbatim unfused stack sequence from the accumulator.
+        std::vector<uint32_t> index_chain_ext;
     };
 
     struct chunk {

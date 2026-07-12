@@ -866,6 +866,11 @@ namespace jai::vm {
         op_status fused_member_container(frame& f, size_t site, const script_value& base,
                                          uint32_t member_node, std::optional<script_value>& scratch,
                                          const script_value*& out);
+        // binary_fused_compute's int-row arithmetic VERBATIM, raw in/out (the fused-INDEX
+        // raw path and its chain steps share one spelling). handled=false for
+        // non-arithmetic ops — the caller falls to the boxed compute.
+        op_status raw_int_arith(token_type op, script_int a, script_int b,
+                                script_int& out, bool& handled);
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)

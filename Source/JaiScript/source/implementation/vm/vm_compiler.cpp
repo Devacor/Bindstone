@@ -1478,6 +1478,43 @@ static binary_expr* index_binary_candidate(expression* e) {
 	return b;
 }
 
+static bool is_index_chain_arith(token_type op) {
+	switch (op) {
+	case token_type::plus:
+	case token_type::minus:
+	case token_type::star:
+	case token_type::slash:
+	case token_type::percent:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// Left-spine walk for chained computed indexes (((a op b) op c) op d …): collects the
+// spine outermost-first. Descends while the step is arithmetic with an ident/literal
+// right and the left is another candidate binary; spine[depth-1] is the innermost node
+// (the caller vets its binary_shape). 0 = shape violation or too deep.
+static int index_chain_spine(binary_expr* rb, binary_expr* (&spine)[8]) {
+	int depth = 0;
+	binary_expr* cur = rb;
+	while (depth < 8) {
+		spine[depth++] = cur;
+		binary_expr* l = index_binary_candidate(cur->left.get());
+		if (!l) {
+			return depth;   // innermost reached (left is ident/lit/subscript-chain)
+		}
+		// descending: this node is a chain STEP — arithmetic, ident/literal right
+		if (!is_index_chain_arith(cur->op.type) ||
+		    (cur->right->get_type() != node_type::identifier_expr &&
+		     cur->right->get_type() != node_type::literal_expr)) {
+			return 0;
+		}
+		cur = l;
+	}
+	return 0;
+}
+
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		compile_expression(expr->left);
@@ -1529,23 +1566,34 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 			return;
 		}
-		// Computed flat-binary index on an ident container: the index runs through the
-		// ONE fused-binary body inside the op (order and error text preserved by the
-		// exec's purity/snapshot discipline)
+		// Computed index on an ident container: a left-spine arithmetic chain runs
+		// through the fused op (raw int fold / verbatim boxed replay); the innermost
+		// node must be the flat fused-binary shape
 		if (expr->left->get_type() == node_type::identifier_expr) {
-			if (binary_expr* rb = index_binary_candidate(expr->right.get());
-			    rb && binary_shape(rb) != binary_shape_none) {
-				fused_index_proto p;
-				p.container = make_fused_operand(expr->left.get());
-				fused_binary_proto bp;
-				bp.op = static_cast<uint8_t>(rb->op.type);
-				bp.left = make_fused_operand(rb->left.get());
-				bp.right = make_fused_operand(rb->right.get());
-				chunk_->fused_binary_protos.push_back(bp);
-				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
-				chunk_->fused_index_protos.push_back(p);
-				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
-				return;
+			if (binary_expr* rb = index_binary_candidate(expr->right.get())) {
+				binary_expr* spine[8];
+				const int depth = index_chain_spine(rb, spine);
+				if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
+					fused_index_proto p;
+					p.container = make_fused_operand(expr->left.get());
+					binary_expr* inner = spine[depth - 1];
+					fused_binary_proto bp;
+					bp.op = static_cast<uint8_t>(inner->op.type);
+					bp.left = make_fused_operand(inner->left.get());
+					bp.right = make_fused_operand(inner->right.get());
+					chunk_->fused_binary_protos.push_back(bp);
+					p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+					for (int i = depth - 2; i >= 0; --i) {
+						fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
+						sp.op = static_cast<uint8_t>(spine[i]->op.type);
+						sp.right = make_fused_operand(spine[i]->right.get());
+						chunk_->fused_binary_protos.push_back(sp);
+						p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
+					}
+					chunk_->fused_index_protos.push_back(p);
+					emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+					return;
+				}
 			}
 		}
 		compile_expression(expr->left);
@@ -1700,18 +1748,34 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				p.index = make_fused_operand(sub->right.get());
 				chunk_->fused_index_protos.push_back(p);
 				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
-			} else if (rb && binary_shape(rb) != binary_shape_none) {
-				// Computed flat-binary index on an ident container (see the read-site twin)
-				fused_index_proto p;
-				p.container = make_fused_operand(sub->left.get());
-				fused_binary_proto bp;
-				bp.op = static_cast<uint8_t>(rb->op.type);
-				bp.left = make_fused_operand(rb->left.get());
-				bp.right = make_fused_operand(rb->right.get());
-				chunk_->fused_binary_protos.push_back(bp);
-				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
-				chunk_->fused_index_protos.push_back(p);
-				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
+			} else if (binary_expr* spine_ok = rb; spine_ok != nullptr) {
+				// Computed-index chain on an ident container (see the read-site twin)
+				binary_expr* spine[8];
+				const int depth = index_chain_spine(rb, spine);
+				if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
+					fused_index_proto p;
+					p.container = make_fused_operand(sub->left.get());
+					binary_expr* inner = spine[depth - 1];
+					fused_binary_proto bp;
+					bp.op = static_cast<uint8_t>(inner->op.type);
+					bp.left = make_fused_operand(inner->left.get());
+					bp.right = make_fused_operand(inner->right.get());
+					chunk_->fused_binary_protos.push_back(bp);
+					p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+					for (int i = depth - 2; i >= 0; --i) {
+						fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
+						sp.op = static_cast<uint8_t>(spine[i]->op.type);
+						sp.right = make_fused_operand(spine[i]->right.get());
+						chunk_->fused_binary_protos.push_back(sp);
+						p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
+					}
+					chunk_->fused_index_protos.push_back(p);
+					emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
+				} else {
+					compile_expression(sub->left);
+					compile_expression(sub->right);
+					emit(opcode::op_index_store, shape);
+				}
 			} else {
 				compile_expression(sub->left);
 				compile_expression(sub->right);

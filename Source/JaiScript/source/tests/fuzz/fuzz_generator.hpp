@@ -238,8 +238,26 @@ namespace jai::fuzz {
 					if (const var_info* s = random_var(vt::s)) return s->name + ".size()";
 					return int_leaf_or_var();
 				}
-				case 6: { // array element
-					if (const var_info* a = random_var(vt::arr)) return a->name + "[" + std::to_string(rng_.range(0, 2)) + "]";
+				case 6: { // array element: literal index, computed flat-binary index, or an
+					// array field off an object (the fused-INDEX shapes; OOB draws are
+					// differential coverage, not noise)
+					if (rng_.chance(25)) {
+						if (const var_info* o = random_var(vt::obj)) {
+							const class_info& ci = classes_[o->class_idx];
+							for (const auto& fld : ci.fields)
+								if (fld.second == vt::arr)
+									return o->name + "." + fld.first + "[" + std::to_string(rng_.range(0, 2)) + "]";
+						}
+					}
+					if (const var_info* a = random_var(vt::arr)) {
+						if (rng_.chance(30)) {
+							if (const var_info* iv = random_var(vt::i)) {
+								static constexpr const char* const iops[] = {"+", "-", "*", "%", "/"};
+								return a->name + "[" + iv->name + " " + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2)) + "]";
+							}
+						}
+						return a->name + "[" + std::to_string(rng_.range(0, 2)) + "]";
+					}
 					return int_leaf_or_var();
 				}
 				case 7: { // int-returning call
@@ -486,9 +504,16 @@ namespace jai::fuzz {
 				const class_info& ci = classes_[o->class_idx];
 				for (const auto& fld : ci.fields)
 					if (fld.second == vt::i) { opts.push_back(o->name + "." + fld.first); break; }
+				for (const auto& fld : ci.fields)
+					if (fld.second == vt::arr) { opts.push_back(o->name + "." + fld.first + "[" + std::to_string(rng_.range(0, 2)) + "]"); break; }
 			}
-			if (const var_info* a = random_var(vt::arr))
+			if (const var_info* a = random_var(vt::arr)) {
 				opts.push_back(a->name + "[" + std::to_string(rng_.range(0, 2)) + "]");
+				if (rng_.chance(25)) {
+					if (const var_info* iv = random_var(vt::i))
+						opts.push_back(a->name + "[" + iv->name + " % 2]");
+				}
+			}
 			if (!opts.empty()) return opts[rng_.below(static_cast<uint32_t>(opts.size()))];
 			std::string t = fresh("t");
 			lines_.push_back("int " + t + " = " + int_literal() + ";");
@@ -519,7 +544,7 @@ namespace jai::fuzz {
 			std::string first_int_field;
 			for (int i = 0; i < n_fields; ++i) {
 				std::string fname = fresh("m");
-				switch (pick_weighted({55, 15, 15, 15})) {
+				switch (pick_weighted({45, 15, 15, 10, 15})) {
 					case 0:
 						lines_.push_back("int " + fname + " = " + std::to_string(rng_.range(0, 20)) + ";");
 						ci.fields.push_back({fname, vt::i});
@@ -533,6 +558,11 @@ namespace jai::fuzz {
 					case 2:
 						lines_.push_back("var " + fname + " = " + std::to_string(rng_.range(0, 9)) + ";");
 						ci.fields.push_back({fname, vt::i});
+						break;
+					case 3: // array field: member-base subscripts read/store through it
+						lines_.push_back("var " + fname + " = [" + std::to_string(rng_.range(0, 9)) + ", " +
+						                 std::to_string(rng_.range(0, 9)) + ", " + std::to_string(rng_.range(0, 9)) + "];");
+						ci.fields.push_back({fname, vt::arr});
 						break;
 					default:
 						lines_.push_back("auto " + fname + " = " + float_literal() + ";");

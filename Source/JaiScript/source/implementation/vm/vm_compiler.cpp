@@ -1456,6 +1456,28 @@ void vm_compiler::compile_identifier_load(identifier_expr* ident) {
 	emit(opcode::op_load, identifier_slot_operand(ident), add_symbol(ident->symbol_id), flags);
 }
 
+// INDEX-fusion container `base.member[...]`: plain non-static member off an identifier
+// (the exec resolves it base→member→index, matching the unfused dispatch order)
+static member_expr* fusable_member_container(expression* e) {
+	if (e->get_type() != node_type::member_expr) return nullptr;
+	auto* m = static_cast<member_expr*>(e);
+	if (m->is_static || m->object->get_type() != node_type::identifier_expr) return nullptr;
+	return m;
+}
+
+// INDEX-fusion computed index candidate: a binary whose op keeps no jump semantics
+// (short-circuit) and is not itself a subscript; the caller still vets binary_shape
+static binary_expr* index_binary_candidate(expression* e) {
+	if (e->get_type() != node_type::binary_expr) return nullptr;
+	auto* b = static_cast<binary_expr*>(e);
+	if (b->op.type == token_type::left_bracket ||
+	    b->op.type == token_type::ampersand_ampersand ||
+	    b->op.type == token_type::pipe_pipe) {
+		return nullptr;
+	}
+	return b;
+}
+
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		compile_expression(expr->left);
@@ -1486,15 +1508,45 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		}
 		// Fused shape: ident container + ident/literal index resolve as operands in-op
 		// (kills both LOAD dispatches; subscript-chain containers stay unfused in v1)
-		if (expr->left->get_type() == node_type::identifier_expr &&
-		    (expr->right->get_type() == node_type::identifier_expr ||
-		     expr->right->get_type() == node_type::literal_expr)) {
+		const bool operand_index = expr->right->get_type() == node_type::identifier_expr ||
+		                           expr->right->get_type() == node_type::literal_expr;
+		if (expr->left->get_type() == node_type::identifier_expr && operand_index) {
 			fused_index_proto p;
 			p.container = make_fused_operand(expr->left.get());
 			p.index = make_fused_operand(expr->right.get());
 			chunk_->fused_index_protos.push_back(p);
 			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 			return;
+		}
+		// Member-base container `base.member[i]`: the GET_MEMBER resolves inside the op
+		// through its own member_ic row (ladder replay for every non-slot shape)
+		if (member_expr* mc = fusable_member_container(expr->left.get()); mc && operand_index) {
+			fused_index_proto p;
+			p.container = make_fused_operand(mc->object.get());
+			p.container.member_node = add_node(expr->left);
+			p.index = make_fused_operand(expr->right.get());
+			chunk_->fused_index_protos.push_back(p);
+			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+			return;
+		}
+		// Computed flat-binary index on an ident container: the index runs through the
+		// ONE fused-binary body inside the op (order and error text preserved by the
+		// exec's purity/snapshot discipline)
+		if (expr->left->get_type() == node_type::identifier_expr) {
+			if (binary_expr* rb = index_binary_candidate(expr->right.get());
+			    rb && binary_shape(rb) != binary_shape_none) {
+				fused_index_proto p;
+				p.container = make_fused_operand(expr->left.get());
+				fused_binary_proto bp;
+				bp.op = static_cast<uint8_t>(rb->op.type);
+				bp.left = make_fused_operand(rb->left.get());
+				bp.right = make_fused_operand(rb->right.get());
+				chunk_->fused_binary_protos.push_back(bp);
+				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+				return;
+			}
 		}
 		compile_expression(expr->left);
 		compile_expression(expr->right);
@@ -1629,12 +1681,35 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			compile_expression(expr->value);
 			// Operand-fused shape: ident container + ident/literal index (kills both
 			// LOAD dispatches; the exec replays op_index_store for non-array shapes)
-			if (sub->left->get_type() == node_type::identifier_expr &&
-			    (sub->right->get_type() == node_type::identifier_expr ||
-			     sub->right->get_type() == node_type::literal_expr)) {
+			const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
+			                           sub->right->get_type() == node_type::literal_expr;
+			member_expr* mc = fusable_member_container(sub->left.get());
+			binary_expr* rb = sub->left->get_type() == node_type::identifier_expr
+				? index_binary_candidate(sub->right.get()) : nullptr;
+			if (sub->left->get_type() == node_type::identifier_expr && operand_index) {
 				fused_index_proto p;
 				p.container = make_fused_operand(sub->left.get());
 				p.index = make_fused_operand(sub->right.get());
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
+			} else if (mc && operand_index) {
+				// Member-base container `base.member[i] = v` (see the read-site twin)
+				fused_index_proto p;
+				p.container = make_fused_operand(mc->object.get());
+				p.container.member_node = add_node(sub->left);
+				p.index = make_fused_operand(sub->right.get());
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
+			} else if (rb && binary_shape(rb) != binary_shape_none) {
+				// Computed flat-binary index on an ident container (see the read-site twin)
+				fused_index_proto p;
+				p.container = make_fused_operand(sub->left.get());
+				fused_binary_proto bp;
+				bp.op = static_cast<uint8_t>(rb->op.type);
+				bp.left = make_fused_operand(rb->left.get());
+				bp.right = make_fused_operand(rb->right.get());
+				chunk_->fused_binary_protos.push_back(bp);
+				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 				chunk_->fused_index_protos.push_back(p);
 				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
 			} else {

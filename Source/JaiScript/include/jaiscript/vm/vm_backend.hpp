@@ -82,6 +82,7 @@ namespace jai::vm {
         uint64_t profile_binary_fused_next_[256] = {};
         uint64_t profile_load_next_[256] = {};
         uint64_t profile_index_fused_next_[256] = {};
+        std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
 #else
         ~vm_backend() override = default;
 #endif
@@ -519,6 +520,7 @@ namespace jai::vm {
         uint64_t eq_method_id_ = 0;
         uint64_t cpp_object_field_id_ = 0;
         uint64_t same_as_id_ = 0;
+        uint64_t builtin_push_id_ = 0;   // "push" (the array-push inline fast path)
         uint64_t coroutine_handle_type_id_ = 0;
         uint64_t resume_id_ = 0;
         uint64_t done_id_ = 0;

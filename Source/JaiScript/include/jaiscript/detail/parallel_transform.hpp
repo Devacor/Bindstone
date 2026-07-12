@@ -16,6 +16,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/thread_pool.hpp>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -175,6 +176,35 @@ namespace jai::detail {
         static constexpr size_t max_region_pools = 8;
         std::vector<parallel_region_pool> region_pools;
         uint64_t region_use_counter = 0;
+
+#ifdef JAISCRIPT_VM_PROFILE
+        // Fork-join phase decomposition (profiling builds; dumped by the dtor): where
+        // main's blocked cycles go per region. wait = the straggler window after main's
+        // own chunk; wake = submit-end -> worker-chunk-start per pool worker (kernel
+        // wake latency), clamped at 0 for workers that started mid-submit-loop.
+        struct region_phase_prof {
+            uint64_t regions = 0;
+            uint64_t setup_cyc = 0;        // entry -> submit loop (admission/slots/captures/prewarm)
+            uint64_t submit_cyc = 0;       // the submit_to loop
+            uint64_t main_chunk_cyc = 0;   // main's own chunk 0
+            uint64_t wait_cyc = 0;         // wait_idle tail
+            uint64_t join_cyc = 0;         // accounting + error scan + assembly (success path)
+            uint64_t wake_lat_sum = 0;
+            uint64_t wake_lat_max = 0;
+            uint64_t wake_samples = 0;
+            uint64_t worker_span_sum = 0;  // pool-worker compute spans
+            uint64_t capture_cyc = 0;      // slice of setup: capture provisioning (all slots)
+            uint64_t capture_count = 0;    // captures provisioned
+            uint64_t cache_hits = 0;       // snapshot cache: content-matched reuses
+            uint64_t cache_stores = 0;     // snapshot cache: records (re)stored
+            uint64_t cache_misses = 0;     // snapshot cache: validate failed or no record
+            uint64_t cache_unprovable = 0; // snapshot cache: shape not flat -> never cached
+            std::map<std::string, uint64_t> cache_miss_names;   // miss counts by capture name
+            std::map<std::string, uint64_t> cache_miss_cyc;     // detach cycles by capture name
+        };
+        region_phase_prof prof_transform;
+        region_phase_prof prof_for;
+#endif
 
         parallel_engine_state();
         ~parallel_engine_state();   // out of line: worker_slot is incomplete here

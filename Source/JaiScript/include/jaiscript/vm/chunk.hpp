@@ -219,6 +219,10 @@ namespace jai::vm {
         // rights ident/literal. All-int chains fold to a raw index in-op; any other
         // shape replays the verbatim unfused stack sequence from the accumulator.
         std::vector<uint32_t> index_chain_ext;
+        // Store-value operand (op_index_store_fused, STATEMENT position only — the
+        // instruction's c=1 elides the result push): ident/literal RHS resolves in-op
+        // instead of LOAD+push. Absent (all-invalid) = the value rides the stack.
+        fused_operand store_value;
     };
 
     struct chunk {

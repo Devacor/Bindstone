@@ -78,9 +78,10 @@ namespace jai::vm {
         uint64_t profile_env_resolve_[6] = {};
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
-        // each BINARY_FUSED / LOAD dispatch — who eats the pushed value
+        // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value
         uint64_t profile_binary_fused_next_[256] = {};
         uint64_t profile_load_next_[256] = {};
+        uint64_t profile_index_fused_next_[256] = {};
 #else
         ~vm_backend() override = default;
 #endif
@@ -858,8 +859,13 @@ namespace jai::vm {
         op_status exec_binary_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_binary_fused_store(frame& f, const vm_instruction& ins);
         // Fused subscript read/store: container+index as operands (no LOAD dispatches);
-        // non-array shapes replay the verbatim unfused ops
+        // non-array shapes replay the verbatim unfused ops. The read core is
+        // sink-templated (defined in vm_backend.cpp): the plain op pushes, the decl
+        // variant lands in the declared slot.
+        template <bool SinkIsStack, typename Sink>
+        op_status index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
+        op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /

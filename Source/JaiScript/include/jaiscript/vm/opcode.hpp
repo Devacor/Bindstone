@@ -136,6 +136,9 @@ namespace jai::vm {
         op_index_store_fused, // a=fused_index_protos index, b=index_flag_lvalue_shape?: a[i]=v
                             // with fused container+index (value from the stack); other shapes
                             // replay the verbatim op_index_store sequence
+        op_index_fused_decl, // a=fused_index_protos index, b=index flags, c=chunk::nodes
+                            // variable_decl: the subscript read lands straight in the decl
+                            // (scalar slot fast path; push + op_decl_var replay otherwise)
 
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
@@ -272,6 +275,7 @@ namespace jai::vm {
             case opcode::op_binary_fused_decl: return "BINARY_FUSED_DECL";
             case opcode::op_index_fused: return "INDEX_FUSED";
             case opcode::op_index_store_fused: return "INDEX_STORE_FUSED";
+            case opcode::op_index_fused_decl: return "INDEX_FUSED_DECL";
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_halt: return "HALT";
         }

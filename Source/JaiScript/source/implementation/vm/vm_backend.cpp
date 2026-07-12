@@ -490,6 +490,11 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
 			break;
 		}
+		case opcode::op_index_fused_decl: {
+			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.c].get());
+			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+			break;
+		}
 		case opcode::op_load:
 			if (ins.a != k_invalid_u32 && ins.b < f->code->symbols.size()) {
 				slot_names.emplace_back(ins.a, symbolizer_->get_string(f->code->symbols[ins.b]));
@@ -4347,8 +4352,17 @@ op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& in
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
 	std::optional<script_value> computed;
 	VM_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	if (!computed) [[unlikely]] {
+		return {};   // compute unwound before its sink ran (pair parity: STORE never runs)
+	}
 	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
-	return store_popped_value(f, store_ins, std::move(*computed));
+	VM_TRY(store_popped_value(f, store_ins, std::move(*computed)));
+	// Statement position (the no-result door's rewrite): op_store's dispatch case pops
+	// the result under this flag — mirror it here, the tail always pushes
+	if (dp.flags & store_flag_no_result) {
+		stack_.pop_back();
+	}
+	return {};
 }
 
 // Cheap-shape operand resolver for exec_fused_cmp_jump: constants, frame slots and
@@ -5179,11 +5193,15 @@ op_status vm_backend::raw_int_arith(token_type op, script_int a, script_int b,
 	}
 }
 
-// Fused subscript read: container+index resolve as operands (slot in-place reads - no
+// The ONE fused subscript read, sink-templated (op_index_fused pushes; the decl variant
+// lands in the declared slot — parity by construction, same shape as
+// binary_fused_compute). Container+index resolve as operands (slot in-place reads - no
 // LOAD dispatches, no operand pushes). The inline path is exec_index's in-bounds array
 // branch VERBATIM; everything else (map/borrow/custom-[]/OOB/non-int index) pushes the
 // resolved operands and replays the unfused op, so every error keeps one spelling.
-op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
+// Mid-op unwinding leaves the exact unfused stack states regardless of sink.
+template <bool SinkIsStack, typename Sink>
+op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	std::optional<script_value> cscratch, mscratch, iscratch;
 	const script_value* container_ptr;
@@ -5304,7 +5322,16 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 				}
 			}
 			const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
-			return exec_index(f, index_ins);
+			if constexpr (SinkIsStack) {
+				return exec_index(f, index_ins);
+			} else {
+				VM_TRY(exec_index(f, index_ins));
+				if (is_unwinding_) [[unlikely]] { return {}; }   // pushed result stands (pair parity)
+				script_value replayed = std::move(stack_.back());
+				stack_.pop_back();
+				sink(std::move(replayed));
+				return {};
+			}
 		}
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
@@ -5333,15 +5360,15 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 				type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 				// slot/env storage is mutable by nature; the resolver's constness is
 				// interface conservatism (same shape as exec_index's map const_cast)
-				stack_.push_back(script_value::make_element_reference(
+				sink(script_value::make_element_reference(
 					const_cast<script_value&>(left).get_array_storage(), static_cast<size_t>(index), engine_, element_type));
 				return {};
 			}
 			if (node->is_typed()) {
-				stack_.push_back(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
+				sink(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
 				return {};
 			}
-			stack_.push_back(node->values()[index]);
+			sink(script_value(node->values()[index]));
 			return {};
 		}
 	}
@@ -5349,7 +5376,7 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	// bytes via the transparent comparator — no per-access key materialization.
 	// Plain read shape only; lvalue/write shapes replay (entry references and
 	// missing-key creation keep exec_index's one spelling). Mirrors exec_index's
-	// map-read branch: hit copies (engine stamped), miss pushes null.
+	// map-read branch: hit copies (engine stamped), miss sinks null.
 	if (left.raw_storage_index() == script_value::TYPEID_MAP &&
 	    p.index.const_index != k_invalid_u32 &&
 	    !(ins.b & (index_flag_lvalue_shape | index_flag_lvalue_write))) {
@@ -5364,9 +5391,9 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 					if (!val.has_valid_engine()) {
 						val.set_engine(engine_);
 					}
-					stack_.push_back(std::move(val));
+					sink(std::move(val));
 				} else {
-					stack_.push_back(make_null());
+					sink(make_null());
 				}
 				return {};
 			}
@@ -5379,7 +5406,59 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
-	return exec_index(f, index_ins);
+	if constexpr (SinkIsStack) {
+		return exec_index(f, index_ins);
+	} else {
+		VM_TRY(exec_index(f, index_ins));
+		if (is_unwinding_) [[unlikely]] { return {}; }   // pushed result stands (pair parity)
+		script_value replayed = std::move(stack_.back());
+		stack_.pop_back();
+		sink(std::move(replayed));
+		return {};
+	}
+}
+
+op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.ip + 1 < f.code->code.size()) { ++profile_index_fused_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+#endif
+	return index_fused_read<true>(f, ins, [this](script_value&& v) { stack_.push_back(std::move(v)); });
+}
+
+// Subscript read landing straight in the declared slot (the 3.59M INDEX_FUSED→DECL_VAR
+// pair): the scalar slot fast path is exec_binary_fused_decl's landing KEPT IN SYNC;
+// every other decl shape (references, typed mismatches, env decls) pushes and runs
+// op_decl_var verbatim with lvalue_init=1 — a subscript initializer is lvalue-shaped.
+op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
+	std::optional<script_value> computed;
+	VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	if (!computed) [[unlikely]] {
+		return {};   // the read unwound; the decl never runs (pair parity)
+	}
+	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.c].get());
+	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		const size_t vi = computed->raw_storage_index();
+		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+			const bool matches = bt == script_value_type::jai_any_type ||
+				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
+				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
+				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
+				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
+			if (matches) {
+				if (decl->type) {
+					computed->set_type_info(decl->type);
+				}
+				frame_slot_set(f, decl->slot_index, std::move(*computed));
+				return {};
+			}
+		}
+	}
+	stack_.push_back(std::move(*computed));
+	const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};
+	return exec_decl_var(f, decl_ins);
 }
 
 // Fused a[i] = v: container+index resolve as operands; the value rides the stack, or —
@@ -10116,6 +10195,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_binary_fused_store: return exec_binary_fused_store(f, ins);
 		case opcode::op_index_fused: return exec_index_fused(f, ins);
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
+		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
 		default: return {};
 	}
 }
@@ -10233,6 +10313,7 @@ void vm_backend::dump_opcode_profile() const {
 	};
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
+	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
 	if (total == 0) return;
@@ -10455,6 +10536,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
+			case opcode::op_index_fused_decl:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

@@ -29,7 +29,10 @@ namespace {
         // the DECLARED type of a slot-resident value decl, or the provable static type of an
         // expression. unknown = no proof (today's enforced store path).
         enum : uint8_t { cls_unknown = 0, cls_int = 1, cls_float = 2 };
-        struct slot_decl_type { uint64_t symbol; uint8_t cls; };
+        // cls = the decl's own class; elem_cls = a typed container's ELEMENT class
+        // (array<int>/array<float> elements are store-enforced invariants, so a
+        // subscript read of one proves — the static all-primitive ruling's twin)
+        struct slot_decl_type { uint64_t symbol; uint8_t cls; uint8_t elem_cls; };
         struct scope {
             std::unordered_multimap<uint64_t, variable_decl*> vars;
             std::unordered_multimap<uint64_t, parameter*> params;
@@ -163,6 +166,21 @@ namespace {
             return found->second.cls;
         }
 
+        // Element class of a slot-resident typed-container decl: array<int>/array<float>
+        // elements are store-enforced, and an OOB read throws (it never yields a
+        // wrong-class value), so a subscript read of one classifies exactly.
+        uint8_t declared_element_class(const identifier_expr* id) const {
+            if (scopes.empty() || id->slot_index == SIZE_MAX || !id->names_value_decl) {
+                return cls_unknown;
+            }
+            const auto& slot_types = scopes.back().slot_types;
+            auto found = slot_types.find(id->slot_index);
+            if (found == slot_types.end() || found->second.symbol != id->symbol_id) {
+                return cls_unknown;
+            }
+            return found->second.elem_cls;
+        }
+
         // math:: intrinsic return classification (shared recognizer, so it agrees with
         // what both backends will execute). Only fns whose result type is fixed - or
         // fixed by provably-classified args (abs/min/max/clamp) - classify; wrong arity
@@ -267,6 +285,14 @@ namespace {
                             if (r == cls_unknown) return cls_unknown;
                             return (l == cls_int && r == cls_int) ? cls_int : cls_float;
                         }
+                        case token_type::left_bracket:
+                            // Subscript read of a slot-resident typed container: the
+                            // element class is a store-enforced invariant
+                            if (b->left->get_type() == node_type::identifier_expr) {
+                                return declared_element_class(
+                                    static_cast<const identifier_expr*>(b->left.get()));
+                            }
+                            return cls_unknown;
                         default:
                             return cls_unknown;   // comparisons/logical/bitwise: no proof
                     }
@@ -542,14 +568,23 @@ namespace {
                         scopes.back().vars.emplace(d->name_id, d);
                         if (d->slot_index != SIZE_MAX && !d->is_static && d->type) {
                             uint8_t cls = cls_unknown;
+                            uint8_t elem_cls = cls_unknown;
                             if (d->type->base_type == script_value_type::jai_int_type) {
                                 cls = cls_int;
                             } else if (d->type->base_type == script_value_type::jai_float_type) {
                                 cls = cls_float;
+                            } else if (d->type->base_type == script_value_type::jai_array_type) {
+                                if (const auto& elem = d->type->element_type()) {
+                                    if (elem->base_type == script_value_type::jai_int_type) {
+                                        elem_cls = cls_int;
+                                    } else if (elem->base_type == script_value_type::jai_float_type) {
+                                        elem_cls = cls_float;
+                                    }
+                                }
                             }
-                            if (cls != cls_unknown) {
+                            if (cls != cls_unknown || elem_cls != cls_unknown) {
                                 scopes.back().slot_types.insert_or_assign(
-                                    d->slot_index, slot_decl_type{d->name_id, cls});
+                                    d->slot_index, slot_decl_type{d->name_id, cls, elem_cls});
                             }
                         }
                     }
@@ -620,6 +655,16 @@ namespace {
 
 } // namespace
 
+void detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
+                                    string_symbolizer* symbolizer) {
+	{
+		ref_escape_marker marker;
+		marker.symbolizer = symbolizer;
+		marker.run(declarations);
+	}
+	detail::mark_transient_reads(declarations);
+}
+
 // One true constructor with dependency injection
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
     : tokens_(tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
@@ -673,17 +718,9 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
         );
     }
 
-    // Escape-mark pass: flag declarations whose storage must be boxed into a cell
-    // (see ref_escape_marker above; consumed by both backends at decl/bind time)
-    {
-        ref_escape_marker marker;
-        marker.symbolizer = symbolizer_;
-        marker.run(declarations);
-    }
-
-    // Transient-read pass: mark subscript reads consumed as transient values so both
-    // backends elide the element-reference mint (detail/transient_read.hpp)
-    detail::mark_transient_reads(declarations);
+    // Escape-mark + transient-read passes (shared with jaibite loads, which must
+    // re-derive the parser-pass flags the serializer does not carry)
+    detail::run_ast_marking_passes(declarations, symbolizer_);
 
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {

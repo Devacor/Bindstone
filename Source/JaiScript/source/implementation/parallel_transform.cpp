@@ -39,8 +39,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <optional>
 #include <unordered_set>
+
+#ifdef JAISCRIPT_VM_PROFILE
+#include <intrin.h>   // __rdtsc: region phase probes (diagnostic builds only)
+#include <cstdio>
+#endif
 
 namespace jai::detail {
 
@@ -87,6 +93,23 @@ namespace jai::detail {
 		std::vector<uint64_t> capture_name_ids;
 		std::unordered_set<const void*> provisioned_nodes;
 
+		// Snapshot-capture reuse across regions (the transform-barrier heat: GLOOM's
+		// string tables were re-detached per worker per region, 3.28M of 3.57M setup
+		// cyc). The cached DETACHED COPY is itself the validity reference: a hit
+		// requires the live source to content-match it under flat_snapshot_equal, and
+		// a record is only stored when that predicate can prove the shape (flat
+		// string/scalar tables) - store-condition == hit-condition. Cache values pin
+		// only worker-owned detached nodes, never caller state (dormant-slot safe);
+		// the join's define-nulling is unchanged.
+		struct snapshot_capture_cache_entry {
+			uint64_t name_id = 0;
+			uint64_t built_serial = 0;           // region_use_counter at store (validation memo key)
+			script_value value{ std::monostate{}, static_cast<engine*>(nullptr) };
+			std::vector<const void*> nodes;      // provisioned_nodes contribution
+			std::vector<type_info*> types;       // prewarm (value_types) contribution
+		};
+		std::vector<snapshot_capture_cache_entry> snapshot_cache;
+
 		// Barrier-admitted class methods for THIS call: worker-private minted dispatcher
 		// values + pre-resolved overloads (parallel-method-admission ruling). Rebuilt per
 		// call (element classes are a runtime fact); cleared at the join.
@@ -99,10 +122,50 @@ namespace jai::detail {
 		const void* fingerprint_fn_body = nullptr;
 		std::vector<std::pair<uint64_t, const void*>> fingerprint_script_bodies;
 		std::vector<std::pair<uint64_t, std::string>> host_functions;   // refreshed each reuse
+
+#ifdef JAISCRIPT_VM_PROFILE
+		// Worker thread stamps chunk entry/exit; main reads after wait_idle (the pool
+		// mutex/CV sequence orders the accesses; invariant TSC compares across cores)
+		uint64_t prof_start_tsc = 0;
+		uint64_t prof_end_tsc = 0;
+#endif
 	};
 
 	parallel_engine_state::parallel_engine_state() = default;
+#ifdef JAISCRIPT_VM_PROFILE
+	parallel_engine_state::~parallel_engine_state() {
+		auto dump = [](const char* name, const region_phase_prof& p) {
+			if (!p.regions) return;
+			fprintf(stderr,
+				"[region-profile] %s: %llu regions | per region: setup %.0f (captures %.0f, %llu/region) | submit %.0f | main-chunk %.0f | wait %.0f | join %.0f cyc\n"
+				"  wake latency avg %.0f max %llu cyc (%llu samples) | pool-worker span avg %.0f cyc\n",
+				name, (unsigned long long)p.regions,
+				(double)p.setup_cyc / p.regions, (double)p.capture_cyc / p.regions,
+				(unsigned long long)(p.capture_count / p.regions),
+				(double)p.submit_cyc / p.regions,
+				(double)p.main_chunk_cyc / p.regions, (double)p.wait_cyc / p.regions,
+				(double)p.join_cyc / p.regions,
+				p.wake_samples ? (double)p.wake_lat_sum / p.wake_samples : 0.0,
+				(unsigned long long)p.wake_lat_max, (unsigned long long)p.wake_samples,
+				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
+			if (p.cache_hits + p.cache_misses + p.cache_unprovable) {
+				fprintf(stderr, "  snapshot cache: hits %llu | misses %llu | stores %llu | unprovable %llu\n",
+					(unsigned long long)p.cache_hits, (unsigned long long)p.cache_misses,
+					(unsigned long long)p.cache_stores, (unsigned long long)p.cache_unprovable);
+				for (const auto& [nm, cnt] : p.cache_miss_names) {
+					const auto cyc_it = p.cache_miss_cyc.find(nm);
+					fprintf(stderr, "    miss %-24s %8llu x %10.2f Mcyc detach\n", nm.c_str(),
+						(unsigned long long)cnt,
+						cyc_it != p.cache_miss_cyc.end() ? cyc_it->second / 1e6 : 0.0);
+				}
+			}
+		};
+		dump("parallel_transform", prof_transform);
+		dump("parallel_for", prof_for);
+	}
+#else
 	parallel_engine_state::~parallel_engine_state() = default;
+#endif
 
 namespace {
 
@@ -1368,10 +1431,161 @@ namespace {
 		return bounds;
 	}
 
+	// Flat-table content equality for the snapshot-capture cache: top-level string, or
+	// a hetero array (same type stamp) whose elements are strings / raw scalars / null.
+	// Live elements compare through deref; detached copies hold no references. Any
+	// deeper shape returns false - the caller re-detaches rather than risks.
+	bool flat_snapshot_equal(const script_value& live_in, const script_value& cached) {
+		const script_value& live = live_in.deref();
+		const size_t li = live.raw_storage_index();
+		if (li != cached.raw_storage_index()) { return false; }
+		if (li == script_value::TYPEID_STRING) {
+			return *live.get_storage().get<strong_ptr<script_string>>() ==
+			       *cached.get_storage().get<strong_ptr<script_string>>();
+		}
+		if (li != script_value::TYPEID_ARRAY) { return false; }
+		const script_array* ln = live.unchecked_array_node();
+		const script_array* cn = cached.unchecked_array_node();
+		if (ln->is_typed() || cn->is_typed()) { return false; }
+		if (live.get_type_info().get() != cached.get_type_info().get()) { return false; }
+		const auto& lv = ln->values();
+		const auto& cv = cn->values();
+		if (lv.size() != cv.size()) { return false; }
+		for (size_t i = 0; i < lv.size(); ++i) {
+			const script_value& a = lv[i].deref();
+			const script_value& b = cv[i];
+			const size_t ai = a.raw_storage_index();
+			if (ai != b.raw_storage_index()) { return false; }
+			switch (ai) {
+			case script_value::TYPEID_STRING:
+				if (*a.get_storage().get<strong_ptr<script_string>>() !=
+				    *b.get_storage().get<strong_ptr<script_string>>()) { return false; }
+				break;
+			case script_value::TYPEID_INT:
+				if (a.unchecked_as_int() != b.unchecked_as_int()) { return false; }
+				break;
+			case script_value::TYPEID_FLOAT: {
+				// Bitwise: NaN-stable (== would force a re-detach every region)
+				const script_float af = a.unchecked_as_float();
+				const script_float bf = b.unchecked_as_float();
+				if (std::memcmp(&af, &bf, sizeof(af)) != 0) { return false; }
+				break;
+			}
+			case script_value::TYPEID_BOOL:
+				if (a.unchecked_as_bool() != b.unchecked_as_bool()) { return false; }
+				break;
+			case script_value::TYPEID_CHAR:
+				if (a.unchecked_as_char() != b.unchecked_as_char()) { return false; }
+				break;
+			case script_value::TYPEID_NULL:
+				break;
+			default:
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// One snapshot/string capture, cache-aware: a content-matched cached copy is reused
+	// outright (types re-registered; provisioned_nodes are the caller's rebuild-on-miss
+	// concern); a miss detaches as before and (re)stores the record only when
+	// flat_snapshot_equal can prove the shape. `validated` memoizes ONE content proof
+	// per region per name: the first slot compares against the live source, and
+	// siblings whose record carries the same store serial hold identical content by
+	// construction (stored single-threaded at one barrier from one source), so they
+	// skip the compare. Throws propagate to the caller's existing per-capture handler.
+	void provision_snapshot_capture(parallel_worker_slot& slot, uint64_t name_id,
+	                                const script_value& source, engine& eng,
+	                                std::vector<type_info*>& value_types,
+	                                script_value& provisioned,
+	                                uint64_t region_serial,
+	                                std::unordered_map<uint64_t, uint64_t>& validated,
+	                                std::vector<const void*>& fresh_nodes,
+	                                bool& any_snapshot_miss
+#ifdef JAISCRIPT_VM_PROFILE
+	                                , parallel_engine_state::region_phase_prof& prof
+	                                , std::string_view prof_name
+#endif
+	                                ) {
+		parallel_worker_slot::snapshot_capture_cache_entry* cached = nullptr;
+		for (auto& e : slot.snapshot_cache) {
+			if (e.name_id == name_id) { cached = &e; break; }
+		}
+		if (cached) {
+			const auto memo = validated.find(name_id);
+			const bool proven = memo != validated.end() && memo->second == cached->built_serial;
+			if (proven || flat_snapshot_equal(source, cached->value)) {
+				if (!proven) { validated[name_id] = cached->built_serial; }
+#ifdef JAISCRIPT_VM_PROFILE
+				++prof.cache_hits;
+#endif
+				value_types.insert(value_types.end(), cached->types.begin(), cached->types.end());
+				provisioned = cached->value;
+				return;
+			}
+		}
+		any_snapshot_miss = true;
+#ifdef JAISCRIPT_VM_PROFILE
+		++prof.cache_misses;
+		++prof.cache_miss_names[std::string(prof_name)];
+		const uint64_t prof_detach0 = __rdtsc();
+#endif
+		std::vector<const void*> capture_nodes;
+		std::vector<type_info*> fresh_types;
+		provisioned = source.parallel_detached_copy(&fresh_types, &capture_nodes);
+#ifdef JAISCRIPT_VM_PROFILE
+		prof.cache_miss_cyc[std::string(prof_name)] += __rdtsc() - prof_detach0;
+#endif
+		value_types.insert(value_types.end(), fresh_types.begin(), fresh_types.end());
+		fresh_nodes.insert(fresh_nodes.end(), capture_nodes.begin(), capture_nodes.end());
+		if (flat_snapshot_equal(source, provisioned)) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++prof.cache_stores;
+#endif
+			parallel_worker_slot::snapshot_capture_cache_entry rec;
+			rec.name_id = name_id;
+			rec.built_serial = region_serial;
+			rec.value = provisioned;
+			rec.nodes = std::move(capture_nodes);
+			rec.types = std::move(fresh_types);
+			if (cached) { *cached = std::move(rec); }
+			else { slot.snapshot_cache.push_back(std::move(rec)); }
+		} else {
+#ifdef JAISCRIPT_VM_PROFILE
+			++prof.cache_unprovable;
+#endif
+			if (cached) {
+				// Shape stopped being provable: the record can never hit again - drop its pins
+				cached->name_id = 0;
+				cached->built_serial = 0;
+				cached->value = script_value(std::monostate{}, &eng);
+				cached->nodes.clear();
+				cached->types.clear();
+			}
+		}
+	}
+
+	// provisioned_nodes maintenance for the cross-region cache: on an all-hit region the
+	// set from the previous region already covers every cached node (stale extras from
+	// dead fresh nodes can only cause a spurious result-detach - content-neutral); any
+	// miss rebuilds it exactly from the surviving records plus this region's fresh nodes.
+	void rebuild_provisioned_nodes(parallel_worker_slot& slot, bool any_snapshot_miss,
+	                               const std::vector<const void*>& fresh_nodes) {
+		if (!any_snapshot_miss) { return; }
+		slot.provisioned_nodes.clear();
+		for (const auto& rec : slot.snapshot_cache) {
+			slot.provisioned_nodes.insert(rec.nodes.begin(), rec.nodes.end());
+		}
+		slot.provisioned_nodes.insert(fresh_nodes.begin(), fresh_nodes.end());
+	}
+
 } // namespace
 
 checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
 	parallel_engine_state& state = eng.parallel_state();
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t0 = __rdtsc();
+#endif
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
 		return checked_result<script_value>(code, std::string_view(state.error_text));
@@ -1585,8 +1799,10 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	contexts.reserve(worker_count);
 
 	// Whatever way this call exits, no capture define survives it: a dormant slot must
-	// never hold a borrow's raw pointer (the viewed container may die with its global),
-	// and snapshots release with the region rather than idling in slot envs.
+	// never hold a borrow's raw pointer (the viewed container may die with its global).
+	// Snapshot copies DO persist - in the slot's cache, worker-owned detached nodes
+	// only - and provisioned_nodes persists with them (rebuild-on-miss; stale extras
+	// from dead fresh nodes can only cause a spurious result-detach, content-neutral).
 	struct capture_define_guard {
 		engine& eng;
 		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
@@ -1599,11 +1815,12 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 					slot->root_env->define(id, script_value(std::monostate{}, &eng));
 				}
 				slot->capture_name_ids.clear();
-				slot->provisioned_nodes.clear();
 				slot->raw_input = nullptr;   // points into this call's locals - never dormant
 			}
 		}
 	} capture_guard{ eng, pool->worker_slots, worker_count };
+	// One content proof per captured name per region (see provision_snapshot_capture)
+	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
 
 	// Raw in-place input (Dev ruling: safe AND free): all-primitive sources are read
 	// directly from the caller's vector by every worker - no per-element detach. Typed
@@ -1644,13 +1861,16 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			}
 		}
 		// Provision the captured reads into THIS worker's root env (single-threaded,
-		// charged to the enclosing execute): scalars copy, strings/snapshots detach
-		// (memory_cap-charged inside parallel_detached_copy), borrows mint the
-		// zero-copy view. Defines are per call - content may have changed since the
-		// last region - and are nulled again at the join.
+		// charged to the enclosing execute): scalars copy, strings/snapshots detach OR
+		// reuse the slot's cross-region cache (content-proven against the live source),
+		// borrows mint the zero-copy view. Defines are per call and nulled at the join;
+		// cached snapshot copies persist in the slot (worker-owned nodes only).
 		slot->capture_name_ids.clear();
-		slot->provisioned_nodes.clear();
-		std::vector<const void*> capture_nodes;
+		bool any_snapshot_miss = false;
+		std::vector<const void*> fresh_nodes;
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t prof_caps0 = __rdtsc();
+#endif
 		for (const auto& cap : captures) {
 			script_value provisioned(std::monostate{}, &eng);
 			try {
@@ -1660,9 +1880,14 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 					break;
 				case parallel_capture_kind::string:
 				case parallel_capture_kind::snapshot:
-					capture_nodes.clear();
-					provisioned = cap.source->parallel_detached_copy(&value_types, &capture_nodes);
-					slot->provisioned_nodes.insert(capture_nodes.begin(), capture_nodes.end());
+					provision_snapshot_capture(*slot, cap.entry->name_id, *cap.source, eng,
+					                           value_types, provisioned,
+					                           state.region_use_counter, snapshot_validated,
+					                           fresh_nodes, any_snapshot_miss
+#ifdef JAISCRIPT_VM_PROFILE
+					                           , state.prof_transform, cap.entry->name
+#endif
+					                           );
 					break;
 				case parallel_capture_kind::borrow:
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
@@ -1675,6 +1900,11 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
 			slot->capture_name_ids.push_back(cap.entry->name_id);
 		}
+		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
+#ifdef JAISCRIPT_VM_PROFILE
+		state.prof_transform.capture_cyc += __rdtsc() - prof_caps0;
+		state.prof_transform.capture_count += captures.size();
+#endif
 		contexts.push_back(slot.get());
 	}
 	prewarm_region_types(eng, [&] {
@@ -1701,16 +1931,53 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 
 	eng.get_symbolizer()->set_frozen(true);
 	state.active_region = &table;
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t1 = __rdtsc();
+#endif
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
 		std::vector<script_value>* out_ptr = &out;
 		engine* eng_ptr = &eng;
-		state.pool->submit_to(k - 1, [ctx, out_ptr, eng_ptr] { run_worker(*ctx, *out_ptr, *eng_ptr); });
+		state.pool->submit_to(k - 1, [ctx, out_ptr, eng_ptr] {
+#ifdef JAISCRIPT_VM_PROFILE
+			ctx->prof_start_tsc = __rdtsc();
+#endif
+			run_worker(*ctx, *out_ptr, *eng_ptr);
+#ifdef JAISCRIPT_VM_PROFILE
+			ctx->prof_end_tsc = __rdtsc();
+#endif
+		});
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t2 = __rdtsc();
+#endif
 	run_worker(*contexts[0], out, eng);
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t3 = __rdtsc();
+#endif
 	if (worker_count > 1) {
 		state.pool->wait_idle();
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t4 = __rdtsc();
+	{
+		auto& p = state.prof_transform;
+		++p.regions;
+		p.setup_cyc += prof_t1 - prof_t0;
+		p.submit_cyc += prof_t2 - prof_t1;
+		p.main_chunk_cyc += prof_t3 - prof_t2;
+		p.wait_cyc += prof_t4 - prof_t3;
+		for (size_t k = 1; k < worker_count; ++k) {
+			const parallel_worker_slot* ctx = contexts[k];
+			if (!ctx->prof_start_tsc) continue;
+			p.wake_lat_sum += ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0;
+			p.wake_lat_max = std::max(p.wake_lat_max,
+				ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0);
+			p.worker_span_sum += ctx->prof_end_tsc - ctx->prof_start_tsc;
+			++p.wake_samples;
+		}
+	}
+#endif
 	state.active_region = nullptr;
 	eng.get_symbolizer()->set_frozen(false);
 
@@ -1740,6 +2007,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	}
 	script_value result = script_value::make_array(nullptr, &eng);
 	result.as_array() = std::move(out);
+#ifdef JAISCRIPT_VM_PROFILE
+	state.prof_transform.join_cyc += __rdtsc() - prof_t4;
+#endif
 	return result;
 }
 
@@ -1754,6 +2024,9 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                       const script_value& container,
                                       const std::shared_ptr<environment>& capture_env) {
 	parallel_engine_state& state = eng.parallel_state();
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t0 = __rdtsc();
+#endif
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
 		return checked_result<void>(code, std::string_view(state.error_text));
@@ -1981,7 +2254,9 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	contexts.reserve(worker_count);
 
 	// Join guard: no capture define and no element reference survives this call - the
-	// holders pin the caller's array, and a dormant slot must never do that.
+	// holders pin the caller's array, and a dormant slot must never do that. Cached
+	// snapshot copies persist (worker-owned nodes only), and provisioned_nodes with
+	// them (rebuild-on-miss; see rebuild_provisioned_nodes).
 	struct inplace_join_guard {
 		engine& eng;
 		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
@@ -1994,7 +2269,6 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 					slot->root_env->define(id, script_value(std::monostate{}, &eng));
 				}
 				slot->capture_name_ids.clear();
-				slot->provisioned_nodes.clear();
 				slot->element_refs.clear();
 				slot->raw_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
@@ -2002,6 +2276,8 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 			}
 		}
 	} join_guard{ eng, pool->worker_slots, worker_count };
+	// One content proof per captured name per region (see provision_snapshot_capture)
+	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
 
 	// The container handle for element references: holders re-deref container+index on
 	// every access (reallocation-safe), and each mint here bumps the handle count once,
@@ -2035,8 +2311,8 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 			slot->raw_input = &source;
 		}
 		slot->capture_name_ids.clear();
-		slot->provisioned_nodes.clear();
-		std::vector<const void*> capture_nodes;
+		bool any_snapshot_miss = false;
+		std::vector<const void*> fresh_nodes;
 		for (const auto& cap : captures) {
 			script_value provisioned(std::monostate{}, &eng);
 			try {
@@ -2046,9 +2322,14 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 					break;
 				case parallel_capture_kind::string:
 				case parallel_capture_kind::snapshot:
-					capture_nodes.clear();
-					provisioned = cap.source->parallel_detached_copy(&value_types, &capture_nodes);
-					slot->provisioned_nodes.insert(capture_nodes.begin(), capture_nodes.end());
+					provision_snapshot_capture(*slot, cap.entry->name_id, *cap.source, eng,
+					                           value_types, provisioned,
+					                           state.region_use_counter, snapshot_validated,
+					                           fresh_nodes, any_snapshot_miss
+#ifdef JAISCRIPT_VM_PROFILE
+					                           , state.prof_for, cap.entry->name
+#endif
+					                           );
 					break;
 				case parallel_capture_kind::borrow:
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
@@ -2061,6 +2342,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
 			slot->capture_name_ids.push_back(cap.entry->name_id);
 		}
+		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
 		// Admitted-method pins: a FRESH dispatcher value minted per worker (new control
 		// block — the pin's runtime copies never touch a shared count), overload
 		// pre-resolved, body chunk precompiled on this worker's own backend. All
@@ -2113,15 +2395,52 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	const bool freeze_symbols = !eng.allow_unsafe_parallel();
 	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
 	state.active_region = &table;
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t1 = __rdtsc();
+#endif
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
 		engine* eng_ptr = &eng;
-		state.pool->submit_to(k - 1, [ctx, eng_ptr] { run_worker_inplace(*ctx, *eng_ptr); });
+		state.pool->submit_to(k - 1, [ctx, eng_ptr] {
+#ifdef JAISCRIPT_VM_PROFILE
+			ctx->prof_start_tsc = __rdtsc();
+#endif
+			run_worker_inplace(*ctx, *eng_ptr);
+#ifdef JAISCRIPT_VM_PROFILE
+			ctx->prof_end_tsc = __rdtsc();
+#endif
+		});
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t2 = __rdtsc();
+#endif
 	run_worker_inplace(*contexts[0], eng);
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t3 = __rdtsc();
+#endif
 	if (worker_count > 1) {
 		state.pool->wait_idle();
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t4 = __rdtsc();
+	{
+		auto& p = state.prof_for;
+		++p.regions;
+		p.setup_cyc += prof_t1 - prof_t0;
+		p.submit_cyc += prof_t2 - prof_t1;
+		p.main_chunk_cyc += prof_t3 - prof_t2;
+		p.wait_cyc += prof_t4 - prof_t3;
+		for (size_t k = 1; k < worker_count; ++k) {
+			const parallel_worker_slot* ctx = contexts[k];
+			if (!ctx->prof_start_tsc) continue;
+			p.wake_lat_sum += ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0;
+			p.wake_lat_max = std::max(p.wake_lat_max,
+				ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0);
+			p.worker_span_sum += ctx->prof_end_tsc - ctx->prof_start_tsc;
+			++p.wake_samples;
+		}
+	}
+#endif
 	state.active_region = nullptr;
 	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(false); }
 
@@ -2147,6 +2466,9 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		return raise(code, winner->message.empty() ? std::string("parallel_for: worker failed")
 		                                           : winner->message);
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	state.prof_for.join_cyc += __rdtsc() - prof_t4;
+#endif
 	return {};
 }
 

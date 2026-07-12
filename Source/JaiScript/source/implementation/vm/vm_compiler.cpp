@@ -170,6 +170,11 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
+			case opcode::op_index_fused_decl: {
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
+				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				break;
+			}
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
@@ -266,6 +271,11 @@ namespace {
 			case opcode::op_binary_fused_decl: {
 				const auto& dp = body.fused_binary_dst_protos[ins.a];
 				auto* decl = static_cast<const variable_decl*>(body.nodes[dp.node_index].get());
+				if (decl->slot_index == SIZE_MAX) return false;
+				break;
+			}
+			case opcode::op_index_fused_decl: {
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
 				if (decl->slot_index == SIZE_MAX) return false;
 				break;
 			}
@@ -1343,6 +1353,25 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
 				if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 				else if (assign->typed_store_provable) flags |= store_flag_type_provable;
+				// Dest-addressed peephole, no-result-door edition (compile_assignment's
+				// twin): a fused-binary RHS runs op_store's exact post-pop tail with no
+				// push/pop round-trip. In-place rewrite, jump targets never shift.
+				auto& code = chunk_->code;
+				if (!code.empty() && code.back().op == opcode::op_binary_fused &&
+				    assign->value->get_type() == node_type::binary_expr) {
+					fused_binary_dst_proto dp;
+					dp.binary_proto = code.back().a;
+					dp.symbol = add_symbol(ident->symbol_id);
+					dp.slot = identifier_slot_operand(ident);
+					dp.flags = flags;
+					chunk_->fused_binary_dst_protos.push_back(dp);
+					vm_instruction& ins = code.back();
+					ins.op = opcode::op_binary_fused_store;
+					ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
+					ins.b = 0;
+					ins.c = 0;
+					return true;
+				}
 				emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 			} else {
 				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
@@ -2144,6 +2173,15 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 			ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
 			ins.b = 0;
 			ins.c = 0;
+			return;
+		}
+		// Subscript-init twin (the INDEX_FUSED→DECL_VAR pair): the read lands straight
+		// in the decl — a/b (proto, flags) stay, c carries the decl node
+		if (!code.empty() && code.back().op == opcode::op_index_fused &&
+		    decl->initializer->get_type() == node_type::binary_expr) {
+			vm_instruction& ins = code.back();
+			ins.op = opcode::op_index_fused_decl;
+			ins.c = add_node(decl);
 			return;
 		}
 	}

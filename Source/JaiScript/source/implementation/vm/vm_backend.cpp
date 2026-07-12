@@ -6952,6 +6952,29 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 			}
 		}
 	}
+	// Constructor thunk (class-name calls: Shot(x)): construction protocol native,
+	// ctor body in-loop - the same door as op_new. Workers stay opaque (their rules
+	// live in execute_callable); coroutine ctors take the native tail inside.
+	if (thunk && thunk->eng == engine_ &&
+	    thunk->payload.kind == script_callable::kind_type::constructor &&
+	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+		auto script_cls = std::dynamic_pointer_cast<script_class_definition>(thunk->payload.cls);
+		if (script_cls) {
+			if (script_cls->get_constructor_asts().empty()) {
+				auto result = construct_default_instance(script_cls, arguments);
+				if (!result) {
+					return raise_from(result);
+				}
+				stack_.push_back(std::move(result.value()));
+				return {};
+			}
+			if (thunk->payload.definition_env) {
+				return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env,
+				                                 arguments, nullptr);
+			}
+		}
+	}
+
 #ifdef JAISCRIPT_VM_PROFILE
 	if (thunk && thunk->payload.kind == script_callable::kind_type::bound_method) {
 		profile_bound_method_paths_[2]++;
@@ -8981,6 +9004,32 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		}
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
+		// Typed ctor value: in-loop body entry with the shared_ptr type stamped onto
+		// the completed frame's object result (the exact post-call set_type_info below)
+		const auto* ctor_thunk = func.target<script_callable_thunk>();
+		if (ctor_thunk && ctor_thunk->eng == engine_ &&
+		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
+		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(ctor_thunk->payload.cls);
+			if (script_cls) {
+				if (script_cls->get_constructor_asts().empty()) {
+					auto result = construct_default_instance(script_cls, args);
+					if (!result) {
+						return raise_from(result);
+					}
+					script_value value = std::move(result.value());
+					if (value.type() == script_value_type::jai_object_type) {
+						value.set_type_info(expr->type);
+					}
+					stack_.push_back(std::move(value));
+					return {};
+				}
+				if (ctor_thunk->payload.definition_env) {
+					return enter_constructor_in_loop(f, script_cls,
+						ctor_thunk->payload.definition_env, args, expr->type.get());
+				}
+			}
+		}
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t prof_sp1 = __rdtsc();
 #endif
@@ -9006,6 +9055,29 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	if (ctor_result && ctor_result.value().is_function()) {
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
+		// Typed ctor value: construction protocol native, ctor body IN-LOOP (workers
+		// stay opaque - their rules live in execute_callable; a null definition_env
+		// with ctor asts is a shape the opaque arm defines, fall to it)
+		const auto* ctor_thunk = func.target<script_callable_thunk>();
+		if (ctor_thunk && ctor_thunk->eng == engine_ &&
+		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
+		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(ctor_thunk->payload.cls);
+			if (script_cls) {
+				if (script_cls->get_constructor_asts().empty()) {
+					auto result = construct_default_instance(script_cls, args);
+					if (!result) {
+						return raise_from(result);
+					}
+					stack_.push_back(std::move(result.value()));
+					return {};
+				}
+				if (ctor_thunk->payload.definition_env) {
+					return enter_constructor_in_loop(f, script_cls,
+						ctor_thunk->payload.definition_env, args, nullptr);
+				}
+			}
+		}
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t prof_new1 = __rdtsc();
 #endif
@@ -9691,9 +9763,15 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 	}
 }
 
-checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
-                                                            std::shared_ptr<environment> definition_env,
-                                                            const std::vector<script_value>& args) {
+// Sections 0-3 of construction (overload resolve, instance + init_env + param binds,
+// initializer chains, field inits): everything BEFORE the ctor body runs, shared by
+// the native path and the in-loop ctor-body entry. Success value = the new instance
+// ('this'); the picked overload rides the out-param. Extracted verbatim from
+// construct_instance - every error spelling unchanged.
+checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+                                                            const std::shared_ptr<environment>& definition_env,
+                                                            const std::vector<script_value>& args,
+                                                            std::shared_ptr<function_decl>& matching_ctor_out) {
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c0 = __rdtsc();
 #endif
@@ -10035,6 +10113,28 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	}
 
 #ifdef JAISCRIPT_VM_PROFILE
+	{
+		++profile_ctor_count_;
+		profile_ctor_cyc_[0] += prof_c1 - prof_c0;
+		profile_ctor_cyc_[1] += prof_c2 - prof_c1;
+		profile_ctor_cyc_[2] += prof_c3 - prof_c2;
+		profile_ctor_cyc_[3] += __rdtsc() - prof_c3;
+	}
+#endif
+	matching_ctor_out = matching_ctor;
+	return this_value;
+}
+
+checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
+                                                            std::shared_ptr<environment> definition_env,
+                                                            const std::vector<script_value>& args) {
+	std::shared_ptr<function_decl> matching_ctor;
+	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor);
+	if (!pre) {
+		return pre;
+	}
+	script_value this_value = std::move(pre.value());
+#ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c4 = __rdtsc();
 #endif
 	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
@@ -10044,17 +10144,74 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	auto result = execute_method_ast(matching_ctor, method_env, args);
 
 #ifdef JAISCRIPT_VM_PROFILE
-	{
-		const uint64_t prof_c5 = __rdtsc();
-		++profile_ctor_count_;
-		profile_ctor_cyc_[0] += prof_c1 - prof_c0;
-		profile_ctor_cyc_[1] += prof_c2 - prof_c1;
-		profile_ctor_cyc_[2] += prof_c3 - prof_c2;
-		profile_ctor_cyc_[3] += prof_c4 - prof_c3;
-		profile_ctor_cyc_[4] += prof_c5 - prof_c4;
-	}
+	profile_ctor_cyc_[4] += __rdtsc() - prof_c4;
 #endif
 	return result;
+}
+
+// In-loop constructor entry (op_new + direct ctor calls): the construction protocol
+// runs natively exactly as before, then the ctor BODY enters the dispatch loop as a
+// method-env-closured frame. push_script_frame is call_script_function's in-loop twin,
+// so explicit-return / fall-off (implicit this) / unwind semantics replicate through
+// the same machinery execute_method_ast delegated to. result_stamp = the shared_ptr
+// arm's post-call type stamp, applied at the frame completion doors
+// (call_record::ctor_result_stamp). Coroutine ctors keep the native tail verbatim.
+op_status vm_backend::enter_constructor_in_loop(frame& f,
+                                                const std::shared_ptr<script_class_definition>& class_def,
+                                                const std::shared_ptr<environment>& definition_env,
+                                                const std::vector<script_value>& args,
+                                                type_info* result_stamp) {
+	std::shared_ptr<function_decl> matching_ctor;
+	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor);
+	if (!pre) {
+		return raise_from(pre);
+	}
+	script_value this_value = std::move(pre.value());
+	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+	method_env->set_access_context(class_def.get());
+	method_env->define(symbolizer_->get_this_id(), this_value);
+	if (matching_ctor->is_coroutine) [[unlikely]] {
+		auto result = execute_method_ast(matching_ctor, method_env, args);
+		if (!result) {
+			return raise_from(result);
+		}
+		script_value value = std::move(result.value());
+		if (result_stamp && value.type() == script_value_type::jai_object_type) {
+			value.set_type_info(type_info_ptr{result_stamp});
+		}
+		stack_.push_back(std::move(value));
+		return {};
+	}
+	// Transient function object: push_script_frame copies/derives everything the frame
+	// needs (name into the record, chunk from the body-keyed cache, env installed during
+	// setup) and the parameter vector is the decl-owned shared instance - nothing points
+	// back into this local after the push returns.
+	script_defined_function ctor_func(matching_ctor->name, shared_parameters_for(matching_ctor.get()),
+	                                  matching_ctor->return_type, matching_ctor->body,
+	                                  std::move(method_env), matching_ctor->local_count);
+	op_status pushed;
+	try {
+		pushed = push_script_frame(f, make_null(), ctor_func, args, 0, args.size(), nullptr);
+	} catch (const script_exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+	if (pushed == op_status::failed) {
+		return pushed;
+	}
+	if (switch_to_) {
+		call_records_[call_records_top_ - 1]->ctor_result_stamp = result_stamp;
+	}
+	return {};
 }
 
 checked_result<script_value> vm_backend::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
@@ -11873,6 +12030,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		rec.ast_pin.reset();
 	}
 	rec.method_result_anchor = false;
+	rec.ctor_result_stamp = nullptr;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	--current_call_depth_;
 	frames_.pop_back();
@@ -11929,6 +12087,9 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 		if (rec.method_result_anchor) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
+		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
+			result.set_type_info(type_info_ptr{rec.ctor_result_stamp});
+		}
 		pop_script_frame_core(rec);
 		fp = rec.caller;
 		stack_.push_back(std::move(result));
@@ -11944,6 +12105,9 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 	}
 	if (rec.method_result_anchor) {
 		anchor_method_result(conv.value(), rec.locals.get_this());
+	}
+	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
+		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});
 	}
 	pop_script_frame_core(rec);
 	fp = rec.caller;
@@ -12059,6 +12223,9 @@ op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& i
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	script_value result = implicit_result_for_record(rec);   // conversion skipped: fall-off parity
+	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
+		result.set_type_info(rec.ctor_result_stamp);
+	}
 	pop_script_frame_core(rec);
 	fp = rec.caller;
 	stack_.push_back(std::move(result));

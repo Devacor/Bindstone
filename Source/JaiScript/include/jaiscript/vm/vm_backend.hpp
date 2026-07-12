@@ -396,6 +396,12 @@ namespace jai::vm {
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
+            // In-loop ctor-body frames (exec_new shared_ptr arm): stamp the completed
+            // frame's OBJECT result with this type, replicating the native arm's
+            // post-call value.set_type_info(expr->type). Raw ptr: the new_expr's type
+            // is AST-pinned. Applied at both completion doors (return_with_result +
+            // fall_off_script_frame), never on unwind paths.
+            type_info* ctor_result_stamp = nullptr;
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
@@ -796,6 +802,19 @@ namespace jai::vm {
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args);
+        // Everything before the ctor body (overload resolve, instance, init_env + binds,
+        // initializer chains, field inits); success value = the new instance ('this')
+        checked_result<script_value> construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+                                                        const std::shared_ptr<environment>& definition_env,
+                                                        const std::vector<script_value>& args,
+                                                        std::shared_ptr<function_decl>& matching_ctor_out);
+        // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct
+        // ctor calls); result_stamp = the shared_ptr arm's post-call type stamp
+        op_status enter_constructor_in_loop(frame& f,
+                                            const std::shared_ptr<script_class_definition>& class_def,
+                                            const std::shared_ptr<environment>& definition_env,
+                                            const std::vector<script_value>& args,
+                                            type_info* result_stamp);
         checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                 const std::vector<script_value>& args);
         void evaluate_field_initializers(std::shared_ptr<class_instance> instance,

@@ -699,17 +699,25 @@ public:
         auto* raw_instance = new class_instance(name_, engine_);
 
         std::shared_ptr<class_instance> instance;
-        auto destructor_name = "~" + name_;
-        uint64_t destructor_id = 0;
-        if (auto eng = engine_) {
-            destructor_id = eng->symbolize(destructor_name);
+        // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
+        // class-static facts, recomputed per MINT before this (measured 2026-07-12 in
+        // the construct_instance section profile). method_epoch_ already cascades to
+        // derived classes on every method-set mutation, so it is the exact validity key.
+        if (dtor_memo_epoch_ != method_epoch_) {
+            dtor_id_ = 0;
+            has_script_dtor_ = false;
+            if (auto eng = engine_) {
+                dtor_id_ = eng->symbolize("~" + name_);
+                has_script_dtor_ = is_script_class() && dtor_id_ != 0 && has_method(dtor_id_);
+            }
+            dtor_memo_epoch_ = method_epoch_;
         }
 
-        if (is_script_class() && destructor_id != 0 && has_method(destructor_id)) {
+        if (has_script_dtor_) {
             auto class_def = shared_from_this();
 
             instance = std::shared_ptr<class_instance>(raw_instance,
-                [class_def, destructor_name](class_instance* ptr) {
+                [class_def](class_instance* ptr) {
                     if (ptr) {
                         std::function<void(std::shared_ptr<class_definition>)> call_destructors;
                         call_destructors = [&](std::shared_ptr<class_definition> current_class) {
@@ -1490,6 +1498,12 @@ private:
 
     // See method_epoch(): per-call-site inline-cache validity stamp
     uint64_t method_epoch_ = 1;
+
+    // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_
+    // matches method_epoch_. mutable: create_instance is the hot mint path.
+    mutable uint64_t dtor_memo_epoch_ = 0;   // method_epoch_ starts at 1 => first mint fills
+    mutable uint64_t dtor_id_ = 0;
+    mutable bool has_script_dtor_ = false;
 
     bool is_transparent_wrapper_ = false;
     std::function<script_value(script_value&, engine*)> unwrap_function_;

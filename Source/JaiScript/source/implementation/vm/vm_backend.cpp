@@ -9681,6 +9681,22 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 	const auto& field_initializers = class_def->get_field_initializer_asts();
 	for (const auto& [field_id, initializer_ast] : field_initializers) {
 		if (initializer_ast) {
+			// Scalar-literal initializers stamp the literal through materialize_constant
+			// (op_const's exact kernel, so the value carries the same engine + type
+			// stamps the eval below would produce - auto-field INFERENCE reads them) at
+			// the SAME stamp point and order (a super-ctor body that reads this field
+			// beforehand sees null either way), minus the whole eval_expression
+			// machinery. Scalars only: no shared nodes to alias.
+			if (initializer_ast->get_type() == node_type::literal_expr) {
+				const auto* lit = static_cast<const literal_expr*>(initializer_ast.get());
+				const size_t li = lit->value.raw_storage_index();
+				if (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
+				    li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
+				    li == script_value::TYPEID_NULL) {
+					instance->set_field(field_id, materialize_constant(lit->value));
+					continue;
+				}
+			}
 			auto result = eval_expression(initializer_ast, init_env);
 			if (!result) {
 				throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
@@ -9783,7 +9799,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
 
 	auto init_env = std::make_shared<environment>(definition_env, symbolizer_);
-	init_env->define("this", this_value);
+	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());   // field initializers are class-body code
 
 	// (binding evaluates trailing defaults for omitted args; omitted params are simply
@@ -9793,7 +9809,9 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 			"Constructor parameter count mismatch");
 	}
 	for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
-		init_env->define(std::string(matching_ctor->parameters[i].name), args[i]);
+		const auto& param = matching_ctor->parameters[i];
+		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
+		init_env->define(param.symbol_id, args[i]);
 	}
 
 	bool handled_parent_init = false;
@@ -10040,7 +10058,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 #endif
 	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
 	method_env->set_access_context(class_def.get());
-	method_env->define("this", this_value);
+	method_env->define(symbolizer_->get_this_id(), this_value);
 
 	auto result = execute_method_ast(matching_ctor, method_env, args);
 

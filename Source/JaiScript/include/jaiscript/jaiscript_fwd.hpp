@@ -3,6 +3,18 @@
 #ifndef __JAISCRIPT_JAISCRIPT_FWD_HPP__
 #define __JAISCRIPT_JAISCRIPT_FWD_HPP__
 
+// Forced inlining for hot-path leaf functions the compiler's inline budget abandons in
+// the giant interpreter/vm TUs (each use is WPR-justified — cite the row). GCC/Clang's
+// always_inline is the same hard demand as MSVC's __forceinline; plain `inline` is the
+// portable floor for anything else.
+#if defined(_MSC_VER)
+#define JAI_FORCEINLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define JAI_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define JAI_FORCEINLINE inline
+#endif
+
 namespace jai {
     
     class engine;

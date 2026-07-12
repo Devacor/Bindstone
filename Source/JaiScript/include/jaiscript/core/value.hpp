@@ -264,10 +264,7 @@ namespace jai {
         // FORCED inline (WPR: MSVC kept out-of-line instances that cost 262k µs in the
         // vm window): almost every caller compares the result against ONE enum value,
         // so inlining lets the switch constant-fold to a raw index compare.
-#if defined(_MSC_VER)
-        __forceinline
-#endif
-        script_value_type current_type() const {
+        JAI_FORCEINLINE script_value_type current_type() const {
             switch (storage_.index()) {
                 case 0: return script_value_type::jai_null_type;        // std::monostate
                 case 1: return script_value_type::jai_int_type;         // script_int
@@ -548,7 +545,8 @@ namespace jai {
             return *std::get_if<TYPEID_BOOL>(&storage_);
         }
 
-        inline script_int unchecked_as_int() const noexcept {
+        // WPR at 99deff47: 56k µs of out-of-line calls in the vm window
+        JAI_FORCEINLINE script_int unchecked_as_int() const noexcept {
             if (auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_)) [[unlikely]] {
                 const void* p = (*b)->ptr;
                 const uint8_t ss = (*b)->size_and_sign;
@@ -1579,13 +1577,13 @@ namespace jai {
         // references. The non-reference fast path is INLINE (one raw index compare):
         // WPR showed the out-of-line call and the current_type() it made per call as
         // two of the vm's hottest rows. Reference resolution stays in value.cpp.
-        const script_value& deref() const {
+        JAI_FORCEINLINE const script_value& deref() const {
             if (storage_.index() != TYPEID_REFERENCE) [[likely]] {
                 return *this;
             }
             return deref_slow();
         }
-        script_value& deref() {
+        JAI_FORCEINLINE script_value& deref() {
             if (storage_.index() != TYPEID_REFERENCE) [[likely]] {
                 return *this;
             }

@@ -7627,6 +7627,62 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
+	const size_t args_base = stack_.size() - argc;
+
+	// ===== Call-arg windows (increment 2): the receiver at stack_[args_base-1] and
+	// the args above it bind IN PLACE for pin-path and method-IC dispatches — no
+	// pooled vector, no per-arg move, the receiver slot is the pin. Guarded by the
+	// string-builtin pre-gate: identifier-receiver sites whose NAME is a string
+	// builtin keep today's probe-first order exactly (the env variable, not the
+	// stack value, decides — receiver-mutating arg expressions depend on it).
+	{
+		const bool maybe_string_builtin = site.receiver_symbol != UINT64_MAX &&
+			(f.code->builtin_indexed
+				? site.bi_string != builtin_method_registries::k_no_builtin
+				: builtins_.string_methods.find(member->member_id) != builtins_.string_methods.end());
+		if (!maybe_string_builtin && member->member_id != same_as_id_ &&
+		    !(member->object && member->object->get_type() == node_type::super_expr)) {
+			script_value& objd = stack_[args_base - 1].deref();
+			const size_t receiver_type = objd.raw_storage_index();
+			if (receiver_type == script_value::TYPEID_OBJECT ||
+			    receiver_type == script_value::TYPEID_SHARED_PTR) {
+				auto holder = objd.get_object_holder();
+				if (holder && holder->is_class_instance_wrapper && holder->data &&
+				    holder->type_id != coroutine_handle_type_id_) {
+					auto* inst = static_cast<class_instance*>(holder->data.get());
+					class_definition* cd = inst->get_class_definition();
+					// Worker pin (pre-resolved at the barrier): slice-enter directly
+					if (parallel_worker_ && cd && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+						const detail::parallel_method_pin* pin = parallel_method_pins_
+							? parallel_method_pins_->find(cd, member->member_id) : nullptr;
+						if (pin) {
+							script_value method_val = pin->method_value;
+							const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
+							return enter_script_method_sliced(f, std::move(method_val), *dispatch,
+							                                  pin->resolved, args_base, argc, site);
+						}
+						// unpinned falls to the vector path below for the identical verdict
+					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
+					           cd->method_epoch() == site.mic_epoch &&
+					           !inst->has_field(member->member_id)) {
+						if (site.mic_static) {
+							script_value method_val = site.mic_method;
+							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
+							                                  site.mic_resolved, args_base, argc, site);
+						}
+						auto resolved = site.mic_dispatch->cls->resolve_method_overload(
+							site.mic_dispatch->name_id, stack_.vec().data() + args_base, argc);
+						if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+							script_value method_val = site.mic_method;
+							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
+							                                  resolved.value(), args_base, argc, site);
+						}
+						// resolution declined (arg types): the vector ladder reports identically
+					}
+				}
+			}
+		}
+	}
 
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
@@ -10415,6 +10471,159 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
 		stack_.push_back(make_null());
 		return {};
 	}
+}
+
+op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& method_val,
+                                                 const script_method_dispatch& dispatch,
+                                                 const std::shared_ptr<function_decl>& ast,
+                                                 size_t args_base, size_t argc,
+                                                 const call_site& site) {
+	try {
+		return push_method_frame_sliced(caller, std::move(method_val), dispatch, ast,
+		                                args_base, argc, &site);
+	} catch (const script_exception& e) {
+		// Receiver + args are still on the stack in slice mode: drop them like the
+		// plain slice path's pre-record throw handling (exec_call's in-loop catch)
+		stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+}
+
+// KEEP BYTE-PARALLEL with push_method_frame below: identical record/env/lazy/sticky
+// setup — the ONLY differences are the slice-window mechanics (receiver read from its
+// stack slot and COPIED into this/env bindings, args bound in place, receiver slot =
+// stack_base = the pin).
+op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& method_val,
+                                               const script_method_dispatch& dispatch,
+                                               const std::shared_ptr<function_decl>& ast,
+                                               size_t args_base, size_t argc,
+                                               const call_site* site) {
+	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
+		return raise_(
+			make_error_code(runtime_error_code::max_recursion_depth),
+			JAI_MAX_CALL_DEPTH_MESSAGE);
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return raise_from(execution_limit_failure());
+	}
+	assert(!has_return_value_);
+
+	chunk* body_chunk;
+	{
+		if (dispatch.body_cache_key == ast->body.get()) {
+			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
+		} else {
+			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count);
+			dispatch.body_cache = compiled;
+			dispatch.body_cache_key = ast->body.get();
+			body_chunk = compiled.get();
+		}
+		if (call_records_top_ == call_records_.size()) {
+			call_records_.push_back(std::make_unique<call_record>());
+		}
+	}
+
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.caller = &caller;
+	rec.return_type = ast->return_type;
+	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
+	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
+	rec.method_result_anchor = true;
+	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
+	rec.prev_env = std::move(environment_);
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = ast->name;
+	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
+	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
+	rec.env_untouched = false;
+	try {
+		// The receiver stays in its slot (the pin); this/env bindings take the
+		// deref'd VALUE — a copy where the vector path moved, but the vector path's
+		// caller made that copy itself (objv = object.deref()), so net copies match.
+		const script_value& receiver_v = stack_[args_base - 1].deref();
+		rec.locals.set_this(receiver_v);
+		if (rec.env_lazy) {
+			environment_ = dispatch.definition_env;
+		} else
+		if (body_chunk->method_env_reusable &&
+		    dispatch.definition_env.get() == cached_global_env_) {
+			auto& scope = dispatch.backend_scope_env;
+			if (scope && scope.use_count() == 1) {
+				scope->rebind_method_this(script_value(receiver_v));
+				environment_ = scope;
+			} else if (!scope) {
+				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_, script_value(receiver_v));
+				scope->set_access_context(dispatch.cls.get());
+				scope->set_vm_pinned_scope(true);
+				environment_ = scope;
+			} else {
+				environment_ = acquire_method_scope_env(dispatch.definition_env, script_value(receiver_v), dispatch.cls.get());
+			}
+		} else {
+			environment_ = acquire_method_scope_env(dispatch.definition_env, script_value(receiver_v), dispatch.cls.get());
+		}
+	} catch (...) {
+		rec.callee_pin = make_null();
+		rec.return_type = nullptr;
+		rec.ast_pin.reset();
+		rec.method_result_anchor = false;
+		rec.locals.this_object_ptr.reset();
+		rec.locals.is_method = false;
+		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
+		--call_records_top_;
+		throw;
+	}
+	++current_call_depth_;
+	rec.f.code = body_chunk;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	rec.f.entry_env = rec.env_lazy ? nullptr : environment_;
+	// Slice window: the caller's args ARE slots 0..argc-1 in place; the receiver slot
+	// below is frame territory, so pop/unwind truncation destroys window + pin together
+	rec.f.window_backed = true;
+	rec.f.window_base = args_base;
+	rec.f.window_live = static_cast<uint32_t>(argc);
+	rec.f.stack_base = args_base - 1;
+	rec.f.top_level = false;
+	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+
+	op_status bound{};
+	try {
+		bound = bind_parameters(ast->parameters, stack_.vec(), args_base, argc, rec.f, *rec.f.code,
+		                        rec.prev_env, site, &caller, caller.code);
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (bound == op_status::failed) {
+		pop_script_frame_core(rec);
+		return bound;
+	}
+	// Conversions during binding push and pop above the args, so the slice is intact
+	assert(stack_.size() == args_base + argc);
+	{
+		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
+		for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
+			stack_.push_back(make_null());
+		}
+	}
+	switch_to_ = &rec.f;
+	return {};
 }
 
 op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val,

@@ -394,7 +394,10 @@ public:
 
     void add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
 
-    // Shared cache-aware overload resolution for script methods (defined in overload_resolution.hpp)
+    // Shared cache-aware overload resolution for script methods (defined in
+    // overload_resolution.hpp). Span core resolves against a caller stack slice
+    // (call-arg windows); the vector overload forwards.
+    checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const script_value* args, size_t argc) const;
     checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
 
     // Single-overload probe for inline-cache fill: the lone overload for name_id, or

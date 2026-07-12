@@ -6393,11 +6393,32 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
+	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
+		// Member-final initializer (auto& p = G.player): field reads evaluate to COPIES,
+		// so the evaluated result can't alias - resolve the chain through the shared
+		// kernel into an owner-pinned FIELD reference instead (route-independence with
+		// ref params/returns; Dev ruling 2026-07-12). Access/removed-field errors
+		// surface as-is; the kernel's generic non-lvalue verdict (computed property,
+		// C++-backed field, non-instance receiver) keeps the decl's own error text.
+		// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
+		auto resolved = detail::resolve_ref_lvalue(decl->initializer.get(), caller_view(&f),
+		                                           environment_.get(), engine_, symbolizer_);
+		if (!resolved && resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+			return raise_from(resolved);
+		}
+		if (resolved) {
+			auto aliased = vm_decl_ref_alias(resolved.value(), engine_);
+			if (!aliased) {
+				return raise_from(aliased);
+			}
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
+		}
+	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
-		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals and "
-		"subscript chains like arr[i] or grid[y][x]; object fields like obj.field are not "
-		"ref-bindable here - pass them to a by-reference parameter instead)");
+		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+		"subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
+		"computed properties and C++-backed members are not ref-bindable)");
 }
 
 op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
@@ -8823,6 +8844,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<new_expr*>(f.code->nodes[ins.a].get());
 	const size_t argc = ins.b;
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_new0 = __rdtsc();
+#endif
 
 	std::vector<script_value> args;
 	args.reserve(argc);
@@ -8957,7 +8981,15 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		}
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t prof_sp1 = __rdtsc();
+#endif
 		auto result = func(args);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_new_count_;
+		profile_new_resolve_cyc_ += prof_sp1 - prof_new0;
+		profile_new_invoke_cyc_ += __rdtsc() - prof_sp1;
+#endif
 		if (!result) {
 			return raise_from(result);
 		}
@@ -8974,7 +9006,15 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	if (ctor_result && ctor_result.value().is_function()) {
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t prof_new1 = __rdtsc();
+#endif
 		auto result = func(args);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_new_count_;
+		profile_new_resolve_cyc_ += prof_new1 - prof_new0;
+		profile_new_invoke_cyc_ += __rdtsc() - prof_new1;
+#endif
 		if (!result) {
 			return raise_from(result);
 		}
@@ -9657,6 +9697,9 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                             std::shared_ptr<environment> definition_env,
                                                             const std::vector<script_value>& args) {
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c0 = __rdtsc();
+#endif
 	const auto& ctor_asts = class_def->get_constructor_asts();
 
 	// Trailing defaults open the arity window; within a tier the ctor using FEWER defaults wins
@@ -9732,6 +9775,9 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 			"No constructor found with matching arguments");
 	}
 
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c1 = __rdtsc();
+#endif
 	auto instance = class_def->create_instance();
 
 	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
@@ -9755,6 +9801,9 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	// delegating ctor must not re-run field initializers afterward
 	bool delegated_to_this = false;
 
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c2 = __rdtsc();
+#endif
 	for (const auto& initializer : matching_ctor->initializers) {
 		if (initializer.target == "super") {
 			if (class_def->get_parent()) {
@@ -9979,16 +10028,33 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 		}
 	}
 
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c3 = __rdtsc();
+#endif
 	if (!delegated_to_this) {
 		evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
 	}
 
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c4 = __rdtsc();
+#endif
 	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
 	method_env->set_access_context(class_def.get());
 	method_env->define("this", this_value);
 
 	auto result = execute_method_ast(matching_ctor, method_env, args);
 
+#ifdef JAISCRIPT_VM_PROFILE
+	{
+		const uint64_t prof_c5 = __rdtsc();
+		++profile_ctor_count_;
+		profile_ctor_cyc_[0] += prof_c1 - prof_c0;
+		profile_ctor_cyc_[1] += prof_c2 - prof_c1;
+		profile_ctor_cyc_[2] += prof_c3 - prof_c2;
+		profile_ctor_cyc_[3] += prof_c4 - prof_c3;
+		profile_ctor_cyc_[4] += prof_c5 - prof_c4;
+	}
+#endif
 	return result;
 }
 
@@ -10688,6 +10754,21 @@ void vm_backend::dump_opcode_profile() const {
 			profile_cycles_[i] / 1e6,
 			(double)profile_cycles_[i] / (double)profile_counts_[i],
 			100.0 * (double)profile_cycles_[i] / (double)total);
+	}
+	if (profile_new_count_) {
+		fprintf(stderr, "[vm-profile] exec_new class path: %llu ctors | resolve avg %.0f cyc | invoke avg %.0f cyc\n",
+			(unsigned long long)profile_new_count_,
+			(double)profile_new_resolve_cyc_ / (double)profile_new_count_,
+			(double)profile_new_invoke_cyc_ / (double)profile_new_count_);
+	}
+	if (profile_ctor_count_) {
+		fprintf(stderr, "[vm-profile] construct_instance sections (%llu ctors, avg cyc): overload %.0f | instance+env+binds %.0f | init-chains %.0f | field-inits %.0f | ctor-body %.0f\n",
+			(unsigned long long)profile_ctor_count_,
+			(double)profile_ctor_cyc_[0] / (double)profile_ctor_count_,
+			(double)profile_ctor_cyc_[1] / (double)profile_ctor_count_,
+			(double)profile_ctor_cyc_[2] / (double)profile_ctor_count_,
+			(double)profile_ctor_cyc_[3] / (double)profile_ctor_count_,
+			(double)profile_ctor_cyc_[4] / (double)profile_ctor_count_);
 	}
 	if (profile_cfs_counts_[0] + profile_cfs_counts_[1] + profile_cfs_counts_[2]) {
 		fprintf(stderr, "[vm-profile] CALL_FROM_SCRATCH exec decomposition (cycles exclude in-loop callee bodies; opaque INCLUDES the native execution):\n");
@@ -12252,11 +12333,17 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					auto resolved = detail::resolve_ref_lvalue(
 						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
 						caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
-					if (!resolved) {
+					if (resolved) {
+						frame_slot_set(callee, param.slot_index, std::move(resolved.value()));
+						continue;
+					}
+					// The kernel's generic non-lvalue verdict falls through to Tier 2
+					// (identifier-keyed map entries classify Tier 1 but only evaluation
+					// can resolve them); access enforcement and other specific errors
+					// propagate. (KEEP BYTE-PARALLEL with bind_reference_parameter)
+					if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
 						return raise_from(resolved);
 					}
-					frame_slot_set(callee, param.slot_index, std::move(resolved.value()));
-					continue;
 				}
 
 				if (symbol_id != UINT64_MAX && caller_env) {
@@ -12270,6 +12357,16 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 							"Cannot take reference of undefined variable");
 					}
 					VM_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
+				} else if (arg.is_reference() && arg.get_reference_holder()) {
+					// Tier 2 (general lvalues; Dev ruling 2026-07-12): the argument already
+					// evaluated in normal left-to-right order, and subscript/map reads over
+					// lvalue bases mint owner-pinned references with full index generality -
+					// computed indices (grid[y+1][x]), member-expr indices (arr[o.idx]), map
+					// keys (m["k"]). A reference VALUE is an lvalue: share its holder, exactly
+					// like the external-invocation path below always has. Nothing runs at the
+					// bind point, so the fast-path constraint holds.
+					// (KEEP BYTE-PARALLEL with the interpreter's bind_reference_parameter)
+					frame_slot_set(callee, param.slot_index, script_value(arg));
 				} else {
 					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),

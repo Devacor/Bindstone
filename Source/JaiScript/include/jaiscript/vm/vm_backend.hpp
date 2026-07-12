@@ -86,6 +86,16 @@ namespace jai::vm {
         uint64_t profile_cfs_counts_[3] = {};
         std::map<std::string, uint64_t> profile_cfs_inloop_names_;   // pinned-path callees
         std::map<std::string, uint64_t> profile_cfs_opaque_cycles_;  // opaque-path cycles by callee
+        // exec_new class-path split: resolve = string + intern + env get; invoke = the
+        // opaque ctor lambda -> execute_callable native re-entry (the suspected heat)
+        uint64_t profile_new_count_ = 0;
+        uint64_t profile_new_resolve_cyc_ = 0;
+        uint64_t profile_new_invoke_cyc_ = 0;
+        // construct_instance sections: [0]=overload resolve [1]=create_instance +
+        // init_env + param binds [2]=initializer chains (super/this) [3]=field inits
+        // [4]=method_env + ctor body (execute_method_ast)
+        uint64_t profile_ctor_cyc_[5] = {};
+        uint64_t profile_ctor_count_ = 0;
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
         // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value

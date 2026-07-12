@@ -1934,11 +1934,13 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
 #endif
+	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
+	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
 		std::vector<script_value>* out_ptr = &out;
 		engine* eng_ptr = &eng;
-		state.pool->submit_to(k - 1, [ctx, out_ptr, eng_ptr] {
+		region_tasks.emplace_back(k - 1, [ctx, out_ptr, eng_ptr] {
 #ifdef JAISCRIPT_VM_PROFILE
 			ctx->prof_start_tsc = __rdtsc();
 #endif
@@ -1947,6 +1949,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			ctx->prof_end_tsc = __rdtsc();
 #endif
 		});
+	}
+	if (!region_tasks.empty()) {
+		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size());
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();
@@ -2398,10 +2403,12 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
 #endif
+	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
+	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
 		engine* eng_ptr = &eng;
-		state.pool->submit_to(k - 1, [ctx, eng_ptr] {
+		region_tasks.emplace_back(k - 1, [ctx, eng_ptr] {
 #ifdef JAISCRIPT_VM_PROFILE
 			ctx->prof_start_tsc = __rdtsc();
 #endif
@@ -2410,6 +2417,9 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 			ctx->prof_end_tsc = __rdtsc();
 #endif
 		});
+	}
+	if (!region_tasks.empty()) {
+		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size());
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();

@@ -101,6 +101,22 @@ namespace jai {
             work_cv_.notify_all();
         }
 
+        // A fork-join region's whole pinned task set in ONE lock + ONE wake: the
+        // per-task submit_to costs a W-worker region W lock round-trips and W
+        // notify_alls (W x W wake predicate evaluations). Order within a worker's
+        // queue matches the span's order.
+        void submit_pinned_batch(std::pair<size_t, task_type>* tasks, size_t count) {
+            {
+                std::lock_guard<std::mutex> guard(mutex_);
+                if (stop_) return;
+                for (size_t i = 0; i < count; ++i) {
+                    workers_[tasks[i].first]->pinned.push_back(std::move(tasks[i].second));
+                    ++outstanding_;
+                }
+            }
+            work_cv_.notify_all();
+        }
+
         // Receives every exception a task lets escape (worker stays alive either way).
         void on_exception(std::function<void(std::exception_ptr)> handler) {
             std::lock_guard<std::mutex> guard(mutex_);

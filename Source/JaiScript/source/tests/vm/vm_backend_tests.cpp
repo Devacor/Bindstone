@@ -3572,6 +3572,9 @@ public:
 				try { var q = a[3 / z]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
 				try { var q2 = a[1 + 1.5]; out = out + "|ran2:" + q2; } catch (er) { out = out + "|" + er; }
 				try { t[1 + 0] = "nope"; out = out + "|ran3"; } catch (er) { out = out + "|" + er; }
+				var big = 9223372036854775807;
+				try { var q4 = a[big + big]; out = out + "|ran4"; } catch (er) { out = out + "|" + er; }
+				try { a[big + big] = 1; out = out + "|ran5"; } catch (er) { out = out + "|" + er; }
 				out;
 			)");
 			check_eq(i1, v1, "computed-index fusion parity (pure + replay spellings)");

@@ -5142,41 +5142,70 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
-	const script_value* index_ptr;
+	const script_value* index_ptr = nullptr;
 	std::optional<script_value> computed_index, csnap;
+	bool have_raw_index = false;
+	script_int raw_index = 0;
 	if (p.index_binary != k_invalid_u32) {
 		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops, no
 		// catch-var shadow) run no user code, so the container POINTER stays valid
-		// across the compute. Everything else snapshots the container first — exactly
+		// across the compute. Int arithmetic short-circuits to a RAW index — no
+		// script_value is born at all; error spellings replicate binary_fused_compute's
+		// int row verbatim. Everything else snapshots the container first — exactly
 		// the copy the unfused LOAD paid — keeping container-before-index order.
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		const token_type bop = static_cast<token_type>(bp.op);
 		bool pure = false;
-		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 &&
-		    is_numeric_binary_op(static_cast<token_type>(bp.op))) {
+		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 && is_numeric_binary_op(bop)) {
 			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
 			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
 			if (pr) {
 				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
 				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
 				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+					const script_int a = pl->unchecked_as_int(), b = pr->unchecked_as_int();
+					switch (bop) {
+					case token_type::plus:
+						if (!ints::try_add(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
+						have_raw_index = true; break;
+					case token_type::minus:
+						if (!ints::try_sub(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
+						have_raw_index = true; break;
+					case token_type::star:
+						if (!ints::try_mul(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
+						have_raw_index = true; break;
+					case token_type::slash:
+						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+						if (!ints::try_div(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
+						have_raw_index = true; break;
+					case token_type::percent:
+						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						raw_index = ints::mod(a, b);
+						have_raw_index = true; break;
+					default: break;   // comparisons keep the boxed compute (bool index replays)
+					}
+				}
 			}
 		}
-		if (!pure) {
-			csnap.emplace(*container_ptr);
-			container_ptr = &*csnap;
-		}
-		VM_TRY(binary_fused_compute(f, p.index_binary,
-		                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
-		if (is_unwinding_) [[unlikely]] {
-			// pair parity: LOAD's container copy and BINARY_FUSED's result (when its
-			// sink ran) stay pushed, INDEX never runs
-			stack_.push_back(*container_ptr);
-			if (computed_index) {
-				stack_.push_back(std::move(*computed_index));
+		if (!have_raw_index) {
+			if (!pure) {
+				csnap.emplace(*container_ptr);
+				container_ptr = &*csnap;
 			}
-			return {};
+			VM_TRY(binary_fused_compute(f, p.index_binary,
+			                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
+			if (is_unwinding_) [[unlikely]] {
+				// pair parity: LOAD's container copy and BINARY_FUSED's result (when its
+				// sink ran) stay pushed, INDEX never runs
+				stack_.push_back(*container_ptr);
+				if (computed_index) {
+					stack_.push_back(std::move(*computed_index));
+				}
+				return {};
+			}
+			index_ptr = &*computed_index;
 		}
-		index_ptr = &*computed_index;
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
@@ -5186,9 +5215,15 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	}
 
 	const script_value& left = *container_ptr;      // fused_ident_value hands back deref'd storage
-	const script_value& right = index_ptr->deref();
-	if (left.raw_storage_index() == script_value::TYPEID_ARRAY && right.is_int()) {
-		const script_int index = right.unchecked_as_int();
+	bool index_is_int = have_raw_index;
+	script_int index_int = raw_index;
+	if (!have_raw_index) {
+		const script_value& right = index_ptr->deref();
+		index_is_int = right.is_int();
+		if (index_is_int) { index_int = right.unchecked_as_int(); }
+	}
+	if (left.raw_storage_index() == script_value::TYPEID_ARRAY && index_is_int) {
+		const script_int index = index_int;
 		const script_array* node = left.unchecked_array_node();
 		if (index >= 0 && index < static_cast<script_int>(node->size())) {
 			const bool lvalue_shape = (ins.b & index_flag_lvalue_shape) != 0;
@@ -5239,7 +5274,8 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	}
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
-	if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
+	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
@@ -5270,37 +5306,66 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			}
 		}
 	}
-	const script_value* index_ptr;
+	const script_value* index_ptr = nullptr;
 	std::optional<script_value> computed_index, csnap;
+	bool have_raw_index = false;
+	script_int raw_index = 0;
 	if (p.index_binary != k_invalid_u32) {
-		// Same purity/snapshot discipline as exec_index_fused: pure numeric shapes keep
-		// the container pointer, everything else snapshots before the compute runs
+		// Same purity/snapshot/raw-int discipline as exec_index_fused: int arithmetic
+		// short-circuits to a raw index (no script_value born, binary_fused_compute's
+		// exact int-row spellings), pure numeric shapes keep the container pointer,
+		// everything else snapshots before the compute runs
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		const token_type bop = static_cast<token_type>(bp.op);
 		bool pure = false;
-		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 &&
-		    is_numeric_binary_op(static_cast<token_type>(bp.op))) {
+		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 && is_numeric_binary_op(bop)) {
 			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
 			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
 			if (pr) {
 				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
 				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
 				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+					const script_int a = pl->unchecked_as_int(), b = pr->unchecked_as_int();
+					switch (bop) {
+					case token_type::plus:
+						if (!ints::try_add(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
+						have_raw_index = true; break;
+					case token_type::minus:
+						if (!ints::try_sub(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
+						have_raw_index = true; break;
+					case token_type::star:
+						if (!ints::try_mul(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
+						have_raw_index = true; break;
+					case token_type::slash:
+						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+						if (!ints::try_div(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
+						have_raw_index = true; break;
+					case token_type::percent:
+						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						raw_index = ints::mod(a, b);
+						have_raw_index = true; break;
+					default: break;   // comparisons keep the boxed compute (bool index replays)
+					}
+				}
 			}
 		}
-		if (!pure) {
-			csnap.emplace(*container_ptr);
-			container_ptr = &*csnap;
-		}
-		VM_TRY(binary_fused_compute(f, p.index_binary,
-		                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
-		if (is_unwinding_) [[unlikely]] {
-			stack_.push_back(*container_ptr);
-			if (computed_index) {
-				stack_.push_back(std::move(*computed_index));
+		if (!have_raw_index) {
+			if (!pure) {
+				csnap.emplace(*container_ptr);
+				container_ptr = &*csnap;
 			}
-			return {};
+			VM_TRY(binary_fused_compute(f, p.index_binary,
+			                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
+			if (is_unwinding_) [[unlikely]] {
+				stack_.push_back(*container_ptr);
+				if (computed_index) {
+					stack_.push_back(std::move(*computed_index));
+				}
+				return {};
+			}
+			index_ptr = &*computed_index;
 		}
-		index_ptr = &*computed_index;
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
@@ -5310,9 +5375,15 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	}
 
 	script_value& container = const_cast<script_value&>(*container_ptr);
-	const script_value& index_v = index_ptr->deref();
-	if (!stack_.empty() && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
-		const script_int index = index_v.unchecked_as_int();
+	bool index_is_int = have_raw_index;
+	script_int index_int = raw_index;
+	if (!have_raw_index) {
+		const script_value& index_v = index_ptr->deref();
+		index_is_int = index_v.is_int();
+		if (index_is_int) { index_int = index_v.unchecked_as_int(); }
+	}
+	if (!stack_.empty() && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_is_int) {
+		const script_int index = index_int;
 		auto storage = container.get_array_storage();
 		// TYPED raw store (mirrors exec_index_store): numeric rhs coerces straight into
 		// the buffer; non-numeric rhs replays for the exact mismatch error
@@ -5356,7 +5427,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	}
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
-	if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
+	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};

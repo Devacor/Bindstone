@@ -72,6 +72,11 @@ namespace jai::vm {
         // exec_call bound-method routing: [0]=branch entered [1]=in-loop dispatch
         // [2]=bound thunk seen but opaque [3]=other opaque callee
         uint64_t profile_bound_method_paths_[4] = {};
+        // env identifier resolution taxonomy (the flat_lookup_ kill): [0]=no cache slot
+        // [1]=frame ineligible (scope env, not global/pinned) [2]=cache hit
+        // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
+        uint64_t profile_env_resolve_[6] = {};
+        std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
 #else
         ~vm_backend() override = default;
 #endif

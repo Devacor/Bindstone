@@ -1415,6 +1415,9 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	// checked by {env, epoch} but NOT by symbol, so slot reuse across symbols would
 	// alias variables - skip the cache entirely instead.
 	if (cache_slot == SIZE_MAX) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[0];
+#endif
 		return nullptr;
 	}
 	// Top-level frames, call frames running directly in the global env (lazy-elided
@@ -1422,8 +1425,39 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	// per-dispatch env parented on the global env): those environments are stable, so
 	// entries actually hit. Other call frames churn envs (binds/resets bump the epoch),
 	// which made the miss-path provenance work a pure tax on call-heavy code.
-	if (!f.top_level && environment_.get() != cached_global_env_ && !environment_->vm_pinned_scope()) {
-		return nullptr;   // callers fall through to their original full lookup
+	environment* resolve_env = environment_.get();
+	if (!f.top_level && resolve_env != cached_global_env_ && !environment_->vm_pinned_scope()) {
+		// Scope-env frames: when every env from the frame down to the GLOBAL is
+		// transparent (standard kind, zero own defines), any hit provably lands in
+		// a global cell — so the site caches against the GLOBAL env's identity and
+		// epoch instead of bailing to the per-access hash walk (GLOOM: 3.3M walks
+		// per 200t, 79% of them the framebuffer name). Transparency is re-proved
+		// per access; a mid-body define flips it and the site falls back. Workers
+		// have cached_global_env_ null and must never write the shared chunk cache.
+		if (!cached_global_env_) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_env_resolve_[1];
+#endif
+			return nullptr;
+		}
+		environment* e = resolve_env;
+		int hops = 0;
+		while (e != cached_global_env_) {
+			if (!e->vm_transparent_for_lookup() || ++hops > 4) {
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_env_resolve_[1];
+#endif
+				return nullptr;   // callers fall through to their original full lookup
+			}
+			e = e->parent_raw();
+			if (!e) {
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_env_resolve_[1];
+#endif
+				return nullptr;
+			}
+		}
+		resolve_env = cached_global_env_;
 	}
 	auto& cache = f.code->env_lookup_cache;
 	if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
@@ -1432,17 +1466,26 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	env_lookup_cache_entry& entry = cache[cache_slot];
 	// Per-env epoch (environment::local_epoch): unrelated scope/method env churn no
 	// longer invalidates entries cached against the stable global/top-level envs
-	const uint64_t epoch = environment_->local_epoch();
-	if (entry.env == environment_.get() && entry.epoch == epoch) {
+	const uint64_t epoch = resolve_env->local_epoch();
+	if (entry.env == resolve_env && entry.epoch == epoch) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[2];
+#endif
 		return entry.ptr;
 	}
 	bool cacheable = false;
-	script_value* ptr = environment_->vm_storage_lookup(symbol_id, cacheable);
+	script_value* ptr = resolve_env->vm_storage_lookup(symbol_id, cacheable);
 	if (ptr && cacheable && epoch != 0) {
-		entry.env = environment_.get();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[3];
+#endif
+		entry.env = resolve_env;
 		entry.epoch = epoch;
 		entry.ptr = ptr;
 	} else {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[4];
+#endif
 		entry.env = nullptr;
 	}
 	return ptr;
@@ -2895,6 +2938,10 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 		stack_.push_back(cached->deref());
 		return {};
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_env_resolve_[5];
+	++profile_env_walk_names_[std::string(symbolizer_->get_string(sym))];
+#endif
 	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper
 	if (script_value* env_val = environment_->get_value_ptr(sym)) {
 		stack_.push_back(env_val->deref());
@@ -4022,6 +4069,10 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
 		return &cached->deref();
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_env_resolve_[5];
+	++profile_env_walk_names_[std::string(symbolizer_->get_string(sym))];
+#endif
 	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper;
 	// env storage is deque-stable, so the pointer outlives this call like get_ref's did
 	if (script_value* env_val = environment_->get_value_ptr(sym)) {
@@ -10007,6 +10058,24 @@ void vm_backend::dump_opcode_profile() const {
 		fprintf(stderr, "[vm-profile] exec_call bound-method: entered %llu | in-loop %llu | bound-opaque %llu | other-opaque %llu\n",
 			(unsigned long long)profile_bound_method_paths_[0], (unsigned long long)profile_bound_method_paths_[1],
 			(unsigned long long)profile_bound_method_paths_[2], (unsigned long long)profile_bound_method_paths_[3]);
+	}
+	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
+	                          profile_env_resolve_[3] + profile_env_resolve_[4];
+	if (er_total) {
+		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu\n",
+			(unsigned long long)profile_env_resolve_[0], (unsigned long long)profile_env_resolve_[1],
+			(unsigned long long)profile_env_resolve_[2], (unsigned long long)profile_env_resolve_[3],
+			(unsigned long long)profile_env_resolve_[4], (unsigned long long)profile_env_resolve_[5]);
+	}
+	if (!profile_env_walk_names_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> walks(profile_env_walk_names_.begin(), profile_env_walk_names_.end());
+		std::sort(walks.begin(), walks.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] ENV full-walk symbols:\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : walks) {
+			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
+			if (++shown >= 15) break;
+		}
 	}
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];

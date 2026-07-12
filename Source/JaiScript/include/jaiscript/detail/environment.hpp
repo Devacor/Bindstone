@@ -159,6 +159,15 @@ namespace jai {
         bool vm_pinned_scope() const noexcept { return vm_pinned_scope_; }
         void set_vm_pinned_scope(bool pinned) noexcept { vm_pinned_scope_ = pinned; }
 
+        // vm ip-cache transparency: a standard scope env that has DEFINED nothing of its
+        // own (local_ids_ — the flat memo map doesn't count) cannot shadow any name, so
+        // lookups provably continue past it. Callers re-prove this per access: a
+        // mid-body define flips it and the site falls back to the full walk.
+        bool vm_transparent_for_lookup() const noexcept {
+            return kind_ == env_kind::standard && local_ids_.empty();
+        }
+        environment* parent_raw() const noexcept { return parent_.get(); }
+
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 

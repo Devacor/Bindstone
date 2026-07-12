@@ -5,6 +5,7 @@
 #include "io.hpp"
 #include "containers.hpp"
 #include "math.hpp"
+#include "strings.hpp"
 // Optional: #include "vector.hpp"  // Vec2/Vec3 types - many engines have their own
 
 namespace jai {
@@ -18,6 +19,7 @@ namespace stdlib {
         register_io_functions(eng_ref);
         register_container_types(eng_ref);
         register_math_functions(eng_ref);
+        register_string_functions(eng_ref);
 
         // Optional: register_vector_types(eng_ref);  // Vec2/Vec3 with move_towards
     }

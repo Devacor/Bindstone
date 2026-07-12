@@ -258,6 +258,50 @@ public:
             check_eq(result.as<std::string>(), "HELLO");
         });
 
+        // ============================================================
+        // string:: namespace (NON-mutating: returns a new string, argument untouched)
+        // ============================================================
+
+        test("ns_to_lower_non_mutating", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute("var s = \"AbC 123!\"; var t = string::to_lower(s); t + \"|\" + s;");
+            check_eq(result.as<std::string>(), "abc 123!|AbC 123!");
+        });
+
+        test("ns_to_upper_non_mutating", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute("var s = \"AbC 123!\"; var t = string::to_upper(s); t + \"|\" + s;");
+            check_eq(result.as<std::string>(), "ABC 123!|AbC 123!");
+        });
+
+        test("ns_to_lower_literal_and_expr", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute("string::to_lower(\"HeLLo\" + \" WoRLD\");");
+            check_eq(result.as<std::string>(), "hello world");
+        });
+
+        test("ns_case_transform_type_errors", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            // Host-function errors surface at the engine boundary (like other stdlib
+            // host bindings), not as script-catchable exceptions - assert the error
+            // surfaces and the engine stays usable afterwards
+            auto expect_error = [&](const char* src) {
+                try {
+                    auto r = engine->execute(src);
+                    check(!r.is_string(), std::string("expected an error result for: ") + src);
+                } catch (const std::exception&) {
+                    // engine-boundary throw is the other legal surface
+                }
+            };
+            expect_error("string::to_lower(42);");
+            expect_error("string::to_upper(\"a\", \"b\");");
+            check_eq(engine->execute("string::to_upper(\"ok\");").as<std::string>(), "OK");
+        });
+
         test("trim_both_sides", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
@@ -701,6 +745,26 @@ public:
                 `HP ${hp:>6.1f}/${maxhp:<6.1f} G${gold:>7} ${name:<12}|`;
             )");
             check_eq(result.as<std::string>(), "HP   73.5/100.0  G   1234 Grubwell    |");
+        });
+
+        // Crash regression: a subscript read in argument position mints an element
+        // reference; string builtins gate on is_string() (derefs) then read
+        // unchecked_as_string() (doesn't) - s.find(parts[0]) was an access violation
+        // on BOTH backends before deref_builtin_args (builtin_methods.hpp). Covers the
+        // identifier-receiver direct path AND the minted bound-method path.
+        test("subscript_arg_to_string_builtins", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(
+                var s = "the quick brown fox";
+                var parts = ["quick", "fox", "wolf"];
+                s.find(parts[0]) == 4 &&
+                s.count(parts[1]) == 1 &&
+                s.find(parts[2]) == -1 &&
+                ("prefix " + s).contains(parts[0]) &&
+                s.starts_with(["the", "a"][0]);
+            )");
+            check_eq(result.as<bool>(), true);
         });
     }
 };

@@ -292,26 +292,6 @@ namespace {
 		return {};
 	}
 
-	bool is_numeric_binary_op(token_type op) {
-		switch (op) {
-			case token_type::plus:
-			case token_type::minus:
-			case token_type::star:
-			case token_type::slash:
-			case token_type::percent:
-			case token_type::less:
-			case token_type::less_equal:
-			case token_type::greater:
-			case token_type::greater_equal:
-			case token_type::equal_equal:
-			case token_type::bang_equal:
-			case token_type::spaceship:
-				return true;
-			default:
-				return false;
-		}
-	}
-
 } // namespace
 
 struct vm_backend::frame_guard {

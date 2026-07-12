@@ -23,6 +23,28 @@ namespace jai {
 
 namespace jai::vm {
 
+    // The numeric-fast-path op set shared by the fused binary/compare/index kernels
+    // (WPR at 99deff47: 40k µs of out-of-line calls when this lived in the vm TU)
+    JAI_FORCEINLINE bool is_numeric_binary_op(token_type op) {
+        switch (op) {
+            case token_type::plus:
+            case token_type::minus:
+            case token_type::star:
+            case token_type::slash:
+            case token_type::percent:
+            case token_type::less:
+            case token_type::less_equal:
+            case token_type::greater:
+            case token_type::greater_equal:
+            case token_type::equal_equal:
+            case token_type::bang_equal:
+            case token_type::spaceship:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     class vm_backend : public execution_backend {
     public:
         vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);

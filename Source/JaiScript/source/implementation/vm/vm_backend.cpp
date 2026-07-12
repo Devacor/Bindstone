@@ -4488,11 +4488,11 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 			const script_value& tmpl = f.code->constants[cp.rhs.const_index];
 			const auto& storage = tmpl.get_storage();
 			switch (storage.index()) {
-				case script_value::TYPEID_INT: stack_.push_back(script_value(std::get<script_int>(storage), engine_)); break;
-				case script_value::TYPEID_FLOAT: stack_.push_back(script_value(std::get<script_float>(storage), engine_)); break;
-				case script_value::TYPEID_STRING: stack_.push_back(script_value(*std::get<strong_ptr<script_string>>(storage), engine_)); break;
-				case script_value::TYPEID_CHAR: stack_.push_back(script_value(std::get<script_char>(storage), engine_)); break;
-				case script_value::TYPEID_BOOL: stack_.push_back(script_value(std::get<script_bool>(storage), engine_)); break;
+				case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
+				case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
+				case script_value::TYPEID_STRING: stack_.push_back(script_value(*storage.get<strong_ptr<script_string>>(), engine_)); break;
+				case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
+				case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 				case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
 				default: {
 					script_value copy = tmpl;
@@ -5081,11 +5081,11 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 script_value vm_backend::materialize_constant(const script_value& tmpl) {
 	const auto& storage = tmpl.get_storage();
 	switch (storage.index()) {
-		case script_value::TYPEID_INT: return script_value(std::get<script_int>(storage), engine_);
-		case script_value::TYPEID_FLOAT: return script_value(std::get<script_float>(storage), engine_);
-		case script_value::TYPEID_STRING: return script_value(*std::get<strong_ptr<script_string>>(storage), engine_);
-		case script_value::TYPEID_CHAR: return script_value(std::get<script_char>(storage), engine_);
-		case script_value::TYPEID_BOOL: return script_value(std::get<script_bool>(storage), engine_);
+		case script_value::TYPEID_INT: return script_value(storage.get<script_int>(), engine_);
+		case script_value::TYPEID_FLOAT: return script_value(storage.get<script_float>(), engine_);
+		case script_value::TYPEID_STRING: return script_value(*storage.get<strong_ptr<script_string>>(), engine_);
+		case script_value::TYPEID_CHAR: return script_value(storage.get<script_char>(), engine_);
+		case script_value::TYPEID_BOOL: return script_value(storage.get<script_bool>(), engine_);
 		case script_value::TYPEID_NULL: return make_null();
 		default: {
 			script_value copy = tmpl;
@@ -5238,7 +5238,7 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
 			if (map_ptr) {
 				auto it = map_ptr->find(map_string_key_probe{
-					*std::get<strong_ptr<script_string>>(itmpl.get_storage())});
+					*itmpl.get_storage().get<strong_ptr<script_string>>()});
 				if (it != map_ptr->end()) {
 					script_value val = it->second;
 					if (!val.has_valid_engine()) {
@@ -5959,7 +5959,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 			    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
 			    argc == thunk->payload.fn->parameters().size()) {
 				pc.fn = thunk->payload.fn.get();
-				pc.pin = *std::get_if<script_value::TYPEID_FUNCTION>(&calleeVal.get_storage());
+				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
 				if (cached_global_env_ && !thunk->payload.fn->closure_env) {
 					site.ic_pin = pc.pin;
@@ -6199,7 +6199,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 				// functions pin only engine-internal state (body AST, params).
 				if (cached_global_env_ && !thunk->payload.fn->closure_env &&
 				    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
-					site.ic_pin = *std::get_if<script_value::TYPEID_FUNCTION>(&calleeVal.get_storage());
+					site.ic_pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = direct_fn;
 					site.ic_argc = static_cast<uint32_t>(argc);
@@ -10099,11 +10099,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				const script_value& tmpl = f.code->constants[ins.a];
 				const auto& storage = tmpl.get_storage();
 				switch (storage.index()) {
-					case script_value::TYPEID_INT: stack_.push_back(script_value(std::get<script_int>(storage), engine_)); break;
-					case script_value::TYPEID_FLOAT: stack_.push_back(script_value(std::get<script_float>(storage), engine_)); break;
-					case script_value::TYPEID_STRING: stack_.push_back(script_value(*std::get<strong_ptr<script_string>>(storage), engine_)); break;
-					case script_value::TYPEID_CHAR: stack_.push_back(script_value(std::get<script_char>(storage), engine_)); break;
-					case script_value::TYPEID_BOOL: stack_.push_back(script_value(std::get<script_bool>(storage), engine_)); break;
+					case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
+					case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
+					case script_value::TYPEID_STRING: stack_.push_back(script_value(*storage.get<strong_ptr<script_string>>(), engine_)); break;
+					case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
+					case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 					case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
 					default: {
 						script_value copy = tmpl;

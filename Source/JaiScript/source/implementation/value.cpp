@@ -481,7 +481,7 @@ script_value script_value::clone() const {
     // shared_ptr<T> is a TYPE MARKER that indicates reference semantics for normal operations,
     // but clone() should perform a deep copy to create an independent instance
     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
-        auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
+        auto obj_holder = storage_.get<strong_ptr<object_holder>>();
         if (!obj_holder) {
             throw runtime_error("Cannot clone shared_ptr: null object_holder");
         }
@@ -531,7 +531,7 @@ script_value script_value::clone() const {
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
         case script_value_type::jai_array_type: {
-            const auto& other_node = *std::get<strong_ptr<script_array>>(storage_);
+            const auto& other_node = *storage_.get<strong_ptr<script_array>>();
             if (other_node.is_typed()) {
                 // kind-preserving deep copy = one buffer copy (8B/element)
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
@@ -557,7 +557,7 @@ script_value script_value::clone() const {
             break;
         }
         case script_value_type::jai_map_type: {
-            auto& other_map = *std::get<strong_ptr<script_map>>(storage_);
+            auto& other_map = *storage_.get<strong_ptr<script_map>>();
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); key/value clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
@@ -571,7 +571,7 @@ script_value script_value::clone() const {
         case script_value_type::jai_object_type: {
             // Regular objects have VALUE semantics by default (deep copy)
             // Only shared_ptr<T> has reference semantics (handled by early return above)
-            auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
+            auto obj_holder = storage_.get<strong_ptr<object_holder>>();
 
             // ...and coroutine handles: a handle references a RUNNING computation, so
             // every copy shares it (field stores, aliases, params, containers all see
@@ -695,7 +695,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             result.storage_ = storage_;
             break;
         case TYPEID_STRING: {
-            const auto& handle = std::get<strong_ptr<script_string>>(storage_);
+            const auto& handle = storage_.get<strong_ptr<script_string>>();
             if (!handle) { break; }   // null handle shares nothing
             engine_->execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
             auto fresh = make_strong<script_string>(*handle);
@@ -704,7 +704,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             break;
         }
         case TYPEID_ARRAY: {
-            const auto& handle = std::get<strong_ptr<script_array>>(storage_);
+            const auto& handle = storage_.get<strong_ptr<script_array>>();
             if (!handle) { break; }
             if (handle->is_typed()) {
                 // all-primitive by construction: detach = one buffer copy
@@ -730,7 +730,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             break;
         }
         case TYPEID_MAP: {
-            const auto& handle = std::get<strong_ptr<script_map>>(storage_);
+            const auto& handle = storage_.get<strong_ptr<script_map>>();
             if (!handle) { break; }
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_map>();
@@ -753,7 +753,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             // Materialize the borrow: silent deep clone of the VIEWED container. The
             // viewed structure is all-primitive by the barrier's classification, and the
             // traversal below reads it by const& only.
-            const auto& tag = std::get<parallel_borrow_tag>(storage_);
+            const auto& tag = storage_.get<parallel_borrow_tag>();
             if (const auto* arr = parallel_borrow_array()) {
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
                 auto fresh = make_strong<script_array>();
@@ -796,10 +796,10 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
     result.type_info_ = v.type_info_;
     parallel_borrow_tag tag;
     if (v.raw_storage_index() == TYPEID_ARRAY) {
-        const auto& handle = std::get<strong_ptr<script_array>>(v.storage_);
+        const auto& handle = v.storage_.get<strong_ptr<script_array>>();
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
     } else if (v.raw_storage_index() == TYPEID_MAP) {
-        const auto& handle = std::get<strong_ptr<script_map>>(v.storage_);
+        const auto& handle = v.storage_.get<strong_ptr<script_map>>();
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get())) | parallel_borrow_tag::k_map_bit;
     } else {
         throw runtime_error("make_parallel_borrow: source must be an array or map");
@@ -809,7 +809,7 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
 }
 
 const script_array* script_value::parallel_borrow_array() const noexcept {
-    if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
+    if (const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>()) {
         if (!tag->is_map_kind()) {
             return static_cast<const script_array*>(tag->pointer());
         }
@@ -818,7 +818,7 @@ const script_array* script_value::parallel_borrow_array() const noexcept {
 }
 
 const script_map* script_value::parallel_borrow_map() const noexcept {
-    if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
+    if (const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>()) {
         if (tag->is_map_kind()) {
             return static_cast<const script_map*>(tag->pointer());
         }
@@ -831,7 +831,7 @@ const script_function& script_value::as_function() const {
     if (val.current_type() != script_value_type::jai_function_type) {
         throw runtime_error("script_value is not a function");
     }
-    return *std::get<strong_ptr<script_function>>(val.storage_);
+    return *val.storage_.get<strong_ptr<script_function>>();
 }
 
 script_value script_value::try_unwrap_transparent_wrapper() const {
@@ -896,7 +896,7 @@ const script_value& script_value::deref_slow() const {
         // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
         // then drops the (non-atomic) refcount on every deref, which is pure overhead
         // on this hot path.
-        const auto& refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        const auto& refHolder = storage_.get<strong_ptr<reference_holder>>();
         if (!refHolder) {
             throw runtime_error("Null reference");
         }
@@ -944,7 +944,7 @@ script_value& script_value::deref_slow() {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
         // See const overload: bind, don't copy, the strong_ptr (avoids refcount churn).
-        auto& refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        auto& refHolder = storage_.get<strong_ptr<reference_holder>>();
         if (!refHolder) {
             throw runtime_error("Null reference");
         }
@@ -984,7 +984,7 @@ script_value& script_value::deref_slow() {
 
 void script_value::assign_through(const script_value& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        auto refHolder = storage_.get<strong_ptr<reference_holder>>();
         if (!refHolder) {
             throw runtime_error("Null reference in assign_through");
         }
@@ -1079,7 +1079,7 @@ void script_value::assign_through(const script_value& value) {
 
 void script_value::assign_through(script_value&& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        auto refHolder = storage_.get<strong_ptr<reference_holder>>();
         if (!refHolder) {
             throw runtime_error("Null reference in assign_through");
         }
@@ -1202,13 +1202,13 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             // guaranteed total order over pointers.
             auto identity = [](const script_value& v) -> const void* {
                 switch (v.raw_storage_index()) {
-                    case TYPEID_ARRAY:      return std::get_if<TYPEID_ARRAY>(&v.storage_)->get();
-                    case TYPEID_MAP:        return std::get_if<TYPEID_MAP>(&v.storage_)->get();
-                    case TYPEID_OBJECT:     return std::get_if<TYPEID_OBJECT>(&v.storage_)->get();
-                    case TYPEID_FUNCTION:   return std::get_if<TYPEID_FUNCTION>(&v.storage_)->get();
-                    case TYPEID_SHARED_PTR: return std::get_if<TYPEID_SHARED_PTR>(&v.storage_)->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
-                    case TYPEID_REFERENCE:  return std::get_if<TYPEID_REFERENCE>(&v.storage_)->get();
-                    case TYPEID_PARALLEL_BORROW: return std::get_if<TYPEID_PARALLEL_BORROW>(&v.storage_)->pointer();  // viewed container = stable identity (region-internal, defensive)
+                    case TYPEID_ARRAY:      return v.storage_.get_if<TYPEID_ARRAY>()->get();
+                    case TYPEID_MAP:        return v.storage_.get_if<TYPEID_MAP>()->get();
+                    case TYPEID_OBJECT:     return v.storage_.get_if<TYPEID_OBJECT>()->get();
+                    case TYPEID_FUNCTION:   return v.storage_.get_if<TYPEID_FUNCTION>()->get();
+                    case TYPEID_SHARED_PTR: return v.storage_.get_if<TYPEID_SHARED_PTR>()->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
+                    case TYPEID_REFERENCE:  return v.storage_.get_if<TYPEID_REFERENCE>()->get();
+                    case TYPEID_PARALLEL_BORROW: return v.storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer();  // viewed container = stable identity (region-internal, defensive)
                     default:                return nullptr;  // invalid/weak_ptr: treated as one equivalence class
                 }
             };

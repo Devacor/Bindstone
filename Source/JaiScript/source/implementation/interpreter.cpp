@@ -2798,19 +2798,19 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
     // Determine type from variant index and extract + recreate value
     switch (storage.index()) {
         case 1:  // script_int
-            push_value(make_value(std::get<script_int>(storage)));
+            push_value(make_value(storage.get<script_int>()));
             break;
         case 2:  // script_float
-            push_value(make_value(std::get<script_float>(storage)));
+            push_value(make_value(storage.get<script_float>()));
             break;
         case 3:  // script_string (wrapped in strong_ptr)
-            push_value(make_value(*std::get<strong_ptr<script_string>>(storage)));
+            push_value(make_value(*storage.get<strong_ptr<script_string>>()));
             break;
         case 4:  // script_char
-            push_value(make_value(std::get<script_char>(storage)));
+            push_value(make_value(storage.get<script_char>()));
             break;
         case 5:  // script_bool
-            push_value(make_value(std::get<script_bool>(storage)));
+            push_value(make_value(storage.get<script_bool>()));
             break;
         case 0:  // std::monostate (null)
             push_value(make_value());

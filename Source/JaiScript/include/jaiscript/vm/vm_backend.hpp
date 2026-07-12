@@ -75,7 +75,8 @@ namespace jai::vm {
         // env identifier resolution taxonomy (the flat_lookup_ kill): [0]=no cache slot
         // [1]=frame ineligible (scope env, not global/pinned) [2]=cache hit
         // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
-        uint64_t profile_env_resolve_[6] = {};
+        // [6]=fast-head hit (env identity + engine serial) [7]=fast-head arm
+        uint64_t profile_env_resolve_[8] = {};
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
         // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value
@@ -707,6 +708,9 @@ namespace jai::vm {
         // Returns the same pointer environment::get_ref/get_value_ptr's storage prefix
         // would; nullptr = caller must run its original full lookup (fallback tails).
         script_value* env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id);
+        // Transparency-walk bail tail: chain-agnostic storage-prefix walk from the
+        // CURRENT env (real shadowing), arming the entry's fast head for env-local hits
+        script_value* env_arm_fast_head(env_lookup_cache_entry* fast_entry, uint64_t symbol_id);
         // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
         op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
 

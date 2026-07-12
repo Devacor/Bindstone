@@ -56,11 +56,11 @@ public:
 	}
 
 	// the whole pool steps through ONE pure in-place function — parallel_for owns
-	// each element exclusively when the host grants workers (SAFE mode: elements are
-	// all-primitive rows, proven at the barrier), the same function in a serial
-	// range-for when HOST_WORKERS == 0. No output array, no pool replacement.
+	// each element exclusively when workers are explicitly requested (SAFE mode:
+	// elements are all-primitive rows, proven at the barrier), the same function
+	// in a serial range-for otherwise. No output array, no pool replacement.
 	void update() {
-		if (HOST_WORKERS == 0) {
+		if (HOST_WORKERS <= 0) {
 			for (auto& p : pool) { gloom_particle_step(p); }
 		} else {
 			parallel_for (auto& p : pool) { gloom_particle_step(p); }

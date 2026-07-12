@@ -9605,6 +9605,12 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
         // Evaluate the container expression
         JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
         container = pop_value();
+        // A script exception here (e.g. a reload-removed method as the container) must
+        // unwind the statement with the ORIGINAL exception, not fall into the
+        // not-iterable ladder below (which clobbered it with 'Type mismatch')
+        if (is_unwinding_) {
+            return {};
+        }
     }
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)

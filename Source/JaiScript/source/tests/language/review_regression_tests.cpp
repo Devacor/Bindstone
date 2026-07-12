@@ -376,6 +376,33 @@ public:
             }
         });
 
+        // Range-for over a container expression that raises a script exception must
+        // unwind with the ORIGINAL exception; the interpreter fell into the
+        // not-iterable ladder instead (empty catch text / 'Type mismatch'). Found by
+        // the differential fuzzer (seeds 1356/1484 post-grammar-extension: a
+        // reload-removed coroutine method called as the for-range container).
+        test("range_for_throwing_container_unwinds_original", [this]() {
+            const char* src = R"(
+                class A { int f = 1; coroutine int co() { yield f; return 2; } }
+                var a = A();
+                class A { int f = 1; }
+                var out = "";
+                try { for (auto y : a.co()) { out = out + y; } } catch (ex) { out = out + "co[" + ex + "]"; }
+                try { for (auto y2 : a.f) { out = out + y2; } } catch (ex2) { out = out + "|f[" + ex2 + "]"; }
+                out = out + "|" + a.f;
+                out;
+            )";
+            std::array<std::string, 2> got;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                got[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check(got[0].find("co[Object has no member 'co']") != std::string::npos,
+                  "interp: original exception surfaces from the container expression");
+            check_eq(got[0], got[1], "range-for container-throw parity");
+        });
+
         // ---- #35 JSON float serialization round-trips at full precision ----
         test("json_float_roundtrip", [this]() {
             auto e = make_engine();

@@ -2,7 +2,9 @@
 // admission walk (docs/parallel_design.md): each function touches ONLY its one
 // element parameter and locals — no globals, no member access, no host calls
 // beyond the math whitelist. The same functions run serially when
-// HOST_WORKERS == 0, which is the 1-vs-N determinism check by construction.
+// HOST_WORKERS <= 0 (the default: at GLOOM's grain the region barrier costs
+// more than it distributes), which keeps the 1-vs-N determinism check: explicit
+// --workers N runs the identical bodies through the parallel machinery.
 
 // A CHUNK of wall rays over a PERSISTENT workspace (parallel_for v1, SAFE
 // mode): a WallChunk class record (render.jai) the body owns exclusively —

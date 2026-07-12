@@ -318,7 +318,10 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		t.planex = planex;
 		t.planey = planey;
 	}
-	if (HOST_WORKERS == 0) {
+	// Serial unless workers are EXPLICITLY requested: at this grain the region
+	// barrier costs more than the ray work it distributes (measured 2026-07-12:
+	// serial 3.42 ms/tick beats every worker count)
+	if (HOST_WORKERS <= 0) {
 		for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
 	} else {
 		parallel_for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
@@ -511,7 +514,7 @@ function rows_half(var& pix, var& parts) -> var {
 // are string tables (per-worker snapshots at the barrier, dense re-reads then
 // free); VW/RESET capture as scalar copies. No var& aliases of captured names
 // (aliases are rejected by admission) - subscript the globals directly. The
-// SAME function runs in a plain serial loop when HOST_WORKERS == 0.
+// SAME function runs in a plain serial loop when HOST_WORKERS <= 0.
 function gloom_row_quad(int ry) -> string {
 	var parts = [];
 	int vw = VW;
@@ -575,7 +578,7 @@ function gloom_row_quad(int ry) -> string {
 }
 
 function rows_quad() -> var {
-	if (HOST_WORKERS == 0) {
+	if (HOST_WORKERS <= 0) {
 		var rows = [];
 		int vrows = VH / 2;
 		for (int ry = 0; ry < vrows; ++ry) { rows.push(gloom_row_quad(ry)); }

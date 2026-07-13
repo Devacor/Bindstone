@@ -711,6 +711,10 @@ namespace jai {
         // Non-coroutine declarations always mint with closure_env = nullptr, so the ONE
         // script_defined_function can be reused for every execution of this node
         mutable std::shared_ptr<script_defined_function> mint_cache;
+        // Return-epilogue classification memo (vm method frames; classify_return_conv
+        // derives it from return_type alone, engine-independent). 0 = uncomputed. Same
+        // benign-idempotent write pattern as script_defined_function::backend_return_conv.
+        mutable uint8_t backend_return_conv = 0;
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
             : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), is_coroutine(false), local_count(0) {}

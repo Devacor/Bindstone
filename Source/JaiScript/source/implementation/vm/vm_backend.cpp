@@ -1363,8 +1363,15 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 	array.reserve(n);
 	const size_t base = stack_.size() - n;
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
-	// bound primitives snapshot (KEEP BYTE-PARALLEL with the interpreter array literal)
+	// bound primitives snapshot, and reference-wrapper reads normalize to VALUES like
+	// assignment (a literal never holds a live reference into its source; deref through
+	// a temp so the owning holder outlives the copy). (KEEP BYTE-PARALLEL with the
+	// interpreter array literal)
 	for (size_t i = 0; i < n; ++i) {
+		if (stack_[base + i].is_reference()) [[unlikely]] {
+			script_value derefed = stack_[base + i].deref();
+			stack_[base + i] = std::move(derefed);
+		}
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}
@@ -1380,8 +1387,13 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	const size_t n = ins.a;
 	const size_t base = stack_.size() - n * 2;
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
-	// bound primitives snapshot (KEEP BYTE-PARALLEL with the interpreter map literal)
+	// bound primitives snapshot, and reference-wrapper reads normalize to VALUES like
+	// assignment (see exec_array; KEEP BYTE-PARALLEL with the interpreter map literal)
 	for (size_t i = 0; i < n * 2; ++i) {
+		if (stack_[base + i].is_reference()) [[unlikely]] {
+			script_value derefed = stack_[base + i].deref();
+			stack_[base + i] = std::move(derefed);
+		}
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}

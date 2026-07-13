@@ -252,6 +252,26 @@ public:
             auto e = make_engine();
             check_eq((int64_t)4000000000LL, e->execute("auto x = 2000000000; x * 2").as_int());
         });
+        // ---- container literals hold VALUES (jaidoom netplay finding): element reads
+        // arrive as reference wrappers (rhs-lvalue read shape) and literals must
+        // normalize them like assignment does — the un-derefed wrapper made
+        // {"x": arr[i]} serialize as null AND aliased the source array. ----
+        test("container_literals_normalize_element_reads", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> typed = [100, 200, 300];
+                var plain = [10, 20];
+                var m = {"t": typed[1], "p": plain[0]};
+                var a = [typed[0], plain[1]];
+                var nested = {"outer": {"inner": typed[2]}};
+                typed[1] = -1;              // literals snapshot: mutations must not show through
+                plain[0] = -1;
+                to_json(m) + "|" + to_json(a) + "|" + to_json(nested);
+            )");
+            check_eq(std::string("{\"p\":10,\"t\":200}|[100,20]|{\"outer\":{\"inner\":300}}"), r.as_string(),
+                "element reads land as numbers and snapshot at literal construction");
+        });
         test("int_mod_neg1_is_zero", [this]() {   // policy-independent: a % -1 == 0, no trap
             auto e = make_engine();
             check_eq((int64_t)0, e->execute("auto x = -9223372036854775807 - 1; auto d = -1; x % d").as_int());

@@ -11493,6 +11493,32 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_func_decl: VM_TRY_OP(exec_func_decl(f, ins)); break;
 			case opcode::op_closure: VM_TRY_OP(exec_closure(f, ins)); break;
 
+			// The five hottest fused ops (7.6M/200t on GLOOM) skip exec_extended's
+			// second switch: direct dispatch on the shared temp (frame stays flat),
+			// keeping the group's switch_to_ tail (operator replays may park callees).
+			// PLACED ABOVE the grouped labels — inserting them mid-group orphans the
+			// earlier labels onto the first direct body (caught by Debug's OOB assert)
+			case opcode::op_binary_fused_decl:
+				VM_TRY_OP_SHARED(exec_binary_fused_decl(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_binary_fused_store:
+				VM_TRY_OP_SHARED(exec_binary_fused_store(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_index_fused:
+				VM_TRY_OP_SHARED(exec_index_fused(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_index_store_fused:
+				VM_TRY_OP_SHARED(exec_index_store_fused(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_index_fused_decl:
+				VM_TRY_OP_SHARED(exec_index_fused_decl(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+
 			// One grouped dispatch: a VM_TRY_OP temp per case would bloat run()'s
 			// Debug frame, which sits on the JAI_MAX_CALL_DEPTH recursion path
 			case opcode::op_this:
@@ -11524,11 +11550,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:
 			case opcode::op_parallel_for:
-			case opcode::op_binary_fused_decl:
-			case opcode::op_binary_fused_store:
-			case opcode::op_index_fused:
-			case opcode::op_index_store_fused:
-			case opcode::op_index_fused_decl:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

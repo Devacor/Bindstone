@@ -11870,7 +11870,9 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
-	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
+	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
+		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
+	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
 	rec.prev_env = std::move(environment_);
@@ -12006,7 +12008,9 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
-	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
+	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
+		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
+	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
 	// Moved, not copied: the method scope env always replaces environment_ below; the
@@ -12181,9 +12185,11 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		rec.direct_pin = {};
 	}
 	rec.return_type = nullptr;
-	if (rec.ast_pin) {
-		rec.ast_pin.reset();
-	}
+	// ast_pin DEFERS to slot reuse (never reset here): the pool slot keeps the decl
+	// alive until a DIFFERENT overload claims it (push assigns only on change), so
+	// recursion re-pins the same method for zero atomic refcounts. A held decl past
+	// pop is not script-observable — AST decls have no destructor semantics; this is
+	// deferred memory release bounded by pool depth (same argument as direct_pin).
 	rec.method_result_anchor = false;
 	rec.ctor_result_stamp = nullptr;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin

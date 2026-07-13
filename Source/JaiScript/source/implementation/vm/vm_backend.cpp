@@ -4431,22 +4431,32 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		rp = resolved.value();
 	}
 
-	// Fast path: mirrors binary_fast_shape without materializing operand loads
+	// Fast path: mirrors binary_fast_shape without materializing operand loads.
+	// Raw-capable sinks (slot-landing consumers) take scalar results with no value
+	// mint at all — every other sink gets the identical minted value it always did.
+	auto emit_int = [&](script_int v) {
+		if constexpr (requires(Sink& s) { s.raw_int(script_int{}); }) { sink.raw_int(v); }
+		else { sink(script_value(v, engine_)); }
+	};
+	auto emit_float = [&](script_float v) {
+		if constexpr (requires(Sink& s) { s.raw_float(script_float{}); }) { sink.raw_float(v); }
+		else { sink(script_value(v, engine_)); }
+	};
 	if (!has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
 		const size_t li = lp->raw_storage_index();
 		const size_t ri = rp->raw_storage_index();
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 			const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
 			switch (op) {
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+'")); sink(script_value(rr, engine_)); return {}; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-'")); sink(script_value(rr, engine_)); return {}; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*'")); sink(script_value(rr, engine_)); return {}; }
+			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+'")); emit_int(rr); return {}; }
+			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-'")); emit_int(rr); return {}; }
+			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*'")); emit_int(rr); return {}; }
 			case token_type::slash:
 				if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-				{ script_int rr; if (!ints::try_div(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/'")); sink(script_value(rr, engine_)); return {}; }
+				{ script_int rr; if (!ints::try_div(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/'")); emit_int(rr); return {}; }
 			case token_type::percent:
 				if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-				sink(script_value(ints::mod(a, b), engine_)); return {};
+				emit_int(ints::mod(a, b)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
 			case token_type::greater: sink(script_value(a > b, engine_)); return {};
@@ -4460,15 +4470,15 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
 			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
 			switch (op) {
-			case token_type::plus: sink(script_value(a + b, engine_)); return {};
-			case token_type::minus: sink(script_value(a - b, engine_)); return {};
-			case token_type::star: sink(script_value(a * b, engine_)); return {};
+			case token_type::plus: emit_float(a + b); return {};
+			case token_type::minus: emit_float(a - b); return {};
+			case token_type::star: emit_float(a * b); return {};
 			case token_type::slash:
 				if (b == 0.0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-				sink(script_value(a / b, engine_)); return {};
+				emit_float(a / b); return {};
 			case token_type::percent:
 				if (b == 0.0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-				sink(script_value(std::fmod(a, b), engine_)); return {};
+				emit_float(std::fmod(a, b)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
 			case token_type::greater: sink(script_value(a > b, engine_)); return {};
@@ -4523,9 +4533,68 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 
 op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
-	std::optional<script_value> computed;
-	VM_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[dp.node_index].get());
+	// Raw-capable sink: scalar kernel results land without a value mint — in place
+	// when the live slot already holds a same-tagged scalar, else the exact mint +
+	// tag + frame_slot_set the boxed fast path below performs. Non-raw results
+	// (bools, strings, general-tail values) box and take the original paths.
+	struct bdecl_lane_sink {
+		vm_backend* vm;
+		frame& fr;
+		variable_decl* decl;
+		bool fast_ok;
+		bool landed = false;
+		std::optional<script_value> boxed;
+		void operator()(script_value&& v) { boxed.emplace(std::move(v)); }
+		void raw_int(script_int iv) {
+			const script_value_type bt = fast_ok && decl->type ? decl->type->base_type
+			                                                   : script_value_type::jai_any_type;
+			if (fast_ok && (bt == script_value_type::jai_any_type || bt == script_value_type::jai_int_type)) {
+				if (script_value* s = vm->frame_slot(fr, decl->slot_index);
+				    s && s->raw_storage_index() == script_value::TYPEID_INT &&
+				    s->get_type_info().get() == decl->type.get()) {
+					s->unchecked_set_int_payload(iv);
+					landed = true;
+					return;
+				}
+				script_value v(iv, vm->engine_);
+				if (decl->type) { v.set_type_info(decl->type); }
+				vm->frame_slot_set(fr, decl->slot_index, std::move(v));
+				landed = true;
+				return;
+			}
+			boxed.emplace(script_value(iv, vm->engine_));
+		}
+		void raw_float(script_float fv) {
+			const script_value_type bt = fast_ok && decl->type ? decl->type->base_type
+			                                                   : script_value_type::jai_any_type;
+			if (fast_ok && (bt == script_value_type::jai_any_type || bt == script_value_type::jai_float_type)) {
+				if (script_value* s = vm->frame_slot(fr, decl->slot_index);
+				    s && s->raw_storage_index() == script_value::TYPEID_FLOAT &&
+				    s->get_type_info().get() == decl->type.get()) {
+					s->unchecked_set_float_payload(fv);
+					landed = true;
+					return;
+				}
+				script_value v(fv, vm->engine_);
+				if (decl->type) { v.set_type_info(decl->type); }
+				vm->frame_slot_set(fr, decl->slot_index, std::move(v));
+				landed = true;
+				return;
+			}
+			boxed.emplace(script_value(fv, vm->engine_));
+		}
+	} lane{this, f, decl,
+	       (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+	       !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level};
+	VM_TRY(binary_fused_compute(f, dp.binary_proto, lane));
+	if (lane.landed) {
+		return {};
+	}
+	std::optional<script_value>& computed = lane.boxed;
+	if (!computed) [[unlikely]] {
+		return {};   // compute unwound before its sink ran (pair parity: the decl never runs)
+	}
 	// Scalar slot decls land directly - the exec_decl_var fast-path preconditions,
 	// KEPT IN SYNC with it. A fused-binary result is never a reference, so the
 	// deref leg is structurally absent here.
@@ -11345,14 +11414,37 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_destructure: VM_TRY_OP(exec_destructure(f, ins)); break;
 			case opcode::op_binary: VM_TRY_OP(exec_binary(f, ins)); break;
 			case opcode::op_binary_fused: VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); break;
-			case opcode::op_binary_fused_temp:
+			case opcode::op_binary_fused_temp: {
 				// Register-file producer: the fused kernel's result lands RAW in a
 				// compiler temp slot (inside the window; no store enforcement - temps
-				// are compiler-owned and consumed by the next fused operand read)
-				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, [&](script_value&& v) {
-					frame_slot_set(f, ins.b, std::move(v));
-				}));
+				// are compiler-owned and consumed by the next fused operand read).
+				// Scalar results write a live same-kind temp's payload in place —
+				// temps only ever receive kernel mints, so a live temp's tag is null.
+				struct temp_lane_sink {
+					vm_backend* vm;
+					frame& fr;
+					uint32_t slot;
+					void operator()(script_value&& v) { vm->frame_slot_set(fr, slot, std::move(v)); }
+					void raw_int(script_int iv) {
+						if (script_value* s = vm->frame_slot(fr, slot);
+						    s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) {
+							s->unchecked_set_int_payload(iv);
+							return;
+						}
+						(*this)(script_value(iv, vm->engine_));
+					}
+					void raw_float(script_float fv) {
+						if (script_value* s = vm->frame_slot(fr, slot);
+						    s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) {
+							s->unchecked_set_float_payload(fv);
+							return;
+						}
+						(*this)(script_value(fv, vm->engine_));
+					}
+				} lane{this, f, ins.b};
+				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, lane));
 				break;
+			}
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;

@@ -386,6 +386,19 @@ namespace jai::vm {
                 }
                 count = new_size;
             }
+            // Bulk window padding: one capacity check + in-place null construction
+            // (the per-slot make_null ctor+move+cap-check loop was the fill half of
+            // the window lifecycle tax). No-op when target <= size.
+            void fill_null_to(size_t target, class engine* eng) {
+                if (target > cap) [[unlikely]] {
+                    const size_t grown = cap < 2048 ? size_t{4096} : cap * 2;
+                    relocate_to(target > grown ? target : grown);
+                }
+                while (count < target) {
+                    new (slots + count) script_value(std::monostate{}, eng);
+                    ++count;
+                }
+            }
             size_t size() const noexcept { return count; }
             bool empty() const noexcept { return count == 0; }
             void clear() noexcept { truncate(0); }
@@ -431,7 +444,7 @@ namespace jai::vm {
                 } else {
                     // Build-up writes (pooled-arg binding, defaults): fill the gap with
                     // live nulls exactly like call_frame::set_local's slot>size path
-                    while (stack_.size() < idx) { stack_.push_back(script_value(std::monostate{}, value.get_engine())); }
+                    stack_.fill_null_to(idx, value.get_engine());
                     stack_.push_back(std::move(value));
                 }
                 if (slot >= f.window_live) { f.window_live = static_cast<uint32_t>(slot + 1); }

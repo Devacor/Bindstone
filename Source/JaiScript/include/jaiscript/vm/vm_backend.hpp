@@ -114,6 +114,10 @@ namespace jai::vm {
         // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
         // [2]=slice resolution declined [3]=mic guard failed
         uint64_t profile_slice_gate_[4] = {};
+        // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
+        // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
+        // [3]=full convert [4]=reference bind [5]=default arg [6]=escape-boxed
+        uint64_t profile_bind_paths_[7] = {};
         // exec_new class-path split: resolve = string + intern + env get; invoke = the
         // opaque ctor lambda -> execute_callable native re-entry (the suspected heat)
         uint64_t profile_new_count_ = 0;

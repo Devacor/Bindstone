@@ -74,6 +74,12 @@ namespace {
             }
         }
 
+        // Ref-return producers only (walk_args deliberately does NOT call this for call
+        // arguments: both backends' ref-param binds box the caller's storage IN PLACE on
+        // demand via share_env_ref / share_boxed_env_storage, so a by-ref callee never
+        // needs the variable pre-boxed — the old conservative mark cell-boxed every
+        // variable whose name ever appeared as a call argument and knocked those decls
+        // off every escape-gated fast path).
         void escape_arg(const expression* arg) {
             if (arg && arg->get_type() == node_type::identifier_expr) {
                 escape(static_cast<const identifier_expr*>(arg)->symbol_id);
@@ -312,7 +318,6 @@ namespace {
 
         void walk_args(const std::vector<expression_ptr>& args) {
             for (const auto& a : args) {
-                escape_arg(a.get());
                 walk_expr(a.get());
             }
         }

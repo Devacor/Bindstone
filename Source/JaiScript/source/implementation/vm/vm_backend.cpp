@@ -11880,7 +11880,10 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	++call_records_top_;
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
-	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
+	if (ast->backend_return_conv == 0) {
+		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
+	}
+	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
 	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
 		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
@@ -12018,7 +12021,10 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	++call_records_top_;
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
-	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
+	if (ast->backend_return_conv == 0) {
+		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
+	}
+	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
 	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
 		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair

@@ -10531,6 +10531,16 @@ op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
+	// Nested-read sources (for (x : m["a"])) arrive as reference wrappers (rhs-lvalue
+	// read shape) - iterate the TARGET like every other consumer normalizes. The
+	// deref'd handle shares the live node, so by-ref element mutation still lands in
+	// the original container. Copy out through a temp: assigning deref() straight in
+	// destroys the holder that owns the deref target. (KEEP BYTE-PARALLEL with the
+	// interpreter's visit_range_for_stmt)
+	if (container.is_reference()) [[unlikely]] {
+		script_value derefed = container.deref();
+		container = std::move(derefed);
+	}
 
 	const iter_proto& proto = f.code->iter_protos[ins.a];
 	iter_state state;

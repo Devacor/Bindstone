@@ -252,6 +252,29 @@ public:
             auto e = make_engine();
             check_eq((int64_t)4000000000LL, e->execute("auto x = 2000000000; x * 2").as_int());
         });
+        // ---- range-for over a NESTED container read (jaidoom edge): for (x : m["a"])
+        // failed "not a map" on both backends — the source expression arrives as a
+        // reference wrapper and iter-init type-checked the wrapper. Deref'd handles
+        // share the live node, so by-ref element mutation still lands in the original. ----
+        test("range_for_iterates_nested_container_reads", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);   // map iteration mints pair objects
+            auto r = e->execute(R"(
+                var m = {"a": {"b": 1, "c": 2}};
+                var acc = "";
+                for (var kv : m["a"]) { acc += kv.first + "=" + to_string(kv.second) + ";"; }
+                var arr = {"list": [10, 20, 30]};
+                int sum = 0;
+                for (var x : arr["list"]) { sum += x; }
+                var nested = [[1, 2], [3, 4]];
+                for (var y : nested[1]) { sum += y; }
+                for (auto& z : arr["list"]) { z = z * 2; }
+                acc + "|" + to_string(sum) + "|" + to_string(arr["list"][0]) + "," + to_string(arr["list"][2]);
+            )");
+            check_eq(std::string("b=1;c=2;|67|20,60"), r.as_string(),
+                "nested reads iterate and by-ref mutation lands in the original");
+        });
+
         // ---- container literals hold VALUES (jaidoom netplay finding): element reads
         // arrive as reference wrappers (rhs-lvalue read shape) and literals must
         // normalize them like assignment does — the un-derefed wrapper made

@@ -9629,6 +9629,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
         if (is_unwinding_) {
             return {};
         }
+        // Nested-read sources (for (x : m["a"])) arrive as reference wrappers -
+        // iterate the TARGET; the deref'd handle shares the live node so by-ref
+        // mutation lands in the original. Temp-copy discipline as everywhere.
+        // (KEEP BYTE-PARALLEL with vm_backend::exec_iter_init)
+        if (container.is_reference()) [[unlikely]] {
+            script_value derefed = container.deref();
+            container = std::move(derefed);
+        }
     }
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)

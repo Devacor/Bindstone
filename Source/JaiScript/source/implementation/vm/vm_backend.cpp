@@ -924,9 +924,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		// Body slots exist behind window_live so operand temps start above the window
 		{
 			const size_t window_slots = std::max(function->local_count, body_chunk->local_count);
-			for (size_t filled = stack_.size() - state.f.window_base; filled < window_slots; ++filled) {
-				stack_.push_back(make_null());
-			}
+			stack_.fill_null_to(state.f.window_base + window_slots, engine_);
 		}
 		state.started = true;
 	}
@@ -6956,9 +6954,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	JAI_CALL_PUSH_SECTION(4);
 	assert(stack_.size() == args_base + argc);
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-	for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
-		stack_.push_back(make_null());
-	}
+	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	switch_to_ = &rec.f;
 	JAI_CALL_PUSH_SECTION(5);
 #undef JAI_CALL_PUSH_SECTION
@@ -12029,9 +12025,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	// Body slots up to local_count exist behind window_live (null placeholders), so
 	// operand temps start above the full window
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-	for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
-		stack_.push_back(make_null());
-	}
+	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	switch_to_ = &rec.f;
 	return {};
 }
@@ -12251,9 +12245,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	assert(stack_.size() == args_base + argc);
 	{
 		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
-		for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
-			stack_.push_back(make_null());
-		}
+		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	}
 	switch_to_ = &rec.f;
 	JAI_MPUSH_SECTION(5);
@@ -12405,9 +12397,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	// Body slots exist behind window_live so operand temps start above the full window
 	{
 		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
-		for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
-			stack_.push_back(make_null());
-		}
+		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	}
 	switch_to_ = &rec.f;
 	return {};
@@ -13253,9 +13243,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	// Body slots exist behind window_live so operand temps start above the full window
 	{
 		const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-		for (size_t filled = stack_.size() - f.window_base; filled < window_slots; ++filled) {
-			stack_.push_back(make_null());
-		}
+		stack_.fill_null_to(f.window_base + window_slots, engine_);
 	}
 
 	checked_result<void> body_result;

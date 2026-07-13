@@ -397,6 +397,14 @@ inline void bind_registrar(engine& eng) {
     registrar_registry<void>::instance().register_all(eng);
 }
 
+// shared_ptr / raw-pointer convenience (engine::make() returns a shared_ptr)
+template<typename Context>
+void bind_registrar(const std::shared_ptr<engine>& eng, const Context& ctx) { bind_registrar(*eng, ctx); }
+template<typename Context>
+void bind_registrar(engine* eng, const Context& ctx) { bind_registrar(*eng, ctx); }
+inline void bind_registrar(const std::shared_ptr<engine>& eng) { bind_registrar(*eng); }
+inline void bind_registrar(engine* eng) { bind_registrar(*eng); }
+
 } // namespace jai
 
 #include <jaiscript/core/dynamic_binder.hpp>

@@ -255,6 +255,7 @@ namespace jai {
         
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
+        bool has_type_tag() const noexcept { return static_cast<bool>(type_info_); }
 
         // Get interned type ID for error messages (falls back to enum value if type_info not set)
         uint64_t type_id() const {

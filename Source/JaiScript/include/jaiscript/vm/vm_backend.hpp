@@ -10,8 +10,10 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <memory>
+#include <new>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -328,34 +330,76 @@ namespace jai::vm {
         // NOT segmented: operand push/pop is the hot-loop path and must stay pure index
         // arithmetic. push_back self-alias (op_dup pushing back()) is grow-safe: the
         // value detours through a temp on the grow branch only.
+        // Stage 5 (owned raw buffer): truncation ELIDES the destructor for slots it can
+        // prove effect-free — trivial-band payload (null/int/float/bool/char; string sits
+        // mid-band and the mask excludes it) AND no canonical type tag. Such a dtor is a
+        // no-op by construction (storage's trivial branch + null strong_ptr decref + raw
+        // engine_), so eliding it is observationally identical. Tagless temps and null
+        // window padding pop for free; typed locals keep their tag decref through the
+        // real dtor, first->last like vector's tail erase. Relocation is memcpy —
+        // script_value is trivially relocatable by design (storage relocation runs no
+        // effectful ctor/dtor; refcounts ride the bytes).
         struct value_stack {
-            std::vector<script_value> v;
+            script_value* slots = nullptr;
+            size_t count = 0;
+            size_t cap = 0;
             vm_backend* owner = nullptr;
+
+            value_stack() = default;
+            value_stack(const value_stack&) = delete;
+            value_stack& operator=(const value_stack&) = delete;
+            ~value_stack();
+
+            static constexpr uint32_t trivial_payload_mask =
+                (1u << script_value::TYPEID_NULL) | (1u << script_value::TYPEID_INT) |
+                (1u << script_value::TYPEID_FLOAT) | (1u << script_value::TYPEID_CHAR) |
+                (1u << script_value::TYPEID_BOOL);
+            static bool dtor_elidable(const script_value& s) noexcept {
+                return ((trivial_payload_mask >> s.raw_storage_index()) & 1u) != 0 && !s.has_type_tag();
+            }
+
             void push_back(const script_value& x) {
-                if (v.size() == v.capacity()) [[unlikely]] { grow_push(script_value(x)); return; }
-                v.push_back(x);
+                if (count == cap) [[unlikely]] { grow_push(script_value(x)); return; }
+                new (slots + count) script_value(x);
+                ++count;
             }
             void push_back(script_value&& x) {
-                if (v.size() == v.capacity()) [[unlikely]] { grow_push(std::move(x)); return; }
-                v.push_back(std::move(x));
+                if (count == cap) [[unlikely]] { grow_push(std::move(x)); return; }
+                new (slots + count) script_value(std::move(x));
+                ++count;
             }
-            void grow_push(script_value x);   // out of line: reserve + rebase + push
-            script_value& back() noexcept { return v.back(); }
-            const script_value& back() const noexcept { return v.back(); }
-            void pop_back() noexcept { v.pop_back(); }
-            size_t size() const noexcept { return v.size(); }
-            bool empty() const noexcept { return v.empty(); }
-            void clear() noexcept { v.clear(); }
-            void reserve(size_t n) { v.reserve(n); }   // startup only (no rebase: nothing live)
-            script_value& operator[](size_t i) noexcept { return v[i]; }
-            const script_value& operator[](size_t i) const noexcept { return v[i]; }
-            std::vector<script_value>::iterator begin() noexcept { return v.begin(); }
-            std::vector<script_value>::iterator end() noexcept { return v.end(); }
-            void erase(std::vector<script_value>::iterator first, std::vector<script_value>::iterator last) {
-                v.erase(first, last);   // truncations only; never grows
+            void grow_push(script_value x);   // out of line: relocate + rebase + push
+            void relocate_to(size_t new_cap); // the ONE buffer move (grow_push + reserve)
+            script_value& back() noexcept { assert(count); return slots[count - 1]; }
+            const script_value& back() const noexcept { assert(count); return slots[count - 1]; }
+            void pop_back() noexcept {
+                assert(count);
+                script_value& s = slots[--count];
+                if (!dtor_elidable(s)) { s.~script_value(); }
             }
-            std::vector<script_value>& vec() noexcept { return v; }
-            const std::vector<script_value>& vec() const noexcept { return v; }
+            void truncate(size_t new_size) noexcept {
+                assert(new_size <= count);
+                script_value* first = slots + new_size;
+                script_value* const last = slots + count;
+                for (; first != last; ++first) {
+                    if (!dtor_elidable(*first)) { first->~script_value(); }
+                }
+                count = new_size;
+            }
+            size_t size() const noexcept { return count; }
+            bool empty() const noexcept { return count == 0; }
+            void clear() noexcept { truncate(0); }
+            void reserve(size_t want);
+            script_value* data() noexcept { return slots; }
+            const script_value* data() const noexcept { return slots; }
+            script_value& operator[](size_t i) noexcept { assert(i < count); return slots[i]; }
+            const script_value& operator[](size_t i) const noexcept { assert(i < count); return slots[i]; }
+            // Fiber stack flip: payload only — owner names the rebase target and stays put
+            void swap_payload(value_stack& other) noexcept {
+                std::swap(slots, other.slots);
+                std::swap(count, other.count);
+                std::swap(cap, other.cap);
+            }
         };
         // Rebase every sanctioned raw pointer into the old stack buffer (counted-for
         // fast states) onto the new one; called only from value_stack::grow_push.
@@ -645,11 +689,16 @@ namespace jai::vm {
         checked_result<void> run(frame& entry);
         op_status run_dispatch(frame*& fp, const size_t records_base);
         // In-loop call machinery: push/pop of call_records_ without native recursion.
-        // args may alias stack_ (zero-copy slice [args_base, args_base+argc) with the
-        // callee slot at args_base-1); the pooled-vector path passes (vec, 0, vec.size()).
+        // ArgsT is value_stack (zero-copy slice [args_base, args_base+argc) with the
+        // callee slot at args_base-1 — args IS stack_, which conversions can relocate
+        // mid-bind, so the container travels, never a raw pointer) or a pooled
+        // std::vector<script_value> passed as (vec, 0, vec.size()).
+        bool args_are_stack(const value_stack& a) const noexcept { return &a == &stack_; }
+        static constexpr bool args_are_stack(const std::vector<script_value>&) noexcept { return false; }
+        template <class ArgsT>
         op_status push_script_frame(frame& caller, script_value&& callee,
                                                const script_defined_function& function,
-                                               const std::vector<script_value>& args,
+                                               const ArgsT& args,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
         // Method-call flattening: a script-class instance method enters the dispatch loop
@@ -715,8 +764,9 @@ namespace jai::vm {
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
                               const std::shared_ptr<environment>& prev_env);
+        template <class ArgsT>
         op_status bind_parameters(const std::vector<parameter>& parameters,
-                                             const std::vector<script_value>& args,
+                                             const ArgsT& args,
                                              size_t args_base, size_t argc,
                                              frame& callee, chunk& body_chunk,
                                              const std::shared_ptr<environment>& caller_env,

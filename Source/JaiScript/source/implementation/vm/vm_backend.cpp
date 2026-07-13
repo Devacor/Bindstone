@@ -25,6 +25,7 @@
 #include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -380,18 +381,39 @@ script_value vm_backend::make_null() const {
 	return script_value(std::monostate{}, engine_);
 }
 
-// Growth chokepoint (stage 2): the ONE sanctioned cross-op raw-pointer cache into
-// frame windows is the counted-for fast state (invariants 2b); reallocation rebases
-// exactly that. The pushed value detours through the temp param so self-referential
-// pushes (op_dup pushing back()) survive the move.
-void vm_backend::value_stack::grow_push(script_value x) {
-	const script_value* old_begin = v.data();
-	const script_value* old_end = old_begin + v.size();
-	v.reserve(v.capacity() < 2048 ? 4096 : v.capacity() * 2);
-	if (owner && old_begin) {
-		owner->rebase_window_pointers(old_begin, old_end, v.data());
+vm_backend::value_stack::~value_stack() {
+	truncate(0);
+	::operator delete(slots);
+}
+
+// The ONE buffer move: script_value relocates by memcpy (storage relocation runs no
+// effectful ctor/dtor; the strong_ptr refcounts ride the bytes), then the sanctioned
+// cross-op raw-pointer cache (counted-for fast states, invariants 2b) rebases.
+void vm_backend::value_stack::relocate_to(size_t new_cap) {
+	script_value* fresh = static_cast<script_value*>(::operator new(new_cap * sizeof(script_value)));
+	if (slots) {
+		std::memcpy(fresh, slots, count * sizeof(script_value));
+		if (owner) {
+			owner->rebase_window_pointers(slots, slots + count, fresh);
+		}
+		::operator delete(slots);
 	}
-	v.push_back(std::move(x));
+	slots = fresh;
+	cap = new_cap;
+}
+
+void vm_backend::value_stack::reserve(size_t want) {
+	if (want > cap) {
+		relocate_to(want);
+	}
+}
+
+// Growth chokepoint (stage 2): the pushed value detours through the temp param so
+// self-referential pushes (op_dup pushing back()) survive the relocation.
+void vm_backend::value_stack::grow_push(script_value x) {
+	relocate_to(cap < 2048 ? 4096 : cap * 2);
+	new (slots + count) script_value(std::move(x));
+	++count;
 }
 
 void vm_backend::rebase_window_pointers(const script_value* old_begin, const script_value* old_end,
@@ -699,7 +721,7 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	// every path. Absolute indices inside (window_base, try stack_size, bases) are
 	// fiber-stack absolute and stay valid across suspends - the old copy-out/copy-in
 	// and rebase arithmetic is gone. Nested resumes nest LIFO through the same guard.
-	std::vector<script_value> stack_storage;
+	value_stack stack_storage;              // owner stays null: the vm's stack_ keeps the rebase identity
 	std::vector<try_record> try_storage;
 	std::vector<iter_state> iter_storage;
 	std::vector<counted_for_state> cfor_storage;
@@ -814,7 +836,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) { flip(); }
 		~fiber_stacks_swap() { flip(); }
 		void flip() {
-			std::swap(vm->stack_.vec(), st->stack_storage);
+			vm->stack_.swap_payload(st->stack_storage);
 			std::swap(vm->try_records_, st->try_storage);
 			std::swap(vm->iter_states_, st->iter_storage);
 			std::swap(vm->cfor_states_, st->cfor_storage);
@@ -855,7 +877,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				auto dr = run(df);
 				if (!dr) {
 					if (stack_.size() > df.stack_base) {
-						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+						stack_.truncate(df.stack_base);
 					}
 					environment_ = prev_env;
 					active_coroutine_ = prev_active;
@@ -866,7 +888,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 					// Uncaught throw inside the default expression: bind null over a
 					// possibly partial stack; the unwinding propagates to the resumer
 					if (stack_.size() > df.stack_base) {
-						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+						stack_.truncate(df.stack_base);
 					}
 					frame_slot_set(state.f, param.slot_index, make_null());
 					continue;
@@ -1377,7 +1399,7 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 		}
 		array.push_back(std::move(stack_[base + i]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 	stack_.push_back(std::move(arrayValue));
 }
 
@@ -1401,7 +1423,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	for (size_t i = 0; i < n; ++i) {
 		map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 	stack_.push_back(std::move(mapValue));
 }
 
@@ -6240,7 +6262,7 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 		return raise_from(result);
 	}
 	script_value out = std::move(result.value());
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 	stack_.push_back(std::move(out));
 	return {};
 }
@@ -6748,14 +6770,14 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			return push_script_frame_pinned(f, *pc.fn, std::move(pc.pin), args_base, argc, &site);
 		} catch (const script_exception& e) {
 			// pre-record throws leave the args on the stack; drop them like exec_call
-			stack_.erase(stack_.begin() + args_base, stack_.end());
+			stack_.truncate(args_base);
 			active_exception_value_ = script_value(std::string(e.what()), engine_);
 			current_exception_ = e;
 			is_unwinding_ = true;
 			stack_.push_back(make_null());
 			return {};
 		} catch (const std::exception& e) {
-			stack_.erase(stack_.begin() + args_base, stack_.end());
+			stack_.truncate(args_base);
 			active_exception_value_ = script_value(std::string(e.what()), engine_);
 			current_exception_ = script_exception(e.what());
 			is_unwinding_ = true;
@@ -6778,7 +6800,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			if (dispatch && dispatch->eng == engine_) {
 				const size_t slice_base = stack_.size() - argc;
 				auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id,
-					stack_.vec().data() + slice_base, argc);
+					stack_.data() + slice_base, argc);
 				if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 #ifdef JAISCRIPT_VM_PROFILE
 					cfs_probe_.bucket = 1;
@@ -6817,7 +6839,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 	return invoke_callee(f, std::move(pc.value), arguments, site);
 }
 
@@ -6921,7 +6943,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 
 	op_status bound{};
 	try {
-		bound = bind_parameters(function.parameters(), stack_.vec(), args_base, argc, rec.f, *rec.f.code,
+		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -6997,7 +7019,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 				const auto* mdispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 				if (mdispatch && mdispatch->eng == engine_) {
 					auto resolved = mdispatch->cls->resolve_method_overload(mdispatch->name_id,
-						stack_.vec().data() + args_base, argc);
+						stack_.data() + args_base, argc);
 					if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 						script_value method_val = *bthunk->payload.bound_dispatch;
 						script_value receiver = *bthunk->payload.this_obj;
@@ -7013,18 +7035,18 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 			// resolves ref args against the caller frame/env directly (no metadata channel)
 			try {
 				return push_script_frame(f, std::move(stack_[args_base - 1]), *direct_fn,
-				                         stack_.vec(), args_base, argc, &site);
+				                         stack_, args_base, argc, &site);
 			} catch (const script_exception& e) {
 				// pre-record throws leave callee+args on the stack; drop them like the
 				// pooled path already had (bind-time throws pop-core'd them already)
-				stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+				stack_.truncate(args_base - 1);
 				active_exception_value_ = script_value(std::string(e.what()), engine_);
 				current_exception_ = e;
 				is_unwinding_ = true;
 				stack_.push_back(make_null());
 				return {};
 			} catch (const std::exception& e) {
-				stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+				stack_.truncate(args_base - 1);
 				active_exception_value_ = script_value(std::string(e.what()), engine_);
 				current_exception_ = script_exception(e.what());
 				is_unwinding_ = true;
@@ -7040,7 +7062,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 
 	script_value callee = std::move(stack_.back());
 	stack_.pop_back();
@@ -7590,7 +7612,7 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	}();
 
 	if (stack_.size() > f.stack_base) {
-		stack_.erase(stack_.begin() + f.stack_base, stack_.end());
+		stack_.truncate(f.stack_base);
 	}
 	environment_ = saved_env;
 	return outcome;
@@ -8734,7 +8756,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							                                  args_base, argc, site);
 						}
 						auto resolved = site.mic_dispatch->cls->resolve_method_overload(
-							site.mic_dispatch->name_id, stack_.vec().data() + args_base, argc);
+							site.mic_dispatch->name_id, stack_.data() + args_base, argc);
 						if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 							script_value method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
@@ -8804,7 +8826,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
@@ -9131,7 +9153,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	for (size_t i = 0; i < argc; ++i) {
 		args.push_back(std::move(stack_[base + i]));
 	}
-	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.truncate(base);
 
 	if (!expr->type) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
@@ -9921,7 +9943,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 				frame_guard guard(this, &df);
 				auto r = run(df);
 				if (stack_.size() > df.stack_base) {
-					stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+					stack_.truncate(df.stack_base);
 				}
 				if (!r) {
 					return raise_from(r);
@@ -10617,7 +10639,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		trace_captured_ = false;
 		current_catch_var_id_ = rec.catch_var;
 		if (stack_.size() > rec.stack_size) {
-			stack_.erase(stack_.begin() + rec.stack_size, stack_.end());
+			stack_.truncate(rec.stack_size);
 		}
 		if (iter_states_.size() > rec.iter_size) {
 			iter_states_.erase(iter_states_.begin() + rec.iter_size, iter_states_.end());
@@ -11803,7 +11825,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 	}
 
 	if (stack_.size() > f.stack_base) {
-		stack_.erase(stack_.begin() + f.stack_base, stack_.end());
+		stack_.truncate(f.stack_base);
 	}
 	environment_ = f.entry_env;
 
@@ -11882,9 +11904,10 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
 }
 
+template <class ArgsT>
 op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const script_defined_function& function,
-                                                   const std::vector<script_value>& args,
+                                                   const ArgsT& args,
                                                    size_t args_base, size_t argc,
                                                    const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
@@ -11930,7 +11953,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	// Stage 2: stack callees stay in their slot below the window — the slot IS the pin
 	// (hot reload can't kill the executing function; pop truncation releases it).
 	// Pooled-vector callees still pin through the record.
-	const bool args_on_stack = &args == &stack_.vec();
+	const bool args_on_stack = args_are_stack(args);
 	if (!args_on_stack) {
 		rec.callee_pin = std::move(callee);
 	}
@@ -12050,14 +12073,14 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& m
 	} catch (const script_exception& e) {
 		// The frame's stack territory is still live in slice mode: drop it like the
 		// plain slice path's pre-record throw handling (exec_call's in-loop catch)
-		stack_.erase(stack_.begin() + frame_base, stack_.end());
+		stack_.truncate(frame_base);
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
 	} catch (const std::exception& e) {
-		stack_.erase(stack_.begin() + frame_base, stack_.end());
+		stack_.truncate(frame_base);
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
@@ -12213,7 +12236,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 
 	op_status bound{};
 	try {
-		bound = bind_parameters(ast->parameters, stack_.vec(), args_base, argc, rec.f, *rec.f.code,
+		bound = bind_parameters(ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -12431,7 +12454,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
 		// boundary the old locals clear destroyed callee state at
-		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
+		stack_.truncate(rec.f.stack_base);
 	}
 	JAI_POP_SUB(1);
 	if (try_records_.size() > rec.try_base) {
@@ -12874,8 +12897,9 @@ op_status vm_backend::bind_reference_to_storage(script_value& storage, frame& ca
 	return {};
 }
 
+template <class ArgsT>
 op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
-                                                 const std::vector<script_value>& args,
+                                                 const ArgsT& args,
                                                  size_t args_base, size_t argc,
                                                  frame& callee, chunk& body_chunk,
                                                  const std::shared_ptr<environment>& caller_env,
@@ -12888,7 +12912,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 	// source died at the old post-bind erase before any script could observe it;
 	// the transient-count audit is stationary). All other branches write their
 	// converted/cloned/boxed value INTO the slot, replacing the raw argument.
-	const bool in_place = callee.window_backed && &args == &stack_.vec() &&
+	const bool in_place = callee.window_backed && args_are_stack(args) &&
 	                      callee.window_base == args_base;
 	for (size_t i = 0; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
@@ -12920,7 +12944,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					// Uncaught throw inside the default expression: the stack may hold
 					// partial values; bind null and let the frame unwind before its first op
 					if (stack_.size() > df.stack_base) {
-						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+						stack_.truncate(df.stack_base);
 					}
 					frame_slot_set(callee, param.slot_index, make_null());
 					continue;
@@ -13213,7 +13237,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);
 		if (stack_.size() > f.stack_base) {
-			stack_.erase(stack_.begin() + f.stack_base, stack_.end());
+			stack_.truncate(f.stack_base);
 		}
 		release_scope_env(std::move(f.entry_env));
 	};

@@ -363,8 +363,11 @@ public:
         serialization_metadata_.current_version = 1;
     }
     
-    // Constructor that accepts a shared_ptr<engine>
-    dynamic_binder(std::shared_ptr<engine>& engine_ptr, const std::string& class_name)
+    // shared_ptr / raw-pointer convenience (engine::make() returns a shared_ptr)
+    dynamic_binder(const std::shared_ptr<engine>& engine_ptr, const std::string& class_name)
+        : dynamic_binder(*engine_ptr, class_name) {
+    }
+    dynamic_binder(engine* engine_ptr, const std::string& class_name)
         : dynamic_binder(*engine_ptr, class_name) {
     }
 

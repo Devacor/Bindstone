@@ -1701,53 +1701,68 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// code, so nothing else is observable). Gated to real function-body chunks (top
 	// level and default-arg chunks have no window of their own).
 	if (temps_active_ && chunk_->is_function_body) {
-		auto liftable = [&](const expression* e) -> binary_expr* {
-			if (e->get_type() != node_type::binary_expr) { return nullptr; }
-			auto* b = const_cast<binary_expr*>(static_cast<const binary_expr*>(e));
-			if (b->op.type == token_type::left_bracket) { return nullptr; }   // subscript = operand shape
-			if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return nullptr; }
-			return binary_shape(b) != binary_shape_none ? b : nullptr;
-		};
 		auto operand_shape = [](const expression* e) -> bool {
 			return e->get_type() == node_type::identifier_expr ||
 			       e->get_type() == node_type::literal_expr ||
 			       fusable_subscript_operand(e);
 		};
-		binary_expr* lb = liftable(expr->left.get());
-		binary_expr* rb = liftable(expr->right.get());
-		if ((lb || rb) &&
-		    (lb || operand_shape(expr->left.get())) &&
-		    (rb || operand_shape(expr->right.get()))) {
-			const size_t temp_mark = temp_next_;
-			auto lift = [&](binary_expr* b) -> uint32_t {
-				fused_binary_proto inner;
-				inner.op = static_cast<uint8_t>(b->op.type);
-				inner.left = make_fused_operand(b->left.get());
-				inner.right = make_fused_operand(b->right.get());
-				chunk_->fused_binary_protos.push_back(inner);
-				const uint32_t inner_index = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+		// Whole-tree classification: operands and pure value-op binaries all the way
+		// down. Returns the binary-node count (the conservative temp bound), -1 = not
+		// fusible. Capped so a pathological expression can't bloat the window every call.
+		std::function<int(const expression*)> fusible_nodes = [&](const expression* e) -> int {
+			if (operand_shape(e)) { return 0; }
+			if (e->get_type() != node_type::binary_expr) { return -1; }
+			const auto* b = static_cast<const binary_expr*>(e);
+			if (b->op.type == token_type::left_bracket) { return -1; }
+			if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
+			// literal-op-literal nodes stay UNFUSED, mirroring binary_shape's refusal:
+			// the interpreter's fast paths never fire for them, and the general paths'
+			// error spellings differ from the fused kernel's ("Division by zero" vs
+			// "... in float operation") - fuzz seed 115 caught the re-pairing
+			if (b->left->get_type() == node_type::literal_expr &&
+			    b->right->get_type() == node_type::literal_expr) { return -1; }
+			const int l = fusible_nodes(b->left.get());
+			if (l < 0) { return -1; }
+			const int r = fusible_nodes(b->right.get());
+			if (r < 0) { return -1; }
+			return l + r + 1;
+		};
+		const int ln = fusible_nodes(expr->left.get());
+		const int rn = ln >= 0 ? fusible_nodes(expr->right.get()) : -1;
+		// At least one side must actually LIFT (ln+rn >= 1): a zero-lift arrival means
+		// the flat fuse above DECLINED this shape (e.g. literal-op-literal), and
+		// re-emitting it fused would re-pair the error spellings the decline preserves.
+		// Cap total temps at 16 so pathological expressions can't bloat the window.
+		if (ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16) {
+			// Depth-first emission: children compute into temps before their parent,
+			// left subtree before right (subtree evaluation order preserved; the temp
+			// dst may alias a released child slot — the kernel resolves both operands
+			// before the sink writes).
+			std::function<fused_operand(const expression*)> side = [&](const expression* e) -> fused_operand {
+				if (operand_shape(e)) { return make_fused_operand(e); }
+				const auto* b = static_cast<const binary_expr*>(e);
+				fused_binary_proto p;
+				p.op = static_cast<uint8_t>(b->op.type);
+				const size_t mark = temp_next_;
+				p.left = side(b->left.get());
+				p.right = side(b->right.get());
+				chunk_->fused_binary_protos.push_back(p);
+				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+				temp_next_ = mark;   // children die into this op
 				const uint32_t t = static_cast<uint32_t>(temp_next_);
 				++temp_next_;
 				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-				emit(opcode::op_binary_fused_temp, inner_index, t);
-				return t;
+				emit(opcode::op_binary_fused_temp, idx, t);
+				fused_operand out;
+				out.slot = t;
+				out.symbol = temp_symbol_index();
+				return out;
 			};
+			const size_t temp_mark = temp_next_;
 			fused_binary_proto outer;
 			outer.op = static_cast<uint8_t>(expr->op.type);
-			if (lb) {
-				const uint32_t t = lift(lb);
-				outer.left.slot = t;
-				outer.left.symbol = temp_symbol_index();
-			} else {
-				outer.left = make_fused_operand(expr->left.get());
-			}
-			if (rb) {
-				const uint32_t t = lift(rb);
-				outer.right.slot = t;
-				outer.right.symbol = temp_symbol_index();
-			} else {
-				outer.right = make_fused_operand(expr->right.get());
-			}
+			outer.left = side(expr->left.get());
+			outer.right = side(expr->right.get());
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
 			temp_next_ = temp_mark;   // LIFO release: temps die once the outer op consumed them

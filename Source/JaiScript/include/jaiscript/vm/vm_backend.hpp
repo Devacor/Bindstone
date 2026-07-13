@@ -76,7 +76,8 @@ namespace jai::vm {
         // [1]=frame ineligible (scope env, not global/pinned) [2]=cache hit
         // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
         // [6]=fast-head hit (env identity + engine serial) [7]=fast-head arm
-        uint64_t profile_env_resolve_[8] = {};
+        // [8]=this-field IC hit [9]=this-field IC arm
+        uint64_t profile_env_resolve_[10] = {};
         // exec_call_from_scratch decomposition (the 38%-row honesty check): brackets the
         // EXEC BODY only, so [0]/[1] are pure call machinery (in-loop callee bodies run
         // after return) while [2] swallows the whole native execution — region waits,
@@ -86,6 +87,23 @@ namespace jai::vm {
         uint64_t profile_cfs_counts_[3] = {};
         std::map<std::string, uint64_t> profile_cfs_inloop_names_;   // pinned-path callees
         std::map<std::string, uint64_t> profile_cfs_opaque_cycles_;  // opaque-path cycles by callee
+        // Call-floor decomposition (the 348-cyc/call honesty check vs Squirrel's ~100
+        // ROUND TRIP). Sections are rdtsc-bracketed, so each carries ~10-15 cyc of probe
+        // baseline: read them as a RANKING, not absolutes, and sanity-check the sum
+        // against the CFS pinned row. push_script_frame_pinned sections:
+        // [0]=entry checks + chunk + record acquire [1]=record init (fields/pins/bases/name)
+        // [2]=env decision + setup [3]=frame init + frames_ push [4]=bind_parameters
+        // [5]=window null-fill + switch staging
+        uint64_t profile_call_push_cyc_[6] = {};
+        uint64_t profile_call_push_count_ = 0;
+        // exec_probe_callee sections: [0]=callee resolve (fused_ident_value + checks)
+        // [1]=IC compare/park + pending_callees_ push
+        uint64_t profile_probe_cyc_[2] = {};
+        uint64_t profile_probe_count_ = 0;
+        // return_with_result sections: [0]=conv classify + deref/convert
+        // [1]=pop_script_frame_core [2]=caller swap + result push
+        uint64_t profile_call_ret_cyc_[3] = {};
+        uint64_t profile_call_ret_count_ = 0;
         // exec_new class-path split: resolve = string + intern + env get; invoke = the
         // opaque ctor lambda -> execute_callable native re-entry (the suspected heat)
         uint64_t profile_new_count_ = 0;
@@ -848,6 +866,56 @@ namespace jai::vm {
                 return &f.locals->get_this();
             }
             return environment_->get_value_ptr(this_id_);
+        }
+
+        // This-field IC probe (bare method-field reads, the BST/gameplay heat): the
+        // site's entry carries a serial-guarded WALK-MISS PROOF — while the engine-wide
+        // env serial is unchanged since a full walk missed here, no env cell anywhere
+        // can shadow the symbol, so resolution jumps straight to the receiver's field
+        // cell. find_field_value re-derives slot/class per access: polymorphic
+        // receivers and hot reload stay correct with no identity compare. Main engine
+        // only (workers keep their private machinery); method-locals frames only so
+        // this-resolution is one pointer read.
+        script_value* this_field_ic_probe(frame& f, size_t cache_slot, uint64_t sym) {
+            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return nullptr; }
+            if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
+            auto& cache = f.code->env_lookup_cache;
+            if (cache.size() <= cache_slot) { return nullptr; }
+            const auto& entry = cache[cache_slot];
+            if (entry.this_field_serial != env_symbolizer_->env_epoch()) { return nullptr; }
+            script_value& this_val = f.locals->get_this();
+            if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
+            // Raw extraction (get_class_instance's exact ladder minus its handle
+            // copies): the frame's this anchor pins the instance for the whole call,
+            // so a raw pointer over the op is sound.
+            auto* oh = this_val.unchecked_get_object_storage().get();
+            if (!oh || !oh->is_class_instance_wrapper) { return nullptr; }
+            auto* instance = static_cast<class_instance*>(oh->data.get());
+            if (!instance) { return nullptr; }
+            if (entry.this_field_class &&
+                entry.this_field_class == static_cast<const void*>(instance->get_class_definition())) {
+                // Absent/invalid cell returns null -> the caller's full ladder handles
+                // defaults/errors exactly as a find_field_value miss would
+                return instance->field_slot_value(entry.this_field_slot);
+            }
+            return instance->find_field_value(sym);
+        }
+        void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
+            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return; }
+            if (!f.locals || !f.locals->is_method) { return; }
+            auto& cache = f.code->env_lookup_cache;
+            if (cache.size() <= cache_slot) { return; }
+            auto& entry = cache[cache_slot];
+            entry.this_field_serial = env_symbolizer_->env_epoch();
+            entry.this_field_class = nullptr;
+            entry.this_field_slot = 0xFFFFFFFFu;
+            if (class_definition* cd = instance ? instance->get_class_definition() : nullptr) {
+                const uint32_t slot = cd->field_slot(sym);
+                if (slot != class_definition::k_no_field_slot) {
+                    entry.this_field_class = cd;
+                    entry.this_field_slot = slot;
+                }
+            }
         }
 
         // Frame-twin of environment::get_value_ptr's method-kind fallback (receiver

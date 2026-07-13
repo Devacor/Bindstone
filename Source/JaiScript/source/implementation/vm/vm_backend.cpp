@@ -3083,6 +3083,16 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
+	// This-field IC: serial-guarded walk-miss proof, checked BEFORE the env cache — the
+	// push copy is byte-identical to the armed fallback below (see fused_ident_value's
+	// twin for the ordering argument)
+	if (script_value* ic_field = this_field_ic_probe(f, f.ip * 3, sym)) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[8];
+#endif
+		stack_.push_back(*ic_field);
+		return {};
+	}
 	if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
 		stack_.push_back(cached->deref());
 		return {};
@@ -3102,6 +3112,10 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
 				if (instance->has_field(sym)) {
+					this_field_ic_arm(f, f.ip * 3, instance.get(), sym);
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_env_resolve_[9];
+#endif
 					stack_.push_back(instance->get_field(sym));
 					return {};
 				}
@@ -4242,6 +4256,19 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 			return &scratch.value();
 		}
 	}
+	// This-field IC: serial-guarded walk-miss proof (see this_field_ic_probe), checked
+	// BEFORE the env cache — an unchanged serial proves the whole chain unchanged since
+	// a full walk missed here, so the cache could only re-miss (its hits are chain
+	// cells). The scratch copy is byte-identical to the armed fallback below (get_field
+	// with a live cell returns *find_field_value); a null probe (unarmed / stale serial
+	// / absent cell — defaults, methods, statics) falls through to the full ladder.
+	if (script_value* ic_field = this_field_ic_probe(f, cache_slot, sym)) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[8];
+#endif
+		scratch.emplace(*ic_field);
+		return &scratch.value();
+	}
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
 		return &cached->deref();
 	}
@@ -4260,6 +4287,12 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
 				if (instance->has_field(sym)) {
+					// The walk above just MISSED and this site resolves a field: bank
+					// the proof so the next access skips the walk while the serial holds
+					this_field_ic_arm(f, cache_slot, instance.get(), sym);
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_env_resolve_[9];
+#endif
 					scratch.emplace(instance->get_field(sym));
 					return &scratch.value();
 				}
@@ -6449,6 +6482,13 @@ op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
 // the ruled observation point (the interpreter always checked before args; the vm's
 // old post-args check was a latent divergence, pinned by callee_first_* tests).
 op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_p0 = __rdtsc();
+	++profile_probe_count_;
+#define JAI_PROBE_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_probe_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
+#else
+#define JAI_PROBE_SECTION(idx)
+#endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
 	std::optional<script_value> scratch;
@@ -6460,6 +6500,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	if (!calleeVal.is_function()) {
 		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
+	JAI_PROBE_SECTION(0);
 	pending_callee pc;
 	if (cached_global_env_ &&
 	    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
@@ -6492,6 +6533,8 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 		}
 	}
 	pending_callees_.push_back(std::move(pc));
+	JAI_PROBE_SECTION(1);
+#undef JAI_PROBE_SECTION
 	return {};
 }
 
@@ -6612,6 +6655,13 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
                                                           strong_ptr<script_function> pin,
                                                           size_t args_base, size_t argc,
                                                           const call_site* site) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_p0 = __rdtsc();
+	++profile_call_push_count_;
+#define JAI_CALL_PUSH_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_push_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
+#else
+#define JAI_CALL_PUSH_SECTION(idx)
+#endif
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return raise_(
 			make_error_code(runtime_error_code::max_recursion_depth),
@@ -6639,6 +6689,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			call_records_.push_back(std::make_unique<call_record>());
 		}
 	}
+	JAI_CALL_PUSH_SECTION(0);
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
@@ -6654,6 +6705,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
+	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
@@ -6676,6 +6728,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			throw;
 		}
 	}
+	JAI_CALL_PUSH_SECTION(2);
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
@@ -6690,6 +6743,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.stack_base = args_base;   // no callee slot below the window
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);
+	JAI_CALL_PUSH_SECTION(3);
 
 	op_status bound{};
 	try {
@@ -6703,12 +6757,15 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 		pop_script_frame_core(rec);
 		return bound;
 	}
+	JAI_CALL_PUSH_SECTION(4);
 	assert(stack_.size() == args_base + argc);
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
 	for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
 		stack_.push_back(make_null());
 	}
 	switch_to_ = &rec.f;
+	JAI_CALL_PUSH_SECTION(5);
+#undef JAI_CALL_PUSH_SECTION
 	return {};
 }
 
@@ -10852,11 +10909,12 @@ void vm_backend::dump_opcode_profile() const {
 	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
 	                          profile_env_resolve_[3] + profile_env_resolve_[4] + profile_env_resolve_[6];
 	if (er_total) {
-		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu | fast-hit %llu | fast-arm %llu\n",
+		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu | fast-hit %llu | fast-arm %llu | this-field-hit %llu | this-field-arm %llu\n",
 			(unsigned long long)profile_env_resolve_[0], (unsigned long long)profile_env_resolve_[1],
 			(unsigned long long)profile_env_resolve_[2], (unsigned long long)profile_env_resolve_[3],
 			(unsigned long long)profile_env_resolve_[4], (unsigned long long)profile_env_resolve_[5],
-			(unsigned long long)profile_env_resolve_[6], (unsigned long long)profile_env_resolve_[7]);
+			(unsigned long long)profile_env_resolve_[6], (unsigned long long)profile_env_resolve_[7],
+			(unsigned long long)profile_env_resolve_[8], (unsigned long long)profile_env_resolve_[9]);
 	}
 	if (!profile_env_walk_names_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> walks(profile_env_walk_names_.begin(), profile_env_walk_names_.end());
@@ -10935,6 +10993,29 @@ void vm_backend::dump_opcode_profile() const {
 				(unsigned long long)profile_cfs_counts_[i], profile_cfs_cycles_[i] / 1e6,
 				(double)profile_cfs_cycles_[i] / (double)profile_cfs_counts_[i]);
 		}
+	}
+	if (profile_call_push_count_) {
+		fprintf(stderr, "[vm-profile] call-floor push sections (%llu pushes, avg cyc, ~10-15 probe baseline each): entry+chunk+rec %.0f | rec-init %.0f | env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
+			(unsigned long long)profile_call_push_count_,
+			(double)profile_call_push_cyc_[0] / (double)profile_call_push_count_,
+			(double)profile_call_push_cyc_[1] / (double)profile_call_push_count_,
+			(double)profile_call_push_cyc_[2] / (double)profile_call_push_count_,
+			(double)profile_call_push_cyc_[3] / (double)profile_call_push_count_,
+			(double)profile_call_push_cyc_[4] / (double)profile_call_push_count_,
+			(double)profile_call_push_cyc_[5] / (double)profile_call_push_count_);
+	}
+	if (profile_probe_count_) {
+		fprintf(stderr, "[vm-profile] probe-callee sections (%llu probes, avg cyc): resolve %.0f | ic+park %.0f\n",
+			(unsigned long long)profile_probe_count_,
+			(double)profile_probe_cyc_[0] / (double)profile_probe_count_,
+			(double)profile_probe_cyc_[1] / (double)profile_probe_count_);
+	}
+	if (profile_call_ret_count_) {
+		fprintf(stderr, "[vm-profile] call-floor return sections (%llu returns, avg cyc): conv %.0f | pop-core %.0f | swap+push %.0f\n",
+			(unsigned long long)profile_call_ret_count_,
+			(double)profile_call_ret_cyc_[0] / (double)profile_call_ret_count_,
+			(double)profile_call_ret_cyc_[1] / (double)profile_call_ret_count_,
+			(double)profile_call_ret_cyc_[2] / (double)profile_call_ret_count_);
 	}
 	if (!profile_cfs_inloop_names_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_inloop_names_.begin(), profile_cfs_inloop_names_.end());
@@ -12046,6 +12127,13 @@ op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction&
 }
 
 op_status vm_backend::return_with_result(frame*& fp, script_value result) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_p0 = __rdtsc();
+	++profile_call_ret_count_;
+#define JAI_CALL_RET_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_ret_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
+#else
+#define JAI_CALL_RET_SECTION(idx)
+#endif
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	// The record's cached classification picks the epilogue without re-deriving it from
 	// type_info per return. none = convert_return_value's no-op route inline (deref only);
@@ -12090,10 +12178,13 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 			result.set_type_info(type_info_ptr{rec.ctor_result_stamp});
 		}
+		JAI_CALL_RET_SECTION(0);
 		pop_script_frame_core(rec);
+		JAI_CALL_RET_SECTION(1);
 		fp = rec.caller;
 		stack_.push_back(std::move(result));
 		++fp->ip;
+		JAI_CALL_RET_SECTION(2);
 		return {};
 	}
 	// Deref + conversion run while the callee's env/frame are still live (native order)
@@ -12109,10 +12200,14 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
 		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});
 	}
+	JAI_CALL_RET_SECTION(0);
 	pop_script_frame_core(rec);
+	JAI_CALL_RET_SECTION(1);
 	fp = rec.caller;
 	stack_.push_back(std::move(conv.value()));
 	++fp->ip;
+	JAI_CALL_RET_SECTION(2);
+#undef JAI_CALL_RET_SECTION
 	return {};
 }
 

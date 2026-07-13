@@ -140,6 +140,10 @@ namespace jai::vm {
         uint64_t profile_binary_fused_next_[256] = {};
         uint64_t profile_load_next_[256] = {};
         uint64_t profile_index_fused_next_[256] = {};
+        // index_fused_read branch taxonomy: [0]=raw-int lane [1]=raw-float lane
+        // [2]=untyped array element copy [3]=lvalue element-ref [4]=const-string map
+        // [5]=general replay [6]=binary-index raw fold [7]=member-node container
+        uint64_t profile_index_read_paths_[8] = {};
         std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
 #else
         ~vm_backend() override = default;

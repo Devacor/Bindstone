@@ -5423,6 +5423,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		if (!resolved) return raise_from(resolved);
 		container_ptr = resolved.value();
 		if (p.container.member_node != k_invalid_u32) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_index_read_paths_[7];
+#endif
 			VM_TRY(fused_member_container(f, static_cast<size_t>(&ins - f.code->code.data()),
 			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
 			if (is_unwinding_) [[unlikely]] {
@@ -5456,6 +5459,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(),
 					                     raw_index, have_raw_index));
+#ifdef JAISCRIPT_VM_PROFILE
+					if (have_raw_index) { ++profile_index_read_paths_[6]; }
+#endif
 				}
 			}
 		}
@@ -5564,6 +5570,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			const bool lvalue_shape = (ins.b & index_flag_lvalue_shape) != 0;
 			const bool transient_read = (ins.b & index_flag_transient_read) != 0 && !has_custom_binary_ops_;
 			if (lvalue_shape && !transient_read) {
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_index_read_paths_[3];
+#endif
 				auto array_type_info = left.get_type_info();
 				type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 				// slot/env storage is mutable by nature; the resolver's constness is
@@ -5577,8 +5586,14 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				// (the decl lane lands it straight in the slot)
 				if constexpr (requires(Sink& s, script_int iv) { s.raw_int(iv); }) {
 					if (node->kind() == script_array::kind_t::i64) {
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_index_read_paths_[0];
+#endif
 						sink.raw_int(node->ints()[static_cast<size_t>(index)]);
 					} else {
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_index_read_paths_[1];
+#endif
 						sink.raw_float(node->floats()[static_cast<size_t>(index)]);
 					}
 					return {};
@@ -5587,6 +5602,34 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 					return {};
 				}
 			}
+			// Plain int/float elements of UNTYPED arrays skip the value copy (variant
+			// dispatch + tag refcounts + copy dtor) through the same raw lanes typed
+			// buffers use — admitted only when the sink stamps its own tag over the
+			// landing (raw_tag_safe), so the dropped element tag is unobservable.
+			// Every other element shape keeps the full copy below.
+			if constexpr (requires(Sink& s, script_int iv) { s.raw_int(iv); s.raw_tag_safe(); }) {
+				if (sink.raw_tag_safe()) {
+					const script_value& el = node->values()[index];
+					const size_t ei = el.raw_storage_index();
+					if (ei == script_value::TYPEID_INT) {
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_index_read_paths_[0];
+#endif
+						sink.raw_int(el.unchecked_as_int());
+						return {};
+					}
+					if (ei == script_value::TYPEID_FLOAT) {
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_index_read_paths_[1];
+#endif
+						sink.raw_float(el.unchecked_as_float());
+						return {};
+					}
+				}
+			}
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_index_read_paths_[2];
+#endif
 			sink(script_value(node->values()[index]));
 			return {};
 		}
@@ -5603,6 +5646,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		if (itmpl.raw_storage_index() == script_value::TYPEID_STRING) {
 			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
 			if (map_ptr) {
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_index_read_paths_[4];
+#endif
 				auto it = map_ptr->find(map_string_key_probe{
 					*itmpl.get_storage().get<strong_ptr<script_string>>()});
 				if (it != map_ptr->end()) {
@@ -5618,6 +5664,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			}
 		}
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_index_read_paths_[5];
+#endif
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
@@ -5660,6 +5709,10 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 			frame& fr;
 			const fused_index_proto& proto;
 			bool landed = false;
+			// Untyped-element raw shortcut admission: land() overwrites the tag with
+			// decl_type, so dropping the element's own tag is unobservable ONLY when
+			// decl_type is set (null decl_type keeps the incoming tag — must copy)
+			bool raw_tag_safe() const { return proto.decl_type != nullptr; }
 			void land(script_value&& v) {
 				if (proto.decl_type) {
 					v.set_type_info(type_info_ptr{proto.decl_type});
@@ -5681,6 +5734,17 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 			void raw_int(script_int iv) {
 				if (proto.decl_expect == static_cast<uint8_t>(script_value::TYPEID_INT) ||
 				    proto.decl_expect == 0xFF) {
+					// Live slot already holding a same-tagged int: payload write in place
+					// (no value mint, no tag refcounts, no old-value dtor — byte-identical
+					// post-state to the mint+land path)
+					if (script_value* slot = vm->frame_slot(fr, proto.decl_slot)) {
+						if (slot->raw_storage_index() == script_value::TYPEID_INT &&
+						    slot->get_type_info().get() == proto.decl_type) {
+							slot->unchecked_set_int_payload(iv);
+							landed = true;
+							return;
+						}
+					}
 					land(script_value(iv, vm->engine_));
 				} else {
 					(*this)(script_value(iv, vm->engine_));   // e.g. float decl: op_decl_var converts
@@ -5689,6 +5753,14 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 			void raw_float(script_float fv) {
 				if (proto.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ||
 				    proto.decl_expect == 0xFF) {
+					if (script_value* slot = vm->frame_slot(fr, proto.decl_slot)) {
+						if (slot->raw_storage_index() == script_value::TYPEID_FLOAT &&
+						    slot->get_type_info().get() == proto.decl_type) {
+							slot->unchecked_set_float_payload(fv);
+							landed = true;
+							return;
+						}
+					}
 					land(script_value(fv, vm->engine_));
 				} else {
 					(*this)(script_value(fv, vm->engine_));
@@ -11136,6 +11208,17 @@ void vm_backend::dump_opcode_profile() const {
 		fprintf(stderr, "[vm-profile] STORE paths: provable-hit %llu | unproven-slot %llu | proven-missed %llu | ref-top %llu\n",
 			(unsigned long long)profile_store_paths_[0], (unsigned long long)profile_store_paths_[3],
 			(unsigned long long)profile_store_paths_[4], (unsigned long long)profile_store_paths_[2]);
+	}
+	{
+		uint64_t idx_total = 0;
+		for (int i = 0; i < 8; ++i) { idx_total += profile_index_read_paths_[i]; }
+		if (idx_total) {
+			fprintf(stderr, "[vm-profile] INDEX-read paths: raw-int %llu | raw-float %llu | untyped-elem %llu | elem-ref %llu | conststr-map %llu | replay %llu | raw-idx-fold %llu | member-container %llu\n",
+				(unsigned long long)profile_index_read_paths_[0], (unsigned long long)profile_index_read_paths_[1],
+				(unsigned long long)profile_index_read_paths_[2], (unsigned long long)profile_index_read_paths_[3],
+				(unsigned long long)profile_index_read_paths_[4], (unsigned long long)profile_index_read_paths_[5],
+				(unsigned long long)profile_index_read_paths_[6], (unsigned long long)profile_index_read_paths_[7]);
+		}
 	}
 }
 #endif

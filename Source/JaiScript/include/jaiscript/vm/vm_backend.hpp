@@ -104,6 +104,16 @@ namespace jai::vm {
         // [1]=pop_script_frame_core [2]=caller swap + result push
         uint64_t profile_call_ret_cyc_[3] = {};
         uint64_t profile_call_ret_count_ = 0;
+        // push_method_frame_sliced sections (the CALL_METHOD push side; the row's
+        // remainder above this sum is resolve/mic/arg staging):
+        // [0]=entry checks + chunk + record acquire [1]=record init + pins (ast_pin
+        // atomic copy lives here) [2]=receiver deref + set_this + method env
+        // [3]=frame init + frames_ push [4]=bind_parameters [5]=window fill + stage
+        uint64_t profile_mpush_cyc_[6] = {};
+        uint64_t profile_mpush_count_ = 0;
+        // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
+        // [2]=slice resolution declined [3]=mic guard failed
+        uint64_t profile_slice_gate_[4] = {};
         // exec_new class-path split: resolve = string + intern + env get; invoke = the
         // opaque ctor lambda -> execute_callable native re-entry (the suspected heat)
         uint64_t profile_new_count_ = 0;

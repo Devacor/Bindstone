@@ -772,6 +772,10 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 			} else {
 				// Calls that already yield a reference pass through; anything else
 				// rejects at convert_return_value's ref-return epilogue
+				if (clean_exit && rs->value->get_type() == node_type::call_expr &&
+				    static_cast<call_expr*>(rs->value.get())->callee->get_type() == node_type::identifier_expr) {
+					pending_tail_call_ = true;
+				}
 				compile_expression(rs->value);
 				// BINARY+RETURN tail fusion (2191c59b double gate: the return VALUE
 				// node's own shape AND the tail opcode must both agree - a logical
@@ -2019,6 +2023,9 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 }
 
 void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
+	// Consumed HERE so nested arg calls never inherit the return-position hint
+	const bool tail_site = pending_tail_call_;
+	pending_tail_call_ = false;
 	if (expr->callee->get_type() == node_type::identifier_expr) {
 		auto* ident = static_cast<identifier_expr*>(expr->callee.get());
 		if (ident->name == "weak_from_this" || ident->name == "shared_from_this") {
@@ -2138,7 +2145,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	if (probe_callee) {
 		chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 		emit(opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
-		     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+		     static_cast<uint32_t>(chunk_->call_sites.size() - 1), tail_site ? 1u : 0u);
 	} else {
 		emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1));

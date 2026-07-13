@@ -802,6 +802,28 @@ script_value* environment::get_value_ptr(uint64_t id) {
     return nullptr;
 }
 
+script_value* environment::get_env_var_ptr(uint64_t id) {
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return it->second;
+    }
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            return parent_it->second;
+        }
+    }
+    if (parent_) {
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            flat_lookup_[id] = ptr;
+            return ptr;
+        }
+    }
+    return nullptr;
+}
+
 script_value make_bound_method(const script_value& this_obj, const script_value& method) {
     auto eng = this_obj.get_engine();
     return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> checked_result<script_value> {

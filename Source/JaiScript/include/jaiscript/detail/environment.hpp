@@ -116,6 +116,10 @@ namespace jai {
         // Checks local storage, parent chain, and this/static fields based on kind
         script_value* get_value_ptr(uint64_t id);
 
+        // get_value_ptr WITHOUT this env's kind fallbacks (this/static fields):
+        // non-null exactly when contains(id) — the store path's single-walk resolve
+        script_value* get_env_var_ptr(uint64_t id);
+
         // Get all variables in this scope (not including parent scopes)
         // Returns a map with string_view keys pointing into the symbolizer (stable until engine destruction)
         std::unordered_map<std::string_view, script_value> get_local_variables() const;

@@ -3236,16 +3236,17 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		}
 	}
 
-	if (environment_->contains(sym)) {
-		script_value* currentVal = environment_->get_value_ptr(sym);
-		bool boxed_cell = false;
-		if (currentVal && currentVal->is_reference()) {
+	// ONE fallback-free walk replaces the old contains() + get_value_ptr() +
+	// assign()-rewalk TRIPLE walk (non-null exactly when contains(); this/static
+	// field stores keep falling through to the kind-aware path below)
+	if (script_value* env_store_target = environment_->get_env_var_ptr(sym)) {
+		script_value* currentVal = env_store_target;
+		if (currentVal->is_reference()) {
 			// Escape-boxed variable (cell) named as itself: redirect to the cell inner and
 			// run the full assignment semantics below on it; anything else stores through
 			auto* holder = currentVal->get_reference_holder();
 			if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 				currentVal = holder->cell();
-				boxed_cell = true;
 			} else {
 				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
 				stack_.push_back(std::move(value));
@@ -3253,13 +3254,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			}
 		}
 		// Boxed storage writes the cell inner directly (an env assign would replace the
-		// handle and detach every alias)
+		// handle and detach every alias); non-boxed writes through the held cell —
+		// env::assign's env-var arm resolves this same pointer, so the rewalk is dead
 		auto store_back = [&](script_value&& v) -> checked_result<void> {
-			if (boxed_cell) {
-				*currentVal = std::move(v);
-				return {};
-			}
-			return environment_->assign(sym, std::move(v));
+			*currentVal = std::move(v);
+			return {};
 		};
 		if (currentVal && currentVal->is_cpp_bound()) {
 			currentVal->assign_through(value);
@@ -3524,13 +3523,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			script_value assignValue = clone_for_assignment(value);
 			VM_TRY(store_back(std::move(assignValue)));
 			stack_.push_back(std::move(value));
-		} else if (boxed_cell) {
+		} else {
 			VM_TRY(store_back(std::move(value)));
 			stack_.push_back(*currentVal);
-		} else {
-			VM_TRY(environment_->assign(sym, std::move(value)));
-			script_value* stored = environment_->get_value_ptr(sym);
-			stack_.push_back(stored ? *stored : make_null());
 		}
 		return {};
 	}

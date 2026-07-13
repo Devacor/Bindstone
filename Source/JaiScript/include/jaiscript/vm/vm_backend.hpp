@@ -111,6 +111,8 @@ namespace jai::vm {
         // [3]=frame init + frames_ push [4]=bind_parameters [5]=window fill + stage
         uint64_t profile_mpush_cyc_[6] = {};
         uint64_t profile_mpush_count_ = 0;
+        // receiver+env sub-split: [0]=receiver deref + set_this [1]=env acquire/rebind
+        uint64_t profile_mpush_sub_[2] = {};
         // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
         // [2]=slice resolution declined [3]=mic guard failed
         uint64_t profile_slice_gate_[4] = {};

@@ -11079,6 +11079,9 @@ void vm_backend::dump_opcode_profile() const {
 		}
 	}
 	if (profile_mpush_count_) {
+		fprintf(stderr, "[vm-profile] method-push receiver+env sub-split (avg cyc): set_this %.0f | env-acquire/rebind %.0f\n",
+			(double)profile_mpush_sub_[0] / (double)profile_mpush_count_,
+			(double)profile_mpush_sub_[1] / (double)profile_mpush_count_);
 		fprintf(stderr, "[vm-profile] method-push sections (%llu pushes, avg cyc): entry+chunk+rec %.0f | rec-init+pins %.0f | receiver+env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
 			(unsigned long long)profile_mpush_count_,
 			(double)profile_mpush_cyc_[0] / (double)profile_mpush_count_,
@@ -11897,7 +11900,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
-	rec.prev_env = std::move(environment_);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -11915,11 +11917,22 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		const script_value& receiver_v = receiver_owned ? receiver_owned->deref()
 		                                                : stack_[args_base - 1].deref();
 		rec.locals.set_this(receiver_v);
-		if (rec.env_lazy) {
+#ifdef JAISCRIPT_VM_PROFILE
+		{ const uint64_t prof_s = __rdtsc(); profile_mpush_sub_[0] += prof_s - prof_p0; prof_p0 = prof_s; }
+#endif
+		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
+			// Recursion/sibling calls within one class: the resolution env is already
+			// the definition env — skip the atomic swap pair entirely and leave nothing
+			// to restore at pop (env-untouched; entry_env stays null for lazy methods,
+			// 'this' rides rec.locals, public-only chains need no access context)
+			rec.env_untouched = true;
+		} else if (rec.env_lazy) {
+			rec.prev_env = std::move(environment_);
 			environment_ = dispatch.definition_env;
 		} else
 		if (body_chunk->method_env_reusable &&
 		    dispatch.definition_env.get() == cached_global_env_) {
+			rec.prev_env = std::move(environment_);
 			auto& scope = dispatch.backend_scope_env;
 			if (scope && scope.use_count() == 1) {
 				scope->rebind_method_this(receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v));
@@ -11935,6 +11948,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 					receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
 			}
 		} else {
+			rec.prev_env = std::move(environment_);
 			environment_ = acquire_method_scope_env(dispatch.definition_env,
 				receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
 		}
@@ -11945,10 +11959,15 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		rec.method_result_anchor = false;
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
-		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
+		if (!rec.env_untouched && rec.prev_env) {
+			environment_ = std::move(rec.prev_env);   // restore the caller env (moved above)
+		}
 		--call_records_top_;
 		throw;
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	{ const uint64_t prof_s = __rdtsc(); profile_mpush_sub_[1] += prof_s - prof_p0; prof_p0 = prof_s; }
+#endif
 	JAI_MPUSH_SECTION(2);
 	++current_call_depth_;
 	rec.f.code = body_chunk;
@@ -11969,7 +11988,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, stack_.vec(), args_base, argc, rec.f, *rec.f.code,
-		                        rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -12038,9 +12057,6 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
-	// Moved, not copied: the method scope env always replaces environment_ below; the
-	// catch restores it on setup failure
-	rec.prev_env = std::move(environment_);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -12060,7 +12076,13 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		// definition_env with the receiver bound; the wrapper env and its define(this)
 		// are bypassed dead weight
 		rec.locals.set_this(receiver);
-		if (rec.env_lazy) {
+		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
+			// Resolution env already correct (recursion/sibling calls within one
+			// class): skip the atomic swap pair; nothing to restore at pop
+			// (KEEP BYTE-PARALLEL with push_method_frame_sliced)
+			rec.env_untouched = true;
+		} else if (rec.env_lazy) {
+			rec.prev_env = std::move(environment_);
 			environment_ = dispatch.definition_env;
 		} else
 		// Sticky method scope: bodies that provably never park state in the env
@@ -12075,6 +12097,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		// still holds the env).
 		if (body_chunk->method_env_reusable &&
 		    dispatch.definition_env.get() == cached_global_env_) {
+			rec.prev_env = std::move(environment_);
 			auto& scope = dispatch.backend_scope_env;
 			if (scope && scope.use_count() == 1) {
 				scope->rebind_method_this(std::move(receiver));
@@ -12088,6 +12111,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 				environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
 			}
 		} else {
+			rec.prev_env = std::move(environment_);
 			environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
 		}
 	} catch (...) {
@@ -12097,7 +12121,9 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		rec.method_result_anchor = false;
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
-		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
+		if (!rec.env_untouched && rec.prev_env) {
+			environment_ = std::move(rec.prev_env);   // restore the caller env (moved above)
+		}
 		--call_records_top_;
 		throw;
 	}
@@ -12118,7 +12144,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
-		                        rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;

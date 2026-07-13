@@ -129,6 +129,10 @@ namespace jai::vm {
         op_binary_fused_store, // a=fused_binary_dst_protos index: BINARY_FUSED whose result
                                // stores to an identifier - computes, then runs op_store's exact
                                // post-pop tail (shared helper) with no push/pop round-trip
+        op_binary_fused_temp,  // a=fused_binary_protos index, b=frame slot: BINARY_FUSED whose
+                               // result lands RAW in a compiler temp slot (above local_count,
+                               // inside the window) - the register-file wave's producer form;
+                               // consumers read it back through the ordinary fused slot operand
 
         op_index_fused,     // a=fused_index_protos index, b=index flags: subscript read whose
                             // container+index resolve as fused operands (no LOAD dispatches);
@@ -277,6 +281,7 @@ namespace jai::vm {
             case opcode::op_index_store_fused: return "INDEX_STORE_FUSED";
             case opcode::op_index_fused_decl: return "INDEX_FUSED_DECL";
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
+            case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

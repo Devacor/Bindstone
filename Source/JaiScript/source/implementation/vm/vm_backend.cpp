@@ -11229,6 +11229,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_destructure: VM_TRY_OP(exec_destructure(f, ins)); break;
 			case opcode::op_binary: VM_TRY_OP(exec_binary(f, ins)); break;
 			case opcode::op_binary_fused: VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); break;
+			case opcode::op_binary_fused_temp:
+				// Register-file producer: the fused kernel's result lands RAW in a
+				// compiler temp slot (inside the window; no store enforcement - temps
+				// are compiler-owned and consumed by the next fused operand read)
+				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, [&](script_value&& v) {
+					frame_slot_set(f, ins.b, std::move(v));
+				}));
+				break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;

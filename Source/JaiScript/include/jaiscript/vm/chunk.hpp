@@ -185,6 +185,17 @@ namespace jai::vm {
         const environment* fast_env = nullptr;
         uint64_t fast_serial = 0;
         script_value* fast_ptr = nullptr;
+        // This-field IC (bare method-field reads): the engine-wide env serial recorded
+        // when this site's FULL WALK missed and the this-fallback resolved a field.
+        // While the serial holds (no define/reparent anywhere), the walk provably still
+        // misses, so resolution may jump straight to the receiver's field cell. 0 = unarmed.
+        // class+slot skip the per-access field_slot hash find: the id->slot mapping is
+        // append-only for a class object's lifetime (ensure_field_slots only emplaces),
+        // so a matching class pointer makes the slot valid forever; a different class
+        // (polymorphic site) or no slot (overflow field) takes the generic find.
+        uint64_t this_field_serial = 0;
+        const void* this_field_class = nullptr;
+        uint32_t this_field_slot = 0xFFFFFFFFu;
     };
 
     // op_compound_fused: `target op= <rhs>` in one dispatch. Binary mode: rhs_proto indexes

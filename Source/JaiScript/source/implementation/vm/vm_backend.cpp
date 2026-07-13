@@ -8518,10 +8518,21 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	// builtin keep today's probe-first order exactly (the env variable, not the
 	// stack value, decides — receiver-mutating arg expressions depend on it).
 	{
-		const bool maybe_string_builtin = site.receiver_symbol != UINT64_MAX &&
+		// The string-builtin pre-gate probes the ENV VARIABLE, not just the name: a
+		// method NAME that collides with a string builtin (insert/count/find/...) must
+		// not exile instance dispatch to the vector path when the variable isn't a
+		// string. Probe order is identical to the vector path's (both run post-args —
+		// exec_call_method fires with receiver+args already pushed), and the probe
+		// spellings mirror line-for-line: get_value_ptr IS get_ref's ladder minus the
+		// error wrapper, is_string() un-derefed exactly like the vector probe's.
+		bool maybe_string_builtin = site.receiver_symbol != UINT64_MAX &&
 			(f.code->builtin_indexed
 				? site.bi_string != builtin_method_registries::k_no_builtin
 				: builtins_.string_methods.find(member->member_id) != builtins_.string_methods.end());
+		if (maybe_string_builtin) {
+			script_value* recv_cell = environment_->get_value_ptr(site.receiver_symbol);
+			maybe_string_builtin = recv_cell && recv_cell->is_string();
+		}
 		if (!maybe_string_builtin && member->member_id != same_as_id_ &&
 		    !(member->object && member->object->get_type() == node_type::super_expr)) {
 			script_value& objd = stack_[args_base - 1].deref();
@@ -8531,6 +8542,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				auto holder = objd.get_object_holder();
 				if (holder && holder->is_class_instance_wrapper && holder->data &&
 				    holder->type_id != coroutine_handle_type_id_) {
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_slice_gate_[0];   // reached instance receiver
+#endif
 					auto* inst = static_cast<class_instance*>(holder->data.get());
 					class_definition* cd = inst->get_class_definition();
 					// Worker pin (pre-resolved at the barrier): slice-enter directly
@@ -8548,6 +8562,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
 					           cd->method_epoch() == site.mic_epoch &&
 					           !inst->has_field(member->member_id)) {
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_slice_gate_[1];   // mic guard passed
+#endif
 						if (site.mic_static) {
 							script_value method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
@@ -8563,7 +8580,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							                                  args_base, argc, site);
 						}
 						// resolution declined (arg types): the vector ladder reports identically
+#ifdef JAISCRIPT_VM_PROFILE
+						++profile_slice_gate_[2];   // resolution declined in the slice branch
+#endif
 					}
+#ifdef JAISCRIPT_VM_PROFILE
+					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
+#endif
 				}
 			} else if (receiver_type == script_value::TYPEID_ARRAY && argc == 1 &&
 			           f.code->builtin_indexed &&
@@ -11029,6 +11052,21 @@ void vm_backend::dump_opcode_profile() const {
 			(double)profile_call_ret_cyc_[1] / (double)profile_call_ret_count_,
 			(double)profile_call_ret_cyc_[2] / (double)profile_call_ret_count_);
 	}
+	if (profile_slice_gate_[0] + profile_slice_gate_[3]) {
+		fprintf(stderr, "[vm-profile] slice-gate: instance-receiver %llu | mic-pass %llu | slice-declined %llu | mic-fail %llu\n",
+			(unsigned long long)profile_slice_gate_[0], (unsigned long long)profile_slice_gate_[1],
+			(unsigned long long)profile_slice_gate_[2], (unsigned long long)profile_slice_gate_[3]);
+	}
+	if (profile_mpush_count_) {
+		fprintf(stderr, "[vm-profile] method-push sections (%llu pushes, avg cyc): entry+chunk+rec %.0f | rec-init+pins %.0f | receiver+env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
+			(unsigned long long)profile_mpush_count_,
+			(double)profile_mpush_cyc_[0] / (double)profile_mpush_count_,
+			(double)profile_mpush_cyc_[1] / (double)profile_mpush_count_,
+			(double)profile_mpush_cyc_[2] / (double)profile_mpush_count_,
+			(double)profile_mpush_cyc_[3] / (double)profile_mpush_count_,
+			(double)profile_mpush_cyc_[4] / (double)profile_mpush_count_,
+			(double)profile_mpush_cyc_[5] / (double)profile_mpush_count_);
+	}
 	if (!profile_cfs_inloop_names_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_inloop_names_.begin(), profile_cfs_inloop_names_.end());
 		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
@@ -11784,6 +11822,13 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
                                                script_value* receiver_owned, size_t frame_base,
                                                size_t args_base, size_t argc,
                                                const call_site* site) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_p0 = __rdtsc();
+	++profile_mpush_count_;
+#define JAI_MPUSH_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_mpush_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
+#else
+#define JAI_MPUSH_SECTION(idx)
+#endif
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return raise_(
 			make_error_code(runtime_error_code::max_recursion_depth),
@@ -11808,6 +11853,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 			call_records_.push_back(std::make_unique<call_record>());
 		}
 	}
+	JAI_MPUSH_SECTION(0);
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
@@ -11826,6 +11872,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
+	JAI_MPUSH_SECTION(1);
 	try {
 		// Slot receivers stay put (the slot is the pin) and this/env bindings COPY the
 		// deref'd value — the vector path's caller made that same copy itself (objv =
@@ -11868,6 +11915,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		--call_records_top_;
 		throw;
 	}
+	JAI_MPUSH_SECTION(2);
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
@@ -11882,6 +11930,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.f.stack_base = frame_base;
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	JAI_MPUSH_SECTION(3);
 
 	op_status bound{};
 	try {
@@ -11895,6 +11944,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		pop_script_frame_core(rec);
 		return bound;
 	}
+	JAI_MPUSH_SECTION(4);
 	// Conversions during binding push and pop above the args, so the slice is intact
 	assert(stack_.size() == args_base + argc);
 	{
@@ -11904,6 +11954,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		}
 	}
 	switch_to_ = &rec.f;
+	JAI_MPUSH_SECTION(5);
+#undef JAI_MPUSH_SECTION
 	return {};
 }
 

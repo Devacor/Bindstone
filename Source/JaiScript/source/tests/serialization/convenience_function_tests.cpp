@@ -234,6 +234,44 @@ public:
             check_eq(int64_t(2), loaded.data[1], "root object member serialize element value");
         });
 
+        // from_json results must be first-class values: every key and value carries the
+        // engine ref, so deep-copy (script assignment), arg passing, and C++ clone() all
+        // work. The old reader minted map KEYS via ast_literal_tag (no engine) — copying
+        // ANY deserialized map threw "Cannot clone script_value: missing engine pointer"
+        // (bit the jaidoom save system, then the netplay dispatch).
+        test("from_json_containers_clone_with_engine_refs", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                var flat = from_json("{\"x\": 1, \"y\": \"two\"}");
+                var flat_copy = flat;
+                flat_copy["x"] = 99;
+
+                var nested = from_json("{\"a\": [1, 2, {\"b\": 3}], \"c\": {\"d\": [4, 5]}}");
+                var nested_copy = nested;
+                nested_copy["c"]["d"][0] = 40;
+
+                function passes(var m) -> int { return m["a"][2]["b"]; }
+
+                to_string(flat["x"]) + "|" + to_string(flat_copy["x"]) + "|" +
+                    to_string(nested["c"]["d"][0]) + "|" + to_string(nested_copy["c"]["d"][0]) + "|" +
+                    to_string(passes(nested));
+            )");
+            check_eq(std::string("1|99|4|40|3"), r.as_string(),
+                "deserialized maps deep-copy independently and pass as args");
+            // C++-side clone of the raw result (the exact call the crash sites hit)
+            script_value direct = eng->execute("from_json(\"{\\\"k\\\": [1, {\\\"n\\\": 2}]}\")");
+            script_value cloned = direct.clone();   // threw "missing engine pointer" before the key fix
+            check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable after C++ clone");
+            // Typed-object reconstruction keys ("_type_" probe) still resolve
+            auto probe = eng->execute(R"(
+                var m = from_json("{\"_type_\": \"NoSuchRegisteredClass\", \"v\": 7}");
+                to_string(m["v"]) + "|" + m["_type_"];
+            )");
+            check_eq(std::string("7|NoSuchRegisteredClass"), probe.as_string(),
+                "string-content key ordering keeps _type_ lookup and map reads intact");
+        });
+
         test("base64_raw_string_roundtrip", [this]() {
             std::string original = "Hello, World!";
             std::string encoded = base64_encode(original);

@@ -890,8 +890,10 @@ private:
 
     // Recursively builds a full script_value subtree from a flat node — only used when a raw
     // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data).
-    // Uses ast_literal_tag keys so map.find(script_value("_type_"/...)) and
-    // is_string()/is_int() behave correctly.
+    // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("_type_"/...))
+    // rank by type-then-content (type_info never participates), and every value in the result
+    // must clone/detach — the old ast_literal_tag keys had no engine pointer, so copying any
+    // deserialized map died with "Cannot clone script_value: missing engine pointer".
     script_value materialize(uint32_t idx) {
         depth_guard guard(current_depth_);
         engine* eng = engine_ref_;
@@ -901,8 +903,7 @@ private:
             auto& map = const_cast<script_map&>(mv.as_map());
             for (uint32_t m = 0; m < node.u.agg.count; ++m) {
                 const JNode& k = nodes_[node.u.agg.first + 2 * m];
-                map.emplace(script_value(script_value::ast_literal_tag{},
-                                         std::string(chars_.data() + k.u.str.off, k.u.str.len)),
+                map.emplace(script_value(script_string(chars_.data() + k.u.str.off, k.u.str.len), eng),
                             materialize(node.u.agg.first + 2 * m + 1));
             }
             return mv;

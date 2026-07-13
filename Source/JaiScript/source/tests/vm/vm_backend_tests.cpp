@@ -245,12 +245,75 @@ public:
 
 		test("recursion_depth_error", [this]() {
 			auto e = vm_engine();
+			// Non-tail shape: `return forever() + 1` keeps a real frame per call, so the
+			// depth limit still applies (the bare-tail form now splices — see tco_ tests)
+			check_throws([&]() {
+				e->execute(R"(
+					function forever() -> auto { return forever() + 1; }
+					forever();
+				)");
+			}, "runaway recursion raises max_recursion_depth");
+		});
+
+		// === Real TCO (Dev ruling: no artificial vm depth limit) ===
+		// A tail-flagged bare self-call splices the live record + window in place; the
+		// interpreter keeps its recursion limit (accepted divergence, KD-ENV-RECURSION-LIMIT
+		// charter). Every decline gate below is pinned by a shape that must still limit.
+
+		test("tco_self_tail_depth_unbounded", [this]() {
+			const char* src = R"(
+				function countdown(int n) -> int {
+					if (n == 0) { return 0; }
+					return countdown(n - 1);
+				}
+				countdown(100000);
+			)";
+			auto e = vm_engine();
+			check_eq((int64_t)0, e->execute(src).as_int());   // 10x past JAI_MAX_CALL_DEPTH
+			auto ie = jai::engine::make();
+			check_throws([&]() { ie->execute(src); }, "interpreter keeps the depth limit");
+		});
+
+		test("tco_accumulator_result_exact", [this]() {
+			auto e = vm_engine();
+			// Untyped (conv none) chain: the value must ride every splice exactly
+			check_eq((int64_t)200000 * 200001 / 2, e->execute(R"(
+				function sum(auto n, auto acc) -> auto {
+					if (n == 0) { return acc; }
+					return sum(n - 1, acc + n);
+				}
+				sum(200000, 0);
+			)").as_int());
+		});
+
+		test("tco_declines_inside_try", [this]() {
+			// `return f(...)` inside try must keep the frame (the catch must see callee
+			// throws), so depth exhausts at the limit and the deepest catch's -999
+			// bubbles up as ordinary return values. A wrong splice would return 0.
+			const char* src = R"(
+				function f(int n) -> int {
+					if (n == 0) { return 0; }
+					try { return f(n - 1); } catch (e) { return -999; }
+				}
+				f(100000);
+			)";
+			auto e = vm_engine();
+			check_eq((int64_t)-999, e->execute(src).as_int());
+			auto ie = jai::engine::make();
+			check_eq((int64_t)-999, ie->execute(src).as_int());   // parity: same shape both backends
+		});
+
+		test("tco_infinite_tail_hits_budget", [this]() {
+			// An infinite tail loop is now a LOOP: the budget check at the splice keeps
+			// it interruptible exactly like while(true)
+			auto e = vm_engine();
+			e->execution_budget(0.05);
 			check_throws([&]() {
 				e->execute(R"(
 					function forever() -> auto { return forever(); }
 					forever();
 				)");
-			}, "runaway recursion raises max_recursion_depth");
+			}, "infinite tail recursion raises the execution budget error");
 		});
 
 		// Fixed 2026-07 (demoreel finding 1): a plain-function call inside a method must

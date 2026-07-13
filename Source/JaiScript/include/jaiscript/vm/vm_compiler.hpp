@@ -72,6 +72,10 @@ namespace jai::vm {
         bool temps_active_ = false;
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
         uint32_t temp_symbol_index();
+        // Tail-position hint for `return f(args)` with clean region exits: consumed by
+        // compile_call so nested arg calls never inherit it; stamped as c=1 on
+        // op_call_from_scratch (a pure hint — every correctness gate lives at runtime)
+        bool pending_tail_call_ = false;
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
         // Fuses a trailing fused-comparison condition with its jump_if_false

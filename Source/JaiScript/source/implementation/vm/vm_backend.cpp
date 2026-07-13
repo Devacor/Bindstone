@@ -6765,6 +6765,32 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 #endif
 		const size_t args_base = stack_.size() - argc;
 		try {
+			// Real TCO (Dev ruling: no artificial depth limit): a tail-flagged bare call
+			// resolving to the CURRENTLY EXECUTING chunk splices the live record instead
+			// of pushing. Gates — top record frame (fibers and non-record frames decline),
+			// self chunk (a mid-recursion global rebind resolves to a different chunk and
+			// declines, preserving the call-time-resolution contract), env-untouched
+			// activation (needs_frame_env false => environment_ provably never moved, so
+			// there is nothing to release or install), idempotent return-conv class (the
+			// dying frame's skipped epilogue and the spliced activation's are the same
+			// pass-through), no live try records (return-inside-try must keep the frame
+			// to catch callee throws), clean pending register. The budget check keeps
+			// infinite tail loops interruptible exactly like real pushes.
+			if (ins.c != 0 && call_records_top_ > 0) {
+				call_record& rec = *call_records_[call_records_top_ - 1];
+				const auto conv = static_cast<return_conv>(rec.return_conv_class);
+				if (&f == &rec.f && static_cast<chunk*>(pc.fn->backend_body_cache.get()) == f.code &&
+				    rec.env_untouched &&
+				    (conv == return_conv::none ||
+				     (conv >= return_conv::prim_int && conv <= return_conv::prim_string)) &&
+				    try_records_.size() == rec.try_base &&
+				    pending_callees_.size() == rec.pending_base) {
+					if (execution_limit_exhausted()) [[unlikely]] {
+						return raise_from(execution_limit_failure());
+					}
+					return tail_splice_frame(rec, *pc.fn, std::move(pc.pin), args_base, argc, &site);
+				}
+			}
 			return push_script_frame_pinned(f, *pc.fn, std::move(pc.pin), args_base, argc, &site);
 		} catch (const script_exception& e) {
 			// pre-record throws leave the args on the stack; drop them like exec_call
@@ -6958,6 +6984,65 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	switch_to_ = &rec.f;
 	JAI_CALL_PUSH_SECTION(5);
 #undef JAI_CALL_PUSH_SECTION
+	return {};
+}
+
+// Tail-call splice (real TCO). Caller gates prove: self chunk, top record frame,
+// env-untouched, idempotent return conv, no live trys, exact arity (the pc.fn path
+// invariant — no default binding). The new activation binds at the TOP slice while
+// the dying window is still live below it (ref args cell-share against dying slots
+// BEFORE they die), then relocates down over the old window — the ranges are
+// provably disjoint (same function => the args sat above the old full window).
+// rec.caller / stack_base / try-iter-cfor bases / depth all stay: the spliced
+// activation returns directly to the ORIGINAL caller through the unchanged pop.
+op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_function& function,
+                                        strong_ptr<script_function> pin,
+                                        size_t args_base, size_t argc, const call_site* site) {
+	chunk* body_chunk = rec.f.code;
+	frame tf;
+	tf.code = body_chunk;
+	tf.locals = &rec.locals;
+	tf.stack_base = args_base;
+	tf.window_backed = true;
+	tf.window_base = args_base;
+	tf.window_live = static_cast<uint32_t>(argc);
+	tf.top_level = false;
+	frames_.push_back(&tf);   // ref-param frames_ scan parity with the real push
+	op_status bound{};
+	try {
+		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
+		                        environment_, site, &rec.f, rec.f.code);
+	} catch (...) {
+		frames_.pop_back();
+		throw;
+	}
+	frames_.pop_back();
+	if (bound == op_status::failed) {
+		return bound;
+	}
+	assert(stack_.size() == args_base + argc);
+	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+	stack_.fill_null_to(args_base + window_slots, engine_);
+	const size_t window_extent = stack_.size() - args_base;
+	// The dying frame's loop state dies at the boundary pop would have killed it
+	// (cfor fast-state pointers into the old window die BEFORE the window is reused)
+	if (iter_states_.size() > rec.iter_base) {
+		iter_states_.erase(iter_states_.begin() + rec.iter_base, iter_states_.end());
+	}
+	if (cfor_states_.size() > rec.cfor_base) {
+		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
+	}
+	const size_t window_base = rec.f.window_base;
+	if (args_base != window_base) {
+		for (size_t i = 0; i < window_extent; ++i) {
+			stack_[window_base + i] = std::move(stack_[args_base + i]);
+		}
+	}
+	stack_.truncate(window_base + window_extent);
+	rec.direct_pin = std::move(pin);
+	rec.f.ip = 0;
+	rec.f.window_live = tf.window_live;
+	switch_to_ = &rec.f;
 	return {};
 }
 

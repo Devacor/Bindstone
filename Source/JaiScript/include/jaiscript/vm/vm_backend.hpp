@@ -1141,6 +1141,13 @@ namespace jai::vm {
                                                strong_ptr<script_function> pin,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
+        // Real TCO: a tail-flagged bare self-call reuses the live record + window in
+        // place — no record push, no depth tick (Dev ruling: no artificial depth limit)
+        op_status tail_splice_frame(call_record& rec,
+                                               const script_defined_function& function,
+                                               strong_ptr<script_function> pin,
+                                               size_t args_base, size_t argc,
+                                               const call_site* site);
         op_status exec_func_decl(frame& f, const vm_instruction& ins);
         op_status exec_closure(frame& f, const vm_instruction& ins);
         op_status exec_destructure(frame& f, const vm_instruction& ins);

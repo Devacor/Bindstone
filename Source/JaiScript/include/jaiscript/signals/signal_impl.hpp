@@ -44,6 +44,9 @@ typename signal_emitter<T>::shared_receiver_type signal_emitter<T>::connect(cons
 	return connect(id, convert_script_function<T>(fn_callback));
 }
 
+// Text-receiver bodies have no error-value channel and must not throw into C++ emit
+// sites — errors route to report_script_error like every converted callback (the old
+// silent catch made a receiver typo indistinguishable from the mutation not landing).
 template<typename T>
 template<typename... Args>
 void receiver<T>::call_script(Args&&... args) {
@@ -55,7 +58,10 @@ void receiver<T>::call_script(Args&&... args) {
 				std::forward<Args>(args)...
 			);
 			script_engine_->execute(script_callback_, locals);
+		} catch (const std::exception& e) {
+			script_engine_->report_script_error(e.what());
 		} catch (...) {
+			script_engine_->report_script_error("Unknown exception in script signal receiver");
 		}
 	}
 }
@@ -72,7 +78,11 @@ bool receiver<T>::call_script_predicate(Args&&... args) {
 			);
 			auto result = script_engine_->execute(script_callback_, locals);
 			return result.template as<bool>();
+		} catch (const std::exception& e) {
+			script_engine_->report_script_error(e.what());
+			return false;
 		} catch (...) {
+			script_engine_->report_script_error("Unknown exception in script signal receiver");
 			return false;
 		}
 	}
@@ -84,7 +94,10 @@ void receiver<T>::call_script() {
 	if (script_engine_ && !script_callback_.empty()) {
 		try {
 			script_engine_->execute(script_callback_);
+		} catch (const std::exception& e) {
+			script_engine_->report_script_error(e.what());
 		} catch (...) {
+			script_engine_->report_script_error("Unknown exception in script signal receiver");
 		}
 	}
 }
@@ -95,7 +108,11 @@ bool receiver<T>::call_script_predicate() {
 		try {
 			auto result = script_engine_->execute(script_callback_);
 			return result.template as<bool>();
+		} catch (const std::exception& e) {
+			script_engine_->report_script_error(e.what());
+			return false;
 		} catch (...) {
+			script_engine_->report_script_error("Unknown exception in script signal receiver");
 			return false;
 		}
 	}

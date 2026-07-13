@@ -226,6 +226,44 @@ public:
             check_eq(result, 42, "Script callback executed correctly");
         });
 
+        // jaidoom netplay finding (d): "nested-element pushes from signal receivers
+        // don't land" — the mutations always landed; a receiver-body ERROR was being
+        // swallowed by call_script's silent catch, which is indistinguishable from a
+        // lost mutation at the consumer. Pins: pushes from BOTH receiver flavors
+        // mutate live globals, and receiver errors surface via report_script_error.
+        test("signal_receiver_container_pushes_land", [this]() {
+            auto eng = jai::foundry::make_engine();
+            eng->execute(R"(
+                var G = {"lists": [[]], "flat": []};
+                function on_evt(int v) -> void {
+                    G["flat"].push(v);
+                    G["lists"][0].push(v * 10);
+                }
+            )");
+            signal_emitter<void(int)> sig;
+            sig.script_engine(eng.get());
+            sig.parameter_names({"v"});
+            auto r1 = sig.connect("fn_recv", eng->get_variable("on_evt"));
+            auto r2 = sig.connect("G[\"lists\"][0].push(v + 1);");
+            sig.emit(7);
+            check_eq((int64_t)1, eng->execute("G[\"flat\"].size()").as_int(), "flat push landed");
+            check_eq((int64_t)2, eng->execute("G[\"lists\"][0].size()").as_int(),
+                "nested pushes landed from both receiver flavors");
+        });
+
+        test("signal_receiver_errors_surface_not_swallowed", [this]() {
+            auto eng = jai::foundry::make_engine();
+            std::vector<std::string> reported;
+            eng->set_script_error_handler([&](const std::string& msg) { reported.push_back(msg); });
+            signal_emitter<void(int)> sig;
+            sig.script_engine(eng.get());
+            sig.parameter_names({"v"});
+            auto recv = sig.connect("undefined_name_xyz.push(v);");
+            sig.emit(3);
+            check_true(!reported.empty(), "receiver-body error routes to report_script_error");
+            check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable after the reported error");
+        });
+
         test("signal_disconnect_during_emit", [this]() {
             signal_emitter<void()> sig;
 

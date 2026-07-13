@@ -62,6 +62,16 @@ namespace jai::vm {
         callable_context callable_;
         size_t scope_depth_ = 0;
         const ast_node* current_stmt_ = nullptr;
+        // Register-file temps: expression temporaries are frame slots above the parser's
+        // local_count (LIFO within one expression tree); compile_callable raises the
+        // chunk's local_count to the watermark so the window covers them. Only the main
+        // function-body chunk allocates (default-arg/standalone chunks share or lack the
+        // callee window — chunk_->is_function_body is the gate).
+        size_t temp_next_ = 0;
+        size_t temp_high_ = 0;
+        bool temps_active_ = false;
+        uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
+        uint32_t temp_symbol_index();
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
         // Fuses a trailing fused-comparison condition with its jump_if_false

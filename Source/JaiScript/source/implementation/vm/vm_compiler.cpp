@@ -4,6 +4,7 @@
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/transient_read.hpp>
 #include <cassert>
 #include <functional>
 
@@ -115,6 +116,7 @@ namespace {
 			case opcode::op_incdec:
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
+			case opcode::op_binary_fused_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -224,6 +226,7 @@ namespace {
 			case opcode::op_incdec:
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
+			case opcode::op_binary_fused_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -503,6 +506,8 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	callable_ = {};
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
+	temps_active_ = false;
+	temp_symbol_index_ = k_invalid_u32;
 
 	for (const auto& decl : declarations) {
 		compile_declaration(decl, true);
@@ -524,6 +529,10 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	loops_.clear();
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
+	temps_active_ = true;
+	temp_next_ = local_count;
+	temp_high_ = local_count;
+	temp_symbol_index_ = k_invalid_u32;
 
 	callable_ = {};
 	callable_.active = true;
@@ -561,6 +570,12 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	result->needs_frame_env = body_needs_frame_env(*result);
 	// The lazy safe list is a strict subset of the sticky list, so env-free bodies qualify
 	result->method_env_reusable = !result->needs_frame_env || method_body_env_reusable(*result);
+	// Register-file temps live above local_count: raise it to the watermark so the
+	// window null-fill (and fiber set_local growth) covers every temp slot
+	if (temp_high_ > result->local_count) {
+		result->local_count = temp_high_;
+	}
+	temps_active_ = false;
 	chunk_ = nullptr;
 	return result;
 }
@@ -1676,9 +1691,58 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
+	// Register-file lift (wave W1): a pure fusible LEFT sub-binary computes into a
+	// compiler temp (a frame slot above local_count) and the outer binary rides the
+	// fused kernel with the temp as an ordinary slot operand — no pushes, no unfused
+	// op_binary. LEFT only: the left operand evaluates first today, so evaluation
+	// order and error precedence are byte-identical; the right side must already be
+	// an operand shape (resolved at op time, after the left, exactly as before).
+	// Gated to real function-body chunks (top level and default-arg chunks have no
+	// window of their own).
+	if (temps_active_ && chunk_->is_function_body &&
+	    expr->left->get_type() == node_type::binary_expr &&
+	    (expr->right->get_type() == node_type::identifier_expr ||
+	     expr->right->get_type() == node_type::literal_expr)) {
+		auto* lb = static_cast<binary_expr*>(expr->left.get());
+		if (lb->op.type != token_type::left_bracket &&
+		    detail::transient_read_marker::is_value_binary_op(lb->op.type) &&
+		    binary_shape(lb) != binary_shape_none) {
+			fused_binary_proto inner;
+			inner.op = static_cast<uint8_t>(lb->op.type);
+			inner.left = make_fused_operand(lb->left.get());
+			inner.right = make_fused_operand(lb->right.get());
+			chunk_->fused_binary_protos.push_back(inner);
+			const uint32_t inner_index = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+			const uint32_t t = static_cast<uint32_t>(temp_next_);
+			++temp_next_;
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_binary_fused_temp, inner_index, t);
+			fused_binary_proto outer;
+			outer.op = static_cast<uint8_t>(expr->op.type);
+			outer.left.slot = t;
+			outer.left.symbol = temp_symbol_index();
+			outer.right = make_fused_operand(expr->right.get());
+			chunk_->fused_binary_protos.push_back(outer);
+			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
+			--temp_next_;   // LIFO release: the temp is dead once the outer op consumed it
+			return;
+		}
+	}
+
 	compile_expression(expr->left);
 	compile_expression(expr->right);
 	emit(opcode::op_binary, static_cast<uint32_t>(expr->op.type), binary_shape_none);
+}
+
+uint32_t vm_compiler::temp_symbol_index() {
+	// One shared symbols entry per chunk: fused_ident_value reads symbols[operand.symbol]
+	// unconditionally at entry, so temps need a REAL index. "\x01tmp" cannot lex as a
+	// script identifier (no collision with catch vars or user names), and the frame-slot
+	// hit returns before the symbol is ever consulted for resolution.
+	if (temp_symbol_index_ == k_invalid_u32) {
+		temp_symbol_index_ = add_symbol(symbolizer_->intern("\x01tmp"));
+	}
+	return temp_symbol_index_;
 }
 
 fused_operand vm_compiler::make_fused_operand(const expression* e) {

@@ -5973,11 +5973,37 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			}
 		}
 		if (node && !node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
+			auto container_type_info = container.get_type_info();
+			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
+			// Plain-scalar in-place lane: no element type -> no conversion -> NO user code
+			// can run, so the handle pin and the value pre-copy below are dead hedges.
+			// Same-storage-kind scalar rhs writes the element payload in place and carries
+			// tag+engine exactly like clone_for_assignment's copy did (identical post-state).
+			if (!element_type) {
+				const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
+				const size_t ri = rhs_peek.raw_storage_index();
+				if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
+					script_value& target = node->values()[static_cast<size_t>(index)];
+					if (target.raw_storage_index() == ri) {
+						if (ri == script_value::TYPEID_INT) {
+							target.unchecked_set_int_payload(rhs_peek.unchecked_as_int());
+						} else {
+							target.unchecked_set_float_payload(rhs_peek.unchecked_as_float());
+						}
+						target.set_type_info(rhs_peek.get_type_info());
+						target.set_engine(rhs_peek.get_engine());
+						if (value_operand) {
+							if (!no_result) { stack_.push_back(*value_ptr); }
+						} else if (no_result) {
+							stack_.pop_back();
+						}   // stack rhs + result wanted: the pending value IS the result
+						return {};
+					}
+				}
+			}
 			// The HANDLE COPY pins the node: element-type conversion can run user code,
 			// which could reassign the container variable out from under a raw pointer
 			strong_ptr<script_array> storage = container.unchecked_get_array_storage();
-			auto container_type_info = container.get_type_info();
-			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 			// Element-type conversion can run user code: pop/copy the value into a local
 			// first (invariant 2b — value_ptr may target a frame slot the stack can move)
 			script_value value = value_operand ? script_value(*value_ptr) : std::move(stack_.back());

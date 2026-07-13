@@ -11067,6 +11067,17 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_slice_gate_[0], (unsigned long long)profile_slice_gate_[1],
 			(unsigned long long)profile_slice_gate_[2], (unsigned long long)profile_slice_gate_[3]);
 	}
+	{
+		uint64_t bind_total = 0;
+		for (int i = 0; i < 7; ++i) bind_total += profile_bind_paths_[i];
+		if (bind_total) {
+			fprintf(stderr, "[vm-profile] bind paths: in-place %llu | prim-slot %llu | exact-class %llu | convert %llu | ref %llu | default %llu | escape-boxed %llu\n",
+				(unsigned long long)profile_bind_paths_[0], (unsigned long long)profile_bind_paths_[1],
+				(unsigned long long)profile_bind_paths_[2], (unsigned long long)profile_bind_paths_[3],
+				(unsigned long long)profile_bind_paths_[4], (unsigned long long)profile_bind_paths_[5],
+				(unsigned long long)profile_bind_paths_[6]);
+		}
+	}
 	if (profile_mpush_count_) {
 		fprintf(stderr, "[vm-profile] method-push sections (%llu pushes, avg cyc): entry+chunk+rec %.0f | rec-init+pins %.0f | receiver+env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
 			(unsigned long long)profile_mpush_count_,
@@ -12756,16 +12767,25 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				// the arg's type_info verbatim (copy IS clone for primitives) - nothing
 				// to do unless the escape mark boxes it
 				if (in_place && param.slot_index == i) {
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_bind_paths_[param.ref_escaping ? 6 : 0];
+#endif
 					if (param.ref_escaping) {
 						script_value inner = std::move(stack_[args_base + i]);
 						stack_[args_base + i] = script_value::make_cell_reference(std::move(inner), engine_);
 					}
 					continue;
 				}
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_bind_paths_[1];
+#endif
 				frame_slot_set(callee, param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
 
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_bind_paths_[3];
+#endif
 			// Shallow copy shields the conversion: it can reenter script (conversion
 			// ctors / to_* methods) and reallocate stack_ under an on-stack arg
 			script_value arg_shield(arg);

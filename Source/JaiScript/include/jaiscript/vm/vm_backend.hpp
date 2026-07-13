@@ -113,6 +113,10 @@ namespace jai::vm {
         uint64_t profile_mpush_count_ = 0;
         // receiver+env sub-split: [0]=receiver deref + set_this [1]=env acquire/rebind
         uint64_t profile_mpush_sub_[2] = {};
+        // pop-core sub-split: [0]=this-clear + env swap [1]=window/stack erase
+        // [2]=aux truncates (try/iter/cfor/pending) [3]=env release [4]=scrub chain
+        uint64_t profile_pop_sub_[5] = {};
+        uint64_t profile_pop_sub_count_ = 0;
         // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
         // [2]=slice resolution declined [3]=mic guard failed
         uint64_t profile_slice_gate_[4] = {};

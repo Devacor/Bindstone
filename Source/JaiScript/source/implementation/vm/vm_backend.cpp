@@ -11057,6 +11057,15 @@ void vm_backend::dump_opcode_profile() const {
 			(double)profile_call_ret_cyc_[1] / (double)profile_call_ret_count_,
 			(double)profile_call_ret_cyc_[2] / (double)profile_call_ret_count_);
 	}
+	if (profile_pop_sub_count_) {
+		fprintf(stderr, "[vm-profile] pop-core sub-split (%llu pops, avg cyc, ~10-15 probe baseline each): this+envswap %.0f | window-erase %.0f | aux-truncates %.0f | env-release %.0f | scrub %.0f\n",
+			(unsigned long long)profile_pop_sub_count_,
+			(double)profile_pop_sub_[0] / (double)profile_pop_sub_count_,
+			(double)profile_pop_sub_[1] / (double)profile_pop_sub_count_,
+			(double)profile_pop_sub_[2] / (double)profile_pop_sub_count_,
+			(double)profile_pop_sub_[3] / (double)profile_pop_sub_count_,
+			(double)profile_pop_sub_[4] / (double)profile_pop_sub_count_);
+	}
 	if (profile_slice_gate_[0] + profile_slice_gate_[3]) {
 		fprintf(stderr, "[vm-profile] slice-gate: instance-receiver %llu | mic-pass %llu | slice-declined %llu | mic-fail %llu\n",
 			(unsigned long long)profile_slice_gate_[0], (unsigned long long)profile_slice_gate_[1],
@@ -12179,6 +12188,13 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 // + depth guard). Destroys the callee's script_value state NOW — deferring destruction
 // is observable.
 void vm_backend::pop_script_frame_core(call_record& rec) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_pc0 = __rdtsc();
+	++profile_pop_sub_count_;
+#define JAI_POP_SUB(idx) { const uint64_t prof_pc1 = __rdtsc(); profile_pop_sub_[idx] += prof_pc1 - prof_pc0; prof_pc0 = prof_pc1; }
+#else
+#define JAI_POP_SUB(idx)
+#endif
 	if (!rec.env_lazy) {
 		// Lazy frames never created an env (environment_ is the CALLER's), so there is
 		// nothing to clear; clearing it poisoned a method caller's this-binding.
@@ -12189,11 +12205,13 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
+	JAI_POP_SUB(0);
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
 		// boundary the old locals clear destroyed callee state at
 		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
 	}
+	JAI_POP_SUB(1);
 	if (try_records_.size() > rec.try_base) {
 		try_records_.erase(try_records_.begin() + rec.try_base, try_records_.end());
 	}
@@ -12206,12 +12224,14 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	if (pending_callees_.size() > rec.pending_base) {
 		pending_callees_.erase(pending_callees_.begin() + rec.pending_base, pending_callees_.end());
 	}
+	JAI_POP_SUB(2);
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));
 	} else if (rec.f.entry_env) {
 		rec.f.entry_env = nullptr;
 	}
+	JAI_POP_SUB(3);
 	// Scrub only what this frame actually dirtied (function frames leave method/static
 	// metadata untouched, and their callee pin lives on the stack, not the record)
 	if (rec.locals.is_method) {
@@ -12242,6 +12262,8 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	--current_call_depth_;
 	frames_.pop_back();
 	--call_records_top_;
+	JAI_POP_SUB(4);
+#undef JAI_POP_SUB
 }
 
 op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {

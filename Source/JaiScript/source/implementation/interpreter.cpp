@@ -8755,11 +8755,19 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
 
     // Evaluate each element and add to array. All-detach ruling (2026-07, open
     // question #12): literal construction is a store boundary - bound primitives
-    // snapshot like every assignment-shaped store (KEEP BYTE-PARALLEL with
+    // snapshot like every assignment-shaped store, and element/subscript reads that
+    // arrive as reference wrappers normalize to VALUES exactly like assignment
+    // (a literal must never hold a live reference into its source; to_json emitted
+    // null for them). Copy out through a temp: assigning deref() straight into elem
+    // destroys the holder that owns the deref target. (KEEP BYTE-PARALLEL with
     // vm_backend::exec_array)
     for (const auto& element : expr->elements) {
         JAISCRIPT_TRY(dispatch_expr(element.get()));
         script_value elem = pop_value();
+        if (elem.is_reference()) [[unlikely]] {
+            script_value derefed = elem.deref();
+            elem = std::move(derefed);
+        }
         if (elem.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             elem = elem.detached_for_store();
         }
@@ -8792,7 +8800,17 @@ checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr)
         script_value value = pop_value();
 
         // All-detach ruling (2026-07, #12): literal construction is a store boundary -
-        // bound primitives snapshot (KEEP BYTE-PARALLEL with vm_backend::exec_map)
+        // bound primitives snapshot, and reference-wrapper reads normalize to VALUES
+        // like assignment (see the array-literal twin for the argument; KEEP
+        // BYTE-PARALLEL with vm_backend::exec_map)
+        if (key.is_reference()) [[unlikely]] {
+            script_value derefed = key.deref();
+            key = std::move(derefed);
+        }
+        if (value.is_reference()) [[unlikely]] {
+            script_value derefed = value.deref();
+            value = std::move(derefed);
+        }
         if (key.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             key = key.detached_for_store();
         }

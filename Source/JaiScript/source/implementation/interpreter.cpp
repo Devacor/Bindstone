@@ -11124,6 +11124,13 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
         decl->name_id = string_symbolizer_->intern(decl->name);
     }
 
+    // reflect:: is engine truth — script declarations into it are impersonation
+    if (is_reserved_namespace_name(decl->name)) {
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+            "Namespace '{0}' is reserved for the engine (reflect:: is C++-registered only)",
+            decl->name_id);
+    }
+
     // Get or create namespace data
     if (!engine_) {
         return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));

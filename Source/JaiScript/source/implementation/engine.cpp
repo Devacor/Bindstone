@@ -1907,6 +1907,17 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));
 }
 
+std::vector<std::string> engine::registered_class_names() const {
+    std::set<std::string> names;
+    for (const auto& [name, def] : impl->classes) {
+        names.insert(name);
+    }
+    for (const auto& [name, def] : impl->class_registry_.script_classes_) {
+        names.insert(name);
+    }
+    return std::vector<std::string>(names.begin(), names.end());
+}
+
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
     // First check C++ classes
     auto it = impl->classes.find(name);

@@ -1630,6 +1630,7 @@ public:
             });
         }
         
+        class_def_->set_cpp_backed(true);   // reflect::is_cpp_bound's class-form answer
         engine_.add_class<T>(class_name_, class_def_);
 
         // Register serialization metadata with the engine's registry (with type_index for runtime lookup)

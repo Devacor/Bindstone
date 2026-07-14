@@ -6,6 +6,7 @@
 #include "containers.hpp"
 #include "math.hpp"
 #include "strings.hpp"
+#include "reflection.hpp"
 // Optional: #include "vector.hpp"  // Vec2/Vec3 types - many engines have their own
 
 namespace jai {
@@ -20,6 +21,9 @@ namespace stdlib {
         register_container_types(eng_ref);
         register_math_functions(eng_ref);
         register_string_functions(eng_ref);
+        register_reflection_functions(eng_ref);   // the reflect:: capability — separately
+                                                  // composable for hosts that grant stdlib
+                                                  // without reflection
 
         // Optional: register_vector_types(eng_ref);  // Vec2/Vec3 with move_towards
     }

@@ -917,6 +917,38 @@ public:
             check_false(method_reachable, "base methods stay unavailable until the base registers");
         });
 
+        test("adoption_under_live_instances_is_an_invariant_violation", [this]() {
+            // Adoption renames the definition; live placeholder instances would lose
+            // their type identity — the binder throws at the registration site instead.
+            auto eng = make_engine();
+            dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("auto stray = AutoChainBase();");   // placeholder identity, alive
+            check_throws([&]() {
+                dynamic_binder<AutoChainBase>(*eng, "TooLateBase")
+                    .method("extra", [](AutoChainBase&) { return (int64_t)1; })
+                    .build();
+            }, "explicit registration after placeholder instances exist throws");
+        });
+
+        test("explicit_property_after_auto_bind_wins", [this]() {
+            // The precedence contract: an explicit .property() placed AFTER auto_bind()
+            // overrides the schema-generated accessor for that name.
+            auto eng = make_engine();
+            dynamic_binder<PropChainBase>(*eng, "PropChainBase")
+                .constructor<>()
+                .auto_bind()
+                .property("armor",
+                    [](PropChainBase&) { return (int64_t)999; },
+                    [](PropChainBase&, int64_t) {})
+                .build();
+            eng->execute("auto p = PropChainBase();");
+            check_eq(eng->execute("p.armor").as_int(), (int64_t)999,
+                "explicit accessor replaced the schema one");
+        });
+
         test("auto_bind_multiple_inheritance", [this]() {
             // Test that auto_bind correctly handles multiple base classes
             // class Left  : property_owner<Left>           -> no base

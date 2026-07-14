@@ -123,6 +123,19 @@ the in-class pin when declared, else the bare class name, always matching the se
 <code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
 on its own, which is exactly what makes an empty engine a sandbox
 (<a href="05-safety-rails.html">Safety Rails</a>).</p>
+<p><strong>Timing.</strong> The static phase (declarations, schema entries, serialization identity, the
+registrar queue) completes at program start, touches no engine, and its cross-file order is irrelevant.
+The runtime phase is host-sequenced: <code>make()</code> → <code>register_all</code> →
+<code>bind_registrar</code> (once per engine) → any explicit binders → run scripts. Inside that
+registration window, order never matters — registrars replay in arbitrary order, derived-before-base is
+fine, and explicit registrations adopt what auto-materialization created. Registering more types
+<em>after</em> scripts have run is supported and intentional (new types appear; re-registering an
+explicitly-bound type replaces its binding for future constructions, while existing instances keep the
+shape they were built with). One contract is enforced, not assumed: <strong>an explicit registration
+cannot adopt an auto-materialized base while script instances of it are alive</strong> — that would
+change their type identity, so the binder throws at the registration site. In practice: finish
+registering before constructing, and treat bare auto-names as internal plumbing — pin a curated name
+(<code>JAI_PROPERTY_OWNER</code>) on anything scripts construct directly.</p>
 
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
 <p>Superpower one. No glue was written for <code>id</code>, <code>level</code>, <code>interval</code>, or

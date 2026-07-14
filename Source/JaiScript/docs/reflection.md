@@ -16,6 +16,7 @@ already hold never mutates under you.
 
 ```jaiscript
 reflect::type_name(x)          // "Creature", "array<int>", "int" — the ONE name (matches $type)
+reflect::is_cpp_bound(x)       // -> bool: C++-backed object or host-registered class (vs script-declared)
 reflect::fields(x)             // -> array of {name, type, kind, access, static, from} — all members
 reflect::has_field(x, "hp")    // -> bool (inherited included)
 reflect::has_method(x, "roar") // -> bool (inherited included)
@@ -43,9 +44,14 @@ for (auto f : reflect::fields(obj)) {
 reflect::get(x, "hp")                   // reads like x.hp
 reflect::set(x, "hp", 50)              // writes like x.hp = 50 — same type + access enforcement
 reflect::invoke(x, "heal", 25)         // calls like x.heal(25) — overloads, defaults, access
+reflect::call("spawn_wave", 3)         // calls a FREE function by name — script or host-registered
 reflect::construct("Goblin", 30)       // == Goblin(30), value semantics
 reflect::construct_shared("Goblin", 30) // == new Goblin(30), reference semantics
 ```
+
+The introspect-then-invoke loop closes: enumerate a callable's parameter types
+(`reflect::method_arguments(x, "heal")` / `reflect::function_arguments("spawn_wave")` — one
+param-array **per overload**), build a matching args array, and `invoke`/`call` it.
 
 The one rule that governs all of B: **reflection is a spelling, not a bypass.** A write or call
 through `reflect::` enforces exactly what direct syntax enforces, with byte-identical error
@@ -66,11 +72,17 @@ for (auto row : wave_table) {
 
 ```jaiscript
 reflect::classes()             // -> array<string>, sorted — everything THIS engine registered
+reflect::functions()           // -> array<string>, sorted, namespace-QUALIFIED ("utils::add")
+reflect::globals()             // -> array<string>, sorted — global variable names
 reflect::bases(x)              // -> array<string>, declaration order; [] at a root
 reflect::instances("Creature") // -> array of live instances of the class (engine-scoped)
 reflect::generation("Creature")// -> int, bumps on hot reload/migration — poll this, re-ask on change
 reflect::methods(x)            // -> signature list; the detailed entry shape is companion §2
 ```
+
+Namespaces need no machinery of their own: `reflect::functions()` returns qualified names, so
+a namespace listing is a prefix filter (`f.starts_with("combat::")`). A dedicated
+`reflect::functions("combat")` overload is sugar the companion stages for v2.
 
 `instances` and `generation` are the tool loop: an editor polls one integer, and re-enumerates
 only when it moved. Everything reflects only what **this engine** registered — a sandbox engine

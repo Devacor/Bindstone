@@ -421,6 +421,12 @@ namespace jai {
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
 
+        // Caller context for builtins (reflect::set/invoke enforcement): a builtin call
+        // pushes no script frame, so the live environment chain answers for the caller
+        const class_definition* current_access_context() const {
+            return environment_ ? environment_->find_access_context() : nullptr;
+        }
+
         // Debugger: named slot-locals (params + reached body decls) of the current call frame,
         // reconstructed from the frame's function AST. Empty at global scope / for foreign frames.
         std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const;

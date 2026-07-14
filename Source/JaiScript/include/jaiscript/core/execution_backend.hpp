@@ -149,6 +149,11 @@ public:
     virtual bool is_unwinding() const = 0;
     virtual const script_exception& get_current_exception() const = 0;
 
+    // Caller's access context at builtin-call time (reflect::set/invoke enforcement:
+    // a builtin invocation does not push a script frame, so the backend's current
+    // environment belongs to the caller). Null = top-level / free-function context.
+    virtual const class_definition* current_access_context() const { return nullptr; }
+
     // True while a script is running on this backend (live frames / a top-level
     // execute in flight). The host-boundary discriminator: a stored-callable
     // invocation at is_executing()==false is a fresh host entry (same rule as the

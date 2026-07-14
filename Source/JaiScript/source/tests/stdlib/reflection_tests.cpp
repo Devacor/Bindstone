@@ -184,6 +184,106 @@ public:
             ).as_int(), (int64_t)7);
         });
 
+        test("get_set_invoke_read_write_like_direct_syntax", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class Soldier {
+                    int hp = 10;
+                    private: int secret = 1;
+                    public: int wound(int amount) { hp = hp - amount; return hp; }
+                    private: int covert() { return secret; }
+                }
+                var s = Soldier();
+            )");
+            check_eq(eng->execute("reflect::get(s, \"hp\")").as_int(), (int64_t)10);
+            eng->execute("reflect::set(s, \"hp\", 42);");
+            check_eq(eng->execute("s.hp").as_int(), (int64_t)42);
+            check_eq(eng->execute("reflect::invoke(s, \"wound\", 5)").as_int(), (int64_t)37);
+            check_eq(eng->execute("s.hp").as_int(), (int64_t)37);
+            // Reads see everything (the to_json rule): private state is readable, with
+            // access REPORTED by fields() so tools can choose to respect it
+            check_eq(eng->execute("reflect::get(s, \"secret\")").as_int(), (int64_t)1);
+        });
+
+        test("set_and_invoke_enforce_the_direct_syntax_access_matrix", [this]() {
+            // Reflection is a spelling, not a bypass: the write/invoke kernels are the
+            // SAME ones direct syntax runs, so the error text is byte-identical.
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class Vault {
+                    private: int gold = 100;
+                    private: int peek() { return gold; }
+                    public: int audit() {
+                        reflect::set(this, "gold", 7);           // own class context: allowed
+                        return reflect::invoke(this, "peek");
+                    }
+                }
+                var v = Vault();
+            )");
+            check_eq(eng->execute(R"(
+                var direct_err = ""; var reflected_err = "";
+                try { v.gold = 5; } catch (e) { direct_err = e; }
+                try { reflect::set(v, "gold", 5); } catch (e) { reflected_err = e; }
+                direct_err != "" && direct_err == reflected_err
+            )").as<bool>(), true);
+            check_eq(eng->execute(R"(
+                var direct_err = ""; var reflected_err = "";
+                try { v.peek(); } catch (e) { direct_err = e; }
+                try { reflect::invoke(v, "peek"); } catch (e) { reflected_err = e; }
+                direct_err != "" && direct_err == reflected_err
+            )").as<bool>(), true);
+            check_eq(eng->execute("v.audit()").as_int(), (int64_t)7);
+        });
+
+        test("call_construct_and_construct_shared", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                function raise(auto x) -> auto { return x + 1; }
+                namespace tools { function twice(auto x) -> auto { return x * 2; } }
+                class P { int x = 0; P(int v) { x = v; } }
+            )");
+            check_eq(eng->execute("reflect::call(\"raise\", 41)").as_int(), (int64_t)42);
+            check_eq(eng->execute("reflect::call(\"tools::twice\", 21)").as_int(), (int64_t)42);
+            check_throws([&]() { eng->execute("reflect::call(\"nope\");"); },
+                "unknown function raises the family error");
+            check_eq(eng->execute("reflect::construct(\"P\", 7).x").as_int(), (int64_t)7);
+            check_throws([&]() { eng->execute("reflect::construct(\"Gremlin\", 1);"); },
+                "unknown class raises the family error");
+            // Value vs reference semantics: == Class(...) vs == new Class(...)
+            eng->execute("var a = reflect::construct(\"P\", 1); var b = a; b.x = 9;");
+            check_eq(eng->execute("a.x").as_int(), (int64_t)1);
+            eng->execute("var sp = reflect::construct_shared(\"P\", 1); var tp = sp; tp.x = 9;");
+            check_eq(eng->execute("sp.x").as_int(), (int64_t)9);
+        });
+
+        test("statics_by_class_name", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class Counter {
+                    static int count = 3;
+                    static int bump() { count = count + 1; return count; }
+                }
+            )");
+            check_eq(eng->execute("reflect::get(\"Counter\", \"count\")").as_int(), (int64_t)3);
+            eng->execute("reflect::set(\"Counter\", \"count\", 10);");
+            check_eq(eng->execute("Counter::count").as_int(), (int64_t)10);
+            check_eq(eng->execute("reflect::invoke(\"Counter\", \"bump\")").as_int(), (int64_t)11);
+        });
+
+        test("host_properties_through_the_same_doors", [this]() {
+            // Host property_owner properties answer through the _get_/_set_ method door
+            auto eng = make_reflective_engine();
+            dynamic_binder<reflect_host_thing>(*eng, "HostThing3")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("var h = HostThing3();");
+            check_eq(eng->execute("reflect::get(h, \"armor\")").as_int(), (int64_t)4);
+            eng->execute("reflect::set(h, \"armor\", 11);");
+            check_eq(eng->execute("h.armor").as_int(), (int64_t)11);
+            check_eq(eng->execute("reflect::get(h, \"armor\")").as_int(), (int64_t)11);
+        });
+
         test("sandbox_engine_reflects_nothing_it_did_not_register", [this]() {
             // The allowlist contract: reflection is a capability over THIS engine's
             // registrations. A second engine in the same process knows nothing about

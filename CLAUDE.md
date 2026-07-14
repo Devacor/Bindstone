@@ -49,8 +49,9 @@ Script debugging is **on by default** (localhost only, free until a session atta
 process listens for VS Code on 127.0.0.1: **Client 52472 / LobbyServer 52473 / GameServer 52474**
 (extra engines in a process take the next free port in +10 steps; the bound port is logged at
 startup). Attach: install `Source/JaiScript/tools/vscode-jaiscript`, F5 → "Attach to JaiScript"
-with that port. Breakpoints/stepping need the interpreter backend — launch with
-`MV_SCRIPT_INTERPRETER=1`. Opt out: `--no-script-debug` (client) or `MV_SCRIPT_NO_DEBUG=1`.
+with that port. Both backends debug identically (breakpoints/stepping/locals — the VM carries the
+same statement hook); `MV_SCRIPT_INTERPRETER=1` still forces the interpreter if wanted, but is not
+required for debugging. Opt out: `--no-script-debug` (client) or `MV_SCRIPT_NO_DEBUG=1`.
 Wiring: `MV::makeScriptEngine` (`Source/Game/Script/script.cpp`), knobs in `MV/Script/script.h`.
 
 ## Tests & Benchmarks (MV/engine)

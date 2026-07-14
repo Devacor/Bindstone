@@ -10643,6 +10643,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     bool found_constructor = false;
     
     // Process class members
+    // Reflection determinism (twin: vm_backend class-decl builder, same commit): field
+    // DECLARATION order retained per class — instance fields then statics, source order
+    std::vector<uint64_t> reflect_field_order_instance;
+    std::vector<uint64_t> reflect_field_order_static;
     for (const auto& member : decl->members) {
         // Extract the actual declaration from the member
         auto* var_decl = member.declaration->get_type() == node_type::variable_decl
@@ -10699,12 +10703,16 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
 
                 // Add static field directly to the class
+                if (field_id != 0) {
+                    reflect_field_order_static.push_back(field_id);
+                }
                 if (field_id != 0 && !preserve_existing) {
                     class_def->add_static_field(field_id, default_val);
                 }
             } else {
                 // Instance field - store initializer AST for evaluation at construction time
                 if (field_id != 0) {
+                    reflect_field_order_instance.push_back(field_id);
                     if (initializer_ast) {
                         // Store the initializer AST in the script class definition (using ID for efficiency)
                         class_def->add_field_initializer_ast(field_id, initializer_ast);
@@ -10890,6 +10898,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
     }
     
+    reflect_field_order_instance.insert(reflect_field_order_instance.end(),
+                                        reflect_field_order_static.begin(),
+                                        reflect_field_order_static.end());
+    class_def->set_field_order(std::move(reflect_field_order_instance));
+
     // If this is a redefinition, we need to call redefine_class to update all instances
     if (is_redefinition) {
         // Evaluate field initializer ASTs to get actual default values for hot reload

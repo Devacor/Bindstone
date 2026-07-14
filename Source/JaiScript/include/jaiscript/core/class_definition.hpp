@@ -1057,6 +1057,27 @@ public:
     bool cpp_backed() const { return cpp_backed_; }
     void set_cpp_backed(bool v) { cpp_backed_ = v; }
     uint64_t reflection_generation() const { return reflection_generation_; }
+    // The C++ identity behind a host-backed class (nullptr for script classes) — lets
+    // reflection reach the type_registry schema (property kinds: field/observable/signal)
+    const std::type_info* cpp_type() const { return cpp_type_; }
+    void set_cpp_type(const std::type_info* t) { cpp_type_ = t; }
+
+    // Field DECLARATION order, this class's own fields (instance fields first, then
+    // statics, each in source order) — replaced wholesale on every (re)definition by
+    // both backends' class-decl builders (same-commit twins). Required for reflection's
+    // determinism contract: symbol ids are interning-order-dependent per engine, so
+    // unordered_map iteration is not reproducible across engines or backends.
+    void set_field_order(std::vector<uint64_t> order) { field_order_ = std::move(order); }
+    const std::vector<uint64_t>& field_order() const { return field_order_; }
+
+    std::vector<std::shared_ptr<class_instance>> live_instances() const {
+        std::vector<std::shared_ptr<class_instance>> live;
+        live.reserve(instances_.size());
+        for (const auto& weak_instance : instances_) {
+            if (auto locked = weak_instance.lock()) { live.push_back(std::move(locked)); }
+        }
+        return live;
+    }
 
     engine* get_engine() const { return engine_; }
 
@@ -1478,6 +1499,8 @@ private:
     bool auto_registered_ = false;
     bool cpp_backed_ = false;
     uint64_t reflection_generation_ = 0;
+    std::vector<uint64_t> field_order_;
+    const std::type_info* cpp_type_ = nullptr;
     type_info_ptr type_info_;
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;

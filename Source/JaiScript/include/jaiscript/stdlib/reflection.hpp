@@ -14,7 +14,9 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/properties/property_schema.hpp>
 #include <string>
+#include <typeindex>
 #include <vector>
 
 namespace jai {
@@ -95,6 +97,69 @@ inline void expect_args(const std::vector<script_value>& args, size_t n, const c
     if (args.size() != n) {
         throw runtime_error(std::string("reflect::") + who + " expects " +
                             std::to_string(n) + (n == 1 ? " argument" : " arguments"));
+    }
+}
+
+// A C++ value type's script-facing name for field entries (host property types)
+inline std::string cpp_type_display_name(engine* eng, std::type_index ti) {
+    if (ti == std::type_index(typeid(int)) || ti == std::type_index(typeid(int64_t)) ||
+        ti == std::type_index(typeid(script_int))) { return "int"; }
+    if (ti == std::type_index(typeid(float)) || ti == std::type_index(typeid(double)) ||
+        ti == std::type_index(typeid(script_float))) { return "float"; }
+    if (ti == std::type_index(typeid(bool))) { return "bool"; }
+    if (ti == std::type_index(typeid(std::string))) { return "string"; }
+    if (auto def = eng->get_class_definition_by_type(ti)) { return def->get_name(); }
+    return "var";
+}
+
+inline script_value make_field_entry(engine* eng, const std::string& name, const std::string& type,
+                                     const std::string& kind, const std::string& access,
+                                     bool is_static, const std::string& from) {
+    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& m = const_cast<script_map&>(entry.as_map());
+    m[script_value(std::string("name"), eng)] = script_value(name, eng);
+    m[script_value(std::string("type"), eng)] = script_value(type, eng);
+    m[script_value(std::string("kind"), eng)] = script_value(kind, eng);
+    m[script_value(std::string("access"), eng)] = script_value(access, eng);
+    m[script_value(std::string("static"), eng)] = script_value(is_static, eng);
+    m[script_value(std::string("from"), eng)] = script_value(from, eng);
+    return entry;
+}
+
+// Base-first, declaration-order field walk (the determinism contract): each level
+// contributes its OWN fields from the retained field_order_, parents before children.
+inline void append_fields_of(engine* eng, class_definition* def, script_value& arr) {
+    for (const auto& parent : def->get_parent_classes()) {
+        if (parent) { append_fields_of(eng, parent.get(), arr); }
+    }
+    const std::string from = def->get_name();
+    for (uint64_t id : def->field_order()) {
+        const std::string name{eng->get_symbolizer()->get_string(id)};
+        std::string type = "auto";
+        if (auto ti = def->get_field_declared_type(id)) {
+            type = (ti->type_name == "any") ? "var"
+                 : (ti->type_name.empty() ? "auto" : ti->type_name);
+        }
+        std::string access = "public";
+        access_level level = access_level::public_access;
+        if (def->find_nonpublic_declarer(id, level)) {
+            access = (level == access_level::private_access) ? "private" : "protected";
+        }
+        arr.as_array().push_back(make_field_entry(eng, name, type, "field", access,
+                                                  def->is_static_field(id), from));
+    }
+    // Host-backed classes: the type_registry schema is the declaration record —
+    // own_properties() is declaration order, kind distinguishes signals/observables
+    if (def->cpp_backed() && def->cpp_type()) {
+        if (const auto* schema = type_registry::instance().try_get(std::type_index(*def->cpp_type()))) {
+            for (const auto& prop : schema->own_properties()) {
+                const char* kind = prop.is_signal ? "signal"
+                                 : prop.is_observable ? "observable" : "field";
+                arr.as_array().push_back(make_field_entry(
+                    eng, prop.name, cpp_type_display_name(eng, prop.value_type_id),
+                    kind, "public", false, from));
+            }
+        }
     }
 }
 
@@ -186,6 +251,29 @@ inline void register_reflection_functions(engine& eng_ref) {
         auto def = reflect_detail::resolve_class(eng, args[0], "generation");
         if (!def) { throw runtime_error("reflect::generation expects a class or class name"); }
         return script_value(static_cast<script_int>(def->reflection_generation()), eng);
+    });
+
+    add("fields", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 1, "fields");
+        auto arr = script_value::make_array(nullptr, eng);
+        // Non-class values (primitives, containers, functions) answer an empty array —
+        // a property grid can call fields() on anything (front door §A)
+        if (auto* def = reflect_detail::resolve_class(eng, args[0], "fields")) {
+            reflect_detail::append_fields_of(eng, def, arr);
+        }
+        return arr;
+    });
+
+    add("instances", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 1, "instances");
+        auto* def = reflect_detail::resolve_class(eng, args[0], "instances");
+        if (!def) { throw runtime_error("reflect::instances expects a class or class name"); }
+        auto arr = script_value::make_array(nullptr, eng);
+        for (auto& inst : def->live_instances()) {
+            arr.as_array().push_back(
+                script_value::make_object(def->get_name(), std::move(inst), eng));
+        }
+        return arr;
     });
 }
 

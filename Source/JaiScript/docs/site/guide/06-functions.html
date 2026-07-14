@@ -167,7 +167,9 @@ auto out = [];
 for (int i = 0; i &lt; 10; ++i) { out.push(fib(i)); }
 out.join(&quot;, &quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34</code></pre></div>
-<p>(On the VM backend, script-to-script calls run as in-loop frames — deep script recursion does not consume native stack.)</p>
+<p>(On the VM backend, script-to-script calls run as in-loop frames — deep script recursion does not consume
+native stack. Bare self tail calls — <code>return f(args)</code> — go further and reuse the live frame:
+accumulator-style tail recursion runs in constant space at any depth.)</p>
 <h2 id="variadics-live-on-the-host-side">Variadics live on the host side<a class="hlink" href="#variadics-live-on-the-host-side" aria-label="link">&#8203;</a></h2>
 <p>Script functions have fixed arity (plus defaults). Variadic functions are provided by the <strong>host</strong> via <code>engine::add_variadic_function</code>, which receives all arguments as a vector — <code>print</code> and <code>format</code> are exactly this:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">engine.add_variadic_function(&quot;sum_all&quot;, [&amp;engine](const std::vector&lt;jai::script_value&gt;&amp; args) {

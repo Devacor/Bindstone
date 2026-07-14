@@ -424,11 +424,11 @@ jai::dynamic_binder&lt;Pickup&gt;(*eng, "Pickup")
     .method("kind", [](Pickup&amp; p) { return std::string("pickup:") + p.name.get(); })
     .build();
 jai::dynamic_binder&lt;HealthPickup&gt;(*eng, "HealthPickup")
-    .auto_bind()                                   // picks up the Pickup base edge + healing
-    .property("name",                              // re-expose the base property explicitly
-        [](HealthPickup&amp; s) { return s.name.get(); },
-        [](HealthPickup&amp; s, const std::string&amp; v) { s.name = v; })
-    .build();</code></pre></div>
+    .auto_bind()      // derives the Pickup base edge from property_owner&lt;HealthPickup, Pickup&gt;
+    .build();         // healing AND the inherited name both bind — no re-exposure needed</code></pre></div>
+<p>(<code>auto_bind</code> reads the inheritance edge straight from the <code>property_owner</code>
+declaration. Classes that don't use <code>property_owner</code> declare the same edge explicitly with
+<code>.base_class&lt;Base&gt;()</code>.)</p>
 <p>Polymorphic serialization needs no extra registration at all — <code>property_owner</code> already recorded
 the <code>$type</code> identity and the derived→base edge. Save through the base pointer, load through the base
 pointer, get the derived object back:</p>
@@ -464,12 +464,11 @@ print("upcast: {} heals {}", describe(h), h.healing);
 print("inherited method: {}", h.kind());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">upcast: elixir heals 40
 inherited method: pickup:elixir</code></pre></div>
-<p>Two rules keep this deterministic. <strong>Register bases before derived types</strong> — the derived binder
+<p>One rule keeps this deterministic. <strong>Register bases before derived types</strong> — the derived binder
 wires the script-side edge by looking up the base's registration, and a missing base means the edge quietly
-doesn't form. And <strong>re-expose inherited <code>JAI_PROPERTY</code> fields on the derived binder</strong>
-(the getter/setter pair above): each inheritance level owns its own property manager, and the automatic
-schema binding does not reliably reach across levels — see the next section. Methods inherit fine;
-it's specifically base-level <em>properties</em> that want the explicit line.</p>
+doesn't form. Methods and <code>JAI_PROPERTY</code> fields both inherit through that edge: the
+schema-generated accessors resolve properties over the whole inheritance chain, so base-level
+declarations need no re-exposure on the derived binder.</p>
 <p>Script classes extending C++ classes (<code>class SmartSpawner : Spawner</code>, with
 <code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section — that
 direction works with zero extra registration.</p>

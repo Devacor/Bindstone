@@ -75,6 +75,24 @@ jai_gloom.exe --bench 300            # autopilot plays while you read ms/frame n
 Movement keys are honest held-key state (`GetAsyncKeyState`), so strafe-running
 while turning and firing works like it should.
 
+### No C++ host: the standalone runner
+
+`gloom.jai` is a drag-drop shim for the standalone `jaiscript.exe` runner: it
+supplies the host API of REFERENCE.md section 2 in pure script (a bit-exact
+xorshift64\* `Rng` under checked overflow, `host_log`/`itrunc`/`ifloor`/`utf8`/
+`ESC`, the `HOST_*` globals) on top of the runner's console IO, then loads
+`scripts/` and runs the host pump. Flags go after `--`:
+
+```bash
+jaiscript.exe gloom.jai                          # play (esc quits)
+jaiscript.exe gloom.jai -- --smoke --ticks 300   # headless parity self-test vs section 3.5
+jaiscript.exe gloom.jai -- --bench 300           # autopilot + sim/draw split
+```
+
+`--smoke` exits 0 only when `STATE_HASH` matches the reference checkpoint
+table. The idiomatic rewrite has the same shim:
+`../gloom_idiomatic/gloom_idiomatic.jai`.
+
 ## The game
 
 Four maps: **DIMLIT ANTECHAMBER** (grunts, and a wall that isn't), **COOLANT

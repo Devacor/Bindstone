@@ -91,6 +91,32 @@ public:
 		MV::require<MV::ResourceException>(false, "Failed to locate : ", a_id);
 		throw; //suppress no return warning.
 	}
+
+	bool has(const std::string &a_id) const {
+		for (auto&& item : dataCollection) {
+			if (item.id == a_id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	std::vector<std::string> ids() const {
+		std::vector<std::string> result;
+		result.reserve(dataCollection.size());
+		for (auto&& item : dataCollection) {
+			result.push_back(item.id);
+		}
+		return result;
+	}
+
+	size_t size() const {
+		return dataCollection.size();
+	}
+
+	const std::vector<DataType>& all() const {
+		return dataCollection;
+	}
 private:
 	Catalog< DataType>() {
 	}

@@ -33,7 +33,10 @@ namespace jai::detail {
     // and never bumping is how 2026-07-11's stale-slot_index caches happened.
     //   v1: original format
     //   v2: traditional-for initializer decls carry slot_index (parser slotting)
-    inline constexpr uint32_t k_jaibite_version = 2;
+    //   v3: \xNN escapes in string/char literals (lexer; literal bytes baked into AST)
+    //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
+    //       detection - previously-rejected inputs only, but the contract says always bump)
+    inline constexpr uint32_t k_jaibite_version = 4;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.

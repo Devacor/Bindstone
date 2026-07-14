@@ -69,6 +69,28 @@ jai_crawler.exe --god               # tourist mode (visit Vexadrach, stay alive)
 
 Needs a Windows 10+ console at least 80x28 (256-color VT processing).
 
+### No build at all: the standalone-runner shim
+
+`scripts/crawler.jai` replays the whole C++ host in pure JaiScript — drag it onto the
+standalone runner (`out/build/x64-Release BENCHMARKS/bin/jaiscript.exe`) and GRUBWELL
+runs with zero example-specific C++. It captures the runner's non-blocking `read_key`
+into a blocking wrapper, re-creates `draw`/`clear_screen`/`chr`/`host_log`/`sleep_ms`,
+the flag globals, and a **bit-exact script-side `Rng`** (xorshift64\* in 16/32-bit
+limbs under checked int64 — same hashes as the C++ host: seed 99's pilot still dies
+on floor 4, turn 341, to the same Grublin Slinger). Flags ride after `--`, dashes
+optional; the save default is `crawler_save.json` in the cwd:
+
+```bash
+jaiscript.exe crawler.jai                                  # interactive, seed 1337
+jaiscript.exe crawler.jai -- seed 7 god
+jaiscript.exe crawler.jai -- smoke turns 250 seed 99       # headless; prints STATE_HASH
+jaiscript.exe crawler.jai -- input "11^dwwwww" quiet       # scripted keys (';'=enter '^'=esc)
+```
+
+Runner-keyboard deltas (its console pump reports lowercase letter edges and no
+punctuation on Windows): uppercase commands = shift+letter, `>` descend = **TAB**,
+`.` wait = **SPACE**, and the `?` help modal is scripted-input-only.
+
 | key | action |
 |---|---|
 | `w` / `up` | step forward (into a monster = attack) |

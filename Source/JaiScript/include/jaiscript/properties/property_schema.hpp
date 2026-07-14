@@ -5,9 +5,7 @@
 #include <map>
 #include <unordered_map>
 #include <typeindex>
-#include <functional>
-#include <memory>
-#include <tuple>
+#include <mutex>
 
 namespace jai {
 
@@ -17,68 +15,26 @@ class property_base;
 // ============================================================================
 // Property Metadata (stored once per type, not per instance)
 // ============================================================================
+// Identity + flags only: typed value access goes through the live property_base
+// erased bridge (value_type_id/value_as/assign_value), never through the schema.
 
 struct property_meta {
 	std::string name;
-	std::type_index type_id;           // typeid(property<T>)
 	std::type_index value_type_id;     // typeid(T) - the actual value type
-	size_t offset_from_owner;          // Byte offset from owner to property<T>*
 	bool default_allow_serialization = true;
 	bool is_observable = false;        // True if this is an observable_property
-
-	// Type-erased accessors using offset (use void* for flexibility)
-	property_base* get_property(void* owner) const;
-	const property_base* get_property(const void* owner) const;
-
-	// Type-erased getter: returns pointer to the underlying value (T*)
-	// Uses property_mgr to find property by name
-	std::function<void*(void* owner, const std::string& prop_name)> get_value_ptr;
-
-	// Type-erased setter: sets the value from a void* source
-	// For observable properties, this triggers the on_change signal
-	std::function<void(void* owner, const std::string& prop_name, const void* value_ptr)> set_value;
+	bool is_signal = false;            // True for JAI_SIGNAL_PROPERTY (binds the generic Signal view)
 
 	// Default constructor for containers
 	property_meta()
-		: type_id(typeid(void))
-		, value_type_id(typeid(void))
-		, offset_from_owner(0) {}
+		: value_type_id(typeid(void)) {}
 
-	// Full constructor with all fields
-	property_meta(std::string n, std::type_index ti, std::type_index value_ti,
-	              size_t offset, bool allow_ser, bool observable,
-	              std::function<void*(void*, const std::string&)> getter,
-	              std::function<void(void*, const std::string&, const void*)> setter)
+	property_meta(std::string n, std::type_index value_ti, bool allow_ser, bool observable, bool signal_prop = false)
 		: name(std::move(n))
-		, type_id(ti)
 		, value_type_id(value_ti)
-		, offset_from_owner(offset)
 		, default_allow_serialization(allow_ser)
 		, is_observable(observable)
-		, get_value_ptr(std::move(getter))
-		, set_value(std::move(setter)) {
-	}
-
-	// Legacy constructor for backwards compatibility
-	property_meta(std::string n, std::type_index ti, size_t offset, bool allow_ser = true)
-		: name(std::move(n))
-		, type_id(ti)
-		, value_type_id(typeid(void))
-		, offset_from_owner(offset)
-		, default_allow_serialization(allow_ser)
-		, is_observable(false) {
-	}
-
-	// Constructor without lambdas - used by JAI_PROPERTY macros
-	// The getter/setter are generated later in dynamic_binder when the type is complete
-	property_meta(std::string n, std::type_index ti, std::type_index value_ti,
-	              size_t offset, bool allow_ser, bool observable)
-		: name(std::move(n))
-		, type_id(ti)
-		, value_type_id(value_ti)
-		, offset_from_owner(offset)
-		, default_allow_serialization(allow_ser)
-		, is_observable(observable) {
+		, is_signal(signal_prop) {
 	}
 };
 
@@ -136,6 +92,9 @@ private:
 // ============================================================================
 // Global Type Registry
 // ============================================================================
+// Sanctioned process-wide static (like the polymorphic registry): type identity is
+// per-binary, not per-engine. Guarded — first-touch inserts can race across engine
+// threads constructing property_owners concurrently.
 
 class type_registry {
 public:
@@ -146,11 +105,13 @@ public:
 
 	// Get or create schema for a type
 	type_property_schema& for_type(std::type_index ti) {
+		std::scoped_lock guard(mutex_);
 		return schemas_[ti];
 	}
 
 	// Get schema if it exists
 	const type_property_schema* try_get(std::type_index ti) const {
+		std::scoped_lock guard(mutex_);
 		auto it = schemas_.find(ti);
 		return it != schemas_.end() ? &it->second : nullptr;
 	}
@@ -174,6 +135,7 @@ public:
 
 	// Get all properties including inherited (walks base class chain)
 	std::vector<const property_meta*> all_properties(std::type_index ti) const {
+		std::scoped_lock guard(mutex_);
 		std::vector<const property_meta*> result;
 		collect_properties_recursive(ti, result);
 		return result;
@@ -202,8 +164,10 @@ public:
 
 	// Get direct base classes
 	std::vector<std::type_index> base_classes(std::type_index ti) const {
-		if (auto* schema = try_get(ti)) {
-			return schema->base_types();
+		std::scoped_lock guard(mutex_);
+		auto it = schemas_.find(ti);
+		if (it != schemas_.end()) {
+			return it->second.base_types();
 		}
 		return {};
 	}
@@ -215,17 +179,8 @@ public:
 
 	// Check if Derived inherits from Base (directly or indirectly)
 	bool inherits_from(std::type_index derived, std::type_index base) const {
-		if (derived == base) return true;
-
-		const auto* schema = try_get(derived);
-		if (!schema) return false;
-
-		for (const auto& direct_base : schema->base_types()) {
-			if (inherits_from(direct_base, base)) {
-				return true;
-			}
-		}
-		return false;
+		std::scoped_lock guard(mutex_);
+		return inherits_from_locked(derived, base);
 	}
 
 	template<typename Derived, typename Base>
@@ -236,80 +191,37 @@ public:
 private:
 	type_registry() = default;
 
+	bool inherits_from_locked(std::type_index derived, std::type_index base) const {
+		if (derived == base) return true;
+
+		auto it = schemas_.find(derived);
+		if (it == schemas_.end()) return false;
+
+		for (const auto& direct_base : it->second.base_types()) {
+			if (inherits_from_locked(direct_base, base)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void collect_properties_recursive(std::type_index ti, std::vector<const property_meta*>& result) const {
-		const auto* schema = try_get(ti);
-		if (!schema) return;
+		auto it = schemas_.find(ti);
+		if (it == schemas_.end()) return;
 
 		// First collect base class properties (so they come first in order)
-		for (const auto& base_ti : schema->base_types()) {
+		for (const auto& base_ti : it->second.base_types()) {
 			collect_properties_recursive(base_ti, result);
 		}
 
 		// Then add own properties
-		for (const auto& prop : schema->own_properties()) {
+		for (const auto& prop : it->second.own_properties()) {
 			result.push_back(&prop);
 		}
 	}
 
+	mutable std::mutex mutex_;
 	std::map<std::type_index, type_property_schema> schemas_;
 };
-
-// ============================================================================
-// Helper to compute offset from owner to property member
-// ============================================================================
-
-template<typename OwnerT, typename PropT>
-constexpr size_t compute_property_offset(PropT OwnerT::* member_ptr) {
-	// Use offsetof-like calculation
-	return reinterpret_cast<size_t>(&(static_cast<OwnerT*>(nullptr)->*member_ptr));
-}
-
-// ============================================================================
-// Static Registration Helpers
-// ============================================================================
-//
-// Note: property_owner CRTP template and related type traits are defined in
-// property_manager.hpp. Use has_property_owner_v<T> to detect if a type uses
-// the property system.
-
-// Registers inheritance info during static initialization
-template<typename Derived, typename... Bases>
-struct type_inheritance_registrar {
-	type_inheritance_registrar() {
-		auto& schema = type_registry::instance().for_type<Derived>();
-		(schema.add_base(std::type_index(typeid(Bases))), ...);
-	}
-};
-
-// Registers a single property during static initialization
-template<typename OwnerT>
-struct property_registrar {
-	template<typename PropT>
-	property_registrar(const char* name, size_t offset, bool allow_serialization = true) {
-		auto& schema = type_registry::instance().for_type<OwnerT>();
-		schema.add(property_meta{
-			name,
-			std::type_index(typeid(PropT)),
-			offset,
-			allow_serialization
-		});
-	}
-};
-
-// ============================================================================
-// Implementation
-// ============================================================================
-
-inline property_base* property_meta::get_property(void* owner) const {
-	return reinterpret_cast<property_base*>(
-		reinterpret_cast<char*>(owner) + offset_from_owner
-	);
-}
-
-inline const property_base* property_meta::get_property(const void* owner) const {
-	return reinterpret_cast<const property_base*>(
-		reinterpret_cast<const char*>(owner) + offset_from_owner
-	);
-}
 
 } // namespace jai

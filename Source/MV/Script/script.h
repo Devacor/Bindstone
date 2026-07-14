@@ -21,8 +21,15 @@ namespace MV {
 	// Callers still connect the engine into their Services themselves.
 	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes = 256 * 1024 * 1024);
 
-	// Env MV_SCRIPT_HOT_RELOAD=1: gameplay .script files re-eval when their mtime changes
-	// (see StandardScriptMethods::loadScript). Off = parse-once shipping behavior.
+	// Editor-hosted process flag. The Workbench sets it TRUE before engine creation; the
+	// shipping game never touches it. Game systems opt out of behaviors that assume a real
+	// run by checking editMode(), scripts read the InEditMode global (registered by
+	// makeScriptEngine), and gameplay script hot-reload turns on without the env var.
+	void editMode(bool a_enabled);
+	bool editMode();
+
+	// Env MV_SCRIPT_HOT_RELOAD=1 (or editMode()): gameplay .script files re-eval when their
+	// mtime changes (see StandardScriptMethods::loadScript). Off = parse-once shipping behavior.
 	bool scriptHotReloadEnabled();
 
 	// Script debugging (DAP; VS Code "Attach to JaiScript") is ON by default on Windows:

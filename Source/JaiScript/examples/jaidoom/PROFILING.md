@@ -32,6 +32,11 @@ Reports ms/tic with sim/render/blit split, realtime multiple, worst tic, and a S
 
 - 120x78 full pipeline: **18.30 ms/tic** (sim 0.96 / render 15.30 / blit 2.03), worst 36 ms,
   1.6x realtime, hash `2710547389` (identical across two runs).
+- **HASH REFERENCE UPDATED 2026-07-13: the tape's STATE_HASH is now `1746772898`** (verified
+  identical across two vm runs AND the interp backend). The old `2710547389` died when map
+  decorations landed (things.jai DECOR table): decor mobjs join the pool the hash folds, and
+  each spawn consumes a math::random draw, shifting the sim stream. The tape replays the same
+  3984 tics deterministically — regression rule 1 applies against the NEW hash.
 - **THE OPENING QUESTION:** the synthetic bench (`p7_bench.jai`, start-room autopilot) reads
   render ~5.4 ms/frame at the same resolution — the real tape renders ~3x heavier. Where does
   real-gameplay render time actually go (which draw stage, which scenes)? Long sightlines?

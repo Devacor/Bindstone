@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -39,7 +39,6 @@ print(&quot;after double_all(nums): nums[0] = {}  &lt;- mutation vanished!&quot;
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a[0] = 1  (the original is untouched)
 b[0] = 99
 after double_all(nums): nums[0] = 1  &lt;- mutation vanished!</code></pre></div>
-<p>*(pinned: semantics/value_semantics_tests.hpp — <code>assignment_copies</code>, <code>array_assignment_copies</code>, <code>map_assignment_copies</code>, <code>function_by_value_copies</code>; deep-copy details in semantics/test_deep_copy.cpp, test_object_deep_copy.cpp)*</p>
 <p><strong>This applies to class instances too</strong> — unlike Python/JS/Lua/C#, objects are values:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
@@ -81,7 +80,7 @@ print(&quot;h.hp = {}&quot;, h.hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after bump(n): 42
 items.size() = 1
 h.hp = 15</code></pre></div>
-<p>*(pinned: semantics/value_semantics_tests.hpp <code>reference_parameter_preserves_modifications</code>; vm/vm_backend_tests.cpp <code>ref_param_*</code> family — ~25 tests covering pass-through chains, block/loop scopes, methods, globals, recursion)*</p>
+<p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion — the aliasing follows the value wherever the call takes it.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }
@@ -99,7 +98,7 @@ print(&quot;arr[1] after realloc = {}&quot;, arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">h.hp = 11
 arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
-<p>*(pinned: vm/vm_backend_tests.cpp <code>ref_param_instance_field_from_method_body</code>, <code>ref_param_element_ref_single_hop</code>, <code>ref_param_element_ref_pass_through_realloc</code>, <code>ref_param_element_ref_shrink_errors</code> — shrinking the array out from under an element ref raises a catchable error rather than corrupting memory; the shared kernel is <code>detail/ref_lvalue.hpp</code>, verbatim in both backends)*</p>
+<p>Shrinking the array out from under an element reference raises a catchable error rather than corrupting memory — the reference machinery is one shared kernel, verbatim in both backends.</p>
 <h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
 <p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
@@ -115,9 +114,23 @@ x = 42;              // still writes through after the array reallocated
 print(&quot;arr[1] = {}&quot;, arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">v = 4
 arr[1] = 42</code></pre></div>
-<p>*(pinned: vm/vm_backend_tests.cpp <code>ref_decl_shares_env_ref</code>, <code>ref_decl_element_ref_survives_realloc</code>)*</p>
-<p><strong>Current caveat:</strong> an <code>auto&amp;</code> bound to a <em>typed</em> array&#x27;s element drops the element&#x27;s type constraint — you can write a string through it into an <code>array&lt;int&gt;</code> (pinned deliberately for now: vm/vm_backend_tests.cpp <code>ref_decl_element_constraint_dropped</code>).</p>
-<p><strong>Known crash (reported):</strong> calling a builtin <em>string</em> method through a ref <em>declaration</em> (<code>auto&amp; r = s; r.length();</code>) currently segfaults on both backends at the commit these docs were built from. String methods through ref <em>parameters</em> are fine, as are array/map methods through ref declarations. Until fixed, dereference first or operate on the original variable. (See INTENT_QUESTIONS.)</p>
+<p>References respect the type system, and builtin methods work through them. A write through an <code>auto&amp;</code> bound to a typed array&#x27;s element converts when compatible and rejects when not — exactly like writing to the element directly — and calling a string/array/map method through a reference mutates the referent in place:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
+auto&amp; e = nums[0];
+e = 9.7;                       // converts to the element type, like any typed write
+print(&quot;after e = 9.7: {}&quot;, to_json(nums));
+try {
+    e = &quot;nope&quot;;                // incompatible writes are rejected through refs too
+} catch (err) {
+    print(&quot;caught: {}&quot;, err);
+}
+var s = &quot;  hello  &quot;;
+auto&amp; r = s;
+r.trim();                      // string methods work through ref declarations
+print(&quot;[{}]&quot;, s);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after e = 9.7: [9,2,3]
+caught: Cannot assign &#x27;string&#x27; to element of type &#x27;int&#x27;
+[hello]</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
 for (auto x : nums) { x *= 2; }       // copies: original unchanged
@@ -126,7 +139,6 @@ for (auto&amp; x : nums) { x *= 2; }      // references: mutates in place
 print(&quot;after ref loop:   {}&quot;, nums[0]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after value loop: 1
 after ref loop:   2</code></pre></div>
-<p>*(pinned: language/range_based_for_tests.cpp; language/review_regression_tests.cpp <code>range_for_ref_in_function</code>, <code>range_for_ref_realloc_no_corruption</code>)*</p>
 <h2 id="escape-hatch-5-shared-ptr-opt-in-reference-semantics">Escape hatch 5: <code>shared_ptr&lt;T&gt;</code> — opt-in reference semantics<a class="hlink" href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics" aria-label="link">&#8203;</a></h2>
 <p>When you <em>want</em> an object shared by handle (entity registries, cross-references), declare it <code>shared_ptr&lt;T&gt;</code>. Copies of the handle alias the same object; <code>weak_ptr&lt;T&gt;</code> observes without owning:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
@@ -147,24 +159,22 @@ auto l = w.lock();
 l.x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">expired: false
 == result: 3</code></pre></div>
-<p>Note the guard rail: <code>weak_ptr&lt;P&gt; w = p;</code> from a plain (value-semantic) object is an error — <em>&quot;Cannot initialize weak_ptr&lt;&gt; from value-semantic object: use shared_ptr\&lt;T\&gt;&quot;</em>. <em>(pinned: semantics/weak_ptr_tests.cpp, semantics/script_container_tests.cpp)</em></p>
-<h2 id="what-each-strategy-costs">What each strategy costs (measured)<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
-<p>Same computation, three ways of holding/passing a meaty object (string name + 8-int stats array + 4 scalars; 200 calls per row, jaibite-precompiled, min-of-5, integer-µs harness — full methodology and tables in <code>docs/aliasing_costs.md</code>; rows live in the &quot;Performance Benchmarks&quot; suite as <code>Aliasing ...</code>):</p>
-<div class="tablewrap"><table><thead><tr><th>strategy</th><th>interp µs/call</th><th>vm µs/call</th><th>vs <code>&amp;</code></th></tr></thead><tbody><tr><td>read-only compute, pass <code>Creature c</code> (by value)</td><td>8.0</td><td>6.6</td><td>1.3–1.4× — the deep copy, ~1.8 µs/call here, grows with payload</td></tr><tr><td>read-only compute, pass <code>Creature&amp; c</code></td><td>6.2</td><td>4.8</td><td>1.0</td></tr><tr><td>read-only compute, pass <code>shared_ptr&lt;Creature&gt; c</code></td><td>6.4</td><td>4.9</td><td>tie (within noise)</td></tr><tr><td>mutate: <code>heal(Unit&amp; u)</code> vs <code>heal(shared_ptr&lt;Unit&gt; u)</code></td><td>1.7 / 1.8</td><td>1.4 / 1.4</td><td>tie (within noise)</td></tr><tr><td>method call — held as value / <code>auto&amp;</code> / shared_ptr</td><td>5.7–5.8</td><td>4.7</td><td>all tie: the holder doesn&#x27;t matter</td></tr></tbody></table></div>
-<p>On the node-aliasing structure benchmark (BST, 15 nodes): in-place <code>&amp;</code> params are ~1.35× faster than the shared_ptr return-and-reassign shape (that delta is the shape, not a per-access penalty), and both are ~3.5× faster than naive by-value, which deep-copies subtrees at every recursion level.</p>
+<p>Note the guard rail: <code>weak_ptr&lt;P&gt; w = p;</code> from a plain (value-semantic) object is an error — <em>&quot;Cannot initialize weak_ptr&lt;&gt; from value-semantic object: use shared_ptr&lt;T&gt;&quot;</em>.</p>
+<h2 id="what-each-strategy-costs">Choosing a strategy<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
+<p>The short version: passing by value pays for a deep copy that grows with the payload; <code>&amp;</code> and <code>shared_ptr</code> alias the same object at essentially the same cost. All three strategies are quantified side by side in <a href="../embedding/11-performance.html#value-strategy-costs">Performance</a>.</p>
 <p><strong>Decision guide:</strong></p>
 <ul>
-<li><strong>Plain values (default)</strong> for scalars, strings (O(1) shared copies), small structs, and anywhere you <em>want</em> snapshot semantics. Stop when the object carries containers and sits in a hot path — the per-call deep copy is the biggest avoidable cost above.</li>
+<li><strong>Plain values (default)</strong> for scalars, strings (O(1) shared copies), small structs, and anywhere you <em>want</em> snapshot semantics. Stop when the object carries containers and sits in a hot path — the per-call deep copy is the one cost here that grows with the object.</li>
 <li><strong><code>T&amp;</code> params / <code>auto&amp;</code> decls</strong> when a function needs to see or mutate the caller&#x27;s object: cheapest aliasing, fastest shape for in-place algorithms. Constraint: references are <em>aliases, not storage</em> — plain assignment stores a value through them, and a reference can&#x27;t live in a field or container. <code>&amp;</code> can&#x27;t be your data model.</li>
 <li><strong><code>shared_ptr&lt;T&gt;</code> (<code>new T(...)</code>)</strong> when identity must outlive the call: fields holding objects, containers of entities, registries, trees/graphs where nodes hold nodes. Same cost as <code>&amp;</code> at call boundaries. Copies follow the declaration: if the object was declared <code>shared_ptr</code> (<code>new T(...)</code>), <code>var</code>/<code>auto</code> copies <strong>share the handle</strong> (as in C++ — copying a <code>shared_ptr</code> copies the handle, not the object); if it was declared a value (<code>MyType(5)</code>), copies <strong>deep-copy</strong>.</li>
 </ul>
-<p><strong>A <code>var</code> holding a handle is the monotonic ladder: it behaves IDENTICALLY to a typed handle holder wherever the typed spelling is legal; its only extra power is accepting an incompatible type.</strong> For a <code>var</code> currently holding a handle, <code>=</code> resolves by the rhs: a <em>handle</em> rhs (<code>p = new Bar();</code>) <strong>rebinds</strong>; a <em>value</em> rhs of a <strong>compatible</strong> class (same class or subclass of the held pointee) <strong>assigns into</strong> the shared pointee — aliases see the change, exactly like <code>shared_ptr&lt;T&gt;</code>/<code>shared_ptr&lt;auto&gt;</code> (<code>var p = new Foo(); p = someFooValue;</code> copies the fields into the shared object); a value rhs of an <strong>incompatible</strong> class (<code>p = Bar();</code>) or a <em>primitive</em> (<code>p = 5;</code>) <strong>rebinds</strong> to an independent copy — this is the one thing <code>var</code> adds, exactly where a typed holder would error. <code>Foo()</code> (a value) assigns into; <code>new Foo()</code> (a handle) rebinds — the same distinction as the typed tiers. The enforced tiers (<code>shared_ptr&lt;T&gt;</code>/<code>shared_ptr&lt;auto&gt;</code>/<code>auto</code>) are unchanged; <code>auto</code> copies of a var-held handle re-lock to the plain spelling. <em>(pinned: language/script_class_tests.cpp <code>var_held_handles_rebind_unchecked</code>)</em></p>
+<p><strong>A <code>var</code> holding a handle is the monotonic ladder: it behaves IDENTICALLY to a typed handle holder wherever the typed spelling is legal; its only extra power is accepting an incompatible type.</strong> For a <code>var</code> currently holding a handle, <code>=</code> resolves by the rhs: a <em>handle</em> rhs (<code>p = new Bar();</code>) <strong>rebinds</strong>; a <em>value</em> rhs of a <strong>compatible</strong> class (same class or subclass of the held pointee) <strong>assigns into</strong> the shared pointee — aliases see the change, exactly like <code>shared_ptr&lt;T&gt;</code>/<code>shared_ptr&lt;auto&gt;</code> (<code>var p = new Foo(); p = someFooValue;</code> copies the fields into the shared object); a value rhs of an <strong>incompatible</strong> class (<code>p = Bar();</code>) or a <em>primitive</em> (<code>p = 5;</code>) <strong>rebinds</strong> to an independent copy — this is the one thing <code>var</code> adds, exactly where a typed holder would error. <code>Foo()</code> (a value) assigns into; <code>new Foo()</code> (a handle) rebinds — the same distinction as the typed tiers. The enforced tiers (<code>shared_ptr&lt;T&gt;</code>/<code>shared_ptr&lt;auto&gt;</code>/<code>auto</code>) are unchanged; <code>auto</code> copies of a var-held handle re-lock to the plain spelling.</p>
 <p>Rule of thumb: <strong>values by default; <code>&amp;</code> when a call needs the real thing; <code>new</code>/<code>shared_ptr</code> when the alias needs to live somewhere.</strong></p>
 <h2 id="clone-vs-copy-host-api-note">clone vs copy (host API note)<a class="hlink" href="#clone-vs-copy-host-api-note" aria-label="link">&#8203;</a></h2>
-<p>Inside script, assignment of value-declared objects behaves as a (deep) copy, as shown above (<code>shared_ptr</code>-declared objects share the handle instead). On the <strong>C++ side</strong> the rule is inverted: copying a <code>jai::script_value</code> is a cheap O(1) <em>shallow</em> handle copy (heavy types sit behind <code>strong_ptr</code>), and <code>value.clone()</code> is the explicit deep copy. Don&#x27;t confuse the two worlds: script <code>=</code> copies; C++ <code>=</code> aliases. <em>(pinned: semantics/test_cpp_bound.cpp, semantics/test_deep_copy_comprehensive.cpp; documented in core/value.hpp)</em></p><nav class="prevnext"><a class="prev" href="../guide/02-type-ladder.html"><span>&larr; previous</span>The Type Ladder: typed, auto, var</a><a class="next" href="../guide/04-operators.html"><span>next &rarr;</span>Operators &amp; Arithmetic</a></nav></article>
+<p>Inside script, assignment of value-declared objects behaves as a (deep) copy, as shown above (<code>shared_ptr</code>-declared objects share the handle instead). On the <strong>C++ side</strong> the rule is inverted: copying a <code>jai::script_value</code> is a cheap O(1) <em>shallow</em> handle copy (heavy types sit behind <code>strong_ptr</code>), and <code>value.clone()</code> is the explicit deep copy. Don&#x27;t confuse the two worlds: script <code>=</code> copies; C++ <code>=</code> aliases.</p><nav class="prevnext"><a class="prev" href="../guide/02-type-ladder.html"><span>&larr; previous</span>The Type Ladder: typed, auto, var</a><a class="next" href="../guide/04-operators.html"><span>next &rarr;</span>Operators &amp; Arithmetic</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

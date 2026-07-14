@@ -346,6 +346,15 @@ namespace stdlib {
             return true;
         });
 
+        // Byte minting (char ruling 2026-07-12): explicit int -> char, range-checked.
+        // The reverse of promotion; there is deliberately no IMPLICIT int -> char.
+        eng_ref.add_function("to_char", [](script_int n) -> script_char {
+            if (n < 0 || n > 255) {
+                throw runtime_error("to_char expects 0..255, got " + std::to_string(n));
+            }
+            return static_cast<script_char>(static_cast<unsigned char>(n));
+        });
+
         eng_ref.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";

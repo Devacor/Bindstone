@@ -813,12 +813,25 @@ namespace jai {
                         // For script_value&, just return a reference to the dereferenced value
                         return deref();
                     } else {
-                        // For user-defined types stored as objects
-                        if (type_info_ && type_info_->is_object()) {
-                            // Unregistered-class binding (opaque box): the pointer IS the object.
-                            // No holder exists so there is no name check (matches the old behavior).
-                            if (auto* box = bound_box()) {
-                                return *static_cast<base_type*>(box->ptr);
+                        // References resolve first (cells reach C++ boundaries raw); the
+                        // object gate is the STORAGE, not type_info_ — var-stored objects
+                        // legally carry an 'any' declared tag (decl flattening ruling), so
+                        // only the holder's registered-type check below guards the cast.
+                        if (is_reference()) {
+                            return deref().as<T>();
+                        }
+                        // Unregistered-class binding (opaque box): the pointer IS the object.
+                        // No holder exists so there is no name check (matches the old behavior);
+                        // bound values are not OBJECT storage, so probe before the storage gate.
+                        if (auto* box = bound_box()) {
+                            return *static_cast<base_type*>(box->ptr);
+                        }
+                        if (is_object()) {
+                            // Smart pointers past this point would reinterpret the holder's
+                            // T as shared_ptr<T> — no aliasable handle exists in a holder
+                            // (only a bound_box, handled above, can legitimately be one).
+                            if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
+                                throw runtime_error("Object type mismatch");
                             }
                             // Non-owning C++ reference (registered class): verify the holder's
                             // registered type before reinterpreting.
@@ -1486,10 +1499,11 @@ namespace jai {
                     }
                 }
 
-                // Fall back to default shared_ptr extraction
-                auto t = type();
-                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto objHolder = storage_.get<strong_ptr<object_holder>>();
+                // Fall back to default shared_ptr extraction. Declared-type gates lie for
+                // var-stored ('any' tag) and reference-wrapped values: probe the deref'd
+                // STORAGE (see the class_instance branch above).
+                if (auto* holderPtr = deref().storage_.get_if<strong_ptr<object_holder>>(); holderPtr && *holderPtr) {
+                    const auto& objHolder = *holderPtr;
 
                     // Check for non-owning C++ reference (holder bound_ptr set, data null)
                     // Cannot safely return shared_ptr from non-owning reference
@@ -1548,10 +1562,10 @@ namespace jai {
                     }
                 }
 
-                // For custom classes, try to extract shared_ptr and dereference
-                auto t = type();
-                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto objHolder = storage_.get<strong_ptr<object_holder>>();
+                // For custom classes, try to extract shared_ptr and dereference. Storage
+                // probe, not declared-type gate (var/'any' tags and references lie).
+                if (auto* holderPtr = deref().storage_.get_if<strong_ptr<object_holder>>(); holderPtr && *holderPtr) {
+                    const auto& objHolder = *holderPtr;
 
                     // Handle non-owning C++ reference via the holder's bound_ptr
                     if (objHolder->bound_ptr && !objHolder->data) {

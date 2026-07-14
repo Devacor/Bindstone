@@ -23,6 +23,24 @@ cmake --build "out/build/x64-Release BENCHMARKS" --target jai_demoreel
 The exe prefers the source `scenes/` dir (so hot reload edits the real files),
 falling back to `demoreel_scenes/` copied next to the binary.
 
+### No build: the standalone runner
+
+`demoreel.jai` is a pure-script shim that recreates the C++ host contract (the
+`ESC` global, `itrunc`/`ifloor`, and a bit-exact script port of the seeded
+xorshift64* `Rng` — checked-int64-safe via 16-bit-limb multiplies) and pumps the
+reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
+
+```
+jaiscript demoreel.jai                  # the reel, 30 fps (q/esc quits; h/f/n/p/space/digits work)
+jaiscript demoreel.jai -- frames 1700   # headless self-test: smoke frames, sizes + stream hash + timing
+jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt for diffing
+```
+
+Verified: the 1700-frame smoke reel produces the same stream hash and
+byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
+Not ported from the C++ host: the VT escape filter / xterm-256 rewrite /
+row-diff (frames present whole), TAB dual-engine swap, and `r` hot reload.
+
 ## Run
 
 ```

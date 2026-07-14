@@ -14,6 +14,7 @@ static jai::registrar<GameInstance, MV::Services> _hookGameInstance("GameInstanc
 	builder.method("spawnCreature", [](GameInstance& a_self, int64_t a_slot, const std::string& a_id) {
 		a_self.spawnCreature(static_cast<int>(a_slot), a_id);
 	});
+	builder.method("data", [](GameInstance& a_self) -> GameData& { return a_self.data(); });
 });
 
 void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position) {

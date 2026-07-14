@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a><a href="open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -40,8 +40,13 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
 e-&gt;execute("print(\"hello\");");</code></pre></div>
 
-<p>It compiles as part of your project — a static lib plus headers, no global interpreter state anywhere.
-Bind a C++ class in a fluent chain, hand the script a budget and a memory cap, and iterate with hot reload:</p>
+<p>Yes, really two lines — a bare engine ships with a basic <code>print</code> built in. One more,
+<code>jai::stdlib::register_all(e);</code>, upgrades it to the formatted <code>{}</code> version and brings
+the full standard library (math, containers, JSON). It compiles as part of your project — a static lib plus
+headers, no global interpreter state anywhere. Bind a C++ class in a
+<a href="embedding/02-dynamic-binder.html">fluent chain</a> — one declaration makes a field reflected,
+script-visible, and serialized, host signals connecting straight to script — hand the script a budget
+and a memory cap, and iterate with hot reload:</p>
 
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 0;          // enforced — assigning a string is an error
 auto name = "Jai";     // inferred, then enforced — locked to string
@@ -77,12 +82,13 @@ print("hp = {}", h.hp);</code></pre></div>
     <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
   <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one executable spec</h3>
     <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte — including error text —
-    enforced by 1,500+ tests run against both, plus a differential fuzzer that files a bug whenever they
+    enforced by 2,000+ tests run against both, plus a differential fuzzer that files a bug whenever they
     disagree. Semantics cannot rot silently.</p>
     <p><a href="embedding/03-backends.html">Backends →</a></p></div>
   <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
     <p>No statics, no singletons; every value carries its engine. Two engines on two threads need no locks,
-    tests cannot contaminate each other, and the planned parallel story falls out of this property instead of
+    tests cannot contaminate each other, and in-language parallelism (<code>parallel_for</code>,
+    <code>parallel_transform</code> — deterministic at any worker count) falls out of this property instead of
     fighting it.</p>
     <p><a href="embedding/01-embedding-quickstart.html">Quickstart →</a></p></div>
   <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
@@ -91,7 +97,8 @@ print("hp = {}", h.hp);</code></pre></div>
     speed is the point. The dungeon crawler reloads its own scripts mid-game on a keypress.</p>
     <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
   <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
-    <p>A script can only touch what the host registered — the binding surface <em>is</em> the allowlist.
+    <p>A script can only touch what the host registered — the
+    <a href="embedding/02-dynamic-binder.html">binding surface</a> <em>is</em> the allowlist.
     Checked integer overflow, catchable recursion limits, an execution budget and a memory cap that a hostile
     script cannot catch-and-swallow its way past. Untrusted scripts are a configuration, not a rewrite.</p>
     <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
@@ -106,12 +113,12 @@ print("hp = {}", h.hp);</code></pre></div>
 <div class="home-section">
 <h2>The receipts</h2>
 <div class="receipts">
-  <div class="receipt"><span class="big">1,500+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
-  <div class="receipt"><span class="big">~45 ns</span><span class="what">per hot-loop iteration on the VM — loops fuse into superinstructions; the VM beats Squirrel on most head-to-head benchmarks (12W/6L/1T)</span></div>
+  <div class="receipt"><span class="big">2,000+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
   <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
-  <div class="receipt"><span class="big">~3,250 lines</span><span class="what">of JaiScript in a complete first-person dungeon crawler; plus a 10-scene demoreel — all doubling as cross-backend determinism tests</span></div>
+  <div class="receipt"><span class="big">~7,600 lines</span><span class="what">of pure JaiScript is a complete <a href="examples/index.html">DOOM</a> — shareware WAD to BSP renderer to status bar, comfortably inside the original's 35 Hz frame budget; a dungeon crawler and a 10-scene demoreel keep it company</span></div>
+  <div class="receipt"><span class="big">16 players</span><span class="what">JaiDOOM deathmatch and co-op over the network — the whole wire protocol is <a href="examples/index.html">script</a>, not C++</span></div>
   <div class="receipt"><span class="big">strict mode</span><span class="what">optional static checking: compiler-style diagnostics with line/column before a single statement runs</span></div>
-  <div class="receipt"><span class="big">0.38 µs</span><span class="what">warm <code>jaibite.execute()</code> on the VM for a tiny script; engine creation ~90 µs, so reuse engines</span></div>
+  <div class="receipt"><span class="big">measured</span><span class="what">hot-loop, call, boot, and per-feature costs are quantified on one page, under one protocol: <a href="embedding/11-performance.html">Performance</a></span></div>
 </div>
 </div>
 
@@ -122,14 +129,12 @@ print("hp = {}", h.hp);</code></pre></div>
   The idiom is <code>&amp;</code> parameters for anything heavy — cheap by design. If you write Python-shaped
   code expecting reference semantics, your first hour will surprise you; read
   <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
-  <li><strong>Call-dense recursion is slower than Lua</strong> today (~5× on a fib microbenchmark). Most game
-  scripts are loop- and method-shaped, where the gap is small to none — the register-window VM redesign that
-  closes it is on the roadmap, not a hope.</li>
+  <li><strong>Call-dense recursion is slower than Lua.</strong> Most game scripts are loop- and
+  method-shaped, where the gap is small to none; if your workload is deep non-tail recursion over tiny
+  frames, Lua wins that race (bare self tail calls reuse their frame on the VM and run at loop
+  speed, any depth). The head-to-head numbers live in <a href="embedding/11-performance.html">Performance</a>.</li>
   <li><strong>Two backends cost maintenance.</strong> That's the price of the executable spec, and shared
-  semantic kernels are steadily shrinking the duplicated surface.</li>
-  <li><strong>Some behaviors are still under design review.</strong> Writing these docs from the test suite
-  surfaced 13 of them — documented as observed, not papered over. Seven now carry design rulings; six
-  remain open: <a href="open-questions.html">Open Questions</a>.</li>
+  semantic kernels keep the duplicated surface small.</li>
 </ul>
 </div>
 
@@ -145,7 +150,7 @@ hardened by adversarial review and differential fuzzing, and dogfooded by buildi
 
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>
 </body>

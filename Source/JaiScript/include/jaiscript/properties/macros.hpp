@@ -27,21 +27,19 @@
 // 1. Per-instance property_manager (for runtime access)
 // 2. Type-level schema via type_registry (for static reflection)
 
-// Schema registration helper - registers to type_registry using _jai_owner_type
-// Note: We only store type info here. The getter/setter lambdas are generated
-// later in dynamic_binder::bind_properties_from_schema() when the type is complete.
-#define JAI_SCHEMA_REGISTER(prop_type, name, is_obs) \
+// Schema registration helper - registers to type_registry using _jai_owner_type.
+// Typed value access goes through property_base's erased bridge at runtime; the schema
+// carries only identity + flags.
+#define JAI_SCHEMA_REGISTER(prop_type, name, is_obs, allow_ser) \
     inline static const int _jai_schema_reg_##name = []{ \
         using OwnerT = _jai_owner_type; \
         using ValueT = prop_type; \
         jai::type_registry::instance().for_type<OwnerT>().add( \
             jai::property_meta{ \
                 #name, \
-                std::type_index(typeid(jai::property<ValueT>)), \
                 std::type_index(typeid(ValueT)), \
-                0, /* offset computed at runtime via property_manager */ \
-                true, /* allow_serialization */ \
-                is_obs /* is_observable */ \
+                allow_ser, \
+                is_obs \
             } \
         ); \
         return 0; \
@@ -49,7 +47,7 @@
 
 // Main property macro
 #define JAI_PROPERTY(type, name, ...) \
-    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \
+    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false, true); \
     jai::property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__ }
 
 // Transient property — registered for runtime access but never serialized.
@@ -57,12 +55,12 @@
 // that are cheaper to recompute at load time than to store and parse.
 // Optional default value: JAI_TRANSIENT_PROPERTY((int), myCache, 0);
 #define JAI_TRANSIENT_PROPERTY(type, name, ...) \
-    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \
+    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false, false); \
     jai::property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__, jai::serialize_mode::transient }
 
 // Deleted property - placeholder for removed properties during deserialization
 #define JAI_DELETED_PROPERTY(type, name) \
-    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \
+    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false, false); \
     jai::deleted_property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name }
 
 // Named property - different serialization name vs variable name
@@ -73,9 +71,7 @@
         jai::type_registry::instance().for_type<OwnerT>().add( \
             jai::property_meta{ \
                 prop_name, \
-                std::type_index(typeid(jai::property<ValueT>)), \
                 std::type_index(typeid(ValueT)), \
-                0, \
                 true, \
                 false \
             } \
@@ -94,11 +90,7 @@
 // 1. Repeat the name (verbose):
 //    jai::property<int> health{property_mgr, "health", 100};
 //
-// 2. C++20 NTTP with string literal (still verbose):
-//    template<jai::fixed_string Name> using prop = jai::property_with_name<Name>;
-//    prop<"health"> health{property_mgr, 100};
-//
-// 3. Use a registration function (separates declaration from registration):
+// 2. Use a registration function (separates declaration from registration):
 //    jai::property<int> health;
 //    void register_props() { health.init(property_mgr, "health", 100); }
 //
@@ -126,5 +118,5 @@
 //   };
 
 #define JAI_OBSERVABLE_PROPERTY(type, name, ...) \
-    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, true); \
+    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, true, true); \
     jai::observable_property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__ }

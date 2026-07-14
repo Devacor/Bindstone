@@ -66,6 +66,19 @@ public:
     void set_score_cpp(int val) { score = val; }
 };
 
+// Two-level chain for the inherited value-property accessor tests: the property
+// lives on the BASE level's manager, script access goes through the DERIVED binder.
+class PropChainBase : public property_owner<PropChainBase> {
+public:
+    JAI_PROPERTY((int), armor, 7);
+    PropChainBase() = default;
+};
+
+class PropChainDerived : public property_owner<PropChainDerived, PropChainBase> {
+public:
+    PropChainDerived() = default;
+};
+
 class Counter {
 public:
     int value;
@@ -90,6 +103,18 @@ public:
     bool operator<=(const Counter& other) const { return value <= other.value; }
     bool operator>(const Counter& other) const { return value > other.value; }
     bool operator>=(const Counter& other) const { return value >= other.value; }
+};
+
+// Polymorphic pair for the dynamic-type make_object test (the ServerCreature-through-
+// shared_ptr<Creature> shape).
+class base_shape {
+public:
+    virtual ~base_shape() = default;
+    double base_val() const { return 1.0; }
+};
+class derived_shape : public base_shape {
+public:
+    double derived_val() const { return 2.0; }
 };
 
 class dynamic_binder_tests : public suite {
@@ -749,6 +774,37 @@ public:
             check_eq(eng->execute("a.c_method()").as<std::string>(), "from_C", "Inherited from C via chain A->B->C");
         });
 
+        test("inherited_value_property_binds_through_derived_auto_bind", [this]() {
+            // A base-level JAI_PROPERTY read/written through a DERIVED registration must
+            // hit the BASE level's property manager in either registration order (each
+            // property_owner level owns its own manager; the generated accessors must
+            // resolve the chain like the signal view does).
+            auto run = [&](bool a_baseFirst) {
+                auto eng = make_engine();
+                auto bindBase = [&]() {
+                    dynamic_binder<PropChainBase>(*eng, "PropChainBase")
+                        .constructor<>()
+                        .auto_bind()
+                        .build();
+                };
+                auto bindDerived = [&]() {
+                    dynamic_binder<PropChainDerived>(*eng, "PropChainDerived")
+                        .constructor<>()
+                        .auto_bind()
+                        .build();
+                };
+                if (a_baseFirst) { bindBase(); bindDerived(); } else { bindDerived(); bindBase(); }
+                eng->execute("auto d = PropChainDerived();");
+                check_eq(eng->execute("d.armor").as_int(), (int64_t)7,
+                    a_baseFirst ? "base-first read" : "derived-first read");
+                eng->execute("d.armor = 11;");
+                check_eq(eng->execute("d.armor").as_int(), (int64_t)11,
+                    a_baseFirst ? "base-first write" : "derived-first write");
+            };
+            run(true);
+            run(false);
+        });
+
         test("auto_bind_multiple_inheritance", [this]() {
             // Test that auto_bind correctly handles multiple base classes
             // class Left  : property_owner<Left>           -> no base
@@ -1178,6 +1234,73 @@ public:
             check_eq(eng->execute("obj.score < 60").as<bool>(), true, "obj.score < 60");
             check_eq(eng->execute("obj.score >= 50").as<bool>(), true, "obj.score >= 50");
             check_eq(eng->execute("obj.score <= 50").as<bool>(), true, "obj.score <= 50");
+        });
+
+        // Bare-identifier call args are escape-marked (their decls CELL-box so script ref
+        // params can bind) and var decls flatten value type_info to 'any' (slot dynamism
+        // ruling) — C++ boundaries must classify by STORAGE and deref before converting.
+        // Red-locked from the Workbench File panel: p.textField(root, ...) with root = a
+        // plain local threw "Unsupported type for non-const reference extraction"; the
+        // free-function shared_ptr shape hard-crashed (Point bytes reinterpreted as a
+        // shared_ptr<Point> in function_binder's create_argument).
+        test("bare_local_object_args_to_cpp_boundaries", [this]() {
+            auto eng = make_engine();
+
+            dynamic_binder<Point>(*eng, "Point")
+                .constructor<double, double>()
+                .method("length", &Point::length)
+                .method("plus", [](Point& a_self, const Point& a_other) { return Point(a_self.x + a_other.x, a_self.y + a_other.y); })
+                .method("shared_x", [](Point& a_self, const std::shared_ptr<Point>& a_other) { (void)a_self; return a_other ? a_other->x : -1.0; })
+                .method("shared_pair", [](Point& a_self) {
+                    (void)a_self;
+                    return std::vector<std::shared_ptr<Point>>{ std::make_shared<Point>(3.0, 4.0), std::make_shared<Point>(6.0, 8.0) };
+                })
+                .build();
+            eng->add_function("free_length", [](const std::shared_ptr<Point>& a_point) { return a_point ? a_point->length() : -1.0; });
+            eng->add_global("shared_point", eng->make_object(std::make_shared<Point>(6.0, 8.0)));
+            // To-script mirror: a const shared_ptr<T>& RETURN must route to the shared_ptr
+            // specialization, not a registry lookup of a class named "std::shared_ptr<T>".
+            auto sharedOut = std::make_shared<Point>(6.0, 8.0);
+            eng->add_function("shared_ref_out", [sharedOut]() -> const std::shared_ptr<Point>& { return sharedOut; });
+            // NON-const lvalue handle through make_value: the universal-reference overload
+            // outranks const shared_ptr<T>& here — the funnel must still share the pointee
+            // (the sim's creature-signal shape).
+            auto lvalueHandle = std::make_shared<Point>(3.0, 4.0);
+            eng->add_global("lvalue_handle", eng->make_value(lvalueHandle));
+
+            double diagonal = std::sqrt(4.0 * 4.0 + 6.0 * 6.0);
+            check_near(5.0, eng->execute("var p0 = Point(3.0, 4.0); p0.length();").as<double>(), 0.0001);
+            check_near(diagonal, eng->execute("var p1 = Point(1.0, 2.0); p1.plus(Point(3.0, 4.0)).length();").as<double>(), 0.0001);
+            check_near(diagonal, eng->execute("var qB = Point(3.0, 4.0); Point(1.0, 2.0).plus(qB).length();").as<double>(), 0.0001);
+            check_near(diagonal, eng->execute("var p = Point(1.0, 2.0); var q = Point(3.0, 4.0); var sum = p.plus(q); sum.length();").as<double>(), 0.0001);
+            check_near(6.0, eng->execute("var sp = shared_point; var p2 = Point(0.0, 0.0); p2.shared_x(sp);").as<double>(), 0.0001);
+            check_near(10.0, eng->execute("var sp2 = shared_point; free_length(sp2);").as<double>(), 0.0001);
+            check_near(10.0, eng->execute("var so = shared_ref_out(); so.length();").as<double>(), 0.0001);
+            check_near(5.0, eng->execute("lvalue_handle.length();").as<double>(), 0.0001);
+            // vector<shared_ptr<T>> elements share identity (the creaturesInRange shape) —
+            // the old fallback wrapped each HANDLE as an object of class "std::shared_ptr<T>".
+            check_near(15.0, eng->execute("var pv = Point(0.0, 0.0); var handles = pv.shared_pair(); handles[0].length() + handles[1].length();").as<double>(), 0.0001);
+        });
+
+        // A handle typed as its BASE must expose the most-derived registered surface —
+        // creature AI receives shared_ptr<Creature> yet calls ServerCreature::agent().
+        test("handles_expose_dynamic_type_surface", [this]() {
+            auto eng = make_engine();
+            dynamic_binder<base_shape>(*eng, "BaseShape")
+                .method("base_val", &base_shape::base_val)
+                .build();
+            dynamic_binder<derived_shape>(*eng, "DerivedShape")
+                .base_class<base_shape>()
+                .method("derived_val", &derived_shape::derived_val)
+                .build();
+            std::shared_ptr<base_shape> asBase = std::make_shared<derived_shape>();
+            auto shapeValue = eng->make_object(asBase);
+            check_eq(std::string("DerivedShape"), shapeValue.get_type_info() ? shapeValue.get_type_info()->type_name : std::string("null"));
+            eng->add_global("shape", shapeValue);
+            check_near(2.0, eng->execute("shape.derived_val();").as<double>(), 0.0001);
+            check_near(1.0, eng->execute("shape.base_val();").as<double>(), 0.0001);
+            eng->add_global("shape2", eng->make_object(std::make_shared<derived_shape>()));
+            check_near(1.0, eng->execute("shape2.base_val();").as<double>(), 0.0001);
         });
     }
 };

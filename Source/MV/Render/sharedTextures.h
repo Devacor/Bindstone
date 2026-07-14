@@ -69,13 +69,19 @@ namespace MV {
 		}
 
 		static std::shared_ptr<TextureHandle> white(){
-			static std::shared_ptr<DynamicTextureDefinition> defaultTexture;
-			static std::shared_ptr<TextureHandle> defaultHandle;
-			if(!defaultTexture){
-				defaultTexture = DynamicTextureDefinition::make("defaultTexture", {1, 1}, {1.0f, 1.0f, 1.0f, 1.0f});
-				defaultHandle = defaultTexture->makeHandle();
+			if(!defaultWhiteTexture){
+				defaultWhiteTexture = DynamicTextureDefinition::make("defaultTexture", {1, 1}, {1.0f, 1.0f, 1.0f, 1.0f});
+				defaultWhiteHandle = defaultWhiteTexture->makeHandle();
 			}
-			return defaultHandle;
+			return defaultWhiteHandle;
+		}
+
+		// Draw2D-teardown hook: the shared white texture gets device-backed, so its binding must be
+		// released while that device's context is still current (atexit destruction of a static
+		// handle dangles the Device*). The next white() call rebuilds fresh.
+		static void resetWhite(){
+			defaultWhiteHandle.reset();
+			defaultWhiteTexture.reset();
 		}
 
 		static std::string fileId(const std::string &a_filename, bool a_repeat, bool a_pixel = false) {
@@ -102,6 +108,9 @@ namespace MV {
 		static GLuint loadingPlaceholderId();
 
 	private:
+		static inline std::shared_ptr<DynamicTextureDefinition> defaultWhiteTexture;
+		static inline std::shared_ptr<TextureHandle> defaultWhiteHandle;
+
 		std::vector<std::string> getImagesInFolder(const std::string& a_packPath) const;
 		std::vector<SharedTextures::PackItem> getSortedPackItems(std::vector<std::string> imagePaths) const;
 

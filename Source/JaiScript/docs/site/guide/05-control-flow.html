@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -22,7 +22,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li class="current"><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="control-flow">Control Flow<a class="hlink" href="#control-flow" aria-label="link">&#8203;</a></h1>
-<p><code>if/else</code>, <code>while</code>, C-style <code>for</code>, range-based <code>for</code>, <code>switch</code> (break-by-default), <code>break</code>/<code>continue</code>, and <code>try/catch/throw</code>. All of it unwinds correctly out of loops and nested frames on both backends. <em>(pinned: language/control_flow_tests.cpp, switch_statement_tests.cpp, exception_handling_tests.cpp)</em></p>
+<p>Everything you expect from C++ control flow, minus its sharpest edge: <code>switch</code> never falls through by accident, and a runaway loop cannot outlive its execution budget. <code>if/else</code>, <code>while</code>, C-style <code>for</code>, range-based <code>for</code>, <code>break</code>/<code>continue</code>, and <code>try/catch/throw</code> — all of it unwinds correctly out of loops and nested frames on both backends.</p>
 <h2 id="if-while-for">if / while / for<a class="hlink" href="#if-while-for" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 7;
 if (n % 2 == 0) { print(&quot;even&quot;); } else { print(&quot;odd&quot;); }
@@ -58,7 +58,6 @@ items[0];</code></pre></div>
 alice scored 3
 bob scored 5
 == result: sword!</code></pre></div>
-<p><em>(pinned: language/range_based_for_tests.cpp — including slot allocation and shrink-during-iteration regression coverage)</em></p>
 <h2 id="switch-break-by-default-explicit-fallthrough">switch: break by default, explicit <code>fallthrough;</code><a class="hlink" href="#switch-break-by-default-explicit-fallthrough" aria-label="link">&#8203;</a></h2>
 <p>The classic C footgun is inverted: cases <strong>never</strong> fall through unless you write <code>fallthrough;</code>. Case values can be integers, strings, enum members, or expressions. <code>fallthrough;</code> outside a switch is an error.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function describe(weapon) {
@@ -83,7 +82,7 @@ print(&quot;fists: {}&quot;, describe(&quot;fists&quot;));</code></pre></div>
 magic: 20 (fell through into enchanted)
 enchanted: 5
 fists: 1</code></pre></div>
-<p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. *(pinned: language/switch_statement_tests.cpp — <code>switch_with_fallthrough</code>, <code>switch_no_match_default_case</code>, <code>fallthrough_only_in_switch</code>, <code>nested_switch</code>, <code>switch_with_return</code>; <code>continue</code>/<code>break</code> leakage through switch was fixed and is regression-pinned)*</p>
+<p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. Switches nest, <code>return</code> works from inside a case, and <code>break</code>/<code>continue</code> in a loop-enclosed switch affect the loop, never leak into the switch.</p>
 <h2 id="try-catch-throw">try / catch / throw<a class="hlink" href="#try-catch-throw" aria-label="link">&#8203;</a></h2>
 <p>Any value can be thrown. <code>catch (e)</code> binds it; <code>catch</code> without a variable is allowed; a bare <code>throw;</code> inside a catch re-throws. Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
@@ -113,7 +112,7 @@ rethrowing inner
 outer caught: inner
 catch without a variable
 == result: done</code></pre></div>
-<p><em>(pinned: language/exception_handling_tests.cpp — including stack-trace capture, throws during argument evaluation, and C++ exception interop in both directions)</em></p>
+<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function that throws surfaces as a catchable script error, and an uncaught script throw reaches the host with its script stack trace attached.</p>
 <h2 id="terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">Terminal errors: execution budget &amp; memory cap are UNCATCHABLE by design<a class="hlink" href="#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design" aria-label="link">&#8203;</a></h2>
 <p>Every <code>execute()</code>/<code>resume()</code> call has a wall-clock budget — <strong>default 1.0 second</strong> (<code>engine::execution_budget(seconds)</code>; <code>0</code> disables). When it trips, the error is <strong>terminal</strong>: script <code>catch</code> handlers are skipped all the way out, so a runaway script can never swallow its own kill signal and livelock the host.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// engine.execution_budget() defaults to 1.0 second per execute()
@@ -124,10 +123,10 @@ try {
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Script execution budget exceeded - raise engine::execution_budget or break up the work: Script execution budget exceeded</code></pre></div>
 <p>(The catch body did not run — the error went straight to the host.)</p>
-<p><code>engine::memory_cap(bytes)</code> works alongside it for allocation bombs: the <strong>first</strong> raise is catchable (the growth is denied), but a <strong>second</strong> raise in the same execute is terminal. Both limits re-arm per <code>execute()</code>. *(pinned: language/execution_budget_tests.cpp — <code>budget_error_is_terminal_not_catchable</code>, <code>budget_terminal_skips_catch_inside_function/lambda/coroutine</code>, <code>memory_cap_first_raise_is_catchable_and_denies</code>, <code>memory_cap_second_raise_is_terminal</code>, <code>budget_rearms_per_execute</code>)*</p><nav class="prevnext"><a class="prev" href="../guide/04-operators.html"><span>&larr; previous</span>Operators &amp; Arithmetic</a><a class="next" href="../guide/06-functions.html"><span>next &rarr;</span>Functions &amp; Lambdas</a></nav></article>
+<p><code>engine::memory_cap(bytes)</code> works alongside it for allocation bombs: the <strong>first</strong> raise is catchable (the growth is denied), but a <strong>second</strong> raise in the same execute is terminal. Both limits re-arm per <code>execute()</code>, and neither can be swallowed from inside a function, lambda, or coroutine — the terminality is the point.</p><nav class="prevnext"><a class="prev" href="../guide/04-operators.html"><span>&larr; previous</span>Operators &amp; Arithmetic</a><a class="next" href="../guide/06-functions.html"><span>next &rarr;</span>Functions &amp; Lambdas</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

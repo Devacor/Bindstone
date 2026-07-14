@@ -61,6 +61,24 @@ std::string engine::get_registered_name() const {
 
 template<typename T>
 script_value engine::make_object(std::shared_ptr<T> data) {
+    // Prefer the DYNAMIC type's registration: handles cross boundaries as their base
+    // static type (signal signatures, vector elements) but script wants the most-derived
+    // surface (ServerCreature::agent through a shared_ptr<Creature>). dynamic_cast<void*>
+    // yields the complete-object pointer, so registry extractors keyed by the dynamic
+    // type name cast correctly regardless of base offsets.
+    if constexpr (std::is_polymorphic_v<T>) {
+        if (data && std::type_index(typeid(*data)) != std::type_index(typeid(T))) {
+            if (auto dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
+                auto instance = dynamic_def->create_instance();
+                uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
+                std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
+                instance->set_field(cpp_object_field_id,
+                    script_value::make_cpp_object(dynamic_def->get_name(), dynamic_def->get_type_id(), complete_object, this));
+                return script_value::make_object(dynamic_def->get_name(), instance, this);
+            }
+        }
+    }
+
     std::string type_name = get_registered_name<T>();
 
     try {
@@ -88,16 +106,27 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
     requires std::is_copy_constructible_v<std::remove_const_t<T>>
 {
     using NonConstT = std::remove_const_t<T>;
-    auto registry = eng->get_conversion_registry();
-    if (registry && registry->template has_conversion<NonConstT>()) {
-        return registry->template convert_to_script<NonConstT>(t);
-    }
+    // Terminal funnel for every generic to-script path: a shared_ptr must share its
+    // pointee's identity, never become an object of a class named "std::shared_ptr<U>"
+    // (non-const lvalues reach here because the universal-reference make_value beats
+    // the const shared_ptr<U>& overload).
+    if constexpr (is_specialization_v<NonConstT, std::shared_ptr>) {
+        if (!t) {
+            return script_value(std::monostate{}, eng);
+        }
+        return eng->make_object(t);
+    } else {
+        auto registry = eng->get_conversion_registry();
+        if (registry && registry->template has_conversion<NonConstT>()) {
+            return registry->template convert_to_script<NonConstT>(t);
+        }
 
-    auto sharedObj = std::make_shared<NonConstT>(t);
-    if (!eng) {
-        throw runtime_error("Engine reference required for custom type conversion");
+        auto sharedObj = std::make_shared<NonConstT>(t);
+        if (!eng) {
+            throw runtime_error("Engine reference required for custom type conversion");
+        }
+        return eng->make_object(sharedObj);
     }
-    return eng->make_object(sharedObj);
 }
 
 template<typename T>
@@ -126,15 +155,24 @@ template<typename T>
 script_value convert_reference_with_registry(T& t, engine* eng) {
     using NonConstT = std::remove_const_t<T>;
 
-    if (eng && eng->has_registered_class<NonConstT>()) {
-        return script_value::make_cpp_bound(&t, eng);
-    }
-
-    if constexpr (std::is_copy_constructible_v<NonConstT>) {
-        return convert_custom_type_with_registry<T>(t, eng);
+    // Smart-pointer twin of convert_custom_type_with_registry's routing: share the
+    // pointee, never bind or wrap the handle itself.
+    if constexpr (is_specialization_v<NonConstT, std::shared_ptr>) {
+        if (!t) {
+            return script_value(std::monostate{}, eng);
+        }
+        return eng->make_object(t);
     } else {
-        throw runtime_error("Cannot convert non-copyable type by reference. "
-                           "Register the type with dynamic_binder first.");
+        if (eng && eng->has_registered_class<NonConstT>()) {
+            return script_value::make_cpp_bound(&t, eng);
+        }
+
+        if constexpr (std::is_copy_constructible_v<NonConstT>) {
+            return convert_custom_type_with_registry<T>(t, eng);
+        } else {
+            throw runtime_error("Cannot convert non-copyable type by reference. "
+                               "Register the type with dynamic_binder first.");
+        }
     }
 }
 
@@ -168,7 +206,8 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
     if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                    std::is_same_v<T, float> || std::is_same_v<T, double> ||
                    std::is_same_v<T, bool> || std::is_same_v<T, char> ||
-                   std::is_same_v<T, std::string> || std::is_same_v<T, script_value>) {
+                   std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||
+                   is_specialization_v<T, std::shared_ptr>) {
         element_type = nullptr;
     } else {
         element_type = eng->get_type_info_for_cpp_type<T>();
@@ -185,6 +224,10 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                            std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                            std::is_same_v<T, std::string>) {
             arr.push_back(script_value(item, eng));
+        } else if constexpr (is_specialization_v<T, std::shared_ptr>) {
+            // The element IS a handle: share identity via make_object<U>. Wrapping the
+            // handle in another shared_ptr registered as "std::shared_ptr<U>" throws.
+            arr.push_back(eng->make_value(item));
         } else {
             if (eng) {
                 auto registry = eng->get_conversion_registry();
@@ -238,6 +281,8 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<K, bool> || std::is_same_v<K, char> ||
                            std::is_same_v<K, std::string>) {
             converted_key = script_value(key, eng);
+        } else if constexpr (is_specialization_v<K, std::shared_ptr>) {
+            converted_key = eng->make_value(key);
         } else {
             if (eng) {
                 auto registry = eng->get_conversion_registry();
@@ -260,6 +305,8 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<V, bool> || std::is_same_v<V, char> ||
                            std::is_same_v<V, std::string>) {
             converted_value = script_value(value, eng);
+        } else if constexpr (is_specialization_v<V, std::shared_ptr>) {
+            converted_value = eng->make_value(value);
         } else {
             if (eng) {
                 auto registry = eng->get_conversion_registry();

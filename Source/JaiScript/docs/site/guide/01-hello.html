@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -33,7 +33,7 @@ jai::stdlib::register_all(eng);                 // print, format, to_string, typ
 jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
 int v = r.as_int();                             // 4</code></pre></div>
 <p>Two things to know from the start:</p>
-<ol><li>**The last expression&#x27;s value is the result of <code>execute()</code>.** No <code>return</code> needed at top level.</li><li><code>set_backend()</code> must be called <strong>before</strong> the first <code>execute()</code> (forbidden after).</li></ol>
+<ol><li><strong>The last expression&#x27;s value is the result of <code>execute()</code>.</strong> No <code>return</code> needed at top level.</li><li><code>set_backend()</code> must be called <strong>before</strong> the first <code>execute()</code> (forbidden after).</li></ol>
 <h2 id="values-and-literals">Values and literals<a class="hlink" href="#values-and-literals" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto i = 42;            // integer (64-bit)
 auto f = 3.14;          // float (double)
@@ -47,7 +47,7 @@ i + f;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string char bool null
 hex: 255, binary: 10, exponent: 2500.000000
 == result: 45.140000</code></pre></div>
-<p>Integers are 64-bit (<code>int64</code>), floats are doubles. Hex (<code>0xFF</code>) and binary (<code>0b1010</code>) integer literals work, as do exponent floats (<code>2.5e3</code>). Strings support the usual escapes (<code>\n</code>, <code>\&quot;</code>, <code>\\</code>). <em>(pinned: semantics/lexer_tests.cpp, semantics/type_info_tests.cpp)</em></p>
+<p>Integers are 64-bit (<code>int64</code>), floats are doubles. Hex (<code>0xFF</code>) and binary (<code>0b1010</code>) integer literals work, as do exponent floats (<code>2.5e3</code>). Strings support the usual escapes (<code>\n</code>, <code>\&quot;</code>, <code>\\</code>) plus <code>\xNN</code> byte escapes (see Containers &amp; Strings).</p>
 <h2 id="comments-and-the-implicit-result">Comments and the implicit result<a class="hlink" href="#comments-and-the-implicit-result" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// single-line comment
 /* multi-line
@@ -56,7 +56,7 @@ auto x = 10; // trailing comment
 x * 2;  // the last expression&#x27;s value is what execute() returns</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 20</code></pre></div>
 <h2 id="print-and-format">print and format<a class="hlink" href="#print-and-format" aria-label="link">&#8203;</a></h2>
-<p><code>print</code> and <code>format</code> are registered by <code>jai::stdlib::register_all</code> as variadic host functions (they are the canonical example of variadics, which live on the host side — see the Functions chapter). <em>(pinned: stdlib/io_tests.cpp)</em></p>
+<p><code>print</code> and <code>format</code> are registered by <code>jai::stdlib::register_all</code> as variadic host functions (they are the canonical example of variadics, which live on the host side — see the Functions chapter).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;plain string&quot;);
 print(&quot;several&quot;, &quot; &quot;, &quot;args&quot;, &quot; &quot;, &quot;concatenate&quot;);
 print(&quot;sequential: {} + {} = {}&quot;, 2, 3, 2 + 3);
@@ -89,7 +89,7 @@ print(to_json({&quot;a&quot;: 1}));</code></pre></div>
 <p><code>type_of(x)</code> returns one of: <code>null bool int float char string array map function object reference weak_ptr</code>.</p><nav class="prevnext"><span></span><a class="next" href="../guide/02-type-ladder.html"><span>next &rarr;</span>The Type Ladder: typed, auto, var</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

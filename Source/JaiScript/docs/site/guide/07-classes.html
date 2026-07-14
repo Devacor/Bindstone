@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -46,7 +46,7 @@ goblin.describe();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">goblin (70/100)
 goblin died
 == result: goblin (-10/100)</code></pre></div>
-<p><code>max_health = health</code> works because field initializers run top-to-bottom in declaration order. Methods access fields directly (implicit self); construction is a plain call — <code>Creature(&quot;goblin&quot;)</code>, **no <code>new</code> keyword**. <code>private:</code> / <code>public:</code> section labels parse (C++ style), but access is not currently enforced — see INTENT_QUESTIONS. <em>(pinned: language/script_class_tests.cpp, language/test_cat_class_syntax.cpp)</em></p>
+<p><code>max_health = health</code> works because field initializers run top-to-bottom in declaration order. Methods access fields directly (implicit self). Construction is a plain call — <code>Creature(&quot;goblin&quot;)</code> makes a <em>value</em>; <code>new Creature(&quot;goblin&quot;)</code> makes a <code>shared_ptr</code> handle instead (see Value Semantics for when you want which). <code>private:</code> / <code>public:</code> section labels work C++-style — see <a href="#access-control">Access control</a> below.</p>
 <h2 id="constructor-overloading-and-this-delegation">Constructor overloading and <code>: this(...)</code> delegation<a class="hlink" href="#constructor-overloading-and-this-delegation" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
@@ -63,8 +63,7 @@ b.x + c.y;</code></pre></div>
 main ctor (3, 3)
 main ctor (1, 2)
 == result: 5</code></pre></div>
-<p><em>(pinned: language/constructor_conversion_tests.cpp, language/method_overload_tests.cpp)</em></p>
-<p><strong>Converting constructors:</strong> a defaulted-parameter constructor is <em>not</em> a converting constructor (deliberate C++ divergence &mdash; conversion requires a true one-parameter constructor; write a delegating overload to opt in). Conversion is opted into with a one-parameter overload (<code>Money(int a) : this(a, 0) {}</code>) and opted out of with a defaulted sentinel parameter (<code>Money(float a, int _ignored = 0)</code>) &mdash; the <code>explicit</code> keyword is unnecessary. <em>(pinned: defaulted_ctor_is_not_a_converting_ctor, delegating_one_param_overload_opts_into_conversion, defaulted_sentinel_param_opts_out_of_conversion)</em></p>
+<p><strong>Converting constructors:</strong> a defaulted-parameter constructor is <em>not</em> a converting constructor (deliberate C++ divergence &mdash; conversion requires a true one-parameter constructor; write a delegating overload to opt in). Conversion is opted into with a one-parameter overload (<code>Money(int a) : this(a, 0) {}</code>) and opted out of with a defaulted sentinel parameter (<code>Money(float a, int _ignored = 0)</code>) &mdash; the <code>explicit</code> keyword is unnecessary.</p>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;
@@ -85,8 +84,8 @@ type_of(c);</code></pre></div>
 == result: object</code></pre></div>
 <p>Redefining a base method <strong>without</strong> <code>override</code> is an error — the message is explicit:</p>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Method &#x27;speak&#x27; shadows base class method. Use &#x27;override&#x27; keyword if this is intentional</code></pre></div>
-<p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected. *(pinned: language/override_tests.cpp, override_edge_cases.cpp; semantics/strong_types_tests.cpp <code>class_inheritance_child_to_parent_allowed</code>, <code>class_type_sibling_classes_rejected</code>, <code>class_type_unrelated_classes_with_same_fields_rejected</code>)*</p>
-<h2 id="typed-fields-are-enforced-new">Typed fields are enforced (new)<a class="hlink" href="#typed-fields-are-enforced-new" aria-label="link">&#8203;</a></h2>
+<p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected.</p>
+<h2 id="typed-fields-are-enforced">Typed fields are enforced<a class="hlink" href="#typed-fields-are-enforced" aria-label="link">&#8203;</a></h2>
 <p>Fields follow the same type ladder as variables: explicit types enforce and convert; <code>var</code> fields stay dynamic; <code>auto</code> fields lock on their initializer.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Stats {
     int hp = 10;
@@ -107,7 +106,25 @@ s.hp;</code></pre></div>
 anything = free
 caught: Type mismatch in assignment
 == result: 3</code></pre></div>
-<p>Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips. *(pinned: semantics/strong_types_tests.cpp <code>typed_field_direct_assign_converts</code>, <code>typed_field_implicit_this_and_ctor_convert</code>, <code>typed_field_compound_converts</code>, <code>typed_field_inheritance_enforced</code>, <code>typed_field_set_field_cpp_api</code>, <code>typed_field_json_roundtrip</code>)*</p>
+<p>Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips.</p>
+<h2 id="access-control">Access control: <code>private:</code> / <code>public:</code><a class="hlink" href="#access-control" aria-label="link">&#8203;</a></h2>
+<p>C++-style section labels control access. Fields and methods after a <code>private:</code> label are reachable from the class&#x27;s own methods but not from outside — the violation is a catchable runtime error, not a silent read:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Chest {
+private:
+    int gold = 250;
+public:
+    int looted = 0;
+    auto peek() { return gold; }      // methods see private members
+}
+auto c = Chest();
+print(&quot;peek() = {}&quot;, c.peek());
+try {
+    c.gold;
+} catch (e) {
+    print(&quot;caught: {}&quot;, e);
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">peek() = 250
+caught: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;</code></pre></div>
 <h2 id="statics">Statics<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h2>
 <p>Static fields and methods belong to the class and are reached with <code>::</code>. Instance constructors/methods see them directly:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
@@ -125,9 +142,9 @@ Counter::PI;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Counter::count = 3
 Counter::twice_count() = 6
 == result: 3.141590</code></pre></div>
-<p><em>(pinned: language/static_field_tests.cpp, static_method_tests.cpp — including statics with inheritance; namespaces can override class statics of the same name, see Kitchen Sink)</em></p>
+<p>Statics work with inheritance, and a namespace can override class statics of the same name — see Kitchen Sink.</p>
 <h2 id="name-resolution-in-methods">Name resolution in methods<a class="hlink" href="#name-resolution-in-methods" aria-label="link">&#8203;</a></h2>
-<p>A bare identifier inside a method resolves in this order, identical on both backends and for reads AND writes (audited 2026-07 with a cross-backend probe matrix):</p>
+<p>A bare identifier inside a method resolves in this order, identical on both backends and for reads AND writes:</p>
 <ol>
 <li>the active <strong>catch variable</strong> (innermost <code>catch</code>)</li>
 <li><strong>locals and parameters</strong> of the current function &mdash; including range-for variables, <code>auto&amp;</code> reference declarations, and constructor parameters (declaration-point scoped: a use <em>before</em> the local&#x27;s declaration resolves outward)</li>
@@ -138,7 +155,7 @@ Counter::twice_count() = 6
 <li><strong>static fields</strong>, then static methods</li>
 </ol>
 <p>Two consequences worth knowing. First, <strong>globals shadow fields</strong>: if a global <code>hp</code> exists, a bare <code>hp</code> in any method reads and writes the global, not the field &mdash; and defining a new global <em>after</em> a class definition steals that class&#x27;s bare-name field accesses from then on. <code>this.hp</code> always reaches the field, and the static checker&#x27;s shadowing warnings (below) flag the declaration-side collisions. Second, <code>[=]</code>/<code>[&amp;]</code> lambdas do <strong>not</strong> capture <code>this</code>: a bare field read inside one is an undefined-variable error; capture <code>[this]</code> explicitly.</p>
-<p>The static checker (<code>engine::static_checking(check_mode::warn)</code> or <code>check()</code>) emits <strong>warning-severity</strong> shadowing diagnostics &mdash; never errors, even in strict mode, because shadowing is legal: a local/parameter/range-for/catch variable that shadows a <em>field</em> of the enclosing class (&quot;local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 4:2)&quot;), a local that shadows an outer local, and a declaration that shadows a global the same function already read. Constructor parameters named after the field they initialize (<code>C(int hp) { this.hp = hp; }</code>) are the established idiom and stay silent. <em>(pinned: semantics/static_check_tests.cpp shadow_* tests; language/script_class_tests.cpp name_resolution_* pins)</em></p>
+<p>The static checker (<code>engine::static_checking(check_mode::warn)</code> or <code>check()</code>) emits <strong>warning-severity</strong> shadowing diagnostics &mdash; never errors, even in strict mode, because shadowing is legal: a local/parameter/range-for/catch variable that shadows a <em>field</em> of the enclosing class (&quot;local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 4:2)&quot;), a local that shadows an outer local, and a declaration that shadows a global the same function already read. Constructor parameters named after the field they initialize (<code>C(int hp) { this.hp = hp; }</code>) are the established idiom and stay silent.</p>
 <h2 id="hot-reload-with-permissive-migration">Hot reload with permissive migration<a class="hlink" href="#hot-reload-with-permissive-migration" aria-label="link">&#8203;</a></h2>
 <p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {
@@ -159,10 +176,10 @@ print(&quot;after reload:  v{} {} retries={}&quot;, cfg.version, cfg.name, cfg.r
 == result: null
 after reload:  v1 production retries=3
 == result: null</code></pre></div>
-<p>Note <code>version</code> stayed <code>1</code> — migration preserves <em>existing per-instance state</em>, it does not re-run initializers for fields that already exist; only the new <code>retries</code> field picked up its default. Methods always come from the newest class definition. Hot reload even works while a function/class on the current call stack is redefined, and suspended method coroutines survive a field-changing reload of their class. *(pinned: language/hot_reload_tests.cpp, hot_reload_correctness_tests.cpp; language/coroutine_tests.cpp <code>method_coroutine_survives_field_changing_reload</code>)*</p><nav class="prevnext"><a class="prev" href="../guide/06-functions.html"><span>&larr; previous</span>Functions &amp; Lambdas</a><a class="next" href="../guide/08-coroutines.html"><span>next &rarr;</span>Coroutines</a></nav></article>
+<p>Note <code>version</code> stayed <code>1</code> — migration preserves <em>existing per-instance state</em>, it does not re-run initializers for fields that already exist; only the new <code>retries</code> field picked up its default. Methods always come from the newest class definition. Hot reload even works while a function/class on the current call stack is redefined, and suspended method coroutines survive a field-changing reload of their class.</p><nav class="prevnext"><a class="prev" href="../guide/06-functions.html"><span>&larr; previous</span>Functions &amp; Lambdas</a><a class="next" href="../guide/08-coroutines.html"><span>next &rarr;</span>Coroutines</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

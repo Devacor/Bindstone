@@ -5,6 +5,7 @@
 
 #include "engine.hpp"
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 #include <set>
 #include <algorithm>
 #include <optional>
@@ -323,11 +324,16 @@ public:
             class_definition* class_def_ptr = this;
 
             methods_.insert_or_assign(name_id, script_value::make_function(
-                [class_def_ptr, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    if (args.empty() || args[0].get_engine() == nullptr) {
+                [class_def_ptr, name_id](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+                    if (raw_args.empty() || raw_args[0].get_engine() == nullptr) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
                                                             "Class definition no longer exists");
                     }
+                    // C++ boundary: escape-boxed locals arrive as CELL references (script
+                    // parameter binding derefs them; the bound-method mint path does not) —
+                    // normalize so overload scoring and converters see hoisted-temp values.
+                    std::vector<script_value> scratch;
+                    const std::vector<script_value>& args = detail::deref_builtin_args(raw_args, scratch);
 
                     size_t script_arg_count = args.size() - 1;
 
@@ -360,7 +366,13 @@ public:
                 engine_
             ));
         } else {
-            methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
+            methods_.insert_or_assign(name_id, script_value::make_function(
+                [func](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+                    std::vector<script_value> scratch;
+                    return func(detail::deref_builtin_args(raw_args, scratch));
+                },
+                engine_
+            ));
         }
         auto_accessor_ids_.erase(name_id);
         bump_method_epoch();
@@ -375,15 +387,19 @@ public:
         }
 
         uint64_t name_id = eng->symbolize(name);
-        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
-
-        if (arity != SIZE_MAX) {
-            static_method_arities_[name_id].push_back(arity);
-        }
+        add_static_method(name_id, std::move(func), arity);
     }
 
+    // C++-only registration door (dynamic_binder statics; script statics take
+    // add_static_script_method) — args normalize like add_method's.
     void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX) {
-        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
+        static_methods_.insert_or_assign(name_id, script_value::make_function(
+            [func](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+                std::vector<script_value> scratch;
+                return func(detail::deref_builtin_args(raw_args, scratch));
+            },
+            engine_
+        ));
 
         if (arity != SIZE_MAX) {
             static_method_arities_[name_id].push_back(arity);

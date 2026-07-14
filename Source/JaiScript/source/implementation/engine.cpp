@@ -455,6 +455,11 @@ struct engine::implementation {
 
     // Type index to class definition mapping for efficient lookups
     std::unordered_map<std::type_index, std::shared_ptr<class_definition>> classesByType;
+
+    // Derived classes whose base_class<Base>() ran before Base registered (registrar
+    // iteration order is type_index order, not dependency order) — linked when the
+    // base's definition arrives in register_class_by_type.
+    std::unordered_map<std::type_index, std::vector<std::shared_ptr<class_definition>>> pendingBaseLinks;
     
     // Function arity info for proper overloading
     std::unordered_map<std::string, size_t> functionArities;
@@ -2186,6 +2191,20 @@ void engine::setHasCustomNumericOps(bool value) {
 
 void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef) {
     impl->classesByType[type] = classDef;
+    auto pending = impl->pendingBaseLinks.find(type);
+    if (pending != impl->pendingBaseLinks.end()) {
+        auto derivedDefs = std::move(pending->second);
+        impl->pendingBaseLinks.erase(pending);
+        for (auto&& derived : derivedDefs) {
+            if (!derived->add_parent(classDef)) {
+                throw std::runtime_error("Diamond inheritance detected while resolving a deferred base-class link");
+            }
+        }
+    }
+}
+
+void engine::defer_base_link(std::type_index base, std::shared_ptr<class_definition> derived) {
+    impl->pendingBaseLinks[base].push_back(std::move(derived));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition_by_type(const std::type_index& type) const {

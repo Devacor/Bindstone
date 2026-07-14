@@ -260,6 +260,21 @@ namespace MV {
 		}
 	}
 
+	void LoadedTexture::releaseDeviceBackedEntries(Render::Device* a_device) {
+		if (!a_device) { return; }
+		std::scoped_lock guard(lock);
+		for (auto&& entry : globalLookup) {
+			auto& data = entry.second;
+			if (data && data->renderDevice == a_device) {
+				if (data->boundTexture.valid()) {
+					a_device->destroyTexture(data->boundTexture);
+				}
+				data->boundTexture = Render::BoundTexture();
+				data->renderDevice = nullptr;
+			}
+		}
+	}
+
 	static Render::PixelFormat rhiFormatForSurface(SDL_Surface* a_surface); // defined below
 
 	void LoadedTextureData::bindToDevice(Render::Device* a_device) {

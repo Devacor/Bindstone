@@ -65,6 +65,16 @@ namespace jai::detail {
 			"Cannot pass non-lvalue to reference parameter");
 	}
 
+	// Member-FINAL subset of the classifier: the ref-DECL gate (var&/auto& = obj.field
+	// chains). Field reads evaluate to COPIES, so member-final initializers need the
+	// kernel resolve; subscript-final initializers stay on the evaluation path - their
+	// rhs-lvalue reads already mint owner-pinned references with full index generality,
+	// and routing them through the kernel would change inner-reference-element aliasing
+	// (see the element-share branch in resolve_ref_lvalue).
+	inline bool is_member_final_ref_lvalue(const expression* e) {
+		return e && e->get_type() == node_type::member_expr && is_ref_bindable_lvalue(e);
+	}
+
 	// A fields_ node is the member's TRUTH only for script-declared fields. C++
 	// .property() members (dynamic_binder) keep a dead null placeholder in fields_ -
 	// reads/writes route through the bound accessors - so a ref bound to the node

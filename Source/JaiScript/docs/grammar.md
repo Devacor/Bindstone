@@ -75,8 +75,9 @@ Notes:
 - **Boolean**: `true`, `false`
 - **Null**: `null` (or `nullptr`)
 
-Escape sequences in `"..."` strings and `'...'` chars are exactly `\n \r \t \\ \" \'`.
-Anything else (including `\0`) is an "Invalid escape sequence" error.
+Escape sequences in `"..."` strings and `'...'` chars are exactly `\n \r \t \\ \" \'` and
+`\xNN` (EXACTLY two hex digits — `"\x415"` is `'A'` then `"5"`; see docs/char_semantics.md).
+Anything else (including `\0` — spell it `\x00`) is an "Invalid escape sequence" error.
 
 ### Template Strings
 
@@ -391,7 +392,11 @@ mapLiteral = "{" (cppMapEntry ("," cppMapEntry)*)? "}"             // C++ style
 
 cppMapEntry = "{" expression "," expression "}"
 
-jsonMapEntry = (IDENTIFIER | STRING_LITERAL) ":" expression        // bare key means "key"
+jsonMapEntry = (IDENTIFIER | STRING_LITERAL | INTEGER_LITERAL     // bare identifier means "key";
+              | FLOAT_LITERAL | CHAR_LITERAL | "true" | "false")  // other keys keep their type
+               ":" expression                                     // ({1: "a"}.has(1), not has("1"))
+// Detection looks for ONE key token immediately followed by ':' — so negative or computed
+// keys ({-1: v}, {1+2: v}) stay unsupported in JSON style; the C++ style ({{-1, v}}) covers them.
 
 argumentList = expression ("," expression)*
 

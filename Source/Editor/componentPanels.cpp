@@ -78,13 +78,13 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	auto saveButton = makeButton(grid, panel.services(), "Save", buttonSize, U8_STR("Save"));
 	saveButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->saveJai("Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
+		controls->elementToEdit->saveJai("Prefabs/" + controls->elementToEdit->id() + ".bindsnap", panel.services());
 	});
 
 	auto loadButton = makeButton(grid, panel.services(), "Load", buttonSize, U8_STR("Load"));
 	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		if (MV::fileExistsAbsolute("Prefabs/" + controls->elementToEdit->id() + ".prefab")) {
-			auto newNode = controls->elementToEdit->parent()->make("Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
+		if (MV::fileExistsAbsolute("Prefabs/" + controls->elementToEdit->id() + ".bindsnap")) {
+			auto newNode = controls->elementToEdit->parent()->make("Prefabs/" + controls->elementToEdit->id() + ".bindsnap", panel.services());
 
 			auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.services().get<MV::TapDevice>());
 

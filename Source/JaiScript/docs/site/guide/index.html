@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -24,21 +24,21 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <h1>The Language Guide</h1>
 <p>Eleven chapters covering the whole core language. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
 <ol class="toc">
-<li><a href="01-hello.html">Hello &amp; Basics</a><p class="toc-desc">JaiScript is a C++-flavored embedded scripting language: snake_case, hot-reloadable, zero static state, and shipped with two interchangeable backends (a tree-walking interpreter and a bytecode VM) that are kept at ful&hellip;</p></li>
-<li><a href="02-type-ladder.html">The Type Ladder: typed, auto, var</a><p class="toc-desc">JaiScript has three rungs of typing strictness for variables (and class fields):</p></li>
-<li><a href="03-value-semantics.html">Value Semantics &amp; References</a><p class="toc-desc">Read this chapter before writing any JaiScript. The single most common ambush for new users lives here: JaiScript copies by default — everywhere. Assignment copies. Function arguments copy. Even class instances copy. &hellip;</p></li>
-<li><a href="04-operators.html">Operators &amp; Arithmetic</a><p class="toc-desc">String + concatenates (&quot;a&quot; + &quot;b&quot;), and + with a string operand stringifies via the usual coercions. Comparison on strings is lexicographic.</p></li>
-<li><a href="05-control-flow.html">Control Flow</a><p class="toc-desc">if/else, while, C-style for, range-based for, switch (break-by-default), break/continue, and try/catch/throw. All of it unwinds correctly out of loops and nested frames on both backends. (pinned: language/control_flow&hellip;</p></li>
-<li><a href="06-functions.html">Functions &amp; Lambdas</a><p class="toc-desc">Three equivalent declaration styles: function name(params) -&gt; type, auto name(params) (inferred return), and typed C-style. Parameters may be typed (enforced + converted like any typed target) or bare (dynamic). De&hellip;</p></li>
-<li><a href="07-classes.html">Classes</a><p class="toc-desc">Script classes: fields with initializers (run in declaration order), constructors with overloading and : this(...) delegation, inheritance with super, statics, and hot reload with instance migration. All methods are v&hellip;</p></li>
-<li><a href="08-coroutines.html">Coroutines</a><p class="toc-desc">Declare with the coroutine keyword; calling one returns a handle instead of running the body. handle.resume() runs to the next yield (returning the yielded value), handle.done() reports completion, and a final return &hellip;</p></li>
-<li><a href="09-containers-strings.html">Containers &amp; Strings</a><p class="toc-desc">Array literals use [...]; map literals use {key: value, ...}. Builtin methods for arrays, maps, strings, and pointers live in one registry shared by both backends (detail/builtin_methods.hpp, populated by init_builtin&hellip;</p></li>
-<li><a href="10-modules.html">Modules: include vs import</a><p class="toc-desc">Everything below is the verified current behavior. (pinned: language/include_import_tests.cpp — all 13 tests)</p></li>
+<li><a href="01-hello.html">Hello &amp; Basics</a><p class="toc-desc">Run a script from C++, meet the values and literals, learn print/format, and see how the last expression becomes the result.</p></li>
+<li><a href="02-type-ladder.html">The Type Ladder: typed, auto, var</a><p class="toc-desc">Three rungs of typing strictness — <code>int</code> enforced, <code>auto</code> inferred then locked, <code>var</code> dynamic — plus the conversion rules typed targets apply.</p></li>
+<li><a href="03-value-semantics.html">Value Semantics &amp; References</a><p class="toc-desc">Read this first. JaiScript copies by default, everywhere — and here are the escape hatches (<code>&amp;</code> parameters, references, <code>shared_ptr</code>) and what each one costs.</p></li>
+<li><a href="04-operators.html">Operators &amp; Arithmetic</a><p class="toc-desc">The full C++ operator set with checked overflow, no undefined behavior, char promotion, and operator overloading on script classes.</p></li>
+<li><a href="05-control-flow.html">Control Flow</a><p class="toc-desc">if/while/for, range-for, switch with break-by-default, try/catch/throw — and the execution budget a runaway script cannot catch its way past.</p></li>
+<li><a href="06-functions.html">Functions &amp; Lambdas</a><p class="toc-desc">Every C++ way of spelling a function, default arguments, lambdas with real capture lists, closures that outlive their frame, and functions as values.</p></li>
+<li><a href="07-classes.html">Classes</a><p class="toc-desc">Fields in declaration order, constructor overloading and delegation, inheritance with explicit <code>override</code>, statics, access control, and hot reload with instance migration.</p></li>
+<li><a href="08-coroutines.html">Coroutines</a><p class="toc-desc"><code>coroutine</code>/<code>yield</code> with resumable handles — drivable by range-for, storable in fields, alive across separate executes.</p></li>
+<li><a href="09-containers-strings.html">Containers &amp; Strings</a><p class="toc-desc">Arrays, ordered maps, typed containers, the full string method set, template strings with format specs, byte-level string reads, and parallel loops.</p></li>
+<li><a href="10-modules.html">Modules: include vs import</a><p class="toc-desc"><code>include</code> runs every time; <code>import</code> caches with timestamp awareness — and hot reload falls straight out of that split.</p></li>
 <li><a href="11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a><p class="toc-desc">The smaller conveniences: enums, namespaces, destructuring, the ternary operator, and null-safe access.</p></li>
 </ol>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

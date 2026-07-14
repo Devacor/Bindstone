@@ -163,7 +163,7 @@ public:
 	}
 
 	std::string assetPath() const {
-		return "Buildings/" + MV::toUpperFirstChar(buildingData.id) + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
+		return "Buildings/" + MV::toUpperFirstChar(buildingData.id) + "/" + (skin().empty() ? "Default" : skin()) + "/building.bindsnap";
 	}
 
 	std::string skin() const;

@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -22,9 +22,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li class="current"><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="modules-include-vs-import">Modules: <code>include</code> vs <code>import</code><a class="hlink" href="#modules-include-vs-import" aria-label="link">&#8203;</a></h1>
-<h2 id="design-intent-verbatim-from-dev">Design intent (verbatim from Dev)<a class="hlink" href="#design-intent-verbatim-from-dev" aria-label="link">&#8203;</a></h2>
-<blockquote><p><strong>include</strong> = PHP-template semantics, runs every time, may return a value, dynamic path exprs OK; <strong>import</strong> = module declaration, NOT an expression, never yields a value, cached (default <code>file_timestamp</code> mtime behavior; <code>once</code>/<code>always</code> modes; engine <code>reset_import(s)</code> for invalidation; <code>add_include_path</code> roots).</p></blockquote>
-<p>Everything below is the verified current behavior. <em>(pinned: language/include_import_tests.cpp — all 13 tests)</em></p>
+<p>Split your scripts into files without inventing a build system. <strong><code>include</code></strong> is textual composition — it runs the file&#x27;s contents in your scope <em>every time</em>, may return a value, and accepts dynamic path expressions. <strong><code>import</code></strong> is a module declaration — a statement (never an expression, never a value), cached per engine, and by default re-run only when the file&#x27;s timestamp changes — which is exactly the hook hot reload hangs off. Both resolve through the host&#x27;s <code>add_include_path</code> roots.</p>
 <h2 id="include-runs-every-single-time">include: runs every single time<a class="hlink" href="#include-runs-every-single-time" aria-label="link">&#8203;</a></h2>
 <p><code>include &quot;file.jai&quot;</code> (or <code>include &lt;file.jai&gt;</code>) executes the file&#x27;s contents <strong>in the current scope, every time it is evaluated</strong>. Definitions land in your scope; side effects repeat on every include:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include &quot;mod_math.jai&quot;
@@ -43,15 +41,14 @@ auto MOD_PI = 3.14159;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">mod_add(2, 3) = 5
 MOD_PI = 3.141590
 include runs EVERY time: load_count = 3</code></pre></div>
-<p>Includes nest (an included file can include another — pinned: <code>nested_includes</code>), and the <code>#</code> prefix is accepted and ignored for C++ muscle memory: <code>#include &quot;x.jai&quot;</code> (pinned: <code>hash_prefix_ignored</code>).</p>
-<p><strong>include in expression position returns the file&#x27;s value</strong> (2026-07): <code>var cfg = include &quot;config.jai&quot;;</code> evaluates to the included file&#x27;s result — its last top-level expression — which makes data-file configs a one-liner. Statement-position include still discards the value. <em>(pinned: <code>include_expression_returns_value</code>, <code>include_expression_dynamic_path_and_nesting</code>, <code>include_statement_position_unchanged</code>)</em></p>
+<p>Includes nest (an included file can include another), and the <code>#</code> prefix is accepted and ignored for C++ muscle memory: <code>#include &quot;x.jai&quot;</code>.</p>
+<p><strong>include in expression position returns the file&#x27;s value</strong>: <code>var cfg = include &quot;config.jai&quot;;</code> evaluates to the included file&#x27;s result — its last top-level expression — which makes data-file configs a one-liner. Statement-position include still discards the value.</p>
 <h2 id="dynamic-paths">Dynamic paths<a class="hlink" href="#dynamic-paths" aria-label="link">&#8203;</a></h2>
 <p>The call form takes any string expression — both for include and import:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto libname = &quot;mod_&quot; + &quot;math&quot; + &quot;.jai&quot;;
 include(libname);
 mod_add(20, 22);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 42</code></pre></div>
-<p>*(pinned: <code>dynamic_include_with_variable</code>, <code>dynamic_import_with_expression</code>)*</p>
 <h2 id="import-cached-module-declaration">import: cached module declaration<a class="hlink" href="#import-cached-module-declaration" aria-label="link">&#8203;</a></h2>
 <p><code>import &quot;file.jai&quot;</code> executes the file <strong>at most once</strong> per engine (subject to the mode below). Repeating the import is free:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto load_count = 0;
@@ -65,14 +62,14 @@ print(&quot;import caches (default: re-run only if the file changed): load_count
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:10: Expected expression</code></pre></div>
 <h3 id="import-modes-engine-import-behavior">Import modes (<code>engine::import_behavior</code>)<a class="hlink" href="#import-modes-engine-import-behavior" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><code>file_timestamp</code> (<strong>default</strong>)</td><td>Re-imports only when the file&#x27;s mtime changed since it was last imported — the hot-reload-friendly default.</td></tr><tr><td><code>once</code></td><td>Import exactly once; ignore later file changes.</td></tr><tr><td><code>always</code></td><td>Treat <code>import</code> as <code>include</code> (runs every time).</td></tr></tbody></table></div>
-<p>Set with <code>engine-&gt;set_import_behavior(engine::import_behavior::once);</code>. *(pinned: <code>basic_import_once_behavior</code>, <code>import_file_timestamp_behavior</code>, <code>import_always_behavior</code>)*</p>
+<p>Set with <code>engine-&gt;set_import_behavior(engine::import_behavior::once);</code>.</p>
 <h3 id="invalidation-and-tracking-host-api">Invalidation and tracking (host API)<a class="hlink" href="#invalidation-and-tracking-host-api" aria-label="link">&#8203;</a></h3>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_include_path(&quot;scripts/&quot;);        // search roots; FIRST added path wins on collisions
 eng-&gt;reset_import(canonical_path);        // forget one module -&gt; next import re-runs it
 eng-&gt;reset_imports();                     // forget all
 eng-&gt;is_imported(canonical_path);         // query (canonical/absolute path)
 eng-&gt;get_imported_files();                // list</code></pre></div>
-<p>Path resolution checks the include paths in the order they were added (pinned: <code>include_path_resolution</code>); a missing file throws (pinned: <code>file_not_found_error</code>).</p>
+<p>Path resolution checks the include paths in the order they were added; a missing file throws.</p>
 <h2 id="which-one-do-i-want-the-real-world-idiom">Which one do I want? (the real-world idiom)<a class="hlink" href="#which-one-do-i-want-the-real-world-idiom" aria-label="link">&#8203;</a></h2>
 <p>The example games use both, exactly along the intended split (examples/crawler/scripts/main.jai — verbatim):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// GRUBWELL entry point. The host executes: import &quot;main.jai&quot;; crawler_main();
@@ -99,7 +96,7 @@ function reload_scripts() -&gt; void {
 <ul><li><strong>Declaring your module graph</strong>: <code>import</code> at the top of each file — cached, cheap to repeat, mtime-aware by default; edits are picked up the next time the import executes.</li><li><strong>Forcing a re-run</strong> (hot reload of rules/content mid-game, mtime aside): <code>include</code> — it always executes.</li><li><strong>Persistent state</strong> goes in a module whose re-execution you avoid (the crawler&#x27;s <code>state.jai</code> convention above) — reload is just re-execution, so keep it away from files you re-run.</li></ul><nav class="prevnext"><a class="prev" href="../guide/09-containers-strings.html"><span>&larr; previous</span>Containers &amp; Strings</a><a class="next" href="../guide/11-kitchen-sink.html"><span>next &rarr;</span>Enums, Namespaces, Destructuring &amp; Friends</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

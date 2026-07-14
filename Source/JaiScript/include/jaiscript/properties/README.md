@@ -276,8 +276,9 @@ class Player_v2 : public jai::property_owner<Player_v2> {
     JAI_PROPERTY((int), z, 0);  // New field with default
 };
 
-// Load v1 data into v2
-player_v2.property_mgr.load(reader, {"x", "y"});  // Specify old field order
+// Load v1 data into v2: nothing extra to do. Loads seek properties BY NAME (JSON) or by
+// stored key (binary), so added fields simply keep their defaults.
+player_v2.property_mgr.load(reader);
 ```
 
 ### Renaming Fields
@@ -291,15 +292,17 @@ class Object_v2 : public jai::property_owner<Object_v2> {
 // Version 3 (renamed to "description")
 class Object_v3 : public jai::property_owner<Object_v3> {
     JAI_PROPERTY((std::string), description);
-    JAI_DELETED_PROPERTY((std::string), label);
+    JAI_DELETED_PROPERTY((std::string), label);   // consumes (discards) the old value
 };
 
 // Load v2 data into v3
-std::unordered_map<std::string, std::string> renames = {
-    {"label", "description"}
-};
-obj_v3.property_mgr.load(reader, {"label"}, renames);
+obj_v3.property_mgr.load(reader);
 ```
+
+Note: there is no automatic value migration on rename — the deleted placeholder DISCARDS
+the old value (pinned by the `version_rename_field` test) and the renamed field keeps its
+default. To carry the value across a rename, migrate it in `post_load` by reading the old
+name explicitly before adopting this pattern.
 
 ### Removing Fields
 

@@ -138,6 +138,8 @@ ctype ctype_from_type_info(const type_info* ti) {
 }
 
 bool is_numeric(ctype::kind_t k) { return k == ctype::int_k || k == ctype::float_k; }
+// Integral promotion (char_promotion.hpp): char acts as int64 0..255 under arithmetic/bitwise.
+bool is_numeric_or_char(ctype::kind_t k) { return is_numeric(k) || k == ctype::char_k; }
 
 // Result type of `l op r` (token base ops). Anything uncertain -> unknown.
 ctype binary_result(const ctype& l, token_type op, const ctype& r) {
@@ -159,21 +161,21 @@ ctype binary_result(const ctype& l, token_type op, const ctype& r) {
         case token_type::minus:
         case token_type::star:
         case token_type::slash:
-            if (is_numeric(l.kind) && is_numeric(r.kind)) {
+            if (is_numeric_or_char(l.kind) && is_numeric_or_char(r.kind)) {
                 return ctype::make((l.kind == ctype::float_k || r.kind == ctype::float_k)
                                        ? ctype::float_k : ctype::int_k);
             }
             return {};
         case token_type::percent:
-            return (l.kind == ctype::int_k && r.kind == ctype::int_k) ? ctype::make(ctype::int_k) : ctype{};
         case token_type::ampersand:
         case token_type::pipe:
         case token_type::caret:
         case token_type::left_shift:
         case token_type::right_shift:
-            return (l.kind == ctype::int_k && r.kind == ctype::int_k) ? ctype::make(ctype::int_k) : ctype{};
+            return ((l.kind == ctype::int_k || l.kind == ctype::char_k) &&
+                    (r.kind == ctype::int_k || r.kind == ctype::char_k)) ? ctype::make(ctype::int_k) : ctype{};
         case token_type::spaceship:
-            return (is_numeric(l.kind) && is_numeric(r.kind)) ? ctype::make(ctype::int_k) : ctype{};
+            return (is_numeric_or_char(l.kind) && is_numeric_or_char(r.kind)) ? ctype::make(ctype::int_k) : ctype{};
         default:
             return {};
     }
@@ -260,6 +262,16 @@ private:
     // on these names degrade to unknown instead of trusting the field's declared type.
     std::unordered_set<std::string_view> global_var_names_;
 
+    // Mixed-branch ternary stash: infer()'s ternary case records the two known-but-
+    // different branch types so walk_variable_decl can warn when an auto decl would
+    // lock its type from whichever branch RUNTIME takes. Stashed rather than re-inferred
+    // at the decl site - re-running infer() on the arms would duplicate sub-diagnostics.
+    struct mixed_ternary_note {
+        const expression* node = nullptr;
+        ctype then_type{};
+        ctype else_type{};
+    } last_mixed_ternary_;
+
     struct var_entry {
         ctype type;
         bool dynamic = false;             // var (or untyped) — assignments never checked
@@ -268,6 +280,16 @@ private:
         size_t line = 0, column = 0;
     };
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
+
+    // Live lambda contexts: a bare [] lambda whose body reaches an enclosing-function local
+    // captured it implicitly — warn once per lambda, nudging toward explicit [=]/[&].
+    struct capture_ctx {
+        size_t base = 0;
+        bool bare = false;
+        bool warned = false;
+        source_location location;
+    };
+    std::vector<capture_ctx> capture_stack_;
 
     struct fn_ctx {
         const type_info* ret = nullptr;   // null = auto
@@ -948,7 +970,11 @@ private:
                 infer(t->condition.get());
                 ctype a = infer(t->then_expression.get());
                 ctype b = infer(t->else_expression.get());
-                return (a.kind == b.kind && a.cls == b.cls) ? a : ctype{};
+                if (a.kind == b.kind && a.cls == b.cls) { return a; }
+                if (!a.is_unknown() && !b.is_unknown()) {
+                    last_mixed_ternary_ = {e, a, b};
+                }
+                return ctype{};
             }
             case node_type::array_literal_expr: {
                 auto* a = static_cast<array_literal_expr*>(e);
@@ -986,6 +1012,16 @@ private:
         size_t scope_index = 0;
         if (var_entry* local = find_local(id->name, &scope_index)) {
             if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
+            if (!capture_stack_.empty()) {
+                auto& cap = capture_stack_.back();
+                if (cap.bare && !cap.warned && scope_index != 0 && scope_index < cap.base) {
+                    cap.warned = true;
+                    diag(diag_level::warning, cap.location,
+                         "bare [] implicitly captured local '" + std::string(id->name) +
+                         "' by value — be explicit with [=] (snapshot) or [&] (share updates)",
+                         local->line, local->column);
+                }
+            }
             return local->dynamic ? ctype{} : local->type;
         }
         if (class_ctx_) {
@@ -1493,6 +1529,18 @@ private:
             entry.type = init;
             entry.dynamic = init.is_unknown();
             entry.display = ctype_name(init);
+            // The one place inference is VALUE-dependent and silent: mixed-branch
+            // ternaries lock auto to whichever branch runtime takes (int-locked then
+            // truncates later float assignments; other-shape mixes turn later
+            // assignments into runtime type mismatches on only one path).
+            if (init.is_unknown() && last_mixed_ternary_.node == decl->initializer.get()) {
+                diag(diag_level::warning, decl->location, "auto '" + std::string(decl->name) +
+                     "' is initialized from a ternary with branch types '" +
+                     ctype_name(last_mixed_ternary_.then_type) + "' and '" +
+                     ctype_name(last_mixed_ternary_.else_type) +
+                     "' - the locked type follows the branch taken at runtime; declare the type "
+                     "explicitly, use 'var', or make both branches the same type");
+            }
         } else {
             // auto without initializer: locked by the first runtime assignment — the
             // checker can't see branch order, so it stays dynamic (documented leniency)
@@ -1503,6 +1551,9 @@ private:
     }
 
     void walk_function(const function_decl* fn) {
+        // Named functions capture nothing: lambda capture contexts must not leak in.
+        std::vector<capture_ctx> saved_captures;
+        saved_captures.swap(capture_stack_);
         scopes_.emplace_back();
         fn_ctx ctx{fn->return_type.get(), fn->is_coroutine, fn->name,
                    fn->location.line, fn->location.column};
@@ -1521,6 +1572,7 @@ private:
         check_falls_off_end(fn);
         fn_stack_.pop_back();
         scopes_.pop_back();
+        capture_stack_.swap(saved_captures);
     }
 
     void define_params(const std::vector<parameter>& params, const source_location& fn_loc,
@@ -1602,6 +1654,11 @@ private:
             if (extra_globals_.count(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
         }
+        capture_stack_.push_back(capture_ctx{
+            scopes_.size(),
+            l->default_capture == lambda_expr::capture_default::none && l->captures.empty(),
+            false, l->location});
+
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
                    l->location.line, l->location.column};
@@ -1614,6 +1671,7 @@ private:
         walk_stmt(l->body.get());
         fn_stack_.pop_back();
         scopes_.pop_back();
+        capture_stack_.pop_back();
     }
 
     // ---------------------------------------------------- fall-off-the-end warning

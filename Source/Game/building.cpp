@@ -13,6 +13,22 @@ static jai::registrar<BuildTree, MV::Services> _hookBuildTree("BuildTree",
 	builder.property("income", &BuildTree::income);
 });
 
+static jai::registrar<SkinData, MV::Services> _hookSkinData("SkinData",
+	[](jai::dynamic_binder<SkinData>& builder, const MV::Services&) {
+	builder.property("id", &SkinData::id);
+	builder.property("costs", &SkinData::costs);
+});
+
+static jai::registrar<BuildingData, MV::Services> _hookBuildingData("BuildingData",
+	[](jai::dynamic_binder<BuildingData>& builder, const MV::Services&) {
+	builder.property("id", &BuildingData::id);
+	// BuildTree owns its upgrade children (unique_ptr) - share the live tree, never copy.
+	builder.method("game", [](BuildingData& a_self) -> BuildTree& { return a_self.game; });
+	builder.property("skins", &BuildingData::skins);
+	builder.property("costs", &BuildingData::costs);
+	builder.property("isServer", &BuildingData::isServer);
+});
+
 static jai::registrar<StandardScriptMethods<Building>, MV::Services> _hookBuildingScriptMethods("BuildingScriptMethods",
 	[](jai::dynamic_binder<StandardScriptMethods<Building>>& builder, const MV::Services&) {
 	builder.property("spawn", &StandardScriptMethods<Building>::scriptSpawn);

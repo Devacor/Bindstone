@@ -4,8 +4,8 @@ REM Uses JaiScript's Foundry framework (header-only) + its generic main_test_run
 REM against the built engine static lib. Returns non-zero if any test fails (CI gate).
 REM Optional arg %1 = directory containing mutedvision.lib (default = optimized main tree).
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-cd /d C:\git\Bindstone\Source\MV\Tests
-set ROOT=C:\git\Bindstone
+cd /d %~dp0
+set ROOT=%~dp0..\..\..
 set ENGINE_LIBDIR=%~1
 if "%ENGINE_LIBDIR%"=="" set ENGINE_LIBDIR=%ROOT%\Builds\Windows\x64\Release
 

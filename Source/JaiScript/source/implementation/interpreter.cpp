@@ -8,6 +8,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
+#include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
@@ -4283,6 +4284,24 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // through jai::ints so the checked-overflow policy covers compound assignment.
                 const size_t leftIdx = target.raw_storage_index();
                 const size_t rightIdx = derefRight.raw_storage_index();
+                // Integral promotion (char_promotion.hpp): a char operand leaves the in-place
+                // ladder and takes the general arithmetic path as int64 0..255, storing back
+                // like the %= case does. KEEP BYTE-PARALLEL with the VM exec_compound_store.
+                if (detail::char_operands_promote(leftIdx, rightIdx)) [[unlikely]] {
+                    token_type baseOp = token_type::plus;
+                    switch (expr->op.type) {
+                        case token_type::plus_equal: baseOp = token_type::plus; break;
+                        case token_type::minus_equal: baseOp = token_type::minus; break;
+                        case token_type::star_equal: baseOp = token_type::star; break;
+                        case token_type::slash_equal: baseOp = token_type::slash; break;
+                        case token_type::percent_equal: baseOp = token_type::percent; break;
+                        default: return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                    }
+                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight));
+                    JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
+                    push_value(expression_result_needed_ ? target.clone() : target);
+                    return {};
+                }
                 const bool bothInt = leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT;
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
@@ -4301,6 +4320,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 return detail::raise_memory_cap(*limits_);
                             }
                             target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+                        } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
+                            // string += char appends the char as TEXT (out += to_char(b),
+                            // the binary-writer shape) — a char is a text unit. Non-char
+                            // rhs keeps the Strong Types raise (string += int stays an
+                            // error, unlike binary +, by pinned design). KEEP
+                            // BYTE-PARALLEL with the VM exec_compound_store.
+                            JAISCRIPT_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
+                            JAISCRIPT_TRY(compound_typed_store_back(target, std::move(joined), identifier->name));
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
@@ -6003,8 +6030,39 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                     return aliased.error_value();
                 }
                 define_variable(std::move(aliased.value()));
+            } else if (detail::is_member_final_ref_lvalue(decl->initializer.get())) {
+                // Member-final initializer (auto& p = G.player): field reads evaluate to
+                // COPIES, so the evaluated result can't alias - resolve the chain through
+                // the shared kernel into an owner-pinned FIELD reference instead (route-
+                // independence with ref params/returns; Dev ruling 2026-07-12). Access/
+                // removed-field errors surface as-is; the kernel's generic non-lvalue
+                // verdict (computed property, C++-backed field, non-instance receiver)
+                // keeps the decl's own error text below.
+                // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
+                auto resolved = detail::resolve_ref_lvalue(decl->initializer.get(),
+                    detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+                    environment_.get(), engine_, string_symbolizer_);
+                if (!resolved && resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+                    return resolved.error_value();
+                }
+                if (resolved) {
+                    auto aliased = decl_ref_alias(resolved.value(), engine_);
+                    if (!aliased) {
+                        return aliased.error_value();
+                    }
+                    define_variable(std::move(aliased.value()));
+                } else {
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
+                        "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+                        "subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
+                        "computed properties and C++-backed members are not ref-bindable)");
+                }
             } else {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
+                // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
+                    "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+                    "subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
+                    "computed properties and C++-backed members are not ref-bindable)");
             }
         }
     } else {
@@ -6436,6 +6494,10 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
         return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
                                    ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
+    // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::char_operands_promote(li, ri)) [[unlikely]]
+        return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
+
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
@@ -6644,6 +6706,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                     // RAW, and in-place mutation must land in the target
                     // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method)
                     script_value& var_ref = ref_result.value().get().deref();
+                    detail::deref_builtin_args_in_place(arguments);
                     auto result = methodIt->second(builtin_method_context{engine_, string_symbolizer_}, var_ref, arguments);
                     if (!result) {
                         return result.error_value();
@@ -7471,7 +7534,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
             // Create a wrapper function that captures the string value by moving it
             script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(ctx, capturedValue, args);
+                std::vector<script_value> scratch;
+                return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -7497,7 +7561,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
             // Create a wrapper function that captures the array value by moving it
             script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(ctx, capturedValue, args);
+                std::vector<script_value> scratch;
+                return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -7523,7 +7588,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
             // Create a wrapper function that captures the map value by moving it
             script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(ctx, capturedValue, args);
+                std::vector<script_value> scratch;
+                return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -7554,7 +7620,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
             // Create a wrapper function that captures the weak_ptr value by moving it
             script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(ctx, capturedValue, args);
+                std::vector<script_value> scratch;
+                return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -7588,7 +7655,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
                 // Create a wrapper function that captures the shared_ptr value by moving it
                 script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                    return method(ctx, capturedValue, args);
+                    std::vector<script_value> scratch;
+                    return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
                 };
 
                 push_value(script_value::make_function(boundMethod, engine_));
@@ -11973,7 +12041,8 @@ checked_result<void> interpreter::bind_reference_to_storage(script_value& storag
 // stack ceiling). KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch.
 checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
                                                            const expression* argExpr,
-                                                           const std::shared_ptr<environment>& caller_env) {
+                                                           const std::shared_ptr<environment>& caller_env,
+                                                           const script_value* evaluated_arg) {
     call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
 
     if (argExpr && argExpr->get_type() == node_type::identifier_expr) {
@@ -12007,10 +12076,27 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     if (argExpr && detail::is_ref_bindable_lvalue(argExpr)) {
         auto resolved = detail::resolve_ref_lvalue(argExpr, detail::caller_frame_view{caller_locals},
                                                    caller_env.get(), engine_, string_symbolizer_);
-        if (!resolved) {
+        if (resolved) {
+            call_stack_[frame_index].set_local(param.slot_index, std::move(resolved.value()));
+            return {};
+        }
+        // The kernel's generic non-lvalue verdict falls through to Tier 2 (identifier-
+        // keyed map entries classify Tier 1 but only evaluation can resolve them);
+        // access enforcement and other specific errors propagate
+        if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
             return resolved.error_value();
         }
-        call_stack_[frame_index].set_local(param.slot_index, std::move(resolved.value()));
+    }
+
+    // Tier 2 (general lvalues; Dev ruling 2026-07-12): the argument already evaluated
+    // in normal left-to-right order, and subscript/map reads over lvalue bases mint
+    // owner-pinned references with full index generality - computed indices
+    // (grid[y+1][x]), member-expr indices (arr[o.idx]), map keys (m["k"]). A reference
+    // VALUE is an lvalue: share its holder, exactly like the external-invocation path
+    // always has. Nothing runs at the bind point, so the fast-path constraint holds.
+    // (KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch)
+    if (evaluated_arg && evaluated_arg->is_reference() && evaluated_arg->get_reference_holder()) {
+        call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
         return {};
     }
 
@@ -12297,7 +12383,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (param.is_reference) {
             if (call_ctx && i < call_ctx->arg_exprs->size()) {
                 auto bound = bind_reference_parameter(param, frame_index,
-                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv);
+                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg);
                 if (!bound) {
                     cleanup();
                     return bound.error_value();

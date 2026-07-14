@@ -45,9 +45,16 @@ namespace MV {
 #endif
 	}
 
+	namespace {
+		bool editModeOn_ = false;
+	}
+
+	void editMode(bool a_enabled) { editModeOn_ = a_enabled; }
+	bool editMode() { return editModeOn_; }
+
 	bool scriptHotReloadEnabled() {
-		static const bool enabled = environmentFlag("MV_SCRIPT_HOT_RELOAD");
-		return enabled;
+		static const bool envEnabled = environmentFlag("MV_SCRIPT_HOT_RELOAD");
+		return envEnabled || editModeOn_;
 	}
 
 	namespace {
@@ -113,6 +120,10 @@ namespace MV {
 		});
 		jai::stdlib::register_all(*engine);
 		jai::bind_registrar<MV::Services>(*engine, a_services);
+		engine->add_global("InEditMode", jai::script_value(editMode(), engine.get()));
+		if (editMode()) {
+			MV::info("Script engine: edit mode (InEditMode=true, gameplay script hot-reload on)");
+		}
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		attachScriptDebugger(*engine);
 #endif

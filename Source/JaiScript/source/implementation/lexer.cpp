@@ -669,6 +669,17 @@ void lexer::scan_template_string() {
     pending_index_ = 0;
 }
 
+namespace {
+    // \xNN escapes take EXACTLY two hex digits ("\x41BC" is 'A' then "BC"), unlike C++'s
+    // consume-all-digits rule whose overflow behavior is a known wart.
+    inline int hex_digit_value(char c) {
+        if (c >= '0' && c <= '9') { return c - '0'; }
+        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
+        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
+        return -1;
+    }
+}
+
 token lexer::scan_string() {
     size_t start = current_ - 1;  // Include opening quote
     size_t startColumn = column_ - 1;
@@ -694,6 +705,15 @@ token lexer::scan_string() {
                 case '\\': value += '\\'; break;
                 case '"': value += '"'; break;
                 case '\'': value += '\''; break;
+                case 'x': {
+                    if (is_at_end()) { return error_token("Unterminated string literal"); }
+                    int hi = hex_digit_value(advance());
+                    if (hi < 0 || is_at_end()) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                    int lo = hex_digit_value(advance());
+                    if (lo < 0) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                    value += static_cast<char>(static_cast<unsigned char>(hi * 16 + lo));
+                    break;
+                }
                 default:
                     return error_token("Invalid escape sequence");
             }
@@ -742,6 +762,15 @@ token lexer::scan_char() {
             case '\\': value = '\\'; break;
             case '"': value = '"'; break;
             case '\'': value = '\''; break;
+            case 'x': {
+                if (is_at_end()) { return error_token("Unterminated character literal"); }
+                int hi = hex_digit_value(advance());
+                if (hi < 0 || is_at_end()) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                int lo = hex_digit_value(advance());
+                if (lo < 0) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                value = static_cast<char>(static_cast<unsigned char>(hi * 16 + lo));
+                break;
+            }
             default:
                 return error_token("Invalid escape sequence in character literal");
         }

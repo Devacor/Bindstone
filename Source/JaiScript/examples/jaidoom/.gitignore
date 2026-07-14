@@ -1,0 +1,10 @@
+# runtime caches and captures — everything here regenerates on demand
+*.jaibite
+*.wav
+*.mid
+*.exe
+*.zip
+jaidoom_save.json
+scripts/*.bmp
+scripts/*.png
+scripts/*.txt

@@ -1,7 +1,9 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/signals/signal.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <vector>
 #include <stdexcept>
 
@@ -9,6 +11,12 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+class emit_board {
+public:
+    jai::signal_emitter<void(int)> onTickedSignal;
+    jai::signal<void(int)> onTicked{ onTickedSignal };
+};
 
 class signal_tests : public suite {
 public:
@@ -447,6 +455,50 @@ public:
             check_eq(order[0], 1, "First connected fires first");
             check_eq(order[1], 2, "Second connected fires second");
             check_eq(order[2], 3, "Third connected fires third");
+        });
+
+        // Emission rights ride the registered TYPE: signal_emitter<Sig> carries
+        // emit(args...), signal<Sig> stays the non-emittable consumer view — which
+        // member a class exposes decides what script may do with it.
+        test("script_emit_through_bound_emitter_fires_script_receiver", [this]() {
+            auto eng = engine::make();
+            bind_signal_type<void(int)>(*eng, "SignalInt");
+            dynamic_binder<emit_board>(*eng, "EmitBoard")
+                .constructor<>()
+                .property("onTicked", &emit_board::onTicked)
+                .property("onTickedEmitter", &emit_board::onTickedSignal)
+                .build();
+            eng->execute("var got = -1; var s = new EmitBoard();");
+            eng->execute("s.onTicked.connect(\"t\", [](var v) { got = v; });");
+            eng->execute("s.onTickedEmitter.emit(23);");
+            check_eq((int64_t)23, eng->execute("got").as_int());
+        });
+
+        test("script_emit_through_bound_emitter_fires_cpp_receiver", [this]() {
+            auto eng = engine::make();
+            bind_signal_type<void(int)>(*eng, "SignalInt");
+            dynamic_binder<emit_board>(*eng, "EmitBoard")
+                .constructor<>()
+                .property("onTickedEmitter", &emit_board::onTickedSignal)
+                .build();
+            auto board = std::make_shared<emit_board>();
+            int got = -1;
+            auto rcv = board->onTicked.connect([&got](int v) { got = v; });
+            eng->add_global("s", eng->make_object(board));
+            eng->execute("s.onTickedEmitter.emit(31);");
+            check_eq(31, got);
+        });
+
+        test("signal_view_stays_non_emittable", [this]() {
+            auto eng = engine::make();
+            bind_signal_type<void(int)>(*eng, "SignalInt");
+            dynamic_binder<emit_board>(*eng, "EmitBoard")
+                .constructor<>()
+                .property("onTicked", &emit_board::onTicked)
+                .build();
+            eng->execute("var s = new EmitBoard();");
+            check_throws([&]() { eng->execute("s.onTicked.emit(1);"); },
+                "the consumer view grants no emission rights");
         });
     }
 };

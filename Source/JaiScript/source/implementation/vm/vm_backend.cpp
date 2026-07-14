@@ -9639,6 +9639,10 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 
 	bool found_constructor = false;
 
+	// Reflection determinism (twin: interpreter class-decl builder, same commit): field
+	// DECLARATION order retained per class — instance fields then statics, source order
+	std::vector<uint64_t> reflect_field_order_instance;
+	std::vector<uint64_t> reflect_field_order_static;
 	for (const auto& member : decl->members) {
 		auto* var_decl = member.declaration->get_type() == node_type::variable_decl
 			? static_cast<variable_decl*>(member.declaration.get()) : nullptr;
@@ -9667,6 +9671,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 			if (var_decl->is_static) {
 				if (field_id != 0) {
 					new_static_field_ids.insert(field_id);
+					reflect_field_order_static.push_back(field_id);
 				}
 				// A reload preserves a static's runtime value; only NEW statics run their initializer
 				bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id);
@@ -9687,6 +9692,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				}
 			} else {
 				if (field_id != 0) {
+					reflect_field_order_instance.push_back(field_id);
 					if (initializer_ast) {
 						class_def->add_field_initializer_ast(field_id, initializer_ast);
 					}
@@ -9756,6 +9762,11 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 		global_env->define(decl->name_id,
 			script_value::make_function(script_callable_thunk{engine_, std::move(ctor_payload)}, engine_));
 	}
+
+	reflect_field_order_instance.insert(reflect_field_order_instance.end(),
+	                                    reflect_field_order_static.begin(),
+	                                    reflect_field_order_static.end());
+	class_def->set_field_order(std::move(reflect_field_order_instance));
 
 	if (is_redefinition) {
 		std::unordered_map<uint64_t, script_value> field_defaults_with_engine;

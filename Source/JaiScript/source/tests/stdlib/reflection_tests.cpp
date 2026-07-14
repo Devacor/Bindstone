@@ -118,6 +118,72 @@ public:
             check_eq(eng->execute("reflect::has_field(\"Evolver\", \"b\")").as<bool>(), true);
         });
 
+        test("fields_declaration_order_base_first", [this]() {
+            // The determinism contract: base's fields first, then own, each in SOURCE
+            // order — never hash order. Access labels and static flags ride the entry.
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class FBase { int hp = 5; private: string secret = "s"; }
+                class FDer : FBase { float speed = 1.5; static int count = 0; }
+            )");
+            eng->execute("var fs = reflect::fields(FDer());");
+            check_eq(eng->execute("fs.size()").as_int(), (int64_t)4);
+            check_eq(eng->execute("fs[0][\"name\"]").as<std::string>(), "hp");
+            check_eq(eng->execute("fs[0][\"from\"]").as<std::string>(), "FBase");
+            check_eq(eng->execute("fs[0][\"type\"]").as<std::string>(), "int");
+            check_eq(eng->execute("fs[1][\"name\"]").as<std::string>(), "secret");
+            check_eq(eng->execute("fs[1][\"access\"]").as<std::string>(), "private");
+            check_eq(eng->execute("fs[2][\"name\"]").as<std::string>(), "speed");
+            check_eq(eng->execute("fs[2][\"from\"]").as<std::string>(), "FDer");
+            check_eq(eng->execute("fs[3][\"name\"]").as<std::string>(), "count");
+            check_eq(eng->execute("fs[3][\"static\"]").as<bool>(), true);
+            // Order is a cross-engine contract, not one engine's accident
+            auto eng2 = make_reflective_engine();
+            eng2->execute(R"(
+                class FBase { int hp = 5; private: string secret = "s"; }
+                class FDer : FBase { float speed = 1.5; static int count = 0; }
+            )");
+            check_eq(eng2->execute("reflect::fields(FDer())[0][\"name\"]").as<std::string>(), "hp");
+            check_eq(eng2->execute("reflect::fields(FDer())[2][\"name\"]").as<std::string>(), "speed");
+        });
+
+        test("fields_reload_recaptures_new_shape_and_order", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute("class Shape { int a = 1; int b = 2; }");
+            check_eq(eng->execute("reflect::fields(Shape()).size()").as_int(), (int64_t)2);
+            eng->execute("class Shape { int b = 2; int c = 3; int a = 1; }");   // reload: reorder + add
+            eng->execute("var fs2 = reflect::fields(\"Shape\");");
+            check_eq(eng->execute("fs2.size()").as_int(), (int64_t)3);
+            check_eq(eng->execute("fs2[0][\"name\"]").as<std::string>(), "b");
+            check_eq(eng->execute("fs2[1][\"name\"]").as<std::string>(), "c");
+            check_eq(eng->execute("fs2[2][\"name\"]").as<std::string>(), "a");
+        });
+
+        test("fields_of_host_class_reports_schema_kinds", [this]() {
+            auto eng = make_reflective_engine();
+            dynamic_binder<reflect_host_thing>(*eng, "HostThing2")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("var hf = reflect::fields(\"HostThing2\");");
+            check_eq(eng->execute("hf.size()").as_int(), (int64_t)1);
+            check_eq(eng->execute("hf[0][\"name\"]").as<std::string>(), "armor");
+            check_eq(eng->execute("hf[0][\"type\"]").as<std::string>(), "int");
+            check_eq(eng->execute("hf[0][\"kind\"]").as<std::string>(), "field");
+            // Non-class values: empty array, never an error (property grids call this on anything)
+            check_eq(eng->execute("reflect::fields(42).size()").as_int(), (int64_t)0);
+        });
+
+        test("instances_walks_the_live_registry", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute("class Tracked { int n = 0; }");
+            eng->execute("var a = new Tracked(); var b = new Tracked(); a.n = 7;");
+            check_eq(eng->execute("reflect::instances(\"Tracked\").size()").as_int(), (int64_t)2);
+            check_eq(eng->execute(
+                "var total = 0; for (auto t : reflect::instances(\"Tracked\")) { total = total + t.n; } total"
+            ).as_int(), (int64_t)7);
+        });
+
         test("sandbox_engine_reflects_nothing_it_did_not_register", [this]() {
             // The allowlist contract: reflection is a capability over THIS engine's
             // registrations. A second engine in the same process knows nothing about

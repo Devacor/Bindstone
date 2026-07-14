@@ -29,7 +29,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
 auto eng = jai::engine::make();                 // shared_ptr&lt;engine&gt;
 // eng-&gt;set_backend(jai::backend_type::vm);     // optional: bytecode VM (before first execute)
-jai::stdlib::register_all(eng);                 // print, format, to_string, type_of, to_json, ...
+jai::stdlib::register_all(eng);                 // formatted print, format, to_string, type_of, to_json, ...
 jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
 int v = r.as_int();                             // 4</code></pre></div>
 <p>Two things to know from the start:</p>
@@ -56,7 +56,10 @@ auto x = 10; // trailing comment
 x * 2;  // the last expression&#x27;s value is what execute() returns</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 20</code></pre></div>
 <h2 id="print-and-format">print and format<a class="hlink" href="#print-and-format" aria-label="link">&#8203;</a></h2>
-<p><code>print</code> and <code>format</code> are registered by <code>jai::stdlib::register_all</code> as variadic host functions (they are the canonical example of variadics, which live on the host side — see the Functions chapter).</p>
+<p>A bare engine ships a basic <code>print</code> (arguments concatenate; no <code>{}</code>
+substitution); <code>jai::stdlib::register_all</code> upgrades it in place to the formatted version
+shown below and registers <code>format</code>. Both are variadic host functions — the canonical
+example of variadics, which live on the host side (see the Functions chapter).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;plain string&quot;);
 print(&quot;several&quot;, &quot; &quot;, &quot;args&quot;, &quot; &quot;, &quot;concatenate&quot;);
 print(&quot;sequential: {} + {} = {}&quot;, 2, 3, 2 + 3);

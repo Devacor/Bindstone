@@ -22,16 +22,15 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li class="current"><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="embedding-quickstart">Embedding Quickstart<a class="hlink" href="#embedding-quickstart" aria-label="link">&#8203;</a></h1>
-<p>JaiScript&#x27;s whole integration pitch fits in two or three lines — it compiles into your project as a static lib plus headers, and an engine is just an object:</p>
+<p>JaiScript&#x27;s whole integration pitch fits in two lines — it compiles into your project as a static lib plus headers, and an engine is just an object:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
-jai::stdlib::register_all(eng); // Optional, but used for print below.
-e-&gt;execute(&quot;print(\&quot;hello\&quot;);&quot;);</code></pre></div>
+e-&gt;execute(&quot;print(\&quot;hello\&quot;);&quot;);   // a bare engine ships a basic print</code></pre></div>
 <p>There is no global interpreter state anywhere: every <code>script_value</code> carries its engine, so two engines are fully isolated (separate globals, separate classes, separate budgets) and two engines on two threads need no locks. <code>engine::make()</code> always returns a <code>std::shared_ptr&lt;engine&gt;</code> — the private constructor makes it impossible to create one any other way (<code>include/jaiscript/core/engine.hpp</code>, <code>engine::make</code>).</p>
 <h2 id="execute-and-read-results-as">Execute and read results: <code>as&lt;T&gt;</code><a class="hlink" href="#execute-and-read-results-as" aria-label="link">&#8203;</a></h2>
 <p><code>execute()</code> returns a <code>jai::script_value</code>; convert it with <code>as&lt;T&gt;()</code> or the direct accessors <code>as_int()</code>, <code>as_float()</code>, <code>as_string()</code>, <code>as_bool()</code>.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/quickstart.cpp — compiled and run against the real lib
 auto eng = jai::engine::make();               // always a shared_ptr&lt;engine&gt;
-jai::stdlib::register_all(eng);               // print, to_string, to_json, math, ...
+jai::stdlib::register_all(eng);               // formatted print, to_string, to_json, math, ...
 
 jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
 r.as&lt;int&gt;();                                        // 4
@@ -45,7 +44,15 @@ as_int(): 42
 as&lt;std::string&gt;: jaiscript
 as&lt;double&gt;: 3
 as&lt;bool&gt;: 1</code></pre></div>
-<p>Note the stdlib is opt-in: a bare engine has <strong>no</strong> <code>print</code>, no <code>to_string</code>, nothing — call <code>jai::stdlib::register_all(eng)</code> to get the standard library. That opt-in is part of the sandbox story (see Safety Rails).</p>
+<p>Note the stdlib is opt-in. A bare engine ships two conveniences — a basic <code>print</code>
+(concatenates its arguments to the host-controlled output stream; no <code>{}</code> formatting) and
+<code>format_value</code> (so template-string specs like <code>${hp:.1f}</code> work on every engine) —
+and nothing else: no <code>to_string</code>, no containers library, no JSON.
+<code>jai::stdlib::register_all(eng)</code> brings the standard library and upgrades <code>print</code>
+in place to the formatted <code>{}</code> version (same name, one registration — the upgrade replaces,
+it never stacks). Neither print grants any authority: output goes only to the stream the host installed
+via <code>set_output_stream</code> — a log file, a capture buffer, or a discarding sink. The opt-in
+surface is part of the sandbox story (see Safety Rails).</p>
 <h2 id="registering-c-functions">Registering C++ functions<a class="hlink" href="#registering-c-functions" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// Typed: signature drives conversion and overload resolution
 eng-&gt;add_function(&quot;square&quot;, [](jai::script_int n) { return n * n; });

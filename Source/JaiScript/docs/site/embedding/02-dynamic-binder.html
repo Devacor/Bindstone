@@ -483,14 +483,12 @@ surface as connectable signal views. Container- and class-typed properties still
 reflect and serialize from the one declaration, but script access needs an explicit
 <code>.property()</code>/<code>.method()</code> in the configure lambda — a member-pointer
 <code>.property()</code> on a <code>std::vector</code> gets you the zero-copy live view.</li>
-<li><strong>Inherited property auto-binding is unreliable — bind it explicitly.</strong> The schema-driven
-binder can generate a derived-level accessor for a base-level property that misses the base's property
-manager (each level owns its own), and whether you get the working base accessor or the dead derived one
-depends on registration history. The reliable spelling on both backends is the pattern from the previous
-section — a one-line getter/setter <code>.property()</code> on the derived binder. Signal properties are
-the exception: their lookup is virtual and whole-chain (<code>find_reflected_property</code>), so a
-base-declared <code>JAI_SIGNAL_PROPERTY</code> connects through a derived registration in either
-registration order.</li>
+<li><strong>Inherited properties resolve through derived registrations.</strong> Every schema-generated
+accessor — value, observable, and signal alike — looks the property up over the whole inheritance chain
+(the virtual <code>find_reflected_property</code>), so a base-declared <code>JAI_PROPERTY</code> or
+<code>JAI_SIGNAL_PROPERTY</code> reads, writes, and connects through a derived registration in either
+registration order. This matches serialization, which saves and loads every level's properties the same
+chain-walking way.</li>
 <li><strong>Function-object signal receivers don't serialize.</strong> Lambdas connected from script and C++
 callbacks fire live but are skipped on save, by design. For handlers that should be part of an object's
 persistent state, connect named script-text receivers (<code>connect("logger",

@@ -427,6 +427,15 @@ public:
         return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0] : nullptr;
     }
 
+    // Reflection enumeration (reflect::methods / method_arguments): this class's OWN
+    // tables — script overload sets (AST decls carry names/types/defaults), the typed
+    // C++ overload table, and the raw method-value maps for names in neither
+    const auto& script_method_overloads() const { return method_overloads_; }
+    const auto& script_static_method_overloads() const { return static_method_overloads_; }
+    const auto& cpp_method_overload_table() const { return cpp_method_overloads_; }
+    const auto& method_values() const { return methods_; }
+    const auto& static_method_values() const { return static_methods_; }
+
     void add_field(std::string_view name, const script_value& default_value) {
         auto eng = engine_;
         if (!eng) return;

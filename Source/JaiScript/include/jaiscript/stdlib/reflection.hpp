@@ -16,8 +16,11 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/ast.hpp>
 #include <jaiscript/properties/property_schema.hpp>
+#include <algorithm>
 #include <cctype>
+#include <set>
 #include <string>
 #include <typeindex>
 #include <vector>
@@ -274,6 +277,164 @@ inline void append_fields_of(engine* eng, class_definition* def, script_value& a
                     kind, "public", false, from));
             }
         }
+    }
+}
+
+// ---- C group: navigate (methods, functions, globals, argument lists) ----
+
+inline script_value make_param_entry(engine* eng, const std::string& name,
+                                     const std::string& type, bool has_default) {
+    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& m = const_cast<script_map&>(entry.as_map());
+    m[script_value(std::string("name"), eng)] = script_value(name, eng);
+    m[script_value(std::string("type"), eng)] = script_value(type, eng);
+    m[script_value(std::string("default"), eng)] = script_value(has_default, eng);
+    return entry;
+}
+
+inline std::string declared_param_type_name(const parameter& p) {
+    if (!p.type || p.type->type_name.empty()) { return "auto"; }
+    return p.type->type_name == "any" ? "var" : p.type->type_name;
+}
+
+inline script_value params_array_for(engine* eng, const std::vector<parameter>& params) {
+    auto arr = script_value::make_array(nullptr, eng);
+    for (const auto& p : params) {
+        arr.as_array().push_back(make_param_entry(
+            eng, p.name, declared_param_type_name(p), p.default_value != nullptr));
+    }
+    return arr;
+}
+
+inline std::string cpp_param_type_name(engine* eng, const param_type_info& pt) {
+    switch (pt.base_type) {
+        case script_value_type::jai_int_type: return "int";
+        case script_value_type::jai_float_type: return "float";
+        case script_value_type::jai_bool_type: return "bool";
+        case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_char_type: return "char";
+        case script_value_type::jai_array_type: return "array";
+        case script_value_type::jai_map_type: return "map";
+        case script_value_type::jai_object_type:
+            if (auto def = eng->get_class_definition_by_type(pt.cpp_type)) {
+                return def->get_name();
+            }
+            return "object";
+        default: return "var";
+    }
+}
+
+inline script_value make_method_entry(engine* eng, const std::string& name, int64_t arity,
+                                      bool is_static, const std::string& access,
+                                      const std::string& from, script_value params) {
+    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& m = const_cast<script_map&>(entry.as_map());
+    m[script_value(std::string("name"), eng)] = script_value(name, eng);
+    m[script_value(std::string("arity"), eng)] = script_value(static_cast<script_int>(arity), eng);
+    m[script_value(std::string("static"), eng)] = script_value(is_static, eng);
+    m[script_value(std::string("access"), eng)] = script_value(access, eng);
+    m[script_value(std::string("from"), eng)] = script_value(from, eng);
+    m[script_value(std::string("params"), eng)] = std::move(params);
+    return entry;
+}
+
+// Chain walk for reflect::methods / method_arguments: OWN tables per level,
+// derived-first with (name, arity, static) dedupe so an override wins; results carry
+// a sort key — enumeration order is (name, arity, static), never hash order.
+struct method_collector {
+    engine* eng;
+    std::vector<std::pair<std::tuple<std::string, int64_t, bool>, script_value>> entries;
+    std::set<std::tuple<std::string, int64_t, bool>> seen;
+
+    void add(const std::string& name, int64_t arity, bool is_static,
+             const class_definition* level, script_value params) {
+        std::tuple<std::string, int64_t, bool> key{name, arity, is_static};
+        if (!seen.insert(key).second) { return; }
+        std::string access = "public";
+        access_level lvl = access_level::public_access;
+        if (level->find_nonpublic_declarer(eng->get_symbolizer()->intern(name), lvl)) {
+            access = (lvl == access_level::private_access) ? "private" : "protected";
+        }
+        entries.emplace_back(std::move(key),
+            make_method_entry(eng, name, arity, is_static, access, level->get_name(),
+                              std::move(params)));
+    }
+
+    script_value sorted_array() {
+        std::sort(entries.begin(), entries.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        auto arr = script_value::make_array(nullptr, eng);
+        for (auto& e : entries) { arr.as_array().push_back(std::move(e.second)); }
+        return arr;
+    }
+};
+
+// only_id = 0 enumerates everything; a member id filters to that name. Auto-accessors
+// and _get_/_set_ spellings are the PROPERTY surface (fields() owns them); a method
+// sharing the class's name is the constructor surface (construct() owns it).
+inline void collect_methods_of(engine* eng, const class_definition* def,
+                               method_collector& out, uint64_t only_id) {
+    auto* sym = eng->get_symbolizer();
+    auto surfaced = [&](uint64_t id, std::string& name_out) {
+        if (only_id && id != only_id) { return false; }
+        name_out = std::string(sym->get_string(id));
+        if (name_out.empty() || name_out == def->get_name()) { return false; }
+        if (name_out.rfind("_get_", 0) == 0 || name_out.rfind("_set_", 0) == 0) { return false; }
+        return true;
+    };
+    std::string name;
+    for (const auto& [id, decls] : def->script_method_overloads()) {
+        if (!surfaced(id, name)) { continue; }
+        for (const auto& fd : decls) {
+            out.add(name, static_cast<int64_t>(fd->parameters.size()), false, def,
+                    params_array_for(eng, fd->parameters));
+        }
+    }
+    for (const auto& [id, decls] : def->script_static_method_overloads()) {
+        if (!surfaced(id, name)) { continue; }
+        for (const auto& fd : decls) {
+            out.add(name, static_cast<int64_t>(fd->parameters.size()), true, def,
+                    params_array_for(eng, fd->parameters));
+        }
+    }
+    for (const auto& [id, by_arity] : def->cpp_method_overload_table()) {
+        if (!surfaced(id, name)) { continue; }
+        for (const auto& [arity, overloads] : by_arity) {
+            for (const auto& entry : overloads) {
+                auto params = script_value::make_array(nullptr, eng);
+                if (entry.param_types.empty()) {   // legacy untyped binding: arity only
+                    for (size_t i = 0; i < arity; ++i) {
+                        params.as_array().push_back(make_param_entry(
+                            eng, "arg" + std::to_string(i), "var", false));
+                    }
+                } else {
+                    size_t i = 0;
+                    for (const auto& pt : entry.param_types) {
+                        params.as_array().push_back(make_param_entry(
+                            eng, "arg" + std::to_string(i++), cpp_param_type_name(eng, pt), false));
+                    }
+                }
+                out.add(name, static_cast<int64_t>(arity), false, def, std::move(params));
+            }
+        }
+    }
+    // Names in neither table (opaque add_method_by_id registrations): unknown signature
+    for (const auto& [id, value] : def->method_values()) {
+        if (!surfaced(id, name) || !value.is_function()) { continue; }
+        if (def->script_method_overloads().count(id) ||
+            def->cpp_method_overload_table().count(id)) { continue; }
+        out.add(name, -1, false, def, script_value::make_array(nullptr, eng));
+    }
+    for (const auto& [id, value] : def->static_method_values()) {
+        if (!surfaced(id, name) || !value.is_function()) { continue; }
+        if (def->script_static_method_overloads().count(id)) { continue; }
+        out.add(name, -1, true, def, script_value::make_array(nullptr, eng));
+    }
+    for (const auto& parent : def->get_parent_classes()) {
+        if (parent) { collect_methods_of(eng, parent.get(), out, only_id); }
+    }
+    if (auto cpp_base = def->get_cpp_base_class()) {
+        collect_methods_of(eng, cpp_base.get(), out, only_id);
     }
 }
 
@@ -559,6 +720,122 @@ inline void register_reflection_functions(engine& eng_ref) {
             value.set_type_info(eng->get_type_info_shared_ptr(pointee));
         }
         return value;
+    });
+
+    // ---- C group: navigate (methods, functions, globals, argument lists) ----
+
+    add("methods", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 1, "methods");
+        auto* def = reflect_detail::resolve_class(eng, args[0], "methods");
+        if (!def) { throw runtime_error("reflect::methods expects a class or class name"); }
+        reflect_detail::method_collector out{eng};
+        reflect_detail::collect_methods_of(eng, def, out, 0);
+        return out.sorted_array();
+    });
+
+    add("method_arguments", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 2, "method_arguments");
+        const std::string name = reflect_detail::expect_name(args, 1, "method_arguments");
+        auto* def = reflect_detail::resolve_class(eng, args[0], "method_arguments");
+        if (!def) { throw runtime_error("reflect::method_arguments expects a class or class name"); }
+        reflect_detail::method_collector out{eng};
+        reflect_detail::collect_methods_of(eng, def, out,
+                                           eng->get_symbolizer()->intern(name));
+        if (out.entries.empty()) {
+            throw runtime_error("reflect::method_arguments: '" + def->get_name() +
+                                "' has no method '" + name + "'");
+        }
+        // One param-array PER OVERLOAD (overloads make any single answer ambiguous)
+        auto sorted = out.sorted_array();
+        auto arr = script_value::make_array(nullptr, eng);
+        for (auto& entry : const_cast<std::vector<script_value>&>(sorted.as_array())) {
+            arr.as_array().push_back(
+                const_cast<script_map&>(entry.as_map())[script_value(std::string("params"), eng)]);
+        }
+        return arr;
+    });
+
+    add("functions", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 0, "functions");
+        std::set<std::string> names;   // sorted, deduped — the determinism contract
+        for (auto& [name_view, value] : eng->get_global_environment()->get_all_variables()) {
+            if (!value.is_function()) { continue; }
+            std::string name{name_view};
+            if (eng->get_class_definition(name)) { continue; }   // constructors: classes() owns them
+            names.insert(std::move(name));
+        }
+        auto* sym = eng->get_symbolizer();
+        for (auto& [ns_id, data] : eng->script_namespaces()) {
+            if (!data) { continue; }
+            const std::string ns{sym->get_string(ns_id)};
+            for (auto& [fid, decls] : data->functions) {
+                (void)decls;
+                names.insert(ns + "::" + std::string(sym->get_string(fid)));
+            }
+            for (auto& [vid, value] : data->variables) {
+                if (value.is_function()) {
+                    names.insert(ns + "::" + std::string(sym->get_string(vid)));
+                }
+            }
+        }
+        auto arr = script_value::make_array(nullptr, eng);
+        for (const auto& n : names) { arr.as_array().push_back(script_value(n, eng)); }
+        return arr;
+    });
+
+    add("globals", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 0, "globals");
+        std::set<std::string> names;
+        for (auto& [name_view, value] : eng->get_global_environment()->get_all_variables()) {
+            if (value.is_function()) { continue; }
+            if (value.is_object()) {   // class-definition holders are registry internals
+                auto holder = value.get_object_holder();
+                if (holder && holder->type_name == "class_definition") { continue; }
+            }
+            names.insert(std::string(name_view));
+        }
+        auto arr = script_value::make_array(nullptr, eng);
+        for (const auto& n : names) { arr.as_array().push_back(script_value(n, eng)); }
+        return arr;
+    });
+
+    add("function_arguments", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 1, "function_arguments");
+        const std::string name = reflect_detail::expect_name(args, 0, "function_arguments");
+        auto arr = script_value::make_array(nullptr, eng);
+        if (auto pos = name.find("::"); pos != std::string::npos) {
+            auto* sym = eng->get_symbolizer();
+            auto& spaces = eng->script_namespaces();
+            auto ns_it = spaces.find(sym->intern(name.substr(0, pos)));
+            if (ns_it != spaces.end() && ns_it->second) {
+                auto fn_it = ns_it->second->functions.find(sym->intern(name.substr(pos + 2)));
+                if (fn_it != ns_it->second->functions.end()) {
+                    for (const auto& fd : fn_it->second) {
+                        arr.as_array().push_back(
+                            reflect_detail::params_array_for(eng, fd->parameters));
+                    }
+                    return arr;
+                }
+            }
+        } else {
+            auto found = eng->get_global_environment()->get(name);
+            if (found && found.value().is_function()) {
+                // Script functions carry their decl in the callable payload; host
+                // registrations are type-erased — they answer an EMPTY overload list
+                const script_function& fn = found.value().as_function();
+                if (const auto* thunk = fn.target<script_callable_thunk>()) {
+                    if (thunk->payload.fn && thunk->payload.fn->shared_parameters) {
+                        arr.as_array().push_back(reflect_detail::params_array_for(
+                            eng, *thunk->payload.fn->shared_parameters));
+                    } else if (thunk->payload.ast) {
+                        arr.as_array().push_back(reflect_detail::params_array_for(
+                            eng, thunk->payload.ast->parameters));
+                    }
+                }
+                return arr;
+            }
+        }
+        throw runtime_error("reflect::function_arguments: unknown function '" + name + "'");
     });
 }
 

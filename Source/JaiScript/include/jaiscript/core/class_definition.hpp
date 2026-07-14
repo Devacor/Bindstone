@@ -1034,6 +1034,17 @@ public:
 
     void set_type_id(uint64_t type_id) { type_id_ = type_id; }
 
+    // Auto-registration lifecycle: base_class<B>() registers an unregistered
+    // property_owner base under its C++ identity so the chain edge always exists;
+    // a later explicit dynamic_binder for the same type ADOPTS this definition and
+    // renames it (registration phase — no live instances carry the old identity).
+    bool auto_registered() const { return auto_registered_; }
+    void set_auto_registered(bool v) { auto_registered_ = v; }
+    void rename(const std::string& name, uint64_t type_id) {
+        name_ = name;
+        type_id_ = type_id;
+    }
+
     engine* get_engine() const { return engine_; }
 
     uint64_t get_cpp_object_field_id() const {
@@ -1450,6 +1461,7 @@ public:
 private:
     std::string name_;
     uint64_t type_id_;
+    bool auto_registered_ = false;
     type_info_ptr type_info_;
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;

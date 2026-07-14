@@ -4,6 +4,7 @@
 #define JAISCRIPT_DETAIL_STATIC_TYPE_NAME_HPP
 
 #include <string_view>
+#include <type_traits>
 
 // Compile-time C++ type names via the compiler's signature macro (the nameof/ctti
 // technique). Used by property_owner's implicit polymorphic registration so a plain
@@ -80,6 +81,34 @@ constexpr std::string_view static_unqualified_type_name() {
 		if (!identifierChar) { return {}; } //lambda / local / anything with a non-identifier final segment
 	}
 	return name;
+}
+
+// THE naming ladder, shared by script registration (dynamic_binder auto-registration,
+// jai::registrar auto-name) and serialization identity (polymorphic implicit entries):
+// a self-owned jai_type_name pin wins, then the bare unqualified type name, then empty
+// (= no portable auto-name: template instantiations, lambdas, locals — name explicitly).
+// One function so a type carries ONE name everywhere and can move between implicit and
+// explicit registration without that name changing.
+//
+// The pin is inherited by C++ lookup, so an unpinned Derived would otherwise claim its
+// Base's name: when the pinning class also declares its owner tag (JAI_PROPERTY_OWNER
+// emits both), only the exact owner keeps the pin and everyone else falls to the derived
+// name. Bare hand-written pins keep whole-chain visibility (the legacy contract).
+template<typename T>
+constexpr std::string_view declared_or_derived_type_name() {
+	if constexpr (requires { std::string_view{T::jai_type_name}; }) {
+		if constexpr (requires { typename T::jai_name_owner; }) {
+			if constexpr (std::is_same_v<typename T::jai_name_owner, T>) {
+				return std::string_view{T::jai_type_name};
+			} else {
+				return static_unqualified_type_name<T>();
+			}
+		} else {
+			return std::string_view{T::jai_type_name};
+		}
+	} else {
+		return static_unqualified_type_name<T>();
+	}
 }
 
 // Compile-time self-test: locks the signature parse against compiler/format drift

@@ -221,7 +221,12 @@ namespace jai {
 			return true;
 		}();
 
-		void register_inheritance() {
+	public:
+		// The schema's base chain is compile-time knowledge (the CRTP Bases pack), so it
+		// must not wait for first construction: dynamic_binder::auto_bind calls this at
+		// REGISTRATION time so schema-driven binding sees inherited properties before any
+		// instance exists; constructors keep calling it too (idempotent magic static).
+		static void register_inheritance() {
 			(void)_jai_poly_registered;
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
@@ -232,6 +237,8 @@ namespace jai {
 			}();
 			(void)_inheritance_registered;
 		}
+
+	private:
 
 	public:
 

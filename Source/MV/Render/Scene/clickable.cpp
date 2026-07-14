@@ -80,9 +80,9 @@ namespace MV {
 		std::shared_ptr<Clickable> Clickable::clickDetectionType(BoundsType a_type) {
 			auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (a_type == BoundsType::NONE && hitDetectionType != BoundsType::NONE) {
-				onEnabledSignal(self);
-			} else if (hitDetectionType == BoundsType::NONE && a_type != BoundsType::NONE) {
 				onDisabledSignal(self);
+			} else if (hitDetectionType == BoundsType::NONE && a_type != BoundsType::NONE) {
+				onEnabledSignal(self);
 			}
 			hitDetectionType = a_type;
 			return self;

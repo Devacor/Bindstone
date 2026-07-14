@@ -317,8 +317,13 @@ class engine;
             }
             
             static script_value to(T& t, engine* eng) {
+                // Smart pointers route to their own specialization — the registry path
+                // would look up a class literally named "std::shared_ptr<T>".
+                if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                    return value_converter<T>::to(t, eng);
+                }
                 // avoids copying non-copyable types and preserves reference semantics
-                if constexpr (std::is_class_v<T> &&
+                else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
@@ -368,6 +373,17 @@ class engine;
                     temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
                     return temp;
                 }
+                // Smart-pointer params can't alias script storage (the holder owns T, not
+                // shared_ptr<T>): materialize a temp handle in parameter storage.
+                else if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                    auto* storage = detail::get_engine_parameter_storage(eng);
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
+                    temp = v.as<T>();
+                    return temp;
+                }
                 // For custom classes, alias the live object (handles class_instance
                 // wrappers, cpp_bound references, and raw holders via as<T&>)
                 else if constexpr (std::is_class_v<T> &&
@@ -388,8 +404,14 @@ class engine;
             }
             
             static script_value to(const T& t, engine* eng) {
+                // Smart pointers route to their own specialization — the registry path
+                // would look up a class literally named "std::shared_ptr<T>" (the sim's
+                // creature-signal args hit exactly this).
+                if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                    return value_converter<T>::to(t, eng);
+                }
                 // Check if this is a custom class type (excluding standard containers and string)
-                if constexpr (std::is_class_v<T> &&
+                else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
@@ -829,9 +851,15 @@ class engine;
                 // Get the actual value (deref handles references automatically)
                 const script_value& actual_arg = arg.deref();
                 
+                // Smart-pointer params materialize the handle by value (holders own T, not
+                // shared_ptr<T> — wrapping again would reinterpret T's bytes as a handle);
+                // the tuple element is an lvalue, so const shared_ptr<T>& binds to it.
+                if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
+                    return actual_arg.as<base_type>();
+                }
                 // For custom classes, get shared_ptr and return reference to the object
                 // Exclude string, script_value, bound_array, bound_map, and built-in container types which have special handling
-                if constexpr (std::is_class_v<base_type> &&
+                else if constexpr (std::is_class_v<base_type> &&
                             !std::is_same_v<base_type, std::string> &&
                             !std::is_same_v<base_type, script_value> &&
                             !is_bound_array_type<base_type>::value &&

@@ -799,6 +799,99 @@ void parser::synchronize() {
     }
 }
 
+namespace {
+    bool is_type_keyword_token(token_type type) {
+        switch (type) {
+            case token_type::auto_keyword:
+            case token_type::var_keyword:
+            case token_type::int_keyword:
+            case token_type::float_keyword:
+            case token_type::string_keyword:
+            case token_type::bool_keyword:
+            case token_type::char_keyword:
+            case token_type::void_keyword:
+            case token_type::function_keyword:
+            case token_type::array_keyword:
+            case token_type::map_keyword:
+            case token_type::weak_ptr_keyword:
+            case token_type::shared_ptr_keyword:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    std::string type_keyword_name_message(std::string_view lexeme, const char* what) {
+        std::string name(lexeme);
+        return "'" + name + "' is a type keyword and cannot be used as a " + std::string(what) +
+               " name - rename it (e.g. '" + name + "name')";
+    }
+
+    // JSON-style map keys: one single token immediately followed by ':'. Literal keys
+    // beyond identifier/string are legal (int/float/char/bool - the runtime map model is
+    // key-type-agnostic); the set must stay single-token so block-vs-map lookahead never
+    // has to parse an expression. Used by BOTH detection sites (looks_like_map_literal
+    // and parse_map_literal's probe) so {1: "a"} and {"s": 0, 1: "a"} agree.
+    bool is_json_map_key_token(token_type type) {
+        switch (type) {
+            case token_type::identifier:
+            case token_type::string_literal:
+            case token_type::integer_literal:
+            case token_type::float_literal:
+            case token_type::char_literal:
+            case token_type::true_keyword:
+            case token_type::false_keyword:
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+void parser::report_expected_name(const std::string& expected_message, const char* what) {
+    if (is_type_keyword_token(peek().type)) {
+        report_error(type_keyword_name_message(peek().lexeme, what), peek());
+    } else {
+        report_error(expected_message, peek());
+    }
+}
+
+checked_result<token> parser::consume_name(const std::string& expected_message, const char* what) {
+    if (!check(token_type::identifier) && is_type_keyword_token(peek().type)) {
+        return consume(token_type::identifier, type_keyword_name_message(peek().lexeme, what));
+    }
+    return consume(token_type::identifier, expected_message);
+}
+
+void parser::synchronize_class_member(size_t class_open_index) {
+    // Brace-aware recovery for the class-member loop: plain synchronize() stops at the
+    // first ';' INSIDE an aborted method body, so the member loop resumed mid-body,
+    // mistook the method's '}' for the class's, and leaked every later member to top
+    // level (spurious errors miles downstream). Re-derive the brace depth from the token
+    // array (immune to lookahead/pushback), then skip to the next member boundary at
+    // class-body level - or stop AT the class's own '}' so the loop closes the class
+    // where it really ends.
+    int depth = 1;
+    for (size_t i = class_open_index + 1; i < current_ && i < tokens_.size(); ++i) {
+        if (tokens_[i].type == token_type::left_brace) { ++depth; }
+        else if (tokens_[i].type == token_type::right_brace) { --depth; }
+    }
+    const size_t entry = current_;
+    while (!is_at_end()) {
+        if (depth <= 0) { return; }
+        if (depth == 1) {
+            if (check(token_type::right_brace)) { return; }
+            if (current_ > entry &&
+                (previous().type == token_type::semicolon || previous().type == token_type::right_brace)) {
+                return;
+            }
+        }
+        const token& consumed = advance();
+        if (consumed.type == token_type::left_brace) { ++depth; }
+        else if (consumed.type == token_type::right_brace) { --depth; }
+    }
+}
+
 // token management (return by reference to avoid copying strings - major perf win)
 const token& parser::peek() const {
     if (pushed_back_token_.has_value()) {
@@ -1363,14 +1456,18 @@ checked_result<type_info_ptr> parser::parse_type() {
 
     // Generic types
     if (match(token_type::array_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'array'"));
+        JAISCRIPT_TRY(consume(token_type::less,
+            "Expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
+            "if this was meant as a variable, rename it"));
         JAISCRIPT_TRY_ASSIGN(type_info_ptr element_type, parse_type());
         consume_greater_in_generic("Expected '>' after array element type");
         return store_type_info(type_info::make_array(*symbolizer_, element_type));
     }
 
     if (match(token_type::map_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'map'"));
+        JAISCRIPT_TRY(consume(token_type::less,
+            "Expected '<' after 'map' - 'map' is the built-in map type keyword (map<K, V>); "
+            "if this was meant as a variable, rename it"));
         JAISCRIPT_TRY_ASSIGN(type_info_ptr keyType, parse_type());
         JAISCRIPT_TRY(consume(token_type::comma, "Expected ',' after map key type"));
         JAISCRIPT_TRY_ASSIGN(type_info_ptr valueType, parse_type());
@@ -1532,8 +1629,9 @@ bool parser::looks_like_map_literal() {
         current_ = savedPos + 1; // back to after {
     }
 
-    // Check for JSON-style map: identifier/string followed by :
-    if (check(token_type::identifier) || check(token_type::string_literal)) {
+    // Check for JSON-style map: one key token (identifier/string/int/float/char/bool)
+    // followed by ':'
+    if (is_json_map_key_token(peek().type)) {
         advance();
         bool isMap = check(token_type::colon);
         current_ = savedPos;
@@ -1576,8 +1674,9 @@ checked_result<expression_ptr> parser::parse_map_literal() {
     // Check if it's JSON style by looking for "key": value pattern
     bool isJsonStyle = false;
 
-    // First, check if the first token could be a key (string or identifier)
-    if (check(token_type::string_literal) || check(token_type::identifier)) {
+    // First, check if the first token could be a key (identifier/string/int/float/
+    // char/bool - keep in lockstep with looks_like_map_literal via is_json_map_key_token)
+    if (is_json_map_key_token(peek().type)) {
         advance(); // consume the potential key
         if (check(token_type::colon)) {
             isJsonStyle = true;
@@ -2100,7 +2199,7 @@ checked_result<declaration_ptr> parser::declaration() {
             auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
 
             do {
-                JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected variable name in destructuring"));
+                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected variable name in destructuring", "variable"));
                 auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
                 decl->names.push_back({sym_view, sym_id});
 
@@ -2284,7 +2383,7 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
 }
 
 checked_result<expression_ptr> parser::finish_member_access(expression_ptr object, bool is_arrow) {
-    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected member name"));
+    JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected member name", "member"));
     uint64_t member_id = get_symbol_id(name);
     return std::make_shared<member_expr>(name.location, object, name.lexeme, member_id, is_arrow);
 }
@@ -2305,7 +2404,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
             if (match(token_type::colon)) {
                 // :name means auto type
                 type = nullptr; // nullptr means auto
-                JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected parameter name after ':'"));
+                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name after ':'", "parameter"));
                 name = name_tok.lexeme;
             }
             // Check for type: name syntax
@@ -2319,13 +2418,13 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
                 if (match(token_type::colon)) {
                     // type: name syntax
-                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected parameter name after ':'"));
+                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name after ':'", "parameter"));
                     name = name_tok.lexeme;
                 } else if (check(token_type::ampersand) || check(token_type::identifier)) {
                     // Traditional type name syntax
                     // Check for reference
                     is_reference = match(token_type::ampersand);
-                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected parameter name"));
+                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name", "parameter"));
                     name = name_tok.lexeme;
                 } else if (check(token_type::comma) || check(token_type::right_paren) || check(token_type::equal)) {
                     // No identifier after type - treat the type as the parameter name with auto type
@@ -2336,11 +2435,11 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                         name = type->type_name;
                         type = nullptr; // Auto type
                     } else {
-                        report_error("Expected parameter name", peek());
+                        report_expected_name("Expected parameter name", "parameter");
     return make_error_code(parse_error_code::unexpected_token);
                     }
                 } else {
-                    report_error("Expected parameter name", peek());
+                    report_expected_name("Expected parameter name", "parameter");
     return make_error_code(parse_error_code::unexpected_token);
                 }
             }
@@ -2757,7 +2856,7 @@ traditional_for:
             type = store_type_info(std::move(refType));
         }
 
-        JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected variable name"));
+        JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected variable name", "variable"));
 
         expression_ptr initializer = nullptr;
         if (match(token_type::equal)) {
@@ -2865,6 +2964,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
     }
 
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before class body"));
+    const size_t class_open_index = current_ - 1;
 
     // Intern the class name at parse time for fast comparisons later
     // Use intern_with_view to ensure we get a string_view pointing to symbolizer storage
@@ -2885,7 +2985,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
         if (match(token_type::public_keyword)) {
             auto colon_result = consume(token_type::colon, "Expected ':' after 'public'");
             if (!colon_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             visibility = class_decl::Public;
@@ -2894,7 +2994,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
         if (match(token_type::private_keyword)) {
             auto colon_result = consume(token_type::colon, "Expected ':' after 'private'");
             if (!colon_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             visibility = class_decl::Private;
@@ -2903,7 +3003,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
         if (match(token_type::protected_keyword)) {
             auto colon_result = consume(token_type::colon, "Expected ':' after 'protected'");
             if (!colon_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             visibility = class_decl::Protected;
@@ -2933,7 +3033,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
                 auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr, /*allow_ctor_initializers=*/true);
                 if (!body_result) {
-                    synchronize();
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
                 member = std::move(body_result.value());
@@ -2946,13 +3046,13 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
                 if (is_static && check(token_type::coroutine_keyword)) {
                     report_error("static coroutine methods are not supported", peek());
-                    synchronize();
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
 
                 auto type_result = parse_type();
                 if (!type_result) {
-                    synchronize();
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
                 type_info_ptr type = std::move(type_result.value());
@@ -2969,7 +3069,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     if (method_name == "operator") {
                         auto op_name = parse_operator_method_symbol();
                         if (!op_name) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
                         method_name = std::move(*op_name);
@@ -2987,26 +3087,26 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         // Validate: static methods cannot use override keyword
                         if (is_static && is_override) {
                             report_error("Static methods cannot use 'override' keyword - they are not virtual", name);
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
                         auto open_paren_result = consume(token_type::left_paren, "Expected '(' after function name");
                         if (!open_paren_result) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
                         auto params_result = parse_parameter_list();
                         if (!params_result) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
                         func->parameters = std::move(params_result.value());
 
                         auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
                         if (!close_paren_result) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
@@ -3017,14 +3117,14 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             } else {
                                 auto return_type_result = parse_type();
                                 if (!return_type_result) {
-                                    synchronize();
+                                    synchronize_class_member(class_open_index);
                                     continue;
                                 }
                                 func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                                 if (type && func->return_type && func->return_type->id != type->id) {
                                     report_error("Conflicting return types '" + type->type_name + "' and '" +
                                                  func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
-                                    synchronize();
+                                    synchronize_class_member(class_open_index);
                                     continue;
                                 }
                             }
@@ -3037,7 +3137,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             // Validate: static methods cannot use override keyword
                             if (is_static) {
                                 report_error("Static methods cannot use 'override' keyword - they are not virtual", previous());
-                                synchronize();
+                                synchronize_class_member(class_open_index);
                                 continue;
                             }
                         }
@@ -3046,13 +3146,13 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
                             // they were silently parsed and ignored - a trap
                             report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
                         if (!match(token_type::left_brace)) {
                             report_error("Expected '{' before function body", peek());
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
@@ -3070,7 +3170,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         auto body_result = block_statement();
                         if (!body_result) {
                             exit_function_scope();  // Clean up on error
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
                         func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
@@ -3082,7 +3182,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         if (match(token_type::equal)) {
                             auto init_result = expression();
                             if (!init_result) {
-                                synchronize();
+                                synchronize_class_member(class_open_index);
                                 continue;
                             }
                             init = std::move(init_result.value());
@@ -3090,7 +3190,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
                         auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
                         if (!semicolon_result) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
 
@@ -3099,15 +3199,15 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         member = var_decl;
                     }
                 } else {
-                    report_error("Expected member name", peek());
-                    synchronize();
+                    report_expected_name("Expected member name", "member");
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
             }
         } else if (match(token_type::tilde)) {
             auto destructor_name_result = consume(token_type::identifier, "Expected class name after '~'");
             if (!destructor_name_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             // Intern destructor name (e.g., "~ClassName")
@@ -3115,7 +3215,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
             auto [dtor_name_id, dtor_name_view] = symbolizer_->intern_with_view(dtor_name_str);
             auto body_result = parse_function_body(dtor_name_view, dtor_name_id, nullptr);
             if (!body_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             member = std::move(body_result.value());
@@ -3137,14 +3237,14 @@ checked_result<declaration_ptr> parser::class_declaration() {
             if (match(token_type::equal)) {
                 auto init_result = expression();
                 if (!init_result) {
-                    synchronize();
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
                 init = std::move(init_result.value());
             }
             auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
             if (!semicolon_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             auto var_decl = std::make_shared<variable_decl>(name.location, nullptr, name.lexeme, get_symbol_id(name), init);
@@ -3168,7 +3268,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 advance(); // consume 'operator'
                 auto op_name = parse_operator_method_symbol();
                 if (!op_name) {
-                    synchronize();
+                    synchronize_class_member(class_open_index);
                     continue;
                 }
                 method_name = std::move(*op_name);
@@ -3178,7 +3278,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 method_name = std::string(name_tok.lexeme);
             } else {
                 report_error("Expected method name or 'operator' after 'function'", peek());
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
 
@@ -3186,7 +3286,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
             auto [method_name_id, method_name_view] = symbolizer_->intern_with_view(method_name);
             auto body_result = parse_function_body(method_name_view, method_name_id, nullptr);
             if (!body_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             auto func = std::dynamic_pointer_cast<function_decl>(body_result.value());
@@ -3202,13 +3302,13 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
             if (is_static && check(token_type::coroutine_keyword)) {
                 report_error("static coroutine methods are not supported", peek());
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
 
             auto type_result = parse_type();
             if (!type_result) {
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             type_info_ptr type = std::move(type_result.value());
@@ -3221,7 +3321,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 if (method_name == "operator") {
                     auto op_name = parse_operator_method_symbol();
                     if (!op_name) {
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
                     method_name = std::move(*op_name);
@@ -3243,20 +3343,20 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     // Parse parameters
                     auto open_paren_result = consume(token_type::left_paren, "Expected '(' after function name");
                     if (!open_paren_result) {
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
                     auto params_result = parse_parameter_list();
                     if (!params_result) {
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
                     func->parameters = std::move(params_result.value());
 
                     auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
                     if (!close_paren_result) {
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
@@ -3268,14 +3368,14 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         } else {
                             auto return_type_result = parse_type();
                             if (!return_type_result) {
-                                synchronize();
+                                synchronize_class_member(class_open_index);
                                 continue;
                             }
                             func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                             if (type && func->return_type && func->return_type->id != type->id) {
                                 report_error("Conflicting return types '" + type->type_name + "' and '" +
                                              func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
-                                synchronize();
+                                synchronize_class_member(class_open_index);
                                 continue;
                             }
                         }
@@ -3291,7 +3391,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     // Validate: static methods cannot use override keyword
                     if (func->is_static && func->is_override) {
                         report_error("Static methods cannot use 'override' keyword - they are not virtual", name);
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
@@ -3300,14 +3400,14 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
                         // they were silently parsed and ignored - a trap
                         report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
                     // Now parse the body
                     if (!match(token_type::left_brace)) {
                         report_error("Expected '{' before function body", peek());
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
@@ -3325,7 +3425,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     auto body_result = block_statement();
                     if (!body_result) {
                         exit_function_scope();  // Clean up on error
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
                     func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
@@ -3338,7 +3438,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     if (match(token_type::equal)) {
                         auto init_result = expression();
                         if (!init_result) {
-                            synchronize();
+                            synchronize_class_member(class_open_index);
                             continue;
                         }
                         init = std::move(init_result.value());
@@ -3346,7 +3446,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
                     auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
                     if (!semicolon_result) {
-                        synchronize();
+                        synchronize_class_member(class_open_index);
                         continue;
                     }
 
@@ -3355,8 +3455,8 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     member = var_decl;
                 }
             } else {
-                report_error("Expected member name", peek());
-                synchronize();
+                report_expected_name("Expected member name", "member");
+                synchronize_class_member(class_open_index);
                 continue;
             }
         }
@@ -3367,18 +3467,18 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 ? static_cast<function_decl*>(member.get()) : nullptr;
             if (!func_member) {
                 report_error("'coroutine' in a class body must be followed by a method", peek());
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             if (func_member->is_static) {
                 report_error("static coroutine methods are not supported", peek());
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             if (func_member->name == className.lexeme ||
                 (!func_member->name.empty() && func_member->name[0] == '~')) {
                 report_error("constructors and destructors cannot be coroutines", peek());
-                synchronize();
+                synchronize_class_member(class_open_index);
                 continue;
             }
             func_member->is_coroutine = true;
@@ -3832,7 +3932,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         type = store_type_info(std::move(refType));
     }
 
-    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected variable name"));
+    JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected variable name", "variable"));
 
     expression_ptr initializer = nullptr;
     if (match(token_type::equal)) {

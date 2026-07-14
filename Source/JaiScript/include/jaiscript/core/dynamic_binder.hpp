@@ -18,6 +18,7 @@
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
+#include <jaiscript/signals/signal_view.hpp>
 #include <string>
 #include <memory>
 #include <functional>
@@ -704,6 +705,11 @@ private:
     // Internal implementation for property registration with validation
     template<typename P>
     dynamic_binder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
+        // Signal members may hand out the generic view at read time — make
+        // sure its type exists before any getter can run.
+        if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
+            ensure_signal_view_type_registered();
+        }
         // Validate that property type is registered (unless explicitly skipped)
         if constexpr (dynamic_binder_validation::needs_registration_check<P>()) {
             if (!skip_validation) {
@@ -752,6 +758,16 @@ private:
                     auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
                         cpp_obj->*member, eng);
                     return eng->make_object(wrapper);
+                }
+                else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
+                    // Typed per-signature bindings (bind_signal_type) take precedence
+                    // when present; otherwise the generic "Signal" view serves the
+                    // member ceremony-free through the erased connect table.
+                    if (eng->template has_registered_class<P>()) {
+                        return convert_reference_with_registry(cpp_obj->*member, eng);
+                    }
+                    return eng->make_object(std::make_shared<signal_script_ops>(
+                        make_signal_script_ops(cpp_obj->*member)));
                 }
                 else if constexpr (std::is_class_v<P> &&
                                    !std::is_same_v<P, std::string> &&
@@ -989,6 +1005,11 @@ public:
                 throw std::runtime_error("Diamond inheritance detected: class '" + class_name_ +
                     "' would have multiple paths to the same base class");
             }
+        } else {
+            // Base not registered yet (registrar order is arbitrary): link when it arrives.
+            // Silently skipping here orphaned the chain — inherited methods and signal
+            // views vanished whenever the derived registrar happened to run first.
+            engine_.defer_base_link(std::type_index(typeid(Base)), class_def_);
         }
 
         // Record the serialization assignability edge (what property_owner does) so a
@@ -1202,6 +1223,13 @@ private:
             const std::type_index value_type = prop_meta->value_type_id;
             const bool is_observable = prop_meta->is_observable;
 
+            // JAI_SIGNAL_PROPERTY entries expose the generic Signal view —
+            // declaring the signal is the whole registration.
+            if (prop_meta->is_signal) {
+                bind_signal_property_view(prop_name);
+                continue;
+            }
+
             // Dispatch to the appropriate template based on value type
             // We use a type-switch here because we have runtime type_index
             if (!try_bind_property_typed<int>(prop_name, value_type, is_observable) &&
@@ -1223,6 +1251,46 @@ private:
         }
     }
 
+    // One engine-wide "Signal" class serves every signature through the erased
+    // table; registered lazily the first time any signal member binds.
+    void ensure_signal_view_type_registered() {
+        if (engine_.is_type_registered("Signal")) { return; }
+        engine* eng = &engine_;
+        dynamic_binder<signal_script_ops> builder(engine_, "Signal");
+        builder.method("connect", [eng](signal_script_ops& self, const std::string& id, const script_value& cb) {
+            if (!self.valid()) { throw runtime_error("Signal view is not backed by a live signal"); }
+            self.connect_fn(self.source, id, cb, eng);
+        });
+        builder.method("disconnect", [](signal_script_ops& self, const std::string& id) {
+            if (self.disconnect_fn != nullptr) { self.disconnect_fn(self.source, id); }
+        });
+        builder.method("connected", [](signal_script_ops& self, const std::string& id) {
+            return self.connected_fn != nullptr && self.connected_fn(self.source, id);
+        });
+        builder.build();
+    }
+
+    // JAI_SIGNAL_PROPERTY schema entries become read-only properties returning
+    // the generic Signal view over the live property's erased connect table.
+    // Lookup is find_reflected_property (virtual, whole chain), so inherited
+    // signal properties resolve against the most-derived live object.
+    void bind_signal_property_view(const std::string& prop_name) {
+        ensure_signal_view_type_registered();
+        engine* eng = &engine_;
+        auto getter = [prop_name, eng](T& self) -> script_value {
+            if constexpr (auto_bind_concepts::is_property_owner<T>) {
+                if (jai::property_base* base = self.find_reflected_property(prop_name)) {
+                    signal_script_ops ops;
+                    if (base->signal_ops(ops) && ops.valid()) {
+                        return eng->make_object(std::make_shared<signal_script_ops>(ops));
+                    }
+                }
+            }
+            return script_value(std::monostate{}, eng);
+        };
+        property(prop_name, std::move(getter), nullptr);
+    }
+
     // Try to bind a property if the value type matches ValueT
     // Returns true if bound, false if type doesn't match
     // For observable properties, also binds an observation method
@@ -1240,9 +1308,14 @@ private:
             ensure_observable_ref_type_registered<ValueT>();
 
             // Create getter that returns the wrapper for observable properties
-            // This enables player.score.on_change(callback) syntax
+            // This enables player.score.on_change(callback) syntax.
+            // Lookup is find_reflected_property (virtual, whole chain) so BASE-level
+            // properties resolve through DERIVED registrations in any registration
+            // order — the same rule the signal property view already follows. The
+            // wrapper's manager stays the registration level's (receiver-lifetime
+            // anchor only; every level's manager shares the object's lifetime).
             auto getter = [prop_name, eng](T& self) -> script_value {
-                auto* base_prop = self.property_mgr.get(prop_name);
+                auto* base_prop = self.find_reflected_property(prop_name);
                 if (!base_prop) {
                     return script_value(std::monostate{}, eng);
                 }
@@ -1257,7 +1330,7 @@ private:
 
             // Create setter that assigns through the property to trigger the signal
             auto setter = [prop_name](T& self, ValueT val) {
-                jai::property_base* base_prop = self.property_mgr.get(prop_name);
+                jai::property_base* base_prop = self.find_reflected_property(prop_name);
                 if (!base_prop) return;
                 jai::observable_property<ValueT>* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
                 if (obs_prop) {
@@ -1270,16 +1343,17 @@ private:
             // Also bind the legacy on_<prop>_change method for backwards compatibility
             bind_observable_property<ValueT>(prop_name);
         } else {
-            // Regular (non-observable) properties just return the value directly
+            // Regular (non-observable) properties just return the value directly.
+            // Whole-chain lookup: see the observable getter's note above.
             auto getter = [prop_name, eng](T& self) -> script_value {
-                if (auto* prop = self.property_mgr.template get<ValueT>(prop_name)) {
+                if (auto* prop = dynamic_cast<jai::property<ValueT>*>(self.find_reflected_property(prop_name))) {
                     return script_value_from_cpp(prop->get(), eng);
                 }
                 return script_value(std::monostate{}, eng);
             };
 
             auto setter = [prop_name](T& self, ValueT val) {
-                jai::property_base* base_prop = self.property_mgr.get(prop_name);
+                jai::property_base* base_prop = self.find_reflected_property(prop_name);
                 if (!base_prop) return;
                 jai::property<ValueT>* regular_prop = dynamic_cast<jai::property<ValueT>*>(base_prop);
                 if (regular_prop) {

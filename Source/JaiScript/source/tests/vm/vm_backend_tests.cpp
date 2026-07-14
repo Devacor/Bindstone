@@ -1847,11 +1847,12 @@ public:
 				var s = "hi";
 				var msg = "";
 			)";
+			// f(m["k"]) moved OUT of this matrix: map-key ref args bind via tier 2
+			// (Dev ruling 2026-07-12; see tier2_general_lvalue_ref_args)
 			const char* cases[] = {
 				"try { f(b.v + 1); } catch (e) { msg = e; } msg;",
 				"try { f(arr.size()); } catch (e) { msg = e; } msg;",
 				"try { f(5); } catch (e) { msg = e; } msg;",
-				"try { f(m[\"k\"]); } catch (e) { msg = e; } msg;",
 				"try { f(arr.size); } catch (e) { msg = e; } msg;",
 				"try { f(b.area); } catch (e) { msg = e; } msg;",   // computed property: no backing field
 			};
@@ -1892,6 +1893,132 @@ public:
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				check_eq((int64_t)501, e->execute(src).as_int());
+			}
+		});
+
+		test("tier2_general_lvalue_ref_args", [this]() {
+			// Dev ruling 2026-07-12: a reference VALUE is an lvalue - ref params bind
+			// the evaluated argument's owner-pinned reference when the structural kernel
+			// can't classify the shape (map keys, computed indices, member-expr indices,
+			// typed-array elements). Index side effects run exactly once, in arg order.
+			const char* src = R"(
+				class O { int idx = 1; }
+				var o = O();
+				var m = {"k": 1};
+				var k = "k";
+				var grid = [[1, 2], [3, 4]];
+				var arr = [10, 20, 30];
+				array<int> ta = [5, 6, 7];
+				int y = 0;
+				var calls = 0;
+				function bump() -> int { calls = calls + 1; return 2; }
+				function f(int& x) { x = x + 100; }
+				f(m["k"]);
+				f(m[k]);
+				f(grid[y + 1][0]);
+				f(arr[o.idx]);
+				f(ta[y + 2]);
+				f(arr[bump()]);
+				to_string(m["k"]) + "|" + to_string(grid[1][0]) + "|" + to_string(arr[1]) + "|" +
+					to_string(ta[2]) + "|" + to_string(arr[2]) + "|" + to_string(calls);
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_eq(std::string("201|103|120|107|130|1"), got);
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical on both backends"); }
+			}
+		});
+
+		test("tier2_missing_key_and_residue_rejections", [this]() {
+			// Map reads never insert: binding a ref to a MISSING key keeps the
+			// non-lvalue error (matches var& decl behavior over missing keys). And
+			// member-FINAL chains over computed subscripts stay rejected - field reads
+			// evaluate to copies and the structural kernel can't take computed indices;
+			// bind a var& row first (documented residue).
+			const char* src = R"(
+				class O { int v = 1; }
+				var m = {"k": 1};
+				var objs = [O(), O()];
+				int i = 0;
+				var msg1 = "";
+				var msg2 = "";
+				function f(int& x) { x = 0; }
+				try { f(m["missing"]); } catch (e) { msg1 = e; }
+				try { f(objs[i + 1].v); } catch (e) { msg2 = e; }
+				msg1 + "&" + msg2;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("Cannot pass non-lvalue to reference parameter&") != std::string::npos,
+					"missing map key rejects: " + got);
+				check_true(got.rfind("Cannot pass non-lvalue") > got.find("&"),
+					"member-final over computed subscript rejects: " + got);
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical on both backends"); }
+			}
+		});
+
+		test("ref_decl_member_final", [this]() {
+			// Dev ruling 2026-07-12 route-independence: var&/auto& declarations bind
+			// member-final chains through the same kernel ref params use (the
+			// gloom_idiomatic `auto& p = G.player` encounter). Computed properties keep
+			// the decl's non-lvalue error.
+			const char* src = R"(
+				class Player { int hp = 100; }
+				class World { var player = Player(); }
+				class O { int v = 1; }
+				class B { int _get_area() { return 4; } }
+				var G = World();
+				auto& p = G.player;
+				p.hp = 55;
+				var objs = [O(), O()];
+				var& r = objs[1].v;
+				r = 42;
+				var b = B();
+				var msg = "";
+				try { auto& a = b.area; } catch (e) { msg = e; }
+				to_string(G.player.hp) + "|" + to_string(objs[1].v) + "|" + msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("55|42|") == 0, got);
+				check_true(got.find("Cannot take reference of non-lvalue") != std::string::npos, got);
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical on both backends"); }
+			}
+		});
+
+		test("ref_decl_member_final_typed_enforcement", [this]() {
+			// A decl-bound field ref carries the DECLARED field type: wrong-type stores
+			// error with the same field text as ref params (route-independence)
+			const char* src = R"(
+				class O { int v = 1; }
+				var o = O();
+				var& r = o.v;
+				r = 9;
+				var msg = "";
+				try { r = "nope"; } catch (e) { msg = e; }
+				to_string(o.v) + "|" + msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("9|") == 0, got);
+				check_true(got.find("Cannot assign") != std::string::npos &&
+				           got.find("field of type") != std::string::npos, got);
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical on both backends"); }
 			}
 		});
 
@@ -2856,17 +2983,24 @@ public:
 		// class-level field default but NO instance fields_ node: binding must keep the
 		// exact non-lvalue error instead of lazily inserting a dead shadow field that
 		// swallows writes
-		test("tier1_cpp_property_member_keeps_non_lvalue_error", [this]() {
+		test("tier1_map_pair_accessor_ref_args", [this]() {
+			// Range-for map pairs expose .second through a C++-backed accessor whose
+			// EVALUATION yields a live map-entry reference: tier 2 binds it and writes
+			// land in the real entry (Dev ruling 2026-07-12 - REVERSES the old
+			// non-lvalue pin here, which guarded fields_-node binding; tier 2 binds the
+			// evaluated reference, never the placeholder node). Map KEYS stay
+			// unbindable: kv.first evaluates to a COPY, so the ordering invariant holds.
 			const char* src = R"(
 				var m = {"a": 1, "b": 2};
 				function f(int& x) { x = 77; }
+				function g(string& s) { s = "zz"; }
 				var msg = "";
 				for (var& kv : m) {
-					try { f(kv.second); } catch (e) { msg = "" + e; }
-					kv.second = 55;
+					f(kv.second);
+					try { g(kv.first); } catch (e) { msg = "" + e; }
 					break;
 				}
-				msg + "|" + to_string(m["a"]);
+				to_string(m["a"]) + "|" + msg + "|" + to_string(m.has("zz"));
 			)";
 			std::string first;
 			for (bool use_vm : {false, true}) {
@@ -2874,9 +3008,10 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("77|") == 0, "write through kv.second lands in the map: " + got);
 				check_true(got.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
-					std::string("C++ property member keeps the exact error, got: ") + got);
-				check_true(got.find("|55") != std::string::npos, "direct property write still reaches the map");
+					"map keys stay unbindable: " + got);
+				check_true(got.find("|false") != std::string::npos, "no key mutation: " + got);
 				if (!use_vm) { first = got; } else { check_eq(first, got, "identical behavior on both backends"); }
 			}
 		});

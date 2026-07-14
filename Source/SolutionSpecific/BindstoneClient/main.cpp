@@ -405,14 +405,14 @@ static void RunLoginUiRepair() {
 		}
 		retextureViews(button, MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(104.0f, 36.0f)));
 	});
-	repairScene("Assets/Prefabs/Button.prefab", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
+	repairScene("Assets/Prefabs/Button.bindsnap", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
 		retextureViews(button, MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(104.0f, 47.0f)));
 	});
-	repairScene("Assets/Prefabs/SimpleButton.prefab", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
+	repairScene("Assets/Prefabs/SimpleButton.bindsnap", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
 		button->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(100.0f, 30.0f)));
 	});
 	repairScene("Assets/Interface/Main/view.scene", nullptr);
-	repairScene("Assets/Prefabs/LoginName.prefab", nullptr);
+	repairScene("Assets/Prefabs/LoginName.bindsnap", nullptr);
 }
 
 // Evals every <a_assetType>/<id>/main(.script|Client.script) through the same
@@ -436,6 +436,122 @@ static void verifyFamilyScripts(MV::Script& a_script, const std::string& a_asset
 			if (ok) { ++a_passed; } else { ++a_failed; }
 		}
 	}
+}
+
+#include "Workbench/workbench.h"
+
+// Launches the Workbench editor (Source/Workbench): dockable, dark-mode, reflection-driven.
+// Run: BindstoneClient.exe -workbench   (-workbenchsmoke = 120-frame self-test, exits 0;
+// -workbenchshot = smoke run that saves workbench_shot.bmp for visual inspection;
+// -workbenchgizmoshot = shot that loads map.scene and selects a node so the gizmos render)
+static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", bool a_loadDefaultScene = false, bool a_selectForGizmo = false) {
+	MV::editMode(true);   // before engine creation: registers InEditMode + hot reload
+	Managers managers({ "", "" });
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
+	// Editor tolerance: the sim's first spawn burst evals every creature script inside one
+	// budget window in Debug; a mid-script budget kill leaves game state (path semaphores)
+	// inconsistent. The shipped game keeps the tight default.
+	jaiEngine->execution_budget(10.0);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "1");
+	managers.renderer.window().windowedMode()
+		.borderless()
+		.allowUserResize(false, MV::Size<int>(800, 600))
+		.resizeWorldWithWindow(true);
+	if (!managers.renderer.initialize(MV::Size<int>(1600, 900))) {
+		std::cout << "[workbench] renderer init failed\n";
+		return 1;
+	}
+	managers.renderer.window().setTitle("Bindstone Workbench");
+
+	float workbenchUiScale = managers.renderer.window().uiScale();
+	Workbench::Theme workbenchTheme(2.0f * workbenchUiScale);
+	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::FontDefinition::make(managers.textLibrary, "wb-small", "Fonts/Verdana.ttf", static_cast<int>(14 * workbenchUiScale));
+	MV::FontDefinition::make(managers.textLibrary, "wb", "Fonts/Verdana.ttf", static_cast<int>(22 * workbenchUiScale));
+
+	// The game's animated-material shaders; without them scene materials fall back to default.
+	managers.renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
+	managers.renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
+	managers.renderer.loadShader("wave", "Shaders/wave.vert", "Shaders/wave.frag");
+	managers.renderer.loadShader("waterfall", "Shaders/default.vert", "Shaders/waterfall.frag");
+	managers.renderer.loadShader("pool", "Shaders/default.vert", "Shaders/pool.frag");
+	managers.renderer.loadShader("shimmer", "Shaders/default.vert", "Shaders/shimmer.frag");
+
+	int workbenchResizeBorder = std::max(6, static_cast<int>(8 * workbenchUiScale));
+	int workbenchTitleBarHeight = static_cast<int>(workbenchTheme.titleBarHeight);
+	int workbenchTitleButtonStrip = static_cast<int>(workbenchTheme.titleButtonWidth * 3.0f);
+	int workbenchTransportStart = static_cast<int>(workbenchTheme.titleBarHeight * 8.0f);
+	int workbenchTransportWidth = static_cast<int>(3.0f * (workbenchTheme.titleButtonWidth * 1.4f + 2.0f) + 8.0f);
+	auto& workbenchWindow = managers.renderer.window();
+	workbenchWindow.hitTest([&workbenchWindow, workbenchResizeBorder, workbenchTitleBarHeight, workbenchTitleButtonStrip, workbenchTransportStart, workbenchTransportWidth](const MV::Point<int>& a_point, const MV::Size<int>& a_size) -> SDL_HitTestResult {
+		if (!workbenchWindow.maximized()) {
+			bool onLeft = a_point.x < workbenchResizeBorder;
+			bool onRight = a_point.x >= a_size.width - workbenchResizeBorder;
+			bool onTop = a_point.y < workbenchResizeBorder;
+			bool onBottom = a_point.y >= a_size.height - workbenchResizeBorder;
+			if (onTop && onLeft) { return SDL_HITTEST_RESIZE_TOPLEFT; }
+			if (onTop && onRight) { return SDL_HITTEST_RESIZE_TOPRIGHT; }
+			if (onBottom && onLeft) { return SDL_HITTEST_RESIZE_BOTTOMLEFT; }
+			if (onBottom && onRight) { return SDL_HITTEST_RESIZE_BOTTOMRIGHT; }
+			if (onTop) { return SDL_HITTEST_RESIZE_TOP; }
+			if (onBottom) { return SDL_HITTEST_RESIZE_BOTTOM; }
+			if (onLeft) { return SDL_HITTEST_RESIZE_LEFT; }
+			if (onRight) { return SDL_HITTEST_RESIZE_RIGHT; }
+		}
+		if (a_point.y < workbenchTitleBarHeight) {
+			if (a_point.x >= a_size.width - workbenchTitleButtonStrip) {
+				return SDL_HITTEST_NORMAL;
+			}
+			if (a_point.x >= workbenchTransportStart && a_point.x < workbenchTransportStart + workbenchTransportWidth) {
+				return SDL_HITTEST_NORMAL;   // sim transport buttons (pause/step/speed/sim)
+			}
+			return SDL_HITTEST_DRAGGABLE;
+		}
+		return SDL_HITTEST_NORMAL;
+	});
+
+	MV::initializeSpineBindings();
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	managers.textures.files("Assets/Map");
+	managers.textures.files("Assets/Images");
+
+	MV::TapDevice workbenchMouse;
+	managers.services.connect(&workbenchMouse);
+	Workbench::App app(managers, workbenchMouse, workbenchTheme);
+	if (a_loadDefaultScene) {
+		app.loadScene("Scenes/map.scene");
+	}
+	if (a_selectForGizmo && app.scene()) {
+		// The sim auto-frame centers the map, so the node nearest the map center is the
+		// one guaranteed on-screen for the gizmo to render against.
+		auto mapBounds = app.scene()->bounds();
+		auto center = MV::point(mapBounds.minPoint.x + mapBounds.size().width * 0.5f, mapBounds.minPoint.y + mapBounds.size().height * 0.5f);
+		std::shared_ptr<MV::Scene::Node> best;
+		float bestDistance = 0.0f;
+		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> visit = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+			auto box = a_node->screenBounds(false);
+			if (box.size().width > 20.0f && box.size().height > 20.0f) {
+				auto at = a_node->worldPosition();
+				float distance = MV::distance(MV::point(at.x, at.y), center);
+				if (!best || distance < bestDistance) {
+					best = a_node;
+					bestDistance = distance;
+				}
+			}
+			for (auto&& child : *a_node) {
+				visit(child);
+			}
+		};
+		visit(app.scene());
+		if (best) {
+			app.select(best);
+			app.frameSelectionInViewport();
+		}
+	}
+	return a_smoke ? app.runFrames(a_loadDefaultScene ? 240 : 120, a_screenshotPath) : app.run();
 }
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
@@ -463,28 +579,28 @@ static void RunAssetVerification() {
 		"Scenes/map.scene",
 		"Assets/Interface/Login/view.scene",
 		"Assets/Interface/Main/view.scene",
-		"Assets/BattleEffects/Missile/Default/unit.prefab",
-		"Assets/Buildings/Life/Default/building.prefab",
-		"Assets/Buildings/Void/Default/building.prefab",
-		"Assets/Creatures/Air_T1/Default/unit.prefab",
-		"Assets/Creatures/Decay_T1/Default/unit.prefab",
-		"Assets/Creatures/Earth_Pebble/Default/unit.prefab",
-		"Assets/Creatures/Earth_T1/Default/unit.prefab",
-		"Assets/Creatures/Fire_T1/Default/unit.prefab",
-		"Assets/Creatures/Life_T1/Default/unit.prefab",
-		"Assets/Creatures/Lightning_T1/Default/unit.prefab",
-		"Assets/Creatures/VoidElemental/Default/unit.prefab",
-		"Assets/Creatures/Void_T1/Default/unit.prefab",
-		"Assets/Creatures/Water_DropletHeal/Default/unit.prefab",
-		"Assets/Creatures/Water_DropletHurt/Default/unit.prefab",
-		"Assets/Creatures/Water_T1/Default/unit.prefab",
-		"Assets/Prefabs/Button.prefab",
-		"Assets/Prefabs/Creatures/voidElemental/voidElemental.prefab",
-		"Assets/Prefabs/Life_T1.prefab",
-		"Assets/Prefabs/LoginName.prefab",
-		"Assets/Prefabs/missile.prefab",
-		"Assets/Prefabs/Missiles/missile.prefab",
-		"Assets/Prefabs/SimpleButton.prefab",
+		"Assets/BattleEffects/Missile/Default/unit.bindsnap",
+		"Assets/Buildings/Life/Default/building.bindsnap",
+		"Assets/Buildings/Void/Default/building.bindsnap",
+		"Assets/Creatures/Air_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Decay_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Earth_Pebble/Default/unit.bindsnap",
+		"Assets/Creatures/Earth_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Fire_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Life_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Lightning_T1/Default/unit.bindsnap",
+		"Assets/Creatures/VoidElemental/Default/unit.bindsnap",
+		"Assets/Creatures/Void_T1/Default/unit.bindsnap",
+		"Assets/Creatures/Water_DropletHeal/Default/unit.bindsnap",
+		"Assets/Creatures/Water_DropletHurt/Default/unit.bindsnap",
+		"Assets/Creatures/Water_T1/Default/unit.bindsnap",
+		"Assets/Prefabs/Button.bindsnap",
+		"Assets/Prefabs/Creatures/voidElemental/voidElemental.bindsnap",
+		"Assets/Prefabs/Life_T1.bindsnap",
+		"Assets/Prefabs/LoginName.bindsnap",
+		"Assets/Prefabs/missile.bindsnap",
+		"Assets/Prefabs/Missiles/missile.bindsnap",
+		"Assets/Prefabs/SimpleButton.bindsnap",
 	};
 	int passed = 0, failed = 0;
 	for (const char* path : nodeFiles) {
@@ -708,6 +824,18 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-emitterbench") == 0) {
 			RunEmitterBenchmark();
 			return 0;
+		}
+		if (strcmp(argv[i], "-workbench") == 0) {
+			return RunWorkbench(false);
+		}
+		if (strcmp(argv[i], "-workbenchsmoke") == 0) {
+			return RunWorkbench(true);
+		}
+		if (strcmp(argv[i], "-workbenchshot") == 0) {
+			return RunWorkbench(true, "workbench_shot.bmp");
+		}
+		if (strcmp(argv[i], "-workbenchgizmoshot") == 0) {
+			return RunWorkbench(true, "workbench_shot.bmp", true, true);
 		}
 	}
 

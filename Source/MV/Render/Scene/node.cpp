@@ -1068,6 +1068,15 @@ namespace MV {
 			for (auto &&childNode : childNodes) {
 				childNode->myParent = this;
 			}
+			// The enclosing node IS the owner; never trust a deserialized componentOwner
+			// (conversion-era assets carry null/stale refs — a dead owner throws on first
+			// component->owner() call).
+			auto self = shared_from_this();
+			for (auto &&childComponent : childComponents) {
+				if (childComponent->componentOwner->lock() != self) {
+					childComponent->reattached(self);
+				}
+			}
 		}
 
 		void Node::postLoadStep() {

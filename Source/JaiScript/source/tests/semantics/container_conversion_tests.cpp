@@ -159,13 +159,10 @@ public:
                 return result;
             });
             
-            // FIXME: There's an issue with map literal parsing where string values 
-            // aren't being created correctly. Skip this test for now.
-            std::cout << "    SKIPPED: Map literal parsing issue" << std::endl;
-            return;
-            
             auto result = engine->execute("number_names({1: \"one\", 2: \"two\", 3: \"three\"})");
+            check(result.as<std::string>().find("1=one") != std::string::npos);
             check(result.as<std::string>().find("2=two") != std::string::npos);
+            check(result.as<std::string>().find("3=three") != std::string::npos);
         });
         
         test("empty_containers", [this]() {

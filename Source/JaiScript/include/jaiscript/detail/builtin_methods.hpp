@@ -74,6 +74,37 @@ namespace jai {
         // definition time by BOTH backends after register_script_class - always-on
         // (independent of static checking), parity-by-construction. Defined in interpreter.cpp.
         void warn_shadowed_handle_builtins(engine& eng, const class_definition& def);
+
+        // Builtin args are BY-VALUE. A subscript read in argument position mints an
+        // owner-pinned element/map-entry reference (transient_read.hpp leaves call args
+        // unmarked so ref params can bind), and script/native parameter binding derefs
+        // it - but builtins receive the raw args vector, where a reference-typed key
+        // never matches map.find (operator<=> doesn't deref) and unchecked_as_string
+        // misreads the holder. Normalize at EVERY builtin dispatch boundary, one shared
+        // spelling for both backends, so builtins see what a hoisted temp would.
+        inline void deref_builtin_args_in_place(std::vector<script_value>& args) {
+            for (auto& arg : args) {
+                if (arg.is_reference()) [[unlikely]] {
+                    script_value resolved(arg.deref());
+                    arg = std::move(resolved);
+                }
+            }
+        }
+        inline const std::vector<script_value>& deref_builtin_args(
+                const std::vector<script_value>& args, std::vector<script_value>& scratch) {
+            bool needs_resolve = false;
+            for (const auto& arg : args) {
+                if (arg.is_reference()) { needs_resolve = true; break; }
+            }
+            if (!needs_resolve) [[likely]] {
+                return args;
+            }
+            scratch.reserve(args.size());
+            for (const auto& arg : args) {
+                scratch.emplace_back(arg.is_reference() ? script_value(arg.deref()) : arg);
+            }
+            return scratch;
+        }
     }
 
 } // namespace jai

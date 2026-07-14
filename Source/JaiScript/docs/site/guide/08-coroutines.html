@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -22,7 +22,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li class="current"><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="coroutines">Coroutines<a class="hlink" href="#coroutines" aria-label="link">&#8203;</a></h1>
-<p>Declare with the <code>coroutine</code> keyword; calling one returns a <strong>handle</strong> instead of running the body. <code>handle.resume()</code> runs to the next <code>yield</code> (returning the yielded value), <code>handle.done()</code> reports completion, and a final <code>return</code> value is delivered by the last <code>resume()</code>. The interpreter implements them by continuation replay, the VM by fibers — behavior is identical. <em>(pinned: language/coroutine_tests.cpp, entire suite)</em></p>
+<p>Declare with the <code>coroutine</code> keyword; calling one returns a <strong>handle</strong> instead of running the body. <code>handle.resume()</code> runs to the next <code>yield</code> (returning the yielded value), <code>handle.done()</code> reports completion, and a final <code>return</code> value is delivered by the last <code>resume()</code>. The interpreter implements them by continuation replay, the VM by fibers — behavior is identical. Coroutines turn stateful multi-frame behavior — AI, cutscenes, staged animations — into straight-line code that pauses where it yields.</p>
 <h2 id="yield-resume-done">yield / resume / done<a class="hlink" href="#yield-resume-done" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int counter() {
     yield 1;
@@ -40,7 +40,7 @@ resume: 2
 done? false
 resume: 3
 done? true</code></pre></div>
-<p>Coroutines take parameters like any function, and <code>yield</code> works inside loops and conditionals. Yield expressions have no duplicate side effects on replay (pinned: <code>yield_no_duplicate_side_effects</code>).</p>
+<p>Coroutines take parameters like any function, and <code>yield</code> works inside loops and conditionals. Side effects in a yield expression run exactly once, however the suspension is implemented underneath.</p>
 <h2 id="each-call-is-an-independent-instance">Each call is an independent instance<a class="hlink" href="#each-call-is-an-independent-instance" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int letters() { yield 1; yield 2; yield 3; }
 auto x = letters();
@@ -66,8 +66,7 @@ got 9
 got 16
 got 25
 == result: 55</code></pre></div>
-<p>*(pinned: <code>range_for_over_generator</code>, <code>range_for_over_finite_generator</code>, <code>coroutine_range_for_over_inner_coroutine</code>)*</p>
-<h2 id="method-coroutines-new">Method coroutines (new)<a class="hlink" href="#method-coroutines-new" aria-label="link">&#8203;</a></h2>
+<h2 id="method-coroutines">Method coroutines<a class="hlink" href="#method-coroutines" aria-label="link">&#8203;</a></h2>
 <p>Class methods can be coroutines. The suspended body sees <code>this</code> — fields read/write normally across suspensions, and every instance gets independent generators:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gen {
     int id = 0;
@@ -80,7 +79,7 @@ auto ga = a.gen();
 auto gb = b.gen();
 print(&quot;{} {} {} {}&quot;, ga.resume(), gb.resume(), ga.resume(), gb.resume());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 2 4</code></pre></div>
-<p>Range-for drives method coroutines too (pinned: <code>method_coroutine_range_for_drives</code>), and they work on derived classes (pinned: <code>method_coroutine_inherited_on_derived</code>).</p>
+<p>Range-for drives method coroutines too, and inherited method coroutines work on derived classes.</p>
 <h2 id="receiver-pinning">Receiver pinning<a class="hlink" href="#receiver-pinning" aria-label="link">&#8203;</a></h2>
 <p>The handle <strong>pins the receiver alive</strong>. Even if the only strong reference to the instance dies with the frame that created it, resuming still sees the fields:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class D {
@@ -98,13 +97,13 @@ h.done();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7
 99
 == result: false</code></pre></div>
-<p>*(pinned: <code>method_coroutine_pins_instance</code> — &quot;the handle keeps the instance alive while suspended&quot;)*</p>
+<p>The handle keeps the instance alive for as long as the coroutine is suspended.</p>
 <h2 id="rules-and-edges">Rules and edges<a class="hlink" href="#rules-and-edges" aria-label="link">&#8203;</a></h2>
-<ul><li><strong>Handles are reference-semantic</strong> (2026-07): copying a handle &mdash; into a field, an array/map element, a by-value parameter, another variable &mdash; shares the ONE live coroutine; every alias sees the same <code>resume()</code>/<code>done()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). The crawler&#x27;s boss AI now keeps its handle in a <code>Game</code> field (<code>G.boss_co</code>). Note the deliberate strong cycle when an instance&#x27;s field holds a handle of its <em>own</em> method (the handle pins the receiver): break it by re-assigning/nulling the field, exactly like any shared structure. <code>static coroutine</code> methods remain rejected (pinned: <code>static_coroutine_method_rejected</code>, <code>handle_stored_in_field_resumes</code>, <code>handle_copies_share_the_coroutine</code>, <code>instance_copy_shares_field_held_handle</code>, <code>engine_teardown_with_field_held_suspended_handle</code>).</li><li>Handles resume correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame (pinned: <code>coroutine_resume_across_executes_with_redeclare</code>, <code>resume_through_by_ref_helper_param</code>, <code>resume_inside_running_function_keeps_caller_frame</code>).</li><li>A failed resume marks only that handle done (pinned: <code>failed_resume_marks_only_that_handle_done</code>).</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (old handle keeps old body), and method coroutines survive field-changing reloads of their class (pinned: <code>free_coroutine_redefine_while_suspended</code>, <code>method_coroutine_survives_field_changing_reload</code>).</li><li>The execution budget still applies during <code>resume()</code> — and budget errors skip catches inside coroutines too (pinned: execution_budget_tests.cpp <code>budget_terminal_skips_catch_inside_coroutine</code>).</li></ul>
-<p>The final <code>return</code> through a typed coroutine converts to the declared type on delivery (pinned: <code>coroutine_final_typed_return_converts</code>).</p><nav class="prevnext"><a class="prev" href="../guide/07-classes.html"><span>&larr; previous</span>Classes</a><a class="next" href="../guide/09-containers-strings.html"><span>next &rarr;</span>Containers &amp; Strings</a></nav></article>
+<ul><li><strong>Handles are reference-semantic</strong>: copying a handle &mdash; into a field, an array/map element, a by-value parameter, another variable &mdash; shares the ONE live coroutine; every alias sees the same <code>resume()</code>/<code>done()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). This is what lets an AI park its behavior coroutine in a field of its own game object and resume it every tick. Note the deliberate strong cycle when an instance&#x27;s field holds a handle of its <em>own</em> method (the handle pins the receiver): break it by re-assigning/nulling the field, exactly like any shared structure. <code>static coroutine</code> methods are rejected.</li><li>Handles resume correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame.</li><li>A failed resume marks only that handle done.</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (the old handle keeps the old body), and method coroutines survive field-changing reloads of their class.</li><li>The execution budget still applies during <code>resume()</code> — and budget errors skip catches inside coroutines too.</li></ul>
+<p>The final <code>return</code> through a typed coroutine converts to the declared type on delivery.</p><nav class="prevnext"><a class="prev" href="../guide/07-classes.html"><span>&larr; previous</span>Classes</a><a class="next" href="../guide/09-containers-strings.html"><span>next &rarr;</span>Containers &amp; Strings</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

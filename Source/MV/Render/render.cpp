@@ -311,19 +311,22 @@ namespace MV {
 		minSize = a_minSize;
 		maxSize = a_maxSize;
 		userCanResize = true;
+		SDLflags = SDLflags | SDL_WINDOW_RESIZABLE;
+		if(window && !renderer.headless()){
+			SDL_SetWindowResizable(window, SDL_TRUE);
+		}
 		updateWindowResizeLimits();
 		return *this;
 	}
 
 	Window& Window::lockUserResize(){
 		userCanResize = false;
-		if(window){
-			minSize = Size<int>(ourWindowSize.width, ourWindowSize.height);
-			maxSize = minSize;
-		}else{
-			minSize = Size<int>(ourWindowSize.width, ourWindowSize.height);
-			maxSize = minSize;
+		SDLflags = SDLflags & ~ SDL_WINDOW_RESIZABLE;
+		if(window && !renderer.headless()){
+			SDL_SetWindowResizable(window, SDL_FALSE);
 		}
+		minSize = Size<int>(ourWindowSize.width, ourWindowSize.height);
+		maxSize = minSize;
 		updateWindowResizeLimits();
 		return *this;
 	}
@@ -392,6 +395,53 @@ namespace MV {
 		return *this;
 	}
 
+	namespace {
+		SDL_HitTestResult sdlHitTestThunk(SDL_Window* a_window, const SDL_Point* a_point, void* a_data) {
+			auto& tester = *static_cast<Window::HitTester*>(a_data);
+			int width = 0;
+			int height = 0;
+			SDL_GetWindowSize(a_window, &width, &height);
+			return tester(Point<int>(a_point->x, a_point->y), Size<int>(width, height));
+		}
+	}
+
+	Window& Window::hitTest(HitTester a_test){
+		hitTester = std::move(a_test);
+		if(window && !renderer.headless()){
+			if(hitTester){
+				SDL_SetWindowHitTest(window, sdlHitTestThunk, &hitTester);
+			}else{
+				SDL_SetWindowHitTest(window, nullptr, nullptr);
+			}
+		}
+		return *this;
+	}
+
+	Window& Window::minimize(){
+		if(window && !renderer.headless()){
+			SDL_MinimizeWindow(window);
+		}
+		return *this;
+	}
+
+	Window& Window::maximize(){
+		if(window && !renderer.headless()){
+			SDL_MaximizeWindow(window);
+		}
+		return *this;
+	}
+
+	Window& Window::restore(){
+		if(window && !renderer.headless()){
+			SDL_RestoreWindow(window);
+		}
+		return *this;
+	}
+
+	bool Window::maximized() const{
+		return window && (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+	}
+
 	const Size<int>& Window::drawableSize() const{
 		return ourDrawableSize;
 	}
@@ -444,6 +494,10 @@ namespace MV {
 
 			SDL_ShowWindow(window);
 			checkSDLError(__LINE__);
+
+			if(hitTester){
+				SDL_SetWindowHitTest(window, sdlHitTestThunk, &hitTester);
+			}
 		}
 
 		if(!userCanResize){
@@ -591,6 +645,8 @@ namespace MV {
 	Draw2D::~Draw2D(){
 		// Free pipelines + drain backend resources while the GL context is still current.
 		clearPipelineCache();
+		SharedTextures::resetWhite();
+		LoadedTexture::releaseDeviceBackedEntries(backend.get());
 		if (backend) { backend->shutdown(); }
 	}
 

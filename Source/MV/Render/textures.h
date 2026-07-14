@@ -300,6 +300,11 @@ namespace MV {
 		// Device-back the shared cache entry for these params in place (every live holder upgrades at
 		// once; nothing erased, so no raw dataValue is invalidated). No-op if absent or already backed.
 		static bool deviceBackInPlace(const TextureParameters& a_parameters, Render::Device* a_device);
+		// Draw2D-teardown hook: destroy this device's bindings while its context is still current.
+		// globalLookup is static and outlives every device; without this, entries surviving to static
+		// teardown (e.g. cacheDecodedSurface preloads) destroy through a dangling Device*. Entries
+		// stay resident and reload-capable (recovery is reload(), not a retained binding).
+		static void releaseDeviceBackedEntries(Render::Device* a_device);
 	private:
 		LoadedTexture(const LoadedTexture&) = delete;
 		LoadedTexture& operator=(const LoadedTexture&) = delete;

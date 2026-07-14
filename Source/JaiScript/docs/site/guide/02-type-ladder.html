@@ -12,7 +12,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
 <button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
@@ -22,9 +22,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li class="current"><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="the-type-ladder">The Type Ladder<a class="hlink" href="#the-type-ladder" aria-label="link">&#8203;</a></h1>
-<p>JaiScript has three rungs of typing strictness for variables (and class fields):</p>
+<p>Pick your strictness per variable: prototype loosely with <code>var</code>, lock things down with explicit types as the code matures — in the same file, with no rewrite. JaiScript has three rungs of typing strictness for variables (and class fields):</p>
 <div class="tablewrap"><table><thead><tr><th>Declaration</th><th>Meaning</th></tr></thead><tbody><tr><td><code>int x = 5;</code> (any explicit type)</td><td><strong>Enforced.</strong> The variable holds this type forever; assignments convert if compatible, error if not.</td></tr><tr><td><code>auto x = 5;</code></td><td><strong>Inferred, then enforced.</strong> The initializer&#x27;s type is inferred once, then locked — from that point <code>auto</code> behaves exactly like the explicit type. <code>auto</code> is <em>not</em> dynamic.</td></tr><tr><td><code>var x = 5;</code></td><td><strong>Dynamic.</strong> Any type may be assigned at any time.</td></tr></tbody></table></div>
-<p>*(pinned: semantics/strong_types_tests.cpp — <code>auto_with_initializer_locks_type</code>, <code>auto_rejects_incompatible_type</code>, <code>var_allows_any_type</code>, <code>int_type_enforced</code>, and ~90 siblings)*</p>
 <h2 id="enforced-types-reject-incompatible-assignments">Enforced types reject incompatible assignments<a class="hlink" href="#enforced-types-reject-incompatible-assignments" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
 x = 12;          // fine, still an int
@@ -43,7 +42,7 @@ y = 2.000000 (float)</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = 5;
 x = &quot;hello&quot;;     // locked to int: string is not convertible</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Type mismatch in assignment: Type mismatch</code></pre></div>
-<p>An <strong>uninitialized</strong> <code>auto x;</code> locks on its <em>first assignment</em> (pinned: <code>auto_uninitialized_locks_on_first_assignment</code>). Assigning <code>null</code> to a locked variable does not un-lock it (<code>null_preserves_type_for_reassignment</code>).</p>
+<p>An <strong>uninitialized</strong> <code>auto x;</code> locks on its <em>first assignment</em>. Assigning <code>null</code> to a locked variable does not un-lock it.</p>
 <h2 id="var-is-genuinely-dynamic">var is genuinely dynamic<a class="hlink" href="#var-is-genuinely-dynamic" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var y = 5;
 print(&quot;y is {} ({})&quot;, y, type_of(y));
@@ -57,10 +56,10 @@ type_of(mixed);</code></pre></div>
 y is now a string (string)
 mixed[1] = two
 == result: map</code></pre></div>
-<p>Container homogeneity follows the ladder: <code>auto nums = [1, 2, 3]</code> locks a homogeneous array; <code>var</code> containers may be heterogeneous and may be reassigned to a different container kind entirely. *(pinned: strong_types_tests.cpp <code>var_array_mixed_types</code>, <code>auto_nested_array_in_map</code>, <code>var_can_change_to_different_container</code>)*</p>
+<p>Container homogeneity follows the ladder: <code>auto nums = [1, 2, 3]</code> locks a homogeneous array; <code>var</code> containers may be heterogeneous and may be reassigned to a different container kind entirely.</p>
 <h2 id="conversion-table-typed-locked-auto-targets">Conversion table (typed / locked-auto targets)<a class="hlink" href="#conversion-table-typed-locked-auto-targets" aria-label="link">&#8203;</a></h2>
-<p>Mirrors <code>enforce_type_compatibility</code>; verified below and pinned in semantics/strong_types_tests.cpp and semantics/type_conversion_tests.cpp:</p>
-<div class="tablewrap"><table><thead><tr><th>Target ← Source</th><th>Result</th></tr></thead><tbody><tr><td><code>float</code> ← int</td><td>widens (<code>3</code> → <code>3.0</code>)</td></tr><tr><td><code>int</code> ← float</td><td><strong>truncates toward zero</strong> (<code>3.99</code> → <code>3</code>, <code>-3.99</code> → <code>-3</code>)</td></tr><tr><td><code>bool</code> ← numeric</td><td>truthiness (<code>5</code> → <code>true</code>, <code>0</code> → <code>false</code>)</td></tr><tr><td><code>string</code> ← int/float/...</td><td>stringified (<code>5</code> → <code>&quot;5&quot;</code>)</td></tr><tr><td><code>int</code> ← bool</td><td><code>true</code> → 1, <code>false</code> → 0 (pinned: <code>bool_to_int_conversion</code>)</td></tr><tr><td><code>int</code>/<code>float</code> ← string</td><td><strong>error</strong> (no implicit parse; use <code>&quot;42&quot;.to_int()</code>)</td></tr><tr><td>class <code>T</code> ← same class or derived</td><td>allowed (upcast); parent → child, siblings, or same-shape unrelated classes are <strong>rejected</strong> (pinned: <code>class_inheritance_child_to_parent_allowed</code>, <code>class_type_sibling_classes_rejected</code>)</td></tr><tr><td>class <code>T</code> ← class with matching conversion ctor / assignment operator</td><td>converts (pinned: <code>script_class_assignment_operator_conversion</code>)</td></tr></tbody></table></div>
+<p>What a typed (or locked-<code>auto</code>) target accepts, and what it does with it:</p>
+<div class="tablewrap"><table><thead><tr><th>Target ← Source</th><th>Result</th></tr></thead><tbody><tr><td><code>float</code> ← int</td><td>widens (<code>3</code> → <code>3.0</code>)</td></tr><tr><td><code>int</code> ← float</td><td><strong>truncates toward zero</strong> (<code>3.99</code> → <code>3</code>, <code>-3.99</code> → <code>-3</code>)</td></tr><tr><td><code>bool</code> ← numeric</td><td>truthiness (<code>5</code> → <code>true</code>, <code>0</code> → <code>false</code>)</td></tr><tr><td><code>string</code> ← int/float/...</td><td>stringified (<code>5</code> → <code>&quot;5&quot;</code>)</td></tr><tr><td><code>int</code> ← bool</td><td><code>true</code> → 1, <code>false</code> → 0</td></tr><tr><td><code>int</code>/<code>float</code> ← string</td><td><strong>error</strong> (no implicit parse; use <code>&quot;42&quot;.to_int()</code>)</td></tr><tr><td>class <code>T</code> ← same class or derived</td><td>allowed (upcast); parent → child, siblings, or same-shape unrelated classes are <strong>rejected</strong></td></tr><tr><td>class <code>T</code> ← class with matching conversion ctor / assignment operator</td><td>converts</td></tr></tbody></table></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float f = 3;         // int -&gt; float widens
 print(&quot;f = {} ({})&quot;, f, type_of(f));
 int i = 3.99;        // float -&gt; int truncates toward zero
@@ -77,7 +76,7 @@ j = -3
 b = true
 s = 5 (string)</code></pre></div>
 <h2 id="compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result">Compound assignment: typed targets convert C++-style, var keeps the dynamic result<a class="hlink" href="#compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result" aria-label="link">&#8203;</a></h2>
-<p>This was recently ruled explicitly (pinned: strong_types_tests.cpp <code>compound_int_target_converts_back</code>, <code>compound_truncates_toward_zero</code>, <code>compound_float_target_stays_float</code>, <code>compound_auto_locked_behaves_typed</code>, <code>compound_var_target_stays_dynamic</code>, <code>compound_string_targets_append</code>, <code>compound_mismatch_errors_parity</code>, <code>compound_overflow_policy_covers_intermediate</code>):</p>
+<p>The rule is two-sided:</p>
 <ul><li>On a <strong>typed (or locked-auto) target</strong>, <code>a op= b</code> computes like C++ and converts the result back to the target&#x27;s type. <code>int i = 7; i /= 2</code> → <code>3</code>; <code>i += 0.5</code> → <code>7</code> (7.5 truncated back).</li><li>On a <strong>var target</strong>, the stored value is whatever the operation produces — the variable may change type.</li></ul>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int i = 7;
 i /= 2;              // C++-style on typed target: stays int
@@ -106,10 +105,10 @@ var v = 7;
 v += 0.5;
 print(&quot;int: {} ({})  var: {} ({})&quot;, i, type_of(i), v, type_of(v));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int: 7 (int)  var: 7.500000 (float)</code></pre></div>
-<p>The compound-assignment conversion also applies to typed <strong>class fields</strong>, typed array <strong>elements</strong>, and by-<strong>ref</strong> targets (pinned: <code>compound_typed_element_and_ref_targets</code>, <code>typed_field_compound_converts</code>).</p><nav class="prevnext"><a class="prev" href="../guide/01-hello.html"><span>&larr; previous</span>Hello &amp; Basics</a><a class="next" href="../guide/03-value-semantics.html"><span>next &rarr;</span>Value Semantics &amp; References</a></nav></article>
+<p>The compound-assignment conversion also applies to typed <strong>class fields</strong>, typed array <strong>elements</strong>, and by-<strong>ref</strong> targets.</p><nav class="prevnext"><a class="prev" href="../guide/01-hello.html"><span>&larr; previous</span>Hello &amp; Basics</a><a class="next" href="../guide/03-value-semantics.html"><span>next &rarr;</span>Value Semantics &amp; References</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

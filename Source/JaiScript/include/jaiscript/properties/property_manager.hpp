@@ -272,13 +272,33 @@ namespace jai {
 		// INHERITED properties are serialized too; without them only the most-derived level survives.
 
 		// Visit every level's properties (bases first, then own) — the single save walk.
+		// Same-name properties across levels follow C++ name-hiding: the DERIVED level wins
+		// and the shadowed base entry is skipped. The flat save format has one slot per name;
+		// without this, duplicate keys corrupted opposite levels in JSON vs binary loads.
 		template<typename Fn>
 		void visit_owned_properties(Fn&& fn) const {
+			std::vector<std::pair<const std::string*, property_base*>> entries;
+			collect_owned_properties(entries);
+			for (size_t i = 0; i < entries.size(); ++i) {
+				bool shadowed = false;
+				for (size_t j = i + 1; j < entries.size(); ++j) {
+					if (*entries[j].first == *entries[i].first) {
+						shadowed = true;
+						break;
+					}
+				}
+				if (!shadowed) {
+					fn(*entries[i].first, entries[i].second);
+				}
+			}
+		}
+
+		void collect_owned_properties(std::vector<std::pair<const std::string*, property_base*>>& out) const {
 			if constexpr (sizeof...(Bases) > 0) {
-				(try_visit_base<Bases>(fn), ...);
+				(try_collect_base<Bases>(out), ...);
 			}
 			for (const auto& [name, prop] : property_mgr.all()) {
-				fn(name, prop);
+				out.emplace_back(&name, prop);
 			}
 		}
 
@@ -315,6 +335,47 @@ namespace jai {
 				((found = found ? found : try_find_base<Bases>(name)), ...);
 			}
 			return found;
+		}
+
+		const property_base* find_owned_property(const std::string& name) const {
+			return const_cast<property_owner*>(this)->find_owned_property(name);
+		}
+
+		// --- Runtime reflection helpers (tooling: inspectors, debuggers) ------------------------
+		// Typed access by name over the whole inheritance chain, built on property_base's erased
+		// bridge. Writes route through erased_assign, so observable_property change signals fire.
+
+		// Virtual twins of visit_owned_properties/find_owned_property: every property_owner level
+		// re-overrides these, so a caller holding a BASE pointer still reflects over the most
+		// derived type's full chain (the non-virtual walkers are bound to the static type).
+		virtual void visit_reflected_properties(const std::function<void(const std::string&, property_base*)>& fn) const {
+			visit_owned_properties(fn);
+		}
+		virtual property_base* find_reflected_property(const std::string& name) {
+			return find_owned_property(name);
+		}
+
+		std::type_index property_type_id(const std::string& name) const {
+			auto* p = find_owned_property(name);
+			return p ? p->value_type_id() : std::type_index(typeid(void));
+		}
+
+		template<typename T>
+		T* property_value(const std::string& name) {
+			auto* p = find_owned_property(name);
+			return p ? p->value_as<T>() : nullptr;
+		}
+
+		template<typename T>
+		const T* property_value(const std::string& name) const {
+			auto* p = find_owned_property(name);
+			return p ? p->value_as<T>() : nullptr;
+		}
+
+		template<typename T>
+		bool set_property_value(const std::string& name, const T& value) {
+			auto* p = find_owned_property(name);
+			return p && p->assign_value(value);
 		}
 
 	protected:
@@ -364,6 +425,14 @@ namespace jai {
 		}
 		template<typename Base>
 		void try_visit_base(...) const {}
+
+		template<typename Base>
+		auto try_collect_base(std::vector<std::pair<const std::string*, property_base*>>& out) const
+			-> decltype(static_cast<const Base*>(this)->collect_owned_properties(out), void()) {
+			static_cast<const Base*>(this)->collect_owned_properties(out);
+		}
+		template<typename Base>
+		void try_collect_base(...) const {}
 
 		template<typename Base, typename Archive>
 		auto try_load_base(Archive& ar)

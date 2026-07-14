@@ -47,6 +47,12 @@ namespace jai {
         // Error handling
         void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector
         void synchronize();  // Error recovery
+        void synchronize_class_member(size_t class_open_index);  // Brace-aware recovery for the class-member loop
+        // Name-position diagnostics: when the offending token is a type keyword
+        // ('map', 'array', ...) the error names the cause at the true site instead
+        // of the generic "Expected X name" (and instead of desyncing downstream)
+        void report_expected_name(const std::string& expected_message, const char* what);
+        checked_result<token> consume_name(const std::string& expected_message, const char* what);
         
         // token management (return by reference to avoid copying strings)
         const token& peek() const;

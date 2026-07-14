@@ -32,6 +32,31 @@ allocates except the first boxing of a variable.
 - **`arr[i]` / `obj.field` / chains** resolve to ELEMENT/FIELD refs via the shared
   `detail/ref_lvalue.hpp` resolver (ref args, ref returns) or the subscript-lvalue
   paths. **`m[k]`** lvalues mint MAP-ENTRY refs.
+
+## What binds (decls, ref params, ref returns)
+
+Binding is two-tiered; both tiers land in the same four holder modes:
+
+- **Tier 1 (structural, bind-time)**: bare identifiers (share/box the storage) and
+  chains of plain member steps with identifier/int-literal subscript indices resolve
+  from the AST via `detail::resolve_ref_lvalue` — pure pointer chasing, never runs
+  script (the bind point sits mid-call-sequence where re-entering script is illegal).
+  Chain resolution happens AFTER all args evaluate (pinned:
+  `tier1_bind_time_ordering_pinned`).
+- **Tier 2 (evaluated lvalues)**: everything else that EVALUATES to a reference binds
+  by sharing the evaluated holder — a reference VALUE is an lvalue. Subscript and map
+  reads over lvalue bases mint owner-pinned refs with full index generality, so
+  computed indices (`grid[y+1][x]`), member-expr indices (`arr[o.idx]`), map keys
+  (`m["k"]`, `m[k]`), and typed-array elements all bind; index expressions run exactly
+  once, in argument order. `var&`/`auto&` declarations additionally resolve
+  member-FINAL initializers (`auto& p = G.player`) through the Tier-1 kernel, since
+  field reads evaluate to copies.
+
+What stays a non-lvalue: rvalues (arithmetic, calls, literals), string subscripts
+(chars are values), map KEYS (`kv.first` — ordering invariant), computed properties
+and C++-backed members whose accessors return copies, missing map keys (reads never
+insert), and member-final chains over COMPUTED subscripts (`objs[i+1].v` — bind a
+`var&` row first).
 - **Ref returns** (`int& f()`, `-> auto&`): the return operand binds like a ref arg
   (ident ⇒ share/box; chain ⇒ resolver; call ⇒ pass-through) and the epilogue hands
   the HANDLE out via `detail::ref_return_pass_through` — non-lvalues and referent

@@ -264,6 +264,17 @@ namespace MV {
 		Window& borderless();
 		Window& bordered();
 
+		// Custom-chrome hit testing (borderless windows): the tester maps a window-space point to
+		// SDL_HITTEST_DRAGGABLE / RESIZE_* / NORMAL so native drag, edge resize, snap and
+		// double-click-maximize keep working. Empty function removes the hook.
+		using HitTester = std::function<SDL_HitTestResult(const Point<int>& a_windowPoint, const Size<int>& a_windowSize)>;
+		Window& hitTest(HitTester a_test);
+
+		Window& minimize();
+		Window& maximize();
+		Window& restore();
+		bool maximized() const;
+
 		const Size<int>& drawableSize() const;
 		const Size<int>& windowSize() const;
 
@@ -296,6 +307,7 @@ namespace MV {
 		bool userCanResize = false;
 		Size<int> minSize;
 		Size<int> maxSize;
+		HitTester hitTester;
 
 		SDL_Window* window = nullptr;
 		Draw2D& renderer;

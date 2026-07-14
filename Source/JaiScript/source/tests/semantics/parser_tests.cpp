@@ -144,9 +144,94 @@ public:
             // Note: "var = 42;" is valid syntax - undeclared variable errors happen at runtime
             check_parse_fails("return return;");
         });
+
+        // 'map'/'array' are hard keywords by grammar contract; using one as a name
+        // used to report a generic "Expected X name" (or "Expected '<'") with no
+        // cause. The diagnostic now names the keyword at the true token.
+        test("type_keyword_as_name_diagnostics", [this]() {
+            auto contains = [](const std::vector<std::string>& errs, const std::string& needle) {
+                for (const auto& e : errs) {
+                    if (e.find(needle) != std::string::npos) return true;
+                }
+                return false;
+            };
+            auto fieldErrs = collect_parse_errors("class C { var map = {}; }");
+            check(contains(fieldErrs, "'map' is a type keyword"), "field: " + (fieldErrs.empty() ? "<none>" : fieldErrs[0]));
+            check(contains(fieldErrs, "member name"), "field what");
+
+            auto arrayErrs = collect_parse_errors("class C { var array = []; }");
+            check(contains(arrayErrs, "'array' is a type keyword"), "array field");
+
+            auto globalErrs = collect_parse_errors("int map = 5;");
+            check(contains(globalErrs, "'map' is a type keyword"), "global: " + (globalErrs.empty() ? "<none>" : globalErrs[0]));
+            check(contains(globalErrs, "variable name"), "global what");
+
+            auto paramErrs = collect_parse_errors("function f(var map) { return 0; }");
+            check(contains(paramErrs, "'map' is a type keyword"), "param");
+
+            auto destructureErrs = collect_parse_errors("auto [x, map] = p;");
+            check(contains(destructureErrs, "'map' is a type keyword"), "destructuring");
+
+            auto memberErrs = collect_parse_errors("obj.map;");
+            check(contains(memberErrs, "'map' is a type keyword"), "member access");
+
+            // Statement starting with the keyword commits to a type parse - the '<'
+            // message now explains the collision instead of a bare "Expected '<'"
+            auto stmtErrs = collect_parse_errors("function g() { map = m; }");
+            check(contains(stmtErrs, "built-in map type keyword"), "statement: " + (stmtErrs.empty() ? "<none>" : stmtErrs[0]));
+        });
+
+        // A failed member/ctor body used to recover at the first ';' INSIDE the body:
+        // the member loop resumed mid-body, took the method's '}' for the class's, and
+        // every later member leaked to top level with a spurious "Expected expression"
+        // at the class's real closing brace. Brace-aware recovery keeps errors at the
+        // true sites and the class intact.
+        test("class_recovery_stays_in_class", [this]() {
+            const std::string code =
+                "class Level {\n"              // 1
+                "\tstring map = \"\";\n"       // 2  <- true site #1 (field name)
+                "\tint kills = 0;\n"           // 3
+                "\tLevel(string m) {\n"        // 4
+                "\t\tmap = m;\n"               // 5  <- true site #2 (use in ctor body)
+                "\t}\n"                        // 6
+                "\tvoid report() {\n"          // 7
+                "\t\tkills = kills + 0;\n"     // 8
+                "\t}\n"                        // 9
+                "\tint total() {\n"            // 10
+                "\t\treturn kills;\n"          // 11
+                "\t}\n"                        // 12
+                "}\n";                         // 13 <- no error may land here
+            auto errs = collect_parse_errors(code);
+            check_eq((size_t)2, errs.size());
+            check(errs.size() == 2 && errs[0].find("2:") != std::string::npos &&
+                  errs[0].find("'map' is a type keyword") != std::string::npos,
+                  "first error at the field: " + (errs.empty() ? "<none>" : errs[0]));
+            check(errs.size() == 2 && errs[1].find("5:") != std::string::npos &&
+                  errs[1].find("built-in map type keyword") != std::string::npos,
+                  "second error at the ctor-body use: " + (errs.size() > 1 ? errs[1] : "<none>"));
+            for (const auto& e : errs) {
+                check(e.find("Expected expression") == std::string::npos, "no downstream cascade: " + e);
+                check(e.find("13:") == std::string::npos, "no error at the class close: " + e);
+            }
+        });
     }
 
 private:
+    std::vector<std::string> collect_parse_errors(const std::string& code) {
+        auto eng = make_engine();
+        auto* symbolizer = eng->get_symbolizer();
+        lexer lex(code, symbolizer, "test.jai");
+        auto tokens = lex.tokenize();
+        std::unordered_set<std::string> empty_types;
+        parser p(tokens, symbolizer, eng.get(), empty_types, "test.jai");
+        try {
+            auto ast = p.parse();
+        } catch (const parse_error&) {
+            // errors_ still carries the reports
+        }
+        return p.get_errors();
+    }
+
     void check_parse_succeeds(const std::string& code) {
         auto eng = make_engine();
         auto* symbolizer = eng->get_symbolizer();

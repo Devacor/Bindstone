@@ -1078,7 +1078,8 @@ namespace jai {
         // per-recursion-level frame (Debug stack ceiling)
         checked_result<void> bind_reference_parameter(const parameter& param, size_t frame_index,
                                                       const expression* argExpr,
-                                                      const std::shared_ptr<environment>& caller_env);
+                                                      const std::shared_ptr<environment>& caller_env,
+                                                      const script_value* evaluated_arg = nullptr);
         // Share-or-box against the caller's variable storage (cell model)
         checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);

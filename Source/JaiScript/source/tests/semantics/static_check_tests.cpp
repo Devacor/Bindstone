@@ -532,8 +532,70 @@ public:
             check_eq((size_t)0, error_count(e->check("string s = 1 + \"b\";")));
         });
 
+        // auto locks its type from the RUNTIME-taken ternary branch ('auto x = c ? 0 : 1.5'
+        // is int on one path, float on the other; the int lock then silently truncates
+        // later float assignments). The one value-dependent, silently-lossy inference
+        // shape gets a warning; typed decls absorb the join and var stays dynamic.
+        test("warn_auto_from_mixed_branch_ternary", [this]() {
+            auto e = make_engine();
+            auto r = e->check("bool c = true; auto x = c ? 0 : 1.5;");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find("'int'") != std::string::npos &&
+                       r.diagnostics[0].message.find("'float'") != std::string::npos);
+
+            // container/class-shaped mixes warn too, naming both shapes
+            auto rc = e->check("bool c = true; auto a = c ? [1] : {\"k\": 1};");
+            check_eq((size_t)1, warning_count(rc));
+            check_true(rc.diagnostics[0].message.find("'array'") != std::string::npos &&
+                       rc.diagnostics[0].message.find("'map'") != std::string::npos);
+
+            // silent: matched branches, typed decl, var decl, non-ternary initializer
+            check_eq((size_t)0, e->check("bool c = true; auto x = c ? 1 : 2;").diagnostics.size());
+            check_eq((size_t)0, e->check("bool c = true; float x = c ? 0 : 1.5;").diagnostics.size());
+            check_eq((size_t)0, e->check("bool c = true; var x = c ? 0 : 1.5;").diagnostics.size());
+            check_eq((size_t)0, e->check("auto x = 1.5;").diagnostics.size());
+        });
+
         // ------------------------------------------------------------ shadowing warnings
         // Always WARNING severity (shadowing is legal; strict must not throw on it).
+
+        test("warn_implicit_capture_in_bare_lambda", [this]() {
+            auto e = make_engine();
+            auto r = e->check(
+                "function f() -> void {\n"
+                "  int x = 5;\n"
+                "  auto g = []() { print(x); };\n"
+                "}");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find(
+                "bare [] implicitly captured local 'x'") != std::string::npos);
+
+            // One warning per lambda, even with several implicit captures.
+            check_eq((size_t)1, e->check(
+                "function f() -> void { int x = 1; int y = 2; auto g = []() { return x + y; }; }")
+                .diagnostics.size());
+
+            // Explicit intent -> silent, all three spellings.
+            check_eq((size_t)0, e->check(
+                "function f() -> void { int x = 1; auto g = [=]() { return x; }; }")
+                .diagnostics.size());
+            check_eq((size_t)0, e->check(
+                "function f() -> void { int x = 1; auto g = [&]() { return x; }; }")
+                .diagnostics.size());
+            check_eq((size_t)0, e->check(
+                "function f() -> void { int x = 1; auto g = [x]() { return x; }; }")
+                .diagnostics.size());
+
+            // Bare [] using only its own params/locals or globals captures nothing -> silent.
+            check_eq((size_t)0, e->check(
+                "function f() -> void { auto g = [](int n) { var m = n; return m; }; }")
+                .diagnostics.size());
+            check_eq((size_t)0, e->check(
+                "var shared = 1;\nfunction f() -> void { auto g = []() { return shared; }; }")
+                .diagnostics.size());
+        });
 
         test("shadow_local_over_field", [this]() {
             auto e = make_engine();

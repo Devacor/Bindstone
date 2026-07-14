@@ -347,13 +347,11 @@ public:
 					ok;
 				)");
 				check_true(r.as<bool>(), backend_tag(use_vm) + "char-char ordering comparisons");
-				// mixed char/int ordering stays a deliberate error (no silent promotion)
+				// Char ruling 2026-07-12 (comparison inting) REVERSED the earlier pin:
+				// mixed char/int ordering now promotes to int64 0..255 like arithmetic.
 				auto e2 = gloom_engine(use_vm);
-				bool threw = false;
-				try { e2->execute("var x = 'a' < 1;"); } catch (const std::exception& ex) {
-					threw = std::string(ex.what()).find("Invalid operands for < operator") != std::string::npos;
-				}
-				check_true(threw, backend_tag(use_vm) + "char/int ordering stays an error");
+				check_true(!e2->execute("var x = 'a' < 1; x").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 1 is false)");
+				check_true(e2->execute("var y = 'a' < 98; y").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 98 is true)");
 			}
 		});
 

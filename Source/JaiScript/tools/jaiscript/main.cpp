@@ -6,6 +6,9 @@
 
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/signals/signal_property.hpp>
+#include <jaiscript/signals/signal_impl.hpp>
+#include <jaiscript/properties/property_serialization.hpp>   // property_manager::load template bodies
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
 #endif
@@ -18,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -28,10 +32,18 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "winmm.lib")
 #else
+#include <cerrno>
+#include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
+#include <csignal>
 #endif
 
 namespace {
@@ -41,6 +53,10 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------- console ---
 
 std::atomic<bool> g_interrupted{false};  // Ctrl+C / Ctrl+Break (host-exe state, not engine state)
+
+#ifdef _WIN32
+std::map<std::string, std::string> g_wav_aliases;   // wav path -> its open MCI device
+#endif
 
 #ifdef _WIN32
 BOOL WINAPI ctrl_handler(DWORD type) {
@@ -74,6 +90,7 @@ struct console_state {
 		DWORD pids[4];
 		solo_console = GetConsoleProcessList(pids, 4) == 1;
 		SetConsoleCtrlHandler(ctrl_handler, TRUE);
+		timeBeginPeriod(1);   // 1ms Sleep granularity for sleep_ms-paced game loops
 #else
 		out_tty = in_tty = vt = true;
 #endif
@@ -140,8 +157,18 @@ void print_usage() {
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
 		"  type_of, math, to_json/from_json, containers) plus host file IO: read_file(path),\n"
-		"  write_file(path, text), file_exists(path), delete_file(path). Args after `--` are the\n"
-		"  global ARGS (array of strings). include/import resolve relative to the script's folder.\n"
+		"  write_file(path, text), file_exists(path), delete_file(path), and console-game IO:\n"
+		"  key_down(name), read_key(), clock_ms(), sleep_ms(n), term_cols(), term_rows(),\n"
+		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
+		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
+		"  key_down from auto-repeat; there are no key-up events. Networking: NetChannel\n"
+		"  (new NetChannel(); listen(port)/connect(host,port)/send(bytes)/pump()/close();\n"
+		"  signals on_packet(bytes)/on_connect()/on_disconnect(reason) fire during pump();\n"
+		"  4-byte big-endian length framing, MV-compatible) and NetServer (N clients on one\n"
+		"  port: listen/send(id,bytes)/broadcast/pump/kick/client_count; per-client signals\n"
+		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)).\n"
+		"  Args after `--` are the global ARGS (array of strings). include/import resolve\n"
+		"  relative to the script's folder.\n"
 		"\n"
 		"debugging: a DAP listener is on by default (localhost only, costs nothing until a session\n"
 		"  attaches). Attach from VS Code with the jaiscript extension (\"Attach to JaiScript\") on\n"
@@ -195,6 +222,740 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 	return -1;   // keep going
 }
 
+// --------------------------------------------------------- console game IO ---
+// The four capabilities a real-time terminal script cannot express (input,
+// clock, sleep, terminal size), same shapes as the crawler/gloom hosts.
+// Windows-first; elsewhere the input pair reports nothing, like those hosts.
+
+#ifdef _WIN32
+int vk_for_key_name(const std::string& name) {
+	if (name.size() == 1) {
+		char c = name[0];
+		if (c >= 'a' && c <= 'z') { return c - 'a' + 'A'; }
+		if (c >= 'A' && c <= 'Z') { return c; }
+		if (c >= '0' && c <= '9') { return c; }
+	}
+	if (name == "space") { return VK_SPACE; }
+	if (name == "left") { return VK_LEFT; }
+	if (name == "right") { return VK_RIGHT; }
+	if (name == "up") { return VK_UP; }
+	if (name == "down") { return VK_DOWN; }
+	if (name == "shift") { return VK_SHIFT; }
+	if (name == "ctrl") { return VK_CONTROL; }
+	if (name == "alt") { return VK_MENU; }
+	if (name == "esc") { return VK_ESCAPE; }
+	if (name == "enter") { return VK_RETURN; }
+	if (name == "tab") { return VK_TAB; }
+	return 0;
+}
+
+std::string key_name_for_vk(WORD vk) {
+	if (vk >= 'A' && vk <= 'Z') { return std::string(1, static_cast<char>(vk - 'A' + 'a')); }
+	if (vk >= '0' && vk <= '9') { return std::string(1, static_cast<char>(vk)); }
+	switch (vk) {
+		case VK_LEFT: return "left";
+		case VK_RIGHT: return "right";
+		case VK_UP: return "up";
+		case VK_DOWN: return "down";
+		case VK_SPACE: return "space";
+		case VK_SHIFT: return "shift";
+		case VK_CONTROL: return "ctrl";
+		case VK_MENU: return "alt";
+		case VK_ESCAPE: return "esc";
+		case VK_RETURN: return "enter";
+		case VK_TAB: return "tab";
+		case VK_BACK: return "backspace";
+		default: return "";
+	}
+}
+
+// ReadConsoleInput pump: real down/up transitions from the console event queue.
+// Works under Windows Terminal/ConPTY, where GetConsoleWindow() is a hidden
+// pseudo-console window and foreground tests always fail; focus gating is
+// implicit (the terminal only forwards events while focused), and focus-loss
+// clears the held table so keys cannot stick.
+struct win_input_state {
+	std::map<std::string, bool> held;
+	std::vector<std::string> edges;
+};
+win_input_state g_win_input;
+
+void win_pump_input() {
+	HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+	DWORD mode = 0;
+	if (in == INVALID_HANDLE_VALUE || !GetConsoleMode(in, &mode)) { return; }   // piped stdin: no game input
+	DWORD avail = 0;
+	while (GetNumberOfConsoleInputEvents(in, &avail) && avail > 0) {
+		INPUT_RECORD records[32];
+		DWORD got = 0;
+		if (!ReadConsoleInput(in, records, 32, &got) || got == 0) { return; }
+		for (DWORD i = 0; i < got; ++i) {
+			if (records[i].EventType == FOCUS_EVENT && !records[i].Event.FocusEvent.bSetFocus) {
+				g_win_input.held.clear();
+			} else if (records[i].EventType == KEY_EVENT) {
+				const KEY_EVENT_RECORD& k = records[i].Event.KeyEvent;
+				std::string name = key_name_for_vk(k.wVirtualKeyCode);
+				if (name.empty()) {
+					// punctuation and numpad have no vk row: take the console's own
+					// character translation ('.', ':', '-', shifted symbols, numpad digits)
+					char translated = static_cast<char>(k.uChar.UnicodeChar);
+					if (k.uChar.UnicodeChar > 32 && k.uChar.UnicodeChar < 127) {
+						name = std::string(1, static_cast<char>(std::tolower(translated)));
+					}
+				}
+				if (name.empty()) { continue; }
+				g_win_input.held[name] = k.bKeyDown != FALSE;
+				if (k.bKeyDown) {
+					g_win_input.edges.push_back(name);
+					if (g_win_input.edges.size() > 128) {           // key_down-only scripts must not hoard edges
+						g_win_input.edges.erase(g_win_input.edges.begin());
+					}
+				}
+			}
+		}
+	}
+}
+#else
+// POSIX terminals deliver bytes, not key events: pump stdin in raw mode into
+// (a) an edge queue for read_key and (b) a last-press table that auto-repeat
+// keeps fresh — key_down = "pressed within the hold window". There are no
+// key-up events and no modifier state (shift/ctrl/alt never read down here).
+// Linux and macOS share this branch (identical termios/ioctl); macOS
+// Terminal.app may send SS3 arrows (ESC O A) — both prefixes are parsed.
+struct posix_input_state {
+	bool raw = false;
+	termios saved{};
+	std::vector<std::string> edges;
+	std::map<std::string, int64_t> last_press;
+};
+posix_input_state g_posix_input;
+constexpr int64_t posix_hold_window_ms = 500;
+
+int64_t posix_now_ms() {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void posix_restore_terminal() {
+	if (g_posix_input.raw) {
+		tcsetattr(STDIN_FILENO, TCSANOW, &g_posix_input.saved);
+		g_posix_input.raw = false;
+	}
+}
+
+void posix_signal_restore(int sig) {
+	posix_restore_terminal();
+	std::signal(sig, SIG_DFL);
+	std::raise(sig);
+}
+
+void posix_enter_raw() {
+	if (g_posix_input.raw || !isatty(STDIN_FILENO)) { return; }
+	tcgetattr(STDIN_FILENO, &g_posix_input.saved);
+	termios raw = g_posix_input.saved;
+	raw.c_lflag &= ~(ICANON | ECHO);
+	raw.c_cc[VMIN] = 0;    // polling reads return immediately
+	raw.c_cc[VTIME] = 0;
+	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+	g_posix_input.raw = true;
+	std::atexit(posix_restore_terminal);
+	std::signal(SIGINT, posix_signal_restore);
+	std::signal(SIGTERM, posix_signal_restore);
+}
+
+void posix_note_key(const std::string& key) {
+	g_posix_input.edges.push_back(key);
+	if (g_posix_input.edges.size() > 128) {              // key_down-only scripts must not hoard edges
+		g_posix_input.edges.erase(g_posix_input.edges.begin());
+	}
+	g_posix_input.last_press[key] = posix_now_ms();
+}
+
+// one short retry distinguishes a lone ESC press from an escape sequence
+// arriving split across reads (ssh latency)
+bool posix_read_byte(unsigned char& b) {
+	if (read(STDIN_FILENO, &b, 1) == 1) { return true; }
+	std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	return read(STDIN_FILENO, &b, 1) == 1;
+}
+
+void posix_pump_input() {
+	posix_enter_raw();
+	if (!g_posix_input.raw) { return; }
+	unsigned char b = 0;
+	while (read(STDIN_FILENO, &b, 1) == 1) {
+		if (b == 0x1B) {
+			unsigned char b2 = 0;
+			if (!posix_read_byte(b2)) { posix_note_key("esc"); continue; }
+			if (b2 == '[' || b2 == 'O') {
+				// CSI (ESC [) or SS3 (ESC O, macOS application cursor mode):
+				// consume parameter/intermediate bytes so modified sequences
+				// (ESC [ 1;5A etc.) never leak phantom keypresses
+				unsigned char fin = 0;
+				bool have = posix_read_byte(fin);
+				while (have && b2 == '[' && fin >= 0x20 && fin <= 0x3F) { have = posix_read_byte(fin); }
+				if (!have) { continue; }
+				switch (fin) {
+					case 'A': posix_note_key("up"); break;
+					case 'B': posix_note_key("down"); break;
+					case 'C': posix_note_key("right"); break;
+					case 'D': posix_note_key("left"); break;
+					default: break;                      // unknown sequence: swallowed
+				}
+				continue;
+			}
+			posix_note_key("esc");
+			b = b2;                                      // ESC then a plain byte: classify it below
+		}
+		if (b == '\n' || b == '\r') { posix_note_key("enter"); continue; }
+		if (b == '\t') { posix_note_key("tab"); continue; }
+		if (b == 127 || b == 8) { posix_note_key("backspace"); continue; }
+		if (b == ' ') { posix_note_key("space"); continue; }
+		if (b > 32 && b < 127) { posix_note_key(std::string(1, static_cast<char>(std::tolower(b)))); }
+	}
+}
+#endif
+
+void register_console_game_io(jai::engine& eng) {
+	eng.add_function("clock_ms", []() -> jai::script_int {
+		return std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+	});
+	eng.add_function("sleep_ms", [](jai::script_int ms) {
+		if (ms > 0) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+	});
+	// held-key state from console events, cross-checked against the physical
+	// key so a release delivered to another window (alt-tab mid-press) unsticks
+	eng.add_function("key_down", [](const std::string& name) -> bool {
+#ifdef _WIN32
+		win_pump_input();
+		auto it = g_win_input.held.find(name);
+		if (it == g_win_input.held.end() || !it->second) { return false; }
+		int vk = vk_for_key_name(name);
+		return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0;
+#else
+		posix_pump_input();
+		auto it = g_posix_input.last_press.find(name);
+		return it != g_posix_input.last_press.end()
+			&& posix_now_ms() - it->second < posix_hold_window_ms;
+#endif
+	});
+	// non-blocking edge events: "" if none; arrows/esc/enter/tab named, letters lowercased
+	eng.add_function("read_key", []() -> std::string {
+#ifdef _WIN32
+		win_pump_input();
+		if (g_win_input.edges.empty()) { return ""; }
+		std::string key = g_win_input.edges.front();
+		g_win_input.edges.erase(g_win_input.edges.begin());
+		return key;
+#else
+		posix_pump_input();
+		if (g_posix_input.edges.empty()) { return ""; }
+		std::string key = g_posix_input.edges.front();
+		g_posix_input.edges.erase(g_posix_input.edges.begin());
+		return key;
+#endif
+	});
+	eng.add_function("term_cols", []() -> jai::script_int {
+#ifdef _WIN32
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+			return info.srWindow.Right - info.srWindow.Left + 1;
+		}
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) { return ws.ws_col; }
+#endif
+		return 80;
+	});
+	eng.add_function("term_rows", []() -> jai::script_int {
+#ifdef _WIN32
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+			return info.srWindow.Bottom - info.srWindow.Top + 1;
+		}
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0) { return ws.ws_row; }
+#endif
+		return 25;
+	});
+	// fire-and-forget WAV playback through winmm's MCI (already linked).
+	// Each distinct file gets its own waveaudio device, so DIFFERENT sounds
+	// overlap (the OS mixes); replaying a sound restarts it. Registered
+	// everywhere, a graceful no-op off-Windows so scripts stay portable.
+	eng.add_function("play_wav", [](const std::string& path) -> bool {
+#ifdef _WIN32
+		auto it = g_wav_aliases.find(path);
+		if (it == g_wav_aliases.end()) {
+			std::string alias = "jaiwav" + std::to_string(g_wav_aliases.size());
+			std::string open = "open \"" + path + "\" type waveaudio alias " + alias;
+			if (::mciSendStringA(open.c_str(), nullptr, 0, nullptr) != 0) {
+				return PlaySoundA(path.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT) != 0;
+			}
+			it = g_wav_aliases.emplace(path, alias).first;
+		}
+		std::string cmd = "stop " + it->second;
+		::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr);
+		cmd = "seek " + it->second + " to start";
+		::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr);
+		cmd = "play " + it->second;
+		return ::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr) == 0;
+#else
+		(void)path;
+		return false;
+#endif
+	});
+	// background MIDI through winmm's MCI sequencer (mixes freely with
+	// play_wav). One track at a time; scripts poll midi_status() == "stopped"
+	// to loop. Same portability contract: no-ops off Windows.
+	eng.add_function("play_midi", [](const std::string& path) -> bool {
+#ifdef _WIN32
+		::mciSendStringA("close jaimidi", nullptr, 0, nullptr);
+		std::string open = "open \"" + path + "\" type sequencer alias jaimidi";
+		if (::mciSendStringA(open.c_str(), nullptr, 0, nullptr) != 0) { return false; }
+		return ::mciSendStringA("play jaimidi", nullptr, 0, nullptr) == 0;
+#else
+		(void)path;
+		return false;
+#endif
+	});
+	eng.add_function("stop_midi", []() -> bool {
+#ifdef _WIN32
+		::mciSendStringA("stop jaimidi", nullptr, 0, nullptr);
+		return ::mciSendStringA("close jaimidi", nullptr, 0, nullptr) == 0;
+#else
+		return false;
+#endif
+	});
+	eng.add_function("midi_status", []() -> std::string {
+#ifdef _WIN32
+		char buf[64] = {0};
+		if (::mciSendStringA("status jaimidi mode", buf, 63, nullptr) != 0) { return ""; }
+		return buf;
+#else
+		return "";
+#endif
+	});
+}
+
+// -------------------------------------------------------------- networking ---
+// A generic length-framed TCP channel for scripts, shaped like Bindstone's
+// network layer: MV's 4-byte big-endian header + content framing on the wire
+// (a jaiscript peer can talk to an MV::Client/Server), and Clickable's
+// property_owner + JAI_SIGNAL_PROPERTY pattern on the API. No threads: the
+// channel owns non-blocking sockets and a script-called pump() drains them,
+// firing signals inside the script's own call stack. Protocol semantics
+// (actions, lockstep, handshakes) live entirely in script.
+
+#ifdef _WIN32
+using net_socket = SOCKET;
+constexpr net_socket net_bad_socket = INVALID_SOCKET;
+bool net_ready() {
+	static const bool ready = [] { WSADATA wsa; return ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
+	return ready;
+}
+bool net_would_block() {
+	int e = ::WSAGetLastError();
+	return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
+}
+void net_close_socket(net_socket s) { ::closesocket(s); }
+void net_set_nonblocking(net_socket s) {
+	u_long mode = 1;
+	::ioctlsocket(s, FIONBIO, &mode);
+}
+#else
+using net_socket = int;
+constexpr net_socket net_bad_socket = -1;
+bool net_ready() { return true; }
+bool net_would_block() { return errno == EWOULDBLOCK || errno == EAGAIN || errno == EINPROGRESS; }
+void net_close_socket(net_socket s) { ::close(s); }
+void net_set_nonblocking(net_socket s) { ::fcntl(s, F_SETFL, ::fcntl(s, F_GETFL, 0) | O_NONBLOCK); }
+#endif
+
+class net_channel : public jai::property_owner<net_channel> {
+	friend jai::access;
+public:
+	typedef void PacketSignature(const std::string&);
+	typedef void ConnectSignature();
+	typedef void DisconnectSignature(const std::string&);
+
+	JAI_SIGNAL_PROPERTY(PacketSignature, on_packet);
+	JAI_SIGNAL_PROPERTY(ConnectSignature, on_connect);
+	JAI_SIGNAL_PROPERTY(DisconnectSignature, on_disconnect);
+
+	net_channel() = default;
+	~net_channel() { drop_sockets(); }
+
+	bool listen(jai::script_int port) {
+		if (!net_ready()) { return fail("winsock unavailable"); }
+		drop_sockets();
+		listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (listener_ == net_bad_socket) { return fail("socket() failed"); }
+		int yes = 1;
+		::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+		sockaddr_in address{};
+		address.sin_family = AF_INET;
+		address.sin_port = htons(static_cast<unsigned short>(port));
+		address.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (::bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
+				|| ::listen(listener_, 1) != 0) {
+			drop_sockets();
+			return fail("bind/listen failed (port taken?)");
+		}
+		net_set_nonblocking(listener_);
+		state_ = "listening";
+		return true;
+	}
+
+	bool connect(const std::string& host, jai::script_int port) {
+		if (!net_ready()) { return fail("winsock unavailable"); }
+		drop_sockets();
+		addrinfo hints{};
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+		addrinfo* found = nullptr;
+		if (::getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &found) != 0 || !found) {
+			return fail("host not found: " + host);
+		}
+		peer_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (peer_ == net_bad_socket) {
+			::freeaddrinfo(found);
+			return fail("socket() failed");
+		}
+		net_set_nonblocking(peer_);
+		int result = ::connect(peer_, found->ai_addr, static_cast<int>(found->ai_addrlen));
+		::freeaddrinfo(found);
+		if (result == 0) {
+			state_ = "connected";
+			announce_connect_ = true;
+		} else if (net_would_block()) {
+			state_ = "connecting";
+		} else {
+			drop_sockets();
+			return fail("connect failed");
+		}
+		return true;
+	}
+
+	// frames and queues; pump() flushes whatever the socket won't take now
+	bool send(const std::string& bytes) {
+		if (state_ != "connected" && state_ != "connecting") { return false; }
+		char header[4] = {
+			static_cast<char>((bytes.size() >> 24) & 0xFF), static_cast<char>((bytes.size() >> 16) & 0xFF),
+			static_cast<char>((bytes.size() >> 8) & 0xFF), static_cast<char>(bytes.size() & 0xFF) };
+		outbox_.append(header, 4);
+		outbox_.append(bytes);
+		if (state_ == "connected") { flush(); }
+		return true;
+	}
+
+	jai::script_int pump() {
+		jai::script_int fired = 0;
+		if (listener_ != net_bad_socket && peer_ == net_bad_socket) {
+			net_socket accepted = ::accept(listener_, nullptr, nullptr);
+			if (accepted != net_bad_socket) {
+				net_set_nonblocking(accepted);
+				peer_ = accepted;
+				state_ = "connected";
+				announce_connect_ = true;
+			}
+		}
+		if (state_ == "connecting" && peer_ != net_bad_socket) {
+			// refusal lands in the EXCEPT set on Windows (writability never fires)
+			fd_set writable;
+			fd_set failed;
+			FD_ZERO(&writable);
+			FD_ZERO(&failed);
+			FD_SET(peer_, &writable);
+			FD_SET(peer_, &failed);
+			timeval instant{0, 0};
+			if (::select(static_cast<int>(peer_ + 1), nullptr, &writable, &failed, &instant) > 0) {
+				int error = 0;
+				socklen_t len = sizeof(error);
+				::getsockopt(peer_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &len);
+				if (error == 0 && !FD_ISSET(peer_, &failed)) {
+					state_ = "connected";
+					announce_connect_ = true;
+				} else {
+					disconnect("connect refused");
+					return fired;
+				}
+			}
+		}
+		if (announce_connect_) {
+			announce_connect_ = false;
+			flush();
+			on_connectSignal();
+		}
+		if (state_ != "connected" || peer_ == net_bad_socket) { return fired; }
+		flush();
+		char chunk[4096];
+		std::string drop_reason;                          // close/error noted, HELD until queued
+		while (peer_ != net_bad_socket) {                 // frames deliver first (a goodbye packet
+			int got = static_cast<int>(::recv(peer_, chunk, sizeof(chunk), 0));   // often rides the same recv as the close)
+			if (got > 0) { inbox_.append(chunk, static_cast<size_t>(got)); continue; }
+			if (got == 0) { drop_reason = "closed by peer"; }
+			else if (!net_would_block()) { drop_reason = "recv error"; }
+			break;
+		}
+		while (inbox_.size() >= 4) {
+			size_t length = (static_cast<size_t>(static_cast<unsigned char>(inbox_[0])) << 24)
+				| (static_cast<size_t>(static_cast<unsigned char>(inbox_[1])) << 16)
+				| (static_cast<size_t>(static_cast<unsigned char>(inbox_[2])) << 8)
+				| static_cast<size_t>(static_cast<unsigned char>(inbox_[3]));
+			if (length > 64u * 1024u * 1024u) {
+				disconnect("oversized frame");
+				break;
+			}
+			if (inbox_.size() < 4 + length) { break; }
+			std::string content = inbox_.substr(4, length);
+			inbox_.erase(0, 4 + length);
+			++fired;
+			on_packetSignal(content);              // may reentrantly send()/close(): state re-checked per loop
+			if (state_ != "connected") { break; }
+		}
+		if (!drop_reason.empty() && state_ == "connected") { disconnect(drop_reason); }
+		return fired;
+	}
+
+	void close() {
+		drop_sockets();
+		state_ = "idle";
+	}
+
+	bool connected() const { return state_ == "connected"; }
+	std::string status() const { return state_; }
+
+private:
+	bool fail(const std::string& why) {
+		state_ = "error: " + why;
+		return false;
+	}
+
+	void disconnect(const std::string& reason) {
+		drop_sockets();
+		state_ = "closed: " + reason;
+		on_disconnectSignal(reason);
+	}
+
+	void flush() {
+		while (!outbox_.empty() && peer_ != net_bad_socket && state_ == "connected") {
+			int sent = static_cast<int>(::send(peer_, outbox_.data(), static_cast<int>(outbox_.size()), 0));
+			if (sent > 0) { outbox_.erase(0, static_cast<size_t>(sent)); continue; }
+			if (!net_would_block()) { disconnect("send error"); }
+			break;
+		}
+	}
+
+	void drop_sockets() {
+		if (peer_ != net_bad_socket) { net_close_socket(peer_); peer_ = net_bad_socket; }
+		if (listener_ != net_bad_socket) { net_close_socket(listener_); listener_ = net_bad_socket; }
+		inbox_.clear();
+		outbox_.clear();
+	}
+
+	net_socket peer_ = net_bad_socket;
+	net_socket listener_ = net_bad_socket;
+	std::string inbox_;
+	std::string outbox_;
+	std::string state_ = "idle";
+	bool announce_connect_ = false;
+};
+
+// The MV::Server shape for scripts: persistent listener, N framed connections,
+// per-client signals, broadcast. Same wire format as net_channel; same no-thread
+// pump contract. Client ids are stable, never reused within a server's lifetime.
+class net_server : public jai::property_owner<net_server> {
+	friend jai::access;
+public:
+	typedef void ClientSignature(jai::script_int);
+	typedef void ClientPacketSignature(jai::script_int, const std::string&);
+	typedef void ClientDropSignature(jai::script_int, const std::string&);
+
+	JAI_SIGNAL_PROPERTY(ClientSignature, on_client_connect);
+	JAI_SIGNAL_PROPERTY(ClientPacketSignature, on_client_packet);
+	JAI_SIGNAL_PROPERTY(ClientDropSignature, on_client_disconnect);
+
+	net_server() = default;
+	~net_server() { close(); }
+
+	bool listen(jai::script_int port) {
+		if (!net_ready()) { return false; }
+		close();
+		listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (listener_ == net_bad_socket) { return false; }
+		int yes = 1;
+		::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+		sockaddr_in address{};
+		address.sin_family = AF_INET;
+		address.sin_port = htons(static_cast<unsigned short>(port));
+		address.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (::bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
+				|| ::listen(listener_, 8) != 0) {
+			net_close_socket(listener_);
+			listener_ = net_bad_socket;
+			return false;
+		}
+		net_set_nonblocking(listener_);
+		return true;
+	}
+
+	bool send(jai::script_int id, const std::string& bytes) {
+		client* c = find(id);
+		if (!c) { return false; }
+		frame_into(c->outbox, bytes);
+		flush(*c);
+		return true;
+	}
+
+	jai::script_int broadcast(const std::string& bytes) {
+		jai::script_int reached = 0;
+		for (auto& c : clients_) {
+			if (c.sock == net_bad_socket) { continue; }
+			frame_into(c.outbox, bytes);
+			flush(c);
+			++reached;
+		}
+		return reached;
+	}
+
+	jai::script_int pump() {
+		jai::script_int fired = 0;
+		if (listener_ != net_bad_socket) {
+			for (;;) {
+				net_socket accepted = ::accept(listener_, nullptr, nullptr);
+				if (accepted == net_bad_socket) { break; }
+				net_set_nonblocking(accepted);
+				clients_.push_back(client{next_id_++, accepted});
+				on_client_connectSignal(clients_.back().id);
+			}
+		}
+		for (size_t i = 0; i < clients_.size(); ++i) {   // index loop: receivers may connect more clients
+			client& c = clients_[i];
+			if (c.sock == net_bad_socket) { continue; }
+			flush(c);
+			std::string drop_reason;                      // held until queued frames deliver
+			char chunk[4096];
+			while (c.sock != net_bad_socket) {
+				int got = static_cast<int>(::recv(c.sock, chunk, sizeof(chunk), 0));
+				if (got > 0) { c.inbox.append(chunk, static_cast<size_t>(got)); continue; }
+				if (got == 0) { drop_reason = "closed by peer"; }
+				else if (!net_would_block()) { drop_reason = "recv error"; }
+				break;
+			}
+			while (c.sock != net_bad_socket && c.inbox.size() >= 4) {
+				size_t length = (static_cast<size_t>(static_cast<unsigned char>(c.inbox[0])) << 24)
+					| (static_cast<size_t>(static_cast<unsigned char>(c.inbox[1])) << 16)
+					| (static_cast<size_t>(static_cast<unsigned char>(c.inbox[2])) << 8)
+					| static_cast<size_t>(static_cast<unsigned char>(c.inbox[3]));
+				if (length > 64u * 1024u * 1024u) {
+					drop_reason = "oversized frame";
+					break;
+				}
+				if (c.inbox.size() < 4 + length) { break; }
+				std::string content = c.inbox.substr(4, length);
+				c.inbox.erase(0, 4 + length);
+				++fired;
+				on_client_packetSignal(c.id, content);
+			}
+			if (!drop_reason.empty() && c.sock != net_bad_socket) {
+				drop(c, drop_reason);
+			}
+		}
+		clients_.erase(std::remove_if(clients_.begin(), clients_.end(),
+			[](const client& c) { return c.sock == net_bad_socket; }), clients_.end());
+		return fired;
+	}
+
+	void kick(jai::script_int id) {
+		if (client* c = find(id)) { drop(*c, "kicked"); }
+	}
+
+	jai::script_int client_count() const {
+		return static_cast<jai::script_int>(clients_.size());
+	}
+
+	bool listening() const { return listener_ != net_bad_socket; }
+
+	void close() {
+		for (auto& c : clients_) {
+			if (c.sock != net_bad_socket) { net_close_socket(c.sock); c.sock = net_bad_socket; }
+		}
+		clients_.clear();
+		if (listener_ != net_bad_socket) { net_close_socket(listener_); listener_ = net_bad_socket; }
+	}
+
+private:
+	struct client {
+		jai::script_int id = 0;
+		net_socket sock = net_bad_socket;
+		std::string inbox;
+		std::string outbox;
+	};
+
+	client* find(jai::script_int id) {
+		for (auto& c : clients_) {
+			if (c.id == id && c.sock != net_bad_socket) { return &c; }
+		}
+		return nullptr;
+	}
+
+	static void frame_into(std::string& outbox, const std::string& bytes) {
+		char header[4] = {
+			static_cast<char>((bytes.size() >> 24) & 0xFF), static_cast<char>((bytes.size() >> 16) & 0xFF),
+			static_cast<char>((bytes.size() >> 8) & 0xFF), static_cast<char>(bytes.size() & 0xFF) };
+		outbox.append(header, 4);
+		outbox.append(bytes);
+	}
+
+	void flush(client& c) {
+		while (!c.outbox.empty() && c.sock != net_bad_socket) {
+			int sent = static_cast<int>(::send(c.sock, c.outbox.data(), static_cast<int>(c.outbox.size()), 0));
+			if (sent > 0) { c.outbox.erase(0, static_cast<size_t>(sent)); continue; }
+			if (!net_would_block()) { drop(c, "send error"); }
+			break;
+		}
+	}
+
+	void drop(client& c, const std::string& reason) {
+		if (c.sock == net_bad_socket) { return; }
+		net_close_socket(c.sock);
+		c.sock = net_bad_socket;
+		on_client_disconnectSignal(c.id, reason);
+	}
+
+	net_socket listener_ = net_bad_socket;
+	std::vector<client> clients_;
+	jai::script_int next_id_ = 1;
+};
+
+void register_net_channel(jai::engine& eng) {
+	jai::dynamic_binder<net_server>(eng, "NetServer")
+		.constructor<>()
+		.method("listen", &net_server::listen)
+		.method("send", &net_server::send)
+		.method("broadcast", &net_server::broadcast)
+		.method("pump", &net_server::pump)
+		.method("kick", &net_server::kick)
+		.method("client_count", &net_server::client_count)
+		.method("listening", &net_server::listening)
+		.method("close", &net_server::close)
+		.auto_bind()
+		.build();
+	jai::dynamic_binder<net_channel>(eng, "NetChannel")
+		.constructor<>()
+		.method("listen", &net_channel::listen)
+		.method("connect", &net_channel::connect)
+		.method("send", &net_channel::send)
+		.method("pump", &net_channel::pump)
+		.method("close", &net_channel::close)
+		.method("connected", &net_channel::connected)
+		.method("status", &net_channel::status)
+		.auto_bind()   // JAI_SIGNAL_PROPERTYs expose the generic Signal view
+		.build();
+}
+
 // ----------------------------------------------------------------- engine ---
 
 std::string trim(const std::string& s) {
@@ -239,6 +1000,8 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		std::error_code ec;
 		return fs::remove(path, ec);
 	});
+	register_console_game_io(*eng);
+	register_net_channel(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

@@ -9,16 +9,16 @@
 #include <compare>
 #include <concepts>
 #include <type_traits>
+#include <typeindex>
 
-#include "../core/fixed_string.hpp"
 
 // Forward declarations
 namespace jai {
 	class property_manager;
 	class property_base;
+	struct signal_script_ops;
 
 	template<typename T> class property;
-	template<typename T, auto Name> class named_property;
 	template<typename T> class deleted_property;
 
 	namespace serialization {
@@ -93,6 +93,32 @@ namespace jai {
 		virtual void serialize(serialization::any_archive_reader& ar) = 0;
 
 		virtual void clone_to_target(property_base& target) = 0;
+
+		// ===== ERASED VALUE ACCESS (reflection bridge for tooling: inspectors, debuggers) =====
+		// Defaults describe a valueless property (deleted_property); property<T> overrides.
+		virtual std::type_index value_type_id() const { return typeid(void); }
+		virtual void* erased_value_ptr() { return nullptr; }
+		virtual const void* erased_value_ptr() const { return nullptr; }
+		// Assigns through the property's own operator= so observable_property change
+		// signals fire; returns false when the property cannot accept a value.
+		virtual bool erased_assign(const void* source) { (void)source; return false; }
+
+		template<typename T>
+		T* value_as() {
+			return value_type_id() == std::type_index(typeid(T)) ? static_cast<T*>(erased_value_ptr()) : nullptr;
+		}
+		template<typename T>
+		const T* value_as() const {
+			return value_type_id() == std::type_index(typeid(T)) ? static_cast<const T*>(erased_value_ptr()) : nullptr;
+		}
+		template<typename T>
+		bool assign_value(const T& source) {
+			return value_type_id() == std::type_index(typeid(T)) && erased_assign(std::addressof(source));
+		}
+
+		// Signal properties fill a type-erased connect/disconnect table (the
+		// generic "Signal" script view rides it); value properties decline.
+		virtual bool signal_ops(signal_script_ops&) { return false; }
 
 	protected:
 		inline property_base(std::string name)
@@ -197,21 +223,10 @@ namespace jai {
 			return *this;
 		}
 
-		// Move constructor
-		property(property&& other) noexcept
-			: property_base(std::move(other))
-			, m_custom_clone(std::move(other.m_custom_clone))
-			, m_value(std::move(other.m_value)) {
-		}
-
-		property& operator=(property&& other) noexcept {
-			if (this != &other) {
-				// Note: Don't move property_base, we stay registered with our original manager
-				m_custom_clone = std::move(other.m_custom_clone);
-				m_value = std::move(other.m_value);
-			}
-			return *this;
-		}
+		// Properties are pinned to the manager that registered their address: a moved-to
+		// object would be unregistered and the moved-from entry would dangle.
+		property(property&&) = delete;
+		property& operator=(property&&) = delete;
 
 		// We cannot meaningfully copy construct a property because they need to be tightly bound to their property_manager reference.
 		property(const property&) = delete;
@@ -257,6 +272,20 @@ namespace jai {
 		}
 		const T& get() const {
 			return m_value;
+		}
+
+		// ===== ERASED VALUE ACCESS =====
+		std::type_index value_type_id() const override { return typeid(T); }
+		void* erased_value_ptr() override { return &m_value; }
+		const void* erased_value_ptr() const override { return &m_value; }
+		bool erased_assign(const void* source) override {
+			if constexpr (std::is_copy_assignable_v<T>) {
+				m_value = *static_cast<const T*>(source);
+				return true;
+			} else {
+				(void)source;
+				return false;
+			}
 		}
 
 		// ===== DEREFERENCE OPERATORS =====
@@ -563,9 +592,11 @@ namespace jai {
 			auto& t = static_cast<property<T>&>(target);
 			if (m_custom_clone){
 				m_custom_clone(*this, t);
-			} else {
+			} else if constexpr (std::is_copy_assignable_v<T>) {
 				t.m_value = m_value;
 			}
+			// Move-only T without a custom clone: nothing to clone (virtual instantiation
+			// must not force copy-assign — property<unique_ptr<T>> is legal to declare).
 		}
 	};
 
@@ -594,62 +625,6 @@ namespace jai {
 		void clone_to_target(property_base&) override {
 			// No-op
 		}
-	};
-
-	// ============================================================================
-	// named_property - Property with compile-time name (C++20 NTTP)
-	// ============================================================================
-	//
-	// Alternative syntax using Non-Type Template Parameters:
-	//
-	//   // Instead of macro:
-	//   JAI_PROPERTY((int), health, 100);
-	//
-	//   // Use NTTP syntax:
-	//   jai::property<int, "health"> health{property_mgr, 100};
-	//
-	// Benefits:
-	// - No macro needed
-	// - Name is compile-time constant (potential for optimizations)
-	// - IDE autocomplete works better
-	// - Cleaner syntax for simple cases
-	//
-	// The macro is still recommended for:
-	// - Types with commas (e.g., std::map<int, int>) - macro handles parentheses
-	// - Schema registration (macro auto-registers to type_registry)
-	//
-	template<typename T, auto Name>
-	class named_property : public property<T> {
-	public:
-		// Compile-time access to property name
-		static constexpr std::string_view property_name = Name;
-
-		// Constructor: property_manager only (default-constructed value)
-		named_property(property_manager& mgr)
-			: property<T>(mgr, std::string(static_cast<std::string_view>(Name))) {}
-
-		// Constructor: property_manager + default value
-		template<typename U>
-			requires std::constructible_from<T, U>
-		named_property(property_manager& mgr, U&& default_val)
-			: property<T>(mgr, std::string(static_cast<std::string_view>(Name)), std::forward<U>(default_val)) {}
-
-		// Constructor: property_manager + default value + clone function
-		template<typename U, typename Fn>
-			requires std::constructible_from<T, U> && std::invocable<Fn, property<T>&, property<T>&>
-		named_property(property_manager& mgr, U&& default_val, Fn&& clone_fn)
-			: property<T>(mgr, std::string(static_cast<std::string_view>(Name)),
-			              std::forward<U>(default_val), std::forward<Fn>(clone_fn)) {}
-
-		// Move operations
-		named_property(named_property&&) = default;
-		named_property& operator=(named_property&&) = default;
-
-		// Copy is deleted (same as property<T>)
-		named_property(const named_property&) = delete;
-
-		// Value assignment (inherited behavior)
-		using property<T>::operator=;
 	};
 
 } // namespace jai

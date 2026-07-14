@@ -193,9 +193,17 @@ item claims validate host-side (TAKE -> ITEM echo stamped with the winner's slot
 drops by net id), barrels explode host-side (BOOM mirrors the visual), and untargeted
 monsters pick the NEAREST live player across the host and every puppet — attacks on a
 ghost land on that player as routed DAMAGE, and hurting a monster aggros it onto the
-shooter's puppet. Level exit: host sends NEXT with its tallies,
-everyone sits the intermission, ALL clients READY -> host START -> everyone rolls into the
-next map together. Co-op deaths respawn at your own numbered start with a pistol, KEYS KEPT.
+shooter's puppet. Level exit is host-owned in BOTH modes (deathmatch too): a client's own
+LEVEL_DONE never acts locally — it travels up as EXIT (once per map, secret-exit flag
+included) and the host answers NEXT with its tallies, forcing everyone's intermission.
+Clients hold there: a key sends READY once, the footer reads WAITING FOR HOST, esc reaches
+a held menu (RESUME returns to the tally, QUIT works, gameplay is unreachable). The host
+shows N/M READY, auto-STARTs the moment everyone still connected is ready (recounted fresh,
+so a mid-intermission disconnect can't wedge it), and its own key works after a 10s grace
+if someone idles. START travels the whole session together; an empty START ends the episode
+on both sides' end screens, where a key returns to the title and BYEs the session down
+cleanly (a host BYE mid-anything tears the client session down without a crash). Co-op
+deaths respawn at your own numbered start with a pistol, KEYS KEPT.
 
 Known edges: players don't collide with each other; powerup visuals aren't mirrored on
 ghosts; the client's own rocket is a cosmetic twin of the host's authoritative one (each
@@ -214,9 +222,24 @@ and ships batches as flat strings; and a bare typed-array read as a map-literal 
 building actions. Bandwidth at 29 awake monsters ~ 1.2KB per MONS keyframe; 16-player STATE
 relay ~ 16 x 17Hz x ~90B = ~25KB/s at the host, trivial on LAN.
 
-Final gate roster, all GREEN: p1_verify, jaidoom selftest, p4_smoke, p5_view, p6_specials,
-p6_hud, jaidoom flowtest (menu/address/persistence sections included), p7_bench, p8_doom2,
-p9_netplay (dm + co-op sections, fake-peer protocol harness over a real loopback socket).
+Decorations: the THINGS walk spawns map decor as state-10 mobjs from the DECOR table
+(things.jai; type -> sprite/anim/radius, art-gated like doom2 monsters, anim letters probed
+from the WAD so animated art cycles). Solidity rides MO_RAD: columns/lamps/candelabras
+block the player (pos_ok, with an escape rule so an overlap never wedges) and monsters
+(mobj_pos_ok); gore ships radius 0 and never collides. Decor joins the SAME shared walk as
+monsters/pickups, so co-op pool indices stay aligned (p9 pins the walk signature host vs
+client). Decor is not shootable and does not block shots.
+
+Presentation: level exits melt — the classic screen wipe (vid.jai wipe_begin/tic/overlay:
+the departing frame slides down in ragged, neighbor-correlated columns over the fresh
+intermission/end screen). It runs only in play()'s draw path on its own LCG; gates and the
+sim never see it (flowtest pins termination, monotonic fall, and math::random isolation).
+
+Final gate roster, all GREEN: p1_verify, jaidoom selftest, p4_smoke, p5_view (incl. the
+decoration census/collision/render section), p6_specials, p6_hud (incl. WAITING FOR HOST
+footer + mid-melt composite), jaidoom flowtest (menu/address/persistence + wipe pins),
+p7_bench, p8_doom2, p9_netplay (dm + co-op + exit-sync rounds + the INVERTED harness: a
+real ClientSession vs a scripted fake host with ~150ms-late deliveries).
 
 ## Verification culture
 

@@ -901,7 +901,11 @@ namespace jai {
         void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
         void register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter);
         void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
-        
+
+        // Records a base link whose base class has not registered yet (registrar order is
+        // type_index order, not dependency order); resolved when the base arrives.
+        void defer_base_link(std::type_index base, std::shared_ptr<class_definition> derived);
+
         // Allow dynamic_binder to access implementation details
         template<typename T> friend class dynamic_binder;
         // Allow function_binder to access conversion registry

@@ -16,7 +16,7 @@ CMake + Ninja, opened as a folder in Visual Studio (VS 18). Build dirs live unde
 
 ### Fast iteration: use the **Debug** build
 
-Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured 2026-07 on the MSI; the link grows with the test exe), and it
+Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured on the MSI; the link grows with the test exe), and it
 defines `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` (catches env/closure cycles) plus MSVC's
 `0xDDDDDDDD` freed-memory fill (surfaces dangling-reference / use-after-free bugs that Release
 can mask). **Iterate in Debug; do a final Release pass for the shipped config.**
@@ -52,7 +52,7 @@ jaiscript_tests.exe --verbose                 # per-test names + timings (use to
 ```
 NOTE: a bare pattern is **additive** — `"Array Tests"` runs that whole suite, and `"push"` runs
 every test named `*push*` across all suites. Use the dotted `"Suite.Test"` form when you want the
-precise AND (suite must match AND test must match). (Fixed 2026-05; the old bare-pattern form
+precise AND (suite must match AND test must match). (Fixed; the old bare-pattern form
 ANDed suite+test and silently skipped a matched suite's tests.)
 
 ### Building against Bindstone / MutedVision (CLI works!)
@@ -270,17 +270,17 @@ for (auto kv : scores) { print(kv.first + ": " + to_string(kv.second)); }
 
 Production-ready: complete lexer/parser + TWO backends at full Foundry parity (tree-walking
 interpreter + bytecode VM), script classes, hot reload, C++ integration, JSON, coroutines
-(interpreter: continuation replay; vm: fibers). The old `LEGACY_VM/` attempt was deleted 2026-07;
+(interpreter: continuation replay; vm: fibers). The old `LEGACY_VM/` attempt was deleted;
 `include/jaiscript/vm/` is the real one. Run the whole suite on the VM with
 `jaiscript_tests.exe --backend=vm` (both backends must stay green).
 
-A 2026-05 deep audit fixed: loop-`throw` infinite hang, range-`for` slot allocation & OOB on
+A deep audit fixed: loop-`throw` infinite hang, range-`for` slot allocation & OOB on
 shrink, `switch` continue/break leakage, map-read auto-insert, `<=>`/NaN map-key ordering,
 int64 `==` precision, cpp-bound float/int reads, float→int UB, integer-overflow policy,
 JSON float precision + recursion depth, and a dangling-temporary in C++ method chaining.
 Regression tests live in `source/tests/language/review_regression_tests.cpp`.
 
-**Current status (2026-07):** both backends at full parity — 1443 tests Debug / 1474 Release
+**Current status:** both backends at full parity — 1443 tests Debug / 1474 Release
 BENCHMARKS, green on interpreter AND vm. VM-perf branch highlights: in-loop VM call frames
 (script calls no longer recurse natively), lvalue reference arguments (`f(obj.field)`,
 `f(arr[i])`) via the shared kernel `detail/ref_lvalue.hpp` (verbatim in both backends), and

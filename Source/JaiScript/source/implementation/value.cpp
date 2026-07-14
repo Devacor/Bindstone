@@ -1188,7 +1188,9 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_char_type:
-            return unchecked_as_char() <=> other.unchecked_as_char();
+            // char is unsigned 0..255 by spec (char_promotion.hpp); ordering here must
+            // agree with promoted script-level comparisons, not platform char signedness
+            return static_cast<unsigned char>(unchecked_as_char()) <=> static_cast<unsigned char>(other.unchecked_as_char());
         case script_value_type::jai_bool_type:
             return unchecked_as_bool() <=> other.unchecked_as_bool();
         default: {

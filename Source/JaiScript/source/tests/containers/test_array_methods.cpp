@@ -159,6 +159,23 @@ public:
             result = eng->execute("arr.length();");
             check_eq(result.as<int>(), 5);
         });
+
+        // Pins that subscript args stay BY-VALUE at the builtin boundary
+        // (deref_builtin_args, builtin_methods.hpp): array lookups already deref'd
+        // via operator== and push copies via vm_convert_array_element - these must
+        // not regress while the map/string boundaries normalize.
+        test("subscript_args_stay_by_value", [this]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                var src = [5, 6];
+                var dst = [];
+                dst.push(src[0]);
+                src[0] = 50;
+                var arr = [5, 6, 7];
+                arr.has(src[1]) && arr.index_of(src[1]) == 1 && dst[0] == 5;
+            )");
+            check_eq(result.as<bool>(), true);
+        });
     }
 };
 

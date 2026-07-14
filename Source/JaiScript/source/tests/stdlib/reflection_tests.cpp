@@ -284,6 +284,83 @@ public:
             check_eq(eng->execute("reflect::get(h, \"armor\")").as_int(), (int64_t)11);
         });
 
+        test("methods_enumerate_sorted_with_overloads_and_chain", [this]() {
+            // Determinism: (name, arity, static) order, never hash order; overloads are
+            // separate entries; auto-accessors and constructors are OTHER surfaces
+            // (fields() / construct()) and stay out.
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class MBase { void alpha() {} }
+                class MDer : MBase {
+                    int zeta(int a, float b = 1.5) { return a; }
+                    int zeta(int a, int b, int c) { return a + b + c; }
+                    private: void hush() {}
+                    static int total() { return 1; }
+                }
+                var ms = reflect::methods("MDer");
+            )");
+            check_eq(eng->execute("ms.size()").as_int(), (int64_t)5);
+            check_eq(eng->execute("ms[0][\"name\"]").as<std::string>(), "alpha");
+            check_eq(eng->execute("ms[0][\"from\"]").as<std::string>(), "MBase");
+            check_eq(eng->execute("ms[1][\"name\"]").as<std::string>(), "hush");
+            check_eq(eng->execute("ms[1][\"access\"]").as<std::string>(), "private");
+            check_eq(eng->execute("ms[2][\"name\"]").as<std::string>(), "total");
+            check_eq(eng->execute("ms[2][\"static\"]").as<bool>(), true);
+            check_eq(eng->execute("ms[3][\"name\"]").as<std::string>(), "zeta");
+            check_eq(eng->execute("ms[3][\"arity\"]").as_int(), (int64_t)2);
+            check_eq(eng->execute("ms[4][\"arity\"]").as_int(), (int64_t)3);
+            check_eq(eng->execute("ms[3][\"params\"][1][\"name\"]").as<std::string>(), "b");
+            check_eq(eng->execute("ms[3][\"params\"][1][\"type\"]").as<std::string>(), "float");
+            check_eq(eng->execute("ms[3][\"params\"][1][\"default\"]").as<bool>(), true);
+        });
+
+        test("method_arguments_one_param_array_per_overload", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                class W {
+                    int f(int a) { return a; }
+                    int f(int a, string b) { return a; }
+                }
+            )");
+            eng->execute("var pa = reflect::method_arguments(\"W\", \"f\");");
+            check_eq(eng->execute("pa.size()").as_int(), (int64_t)2);
+            check_eq(eng->execute("pa[0].size()").as_int(), (int64_t)1);
+            check_eq(eng->execute("pa[1].size()").as_int(), (int64_t)2);
+            check_eq(eng->execute("pa[1][1][\"type\"]").as<std::string>(), "string");
+            check_throws([&]() { eng->execute("reflect::method_arguments(\"W\", \"nope\");"); },
+                "unknown method raises the family error");
+        });
+
+        test("functions_globals_and_function_arguments", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute(R"(
+                function greet(string who, int times = 1) -> string { return who; }
+                namespace tools { function twice(auto x) -> auto { return x * 2; } }
+                var health = 12;
+                class Q { int q = 1; }
+            )");
+            check_eq(eng->execute(
+                "var found = 0; for (auto f : reflect::functions()) { if (f == \"greet\" || f == \"tools::twice\") { found = found + 1; } } found"
+            ).as_int(), (int64_t)2);
+            // Constructors are the classes() surface, not functions()
+            check_eq(eng->execute(
+                "var q = 0; for (auto f : reflect::functions()) { if (f == \"Q\") { q = q + 1; } } q"
+            ).as_int(), (int64_t)0);
+            check_eq(eng->execute(
+                "var g = 0; for (auto n : reflect::globals()) { if (n == \"health\") { g = g + 1; } if (n == \"greet\") { g = g + 100; } } g"
+            ).as_int(), (int64_t)1);
+            eng->execute("var fa = reflect::function_arguments(\"greet\");");
+            check_eq(eng->execute("fa.size()").as_int(), (int64_t)1);
+            check_eq(eng->execute("fa[0][0][\"name\"]").as<std::string>(), "who");
+            check_eq(eng->execute("fa[0][0][\"type\"]").as<std::string>(), "string");
+            check_eq(eng->execute("fa[0][1][\"default\"]").as<bool>(), true);
+            check_eq(eng->execute("reflect::function_arguments(\"tools::twice\")[0][0][\"name\"]").as<std::string>(), "x");
+            // Host registrations are type-erased: empty overload list, never an error
+            check_eq(eng->execute("reflect::function_arguments(\"print\").size()").as_int(), (int64_t)0);
+            check_throws([&]() { eng->execute("reflect::function_arguments(\"nope\");"); },
+                "unknown function raises the family error");
+        });
+
         test("sandbox_engine_reflects_nothing_it_did_not_register", [this]() {
             // The allowlist contract: reflection is a capability over THIS engine's
             // registrations. A second engine in the same process knows nothing about

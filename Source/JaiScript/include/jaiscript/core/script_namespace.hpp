@@ -21,6 +21,14 @@ struct script_namespace_data {
     std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classes;              // class_name_id -> definition
 };
 
+// Namespaces scripts may not declare into: reflect:: answers are C++-sided engine truth,
+// so a script function wearing its name would be impersonation. math:: stays deliberately
+// OPEN (script-contributed math is legitimate math). Flat namespace names make
+// "reflect::sub" its own name — the prefix is reserved with it.
+inline bool is_reserved_namespace_name(std::string_view name) {
+    return name == "reflect" || name.starts_with("reflect::");
+}
+
 } // namespace jai
 
 #endif // __JAISCRIPT_CORE_SCRIPT_NAMESPACE_HPP__

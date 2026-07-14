@@ -1051,6 +1051,13 @@ public:
         return false;
     }
 
+    // Reflection surface (docs/reflection.md): dynamic_binder marks host-backed classes;
+    // the generation counter bumps on every redefinition so tools poll one integer and
+    // re-query only when it moved (the live-query/recapture model).
+    bool cpp_backed() const { return cpp_backed_; }
+    void set_cpp_backed(bool v) { cpp_backed_ = v; }
+    uint64_t reflection_generation() const { return reflection_generation_; }
+
     engine* get_engine() const { return engine_; }
 
     uint64_t get_cpp_object_field_id() const {
@@ -1272,6 +1279,7 @@ public:
                         bool structurally_identical = false) {
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        ++reflection_generation_;
         if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
 
         if (structurally_identical) {
@@ -1468,6 +1476,8 @@ private:
     std::string name_;
     uint64_t type_id_;
     bool auto_registered_ = false;
+    bool cpp_backed_ = false;
+    uint64_t reflection_generation_ = 0;
     type_info_ptr type_info_;
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;

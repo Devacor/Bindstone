@@ -542,6 +542,10 @@ namespace jai {
         // Get class definition by name
         std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
 
+        // Every class THIS engine can name (host-bound + script-declared), sorted —
+        // reflect::classes()'s deterministic source
+        std::vector<std::string> registered_class_names() const;
+
         // Get class definition by type_id (faster than string lookup)
         std::shared_ptr<class_definition> get_class_definition(uint64_t type_id) const;
 

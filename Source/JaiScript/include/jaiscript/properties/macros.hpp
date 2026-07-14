@@ -50,6 +50,23 @@
     JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false, true); \
     jai::property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__ }
 
+// Optional curated name pin for the shared naming ladder (script auto-registration,
+// jai::registrar auto-name, serialization $type — one name everywhere). The owner tag
+// keeps the pin from leaking onto derived classes through C++ name lookup, and the
+// static_assert catches a copy-pasted CRTP self type at compile time.
+#define JAI_PROPERTY_OWNER(ClassName) \
+    static constexpr const char* jai_type_name = #ClassName; \
+    using jai_name_owner = ClassName; \
+    static_assert(std::is_same_v<ClassName, _jai_owner_type>, \
+        "JAI_PROPERTY_OWNER(" #ClassName "): name must match the property_owner CRTP self type")
+
+// Same pin with a curated name that differs from the C++ identifier.
+#define JAI_PROPERTY_OWNER_AS(ClassName, NameString) \
+    static constexpr const char* jai_type_name = NameString; \
+    using jai_name_owner = ClassName; \
+    static_assert(std::is_same_v<ClassName, _jai_owner_type>, \
+        "JAI_PROPERTY_OWNER_AS(" #ClassName ", ...): class must be the property_owner CRTP self type")
+
 // Transient property — registered for runtime access but never serialized.
 // Use for derived/reconstructed values (cached bounds, computed matrices, etc.)
 // that are cheaper to recompute at load time than to store and parse.

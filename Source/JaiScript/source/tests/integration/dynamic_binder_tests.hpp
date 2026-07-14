@@ -79,6 +79,48 @@ public:
     PropChainDerived() = default;
 };
 
+// Base auto-registration fixtures: AutoChainBase is deliberately NOT registered by the
+// tests that use AutoChainDerived — the derived registration must materialize it.
+class AutoChainBase : public property_owner<AutoChainBase> {
+public:
+    JAI_PROPERTY((int), armor_base, 3);
+    AutoChainBase() = default;
+    static void jai_auto_bind(dynamic_binder<AutoChainBase>& b) {
+        b.method("base_shout", [](AutoChainBase&) { return std::string("from_base"); });
+    }
+};
+
+class AutoChainDerived : public property_owner<AutoChainDerived, AutoChainBase> {
+public:
+    AutoChainDerived() = default;
+};
+
+class PinnedNameBase : public property_owner<PinnedNameBase> {
+public:
+    JAI_PROPERTY_OWNER_AS(PinnedNameBase, "NicePinned");
+    JAI_PROPERTY((int), pin_field, 9);
+    PinnedNameBase() = default;
+};
+
+class PinnedNameDerived : public property_owner<PinnedNameDerived, PinnedNameBase> {
+public:
+    PinnedNameDerived() = default;
+};
+
+class CollideNameBase : public property_owner<CollideNameBase> {
+public:
+    JAI_PROPERTY((int), collide_field, 5);
+    CollideNameBase() = default;
+    static void jai_auto_bind(dynamic_binder<CollideNameBase>& b) {
+        b.method("collide_shout", [](CollideNameBase&) { return std::string("x"); });
+    }
+};
+
+class CollideNameDerived : public property_owner<CollideNameDerived, CollideNameBase> {
+public:
+    CollideNameDerived() = default;
+};
+
 class Counter {
 public:
     int value;
@@ -803,6 +845,76 @@ public:
             };
             run(true);
             run(false);
+        });
+
+        // === property_owner does all the things: the CRTP declaration is the truth,
+        // === engine registration is a complete projection of it.
+
+        test("property_owner_base_auto_registers_on_derived_registration", [this]() {
+            // The base is NEVER explicitly registered: registering the derived class
+            // materializes it (methods via jai_auto_bind, schema, parent edge).
+            auto eng = make_engine();
+            dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("auto d = AutoChainDerived();");
+            check_eq(eng->execute("d.base_shout()").as<std::string>(), "from_base",
+                "base method reachable through the auto-registered base definition");
+            check_eq(eng->execute("d.armor_base").as_int(), (int64_t)3,
+                "base property reachable");
+        });
+
+        test("explicit_base_registration_adopts_auto_registered", [this]() {
+            // Derived registers FIRST (auto-registers the base); the explicit base
+            // registration then ADOPTS that definition — same object, renamed — so
+            // methods added by the explicit registrar reach existing derived bindings.
+            auto eng = make_engine();
+            dynamic_binder<AutoChainDerived>(*eng, "AutoChainDerived")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            dynamic_binder<AutoChainBase>(*eng, "NiceBase")
+                .method("extra", [](AutoChainBase&) { return (int64_t)42; })
+                .build();
+            eng->execute("auto d = AutoChainDerived();");
+            check_eq(eng->execute("d.base_shout()").as<std::string>(), "from_base",
+                "pre-adoption method survives");
+            check_eq(eng->execute("d.extra()").as_int(), (int64_t)42,
+                "post-adoption method reaches derived instances (same definition)");
+            eng->execute("auto b = NiceBase();");
+            check_eq(eng->execute("b.base_shout()").as<std::string>(), "from_base",
+                "curated name constructs the adopted definition");
+        });
+
+        test("pinned_base_auto_registers_under_pin", [this]() {
+            auto eng = make_engine();
+            dynamic_binder<PinnedNameDerived>(*eng, "PinnedNameDerived")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("auto p = NicePinned();");
+            check_eq(eng->execute("p.pin_field").as_int(), (int64_t)9,
+                "auto-registered base carries its JAI_PROPERTY_OWNER_AS pin as the script name");
+        });
+
+        test("base_auto_registration_declines_name_collision", [this]() {
+            // A DIFFERENT type already owns the ladder name: auto-registration declines
+            // (deferred link keeps waiting); the schema-vacuumed property still works.
+            auto eng = make_engine();
+            dynamic_binder<Counter>(*eng, "CollideNameBase")
+                .constructor<>()
+                .build();
+            dynamic_binder<CollideNameDerived>(*eng, "CollideNameDerived")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            eng->execute("auto d = CollideNameDerived();");
+            check_eq(eng->execute("d.collide_field").as_int(), (int64_t)5,
+                "vacuumed base property survives the declined auto-registration");
+            bool method_reachable = true;
+            try { eng->execute("d.collide_shout();"); } catch (...) { method_reachable = false; }
+            check_false(method_reachable, "base methods stay unavailable until the base registers");
         });
 
         test("auto_bind_multiple_inheritance", [this]() {

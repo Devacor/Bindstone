@@ -193,12 +193,13 @@ private:
 //   jai::bind_registrar(engine);                     // No context
 //   jai::bind_registrar<Services>(engine, services); // With context
 
-// Shared by the auto-named registrar constructors: the bare C++ type name (also used as
-// the serialization $type, so the two stay in lockstep), or a compile error pointing at
-// the explicit-name constructor when T has no portable name.
+// Shared by the auto-named registrar constructors: the ONE naming ladder (self-owned
+// jai_type_name pin, else the bare C++ type name — also the serialization $type, so the
+// two stay in lockstep), or a compile error pointing at the explicit-name constructor
+// when T has no portable name.
 template<typename T>
 inline std::string registrar_auto_name() {
-    constexpr auto derived = ::jai::detail::static_unqualified_type_name<T>();
+    constexpr auto derived = ::jai::detail::declared_or_derived_type_name<T>();
     static_assert(!derived.empty(),
         "jai::registrar<T, Context>: T has no portable auto-name (template instantiation, "
         "lambda, or local type). Pass an explicit name: jai::registrar<T, Context>(\"Name\").");

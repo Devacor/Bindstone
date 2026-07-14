@@ -15,6 +15,7 @@
 #include "bound_map.hpp"
 #include "bound_cpp_vector.hpp"
 #include <jaiscript/serialization/archive_impl.hpp>
+#include <jaiscript/detail/static_type_name.hpp>
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
@@ -357,8 +358,21 @@ public:
         // Intern the class name for fast type comparisons
         uint64_t type_id = engine.get_symbolizer()->intern(class_name);
 
-        class_def_ = std::make_shared<class_definition>(class_name, type_id, &engine_);
-        
+        // Adopt an auto-registered projection of this type (base_class<B> materializes
+        // unregistered property_owner bases under their derived name): the explicit
+        // registration continues configuring the SAME definition — parent edges and
+        // schema bindings survive — and stamps the curated name. Registration phase,
+        // so no instances carry the placeholder identity yet. The placeholder name
+        // stays mapped as an alias.
+        if (auto existing = engine.get_class_definition_by_type(std::type_index(typeid(T)));
+            existing && existing->auto_registered()) {
+            class_def_ = existing;
+            class_def_->set_auto_registered(false);
+            class_def_->rename(class_name, type_id);
+        } else {
+            class_def_ = std::make_shared<class_definition>(class_name, type_id, &engine_);
+        }
+
         // Initialize serialization metadata
         serialization_metadata_.class_name = class_name;
         serialization_metadata_.current_version = 1;
@@ -379,6 +393,9 @@ public:
             try { build(); } catch (...) {}
         }
     }
+
+    // base_class<B>'s auto-registration configures a sibling instantiation directly
+    template<typename> friend class dynamic_binder;
 
     // Disable copy (would cause double-build issues)
     dynamic_binder(const dynamic_binder&) = delete;
@@ -997,6 +1014,30 @@ public:
 
         // Set up inheritance relationship - use type_index lookup instead of typeid name
         auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
+        if (!base_def) {
+            // The property_owner declaration IS the inheritance truth: an unregistered
+            // property_owner base is materialized NOW (recursively, through its own
+            // auto_bind) so the engine projection of the chain is always complete —
+            // methods, schema properties, and signal views all resolve without any
+            // registration-order rule. A later explicit registration ADOPTS this
+            // definition (see the constructor) rather than competing with it. The name
+            // comes from the shared ladder (self-owned jai_type_name pin, else the bare
+            // unqualified type name); no portable name, or the name already belonging
+            // to a DIFFERENT type, declines to today's deferred link.
+            if constexpr (auto_bind_concepts::is_property_owner<Base>) {
+                constexpr auto derived_name = detail::declared_or_derived_type_name<Base>();
+                if constexpr (!derived_name.empty()) {
+                    const std::string base_name{derived_name};
+                    if (!engine_.get_class_definition(base_name)) {
+                        dynamic_binder<Base> auto_bound(engine_, base_name);
+                        auto_bound.class_def_->set_auto_registered(true);
+                        auto_bound.auto_bind();
+                        auto_bound.build();
+                        base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
+                    }
+                }
+            }
+        }
         if (base_def) {
             // Use add_parent to append (validates for diamond inheritance)
             // add_parent is idempotent (returns true if already registered)
@@ -1181,6 +1222,9 @@ public:
 
         // Bind properties from type_registry if T is a property_owner
         if constexpr (auto_bind_concepts::is_property_owner<T>) {
+            // The schema's base chain otherwise registers on FIRST CONSTRUCTION —
+            // registrar-time binding must see inherited properties before any instance
+            T::register_inheritance();
             bind_properties_from_schema();
         }
 

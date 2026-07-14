@@ -202,13 +202,11 @@ public:
     template<typename T>
     static void try_auto_register_implicit() {
         if constexpr (std::is_polymorphic_v<T>) {
-            if constexpr (requires { std::string_view{T::jai_type_name}; }) {
-                register_implicit_entry<T>(std::string(T::jai_type_name));
-            } else {
-                constexpr auto derivedName = ::jai::detail::static_unqualified_type_name<T>();
-                if constexpr (!derivedName.empty()) {
-                    register_implicit_entry<T>(std::string(derivedName));
-                }
+            // The shared naming ladder (detail/static_type_name.hpp): identical name here,
+            // in jai::registrar auto-naming, and in dynamic_binder base auto-registration.
+            constexpr auto ladderName = ::jai::detail::declared_or_derived_type_name<T>();
+            if constexpr (!ladderName.empty()) {
+                register_implicit_entry<T>(std::string(ladderName));
             }
         }
     }

@@ -107,6 +107,29 @@
     el.innerHTML = highlight(el.textContent, isJai ? JAI_KW : CPP_KW, isJai ? JAI_TYPES : {});
   }
 
+  /* ---------------- line-number gutters ---------------- */
+  // Every code snippet gets a line gutter; the numbers live outside the selection
+  // (user-select: none) so copied code stays clean. Output/capture frames are
+  // program results, not snippets — no numbers there. One-liners stay bare.
+  var numbered = document.querySelectorAll(
+    ".codeblock:not(.cb-output):not(.cb-capture) pre > code");
+  for (var n = 0; n < numbered.length; n++) {
+    var codeEl = numbered[n];
+    var text = codeEl.textContent;
+    if (text.charAt(text.length - 1) === "\n") { text = text.slice(0, -1); }
+    var count = text.split("\n").length;
+    if (count < 2) { continue; }
+    var gutter = document.createElement("span");
+    gutter.className = "cb-gutter";
+    gutter.setAttribute("aria-hidden", "true");
+    var nums = "";
+    for (var ln = 1; ln <= count; ln++) { nums += ln + "\n"; }
+    gutter.textContent = nums;
+    var pre = codeEl.parentNode;
+    pre.classList.add("cb-numbered");
+    pre.insertBefore(gutter, codeEl);
+  }
+
   /* ---------------- search ---------------- */
   var box = document.getElementById("search-box");
   var results = document.getElementById("search-results");

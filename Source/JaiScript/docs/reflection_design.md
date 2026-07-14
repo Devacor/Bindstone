@@ -200,8 +200,9 @@ syntax; a separate host-side C++ API stays unrestricted.**
   save systems, debuggers) — hiding private state from them makes the features impossible, and
   the information already leaks through `to_json` anyway. The `access` key keeps the label
   visible so tools can *choose* to respect it (see example 3).
-- **`reflect::set` / `invoke`: enforce from the caller's context, exactly like `v.name = x` /
-  `v.name(args)`.** Reflection must not be an access-control bypass: `set_field(other, "hp", 0)`
+- **`reflect::set` / `reflect::invoke`: enforce from the caller's context, exactly like
+  `v.name = x` / `v.name(args)`.** Reflection must not be an access-control bypass:
+  `reflect::set(other, "hp", 0)`
   from top-level code on a private field errors precisely like `other.hp = 0` would. Mechanism:
   the builtin asks the backend for `current_access_context()` (retention item 4) and calls the
   same `detail::enforce_member_access` kernel both backends use, then `enforce_field_write`

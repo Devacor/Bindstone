@@ -111,6 +111,19 @@ reflect::instances("Class" | v)      // -> array of live instances (the existing
                                      //    registry class_definition::instances_ — purge-expired walk)
 reflect::generation("Class" | v)     // -> int; bumps on redefine_class/migration — the cheap
                                      //    "should I re-ask" poll for tools (live-query model)
+reflect::call("name", args...)       // free-function twin of invoke: resolves the (possibly
+                                     //    namespace-qualified) name in the global env and calls —
+                                     //    the same callable direct syntax uses (construct's pattern)
+reflect::functions()                 // -> array<string>, sorted, namespace-QUALIFIED — the
+                                     //    registration surface (registration_fingerprint precedent)
+reflect::function_arguments("name")  // -> array of param-arrays, ONE PER OVERLOAD
+reflect::method_arguments(v|"Class", "name")  // -> same shape; sugar over reflect::methods
+                                     //    entries (one param-array per overload — overloads make
+                                     //    any single-signature answer ambiguous by construction)
+reflect::globals()                   // -> array<string>, sorted — global variable names
+reflect::is_cpp_bound(v | "Class")   // -> bool; VALUE form: C++-backed (cpp_bound storage or an
+                                     //    object holder with a bound C++ payload — semantic, post-
+                                     //    deref); CLASS form: host-registered vs script-declared
 ```
 
 `type_of` is unchanged (back-compat: coarse kinds). `reflect::type_name` is its precise sibling —
@@ -359,11 +372,12 @@ guarantee keeps the output diffable).
 ## 6. What v1 excludes (staging)
 
 **v1 (all builtins over existing data + retention items 1/3/4):**
-`reflect::fields, methods, has_field, has_method, get, set, invoke, construct,
-construct_shared, classes, bases, type_name, instances, generation` — plus the
-reserved-namespace enforcement itself (declaration-time error, both backends) and its two
-contract pins: script extension of `math::` WORKS (openness is a contract too), and a script
-`namespace reflect {}` errors identically on both backends.
+`reflect::fields, methods, has_field, has_method, get, set, invoke, call, construct,
+construct_shared, classes, functions, function_arguments, method_arguments, globals, bases,
+type_name, is_cpp_bound, instances, generation` — plus the reserved-namespace enforcement
+itself (declaration-time error, both backends) and its two contract pins: script extension of
+`math::` WORKS (openness is a contract too), and a script `namespace reflect {}` errors
+identically on both backends.
 
 `reflect::instances` walks the existing weak instance registry
 (`class_definition::instances_` — the hot-reload migration list), purging expired entries;
@@ -389,8 +403,10 @@ check. Same story made `construct` cheap (env lookup + call).
 - **Host param names** — dynamic_binder API extension (retention gap 2).
 - **Field type constraints as values** (querying `array<int>`'s element type as a navigable
   object rather than parsing `reflect::type_name`'s string) — falls out of metatypes.
-- **Namespace / enum / free-function reflection** (`functions_of("game::combat")`) — different
-  registries, same pattern.
+- **Namespace enumeration sugar** — free functions are v1 (`reflect::functions()` with
+  QUALIFIED names, `reflect::call`, `reflect::function_arguments`), so a namespace listing is
+  already a prefix filter; `reflect::functions("combat")` and `reflect::namespaces()` are v2
+  conveniences over the same data. Enum reflection — different registry, same pattern, v2.
 - **Debugger integration** — DAP `variablesReference` field expansion reusing `reflect::fields`.
 - **Opt-in member-miss hook** (Lua-metatable/`__getattr__`-shaped interception) — member-miss
   RAISES today, so a per-class fallback hook lives entirely on the error path: zero hot cost

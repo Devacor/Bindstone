@@ -418,7 +418,8 @@ public:
     JAI_PROPERTY((int64_t), healing, 25);
 };
 
-// Register the BASE first — a derived binder wires inheritance by looking its base up.
+// Registration order does not matter — either class may register first, or the base
+// not at all: a derived registration materializes an unregistered property_owner base.
 jai::dynamic_binder&lt;Pickup&gt;(*eng, "Pickup")
     .auto_bind()
     .method("kind", [](Pickup&amp; p) { return std::string("pickup:") + p.name.get(); })
@@ -464,11 +465,19 @@ print("upcast: {} heals {}", describe(h), h.healing);
 print("inherited method: {}", h.kind());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">upcast: elixir heals 40
 inherited method: pickup:elixir</code></pre></div>
-<p>One rule keeps this deterministic. <strong>Register bases before derived types</strong> — the derived binder
-wires the script-side edge by looking up the base's registration, and a missing base means the edge quietly
-doesn't form. Methods and <code>JAI_PROPERTY</code> fields both inherit through that edge: the
-schema-generated accessors resolve properties over the whole inheritance chain, so base-level
-declarations need no re-exposure on the derived binder.</p>
+<p>There is no registration-order rule. <strong>The <code>property_owner</code> declaration is the
+inheritance truth, and registration projects it completely</strong>: a derived registration
+materializes an unregistered <code>property_owner</code> base on the spot (methods from its
+<code>jai_auto_bind</code>, schema properties, signal views — recursively up the chain), and an explicit
+registration arriving later <em>adopts</em> that same definition and gives it its curated script name —
+existing bindings and derived instances follow, because it is the same definition. Methods and
+<code>JAI_PROPERTY</code> fields both inherit through the chain, and base-level declarations need no
+re-exposure on the derived binder. Auto-materialized bases are named by the shared ladder: a
+<code>JAI_PROPERTY_OWNER(Name)</code> / <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when the
+class declares one, else the bare C++ class name — the same name serialization uses for
+<code>$type</code>, so a type carries one identity everywhere. (Plain non-<code>property_owner</code>
+bases keep the explicit <code>.base_class&lt;B&gt;()</code> spelling, and a base whose name is already
+taken by a different type simply waits for its own registration, exactly as before.)</p>
 <p>Script classes extending C++ classes (<code>class SmartSpawner : Spawner</code>, with
 <code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section — that
 direction works with zero extra registration.</p>

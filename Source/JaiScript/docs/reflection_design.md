@@ -1,12 +1,25 @@
-# Script-side reflection (design, v1)
+# Script-side reflection — the companion (machinery, rulings, proofs)
 
-**Status: DESIGN ONLY — no implementation until Dev reads this.** One open ruling (§3, access
-model) is presented as a recommendation. Everything else is ready to build against.
+**Status: DESIGN, ready to build.** The front door is [reflection.md](reflection.md) — the
+A+B+C read that tells users everything they need. THIS doc is the D+E companion: the probe
+inventory, entry shapes, the access model, retention work, parity proofs, staging, and costs.
+The two documents cross-reference; when they could disagree, the front door states the contract
+and this one explains the mechanism.
 
 The premise: the runtime already keeps rich type information (class definitions, declared field
 types, method ASTs, access labels, host binding signatures) — script just has no syntax to ask
 about it beyond `type_of`/`to_json`/`from_json`. Reflection v1 is a set of ordinary builtins over
 data that (almost entirely) already exists.
+
+**Naming (ruling, 2026-07-14):** everything lives in the **reserved `reflect::` namespace** —
+C++-registered only; script declarations into it error at declaration time on both backends
+(engine-held reserved-namespace set, today `{reflect}`). Contrast `math::`, which is
+deliberately OPEN to script extension (intrinsics claim their names, user functions coexist;
+intrinsic wins a collision) — reflection is engine truth and must not be impersonatable.
+Sigils (`$`, `^`) were considered and rejected on grammar collisions (template-string
+substitution, XOR). Spelling is decoupled from dispatch: registry functions in v1, intrinsic
+promotion later without script changes. Earlier drafts of this doc used flat names
+(`fields_of`, `type_name_of`); the namespaced spellings below are canonical.
 
 ---
 
@@ -38,7 +51,7 @@ data that (almost entirely) already exists.
 
 The debugger's Locals view (`controller::list_locals`, controller.cpp:113-140) stringifies
 frame locals only — object fields are **not** expanded today (`variablesReference: 0`,
-connector.cpp:667). `fields_of` + `get_field` would incidentally give the DAP connector its
+connector.cpp:667). `reflect::fields` + `reflect::get` would incidentally give the DAP connector its
 future field-expansion path for free.
 
 ### NEEDS RETENTION — gaps a v1 must fill
@@ -80,43 +93,52 @@ All are ordinary engine builtins (registered once per engine like `format_value`
 arrays/maps minted at call time, never live views (§4).
 
 ```cpp
-fields_of(v | "Class")      // -> array<map>: [{name, type, access, static, from}, ...]
-methods_of(v | "Class")     // -> array<map>: [{name, arity, static, access, from, params}, ...]
-has_field(v | "Class", "name")   // -> bool (inherited included; host properties included)
-has_method(v | "Class", "name")  // -> bool (inherited included)
-get_field(v, "name")             // read like `v.name` from the call site (see §3)
-get_field("Class", "name")       // static field read (Class::name)
-set_field(v, "name", value)      // write like `v.name = value` — full type + access enforcement
-set_field("Class", "name", value)
-invoke(v, "name", args...)       // call like `v.name(args...)` — overloads, defaults, access
-construct("Class", args...)      // == Class(args...) — value semantics
-construct_shared("Class", args...) // == new Class(args...) — shared_ptr/reference semantics
-classes()                        // -> array<string>, sorted (script + host-bound classes)
-bases_of(v | "Class")            // -> array<string>, declaration order (MI-aware); [] at a root
-type_name_of(v)                  // precise type: "Creature", "array<int>", "map<string,int>", "int"
+reflect::fields(v | "Class")     // -> array<map>: [{name, type, kind, access, static, from}, ...]
+reflect::methods(v | "Class")    // -> array<map>: [{name, arity, static, access, from, params}, ...]
+reflect::reflect::has_field(v | "Class", "name")   // -> bool (inherited included; host properties included)
+reflect::reflect::has_method(v | "Class", "name")  // -> bool (inherited included)
+reflect::get(v, "name")              // read like `v.name` from the call site (see §3)
+reflect::get("Class", "name")        // static field read (Class::name)
+reflect::set(v, "name", value)       // write like `v.name = value` — full type + access enforcement
+reflect::set("Class", "name", value)
+reflect::invoke(v, "name", args...)  // call like `v.name(args...)` — overloads, defaults, access
+reflect::reflect::construct("Class", args...) // == Class(args...) — value semantics
+reflect::reflect::construct_shared("Class", args...) // == new Class(args...) — reference semantics
+reflect::classes()                   // -> array<string>, sorted (script + host-bound classes)
+reflect::bases(v | "Class")          // -> array<string>, declaration order (MI-aware); [] at a root
+reflect::type_name(v)                // precise type: "Creature", "array<int>", "map<string,int>", "int"
+reflect::instances("Class" | v)      // -> array of live instances (the existing weak instance
+                                     //    registry class_definition::instances_ — purge-expired walk)
+reflect::generation("Class" | v)     // -> int; bumps on redefine_class/migration — the cheap
+                                     //    "should I re-ask" poll for tools (live-query model)
 ```
 
-`type_of` is unchanged (back-compat: coarse kinds). `type_name_of` is its precise sibling —
-class name for objects (`class_instance::get_class_name()` / holder type_name), the type_info
-`canonical_name()` for typed containers, the kind name for primitives, `"any"`-element containers
-report the open form (`"array<>"`).
+`type_of` is unchanged (back-compat: coarse kinds). `reflect::type_name` is its precise sibling —
+class name for objects (**the naming-ladder name**: `class_definition::get_name()`, which the
+does-all-things work keeps identical to the serialization `$type` and the script-visible
+constructor name — reflection must never mint a third name), the type_info `canonical_name()`
+for typed containers, the kind name for primitives, `"any"`-element containers report the open
+form (`"array<>"`). Types are SEMANTIC: deref references and unmask `TYPEID_CPP_BOUND` via the
+semantic index — reflection must never report storage wrappers (the var-flattening trap family).
 
-### fields_of entry shape
+### reflect::fields entry shape
 
 - `name` (string), `type` (string: declared type's `canonical_name()`; `"var"` for any-tagged;
-  `"auto"` for undeclared-inferred), `access` (`"public"|"private"|"protected"`), `static`
-  (bool), `from` (string: declaring class — `find_field_declaring_class` exists, and property
-  grids group by it).
+  `"auto"` for undeclared-inferred), `kind` (`"field"|"observable"|"signal"` — signals are
+  members here, so ONE enumeration covers them; the schema's `is_signal`/`is_observable` flags
+  drive it and no separate signals call exists), `access` (`"public"|"private"|"protected"`),
+  `static` (bool), `from` (string: declaring class — `find_field_declaring_class` exists, and
+  property grids group by it).
 - **Script classes:** all declared fields including inherited ones. The synthetic
   `__cpp_object__` runtime field is excluded (same rule as to_json, json_archive.hpp:329).
 - **Host-bound types:** `.property()` entries — name from the binder's field placeholder, type
   from the serialization registry's `property_metadata.type`, `access: "public"` (host members
-  have no labels), plus `read_only` reported as `access: "public"` with no setter → `set_field`
+  have no labels), plus `read_only` reported as `access: "public"` with no setter → `reflect::set`
   errors with the setter-missing family text. (Alternative considered: a fifth `read_only` key
   for host properties only; recommended — it's one bool we already retain.)
 - **Arrays / maps / primitives / functions:** empty array. Fields are a class concept; the
-  element/key/value types are `type_name_of`'s job (`"array<int>"`). Not an error — a property
-  grid should be able to call `fields_of` on anything.
+  element/key/value types are `reflect::type_name`'s job (`"array<int>"`). Not an error — a property
+  grid should be able to call `reflect::fields` on anything.
 - **Opaque host tokens** (unregistered `make_value(T*)` pass-throughs): empty array, consistent
   with `is_registered_type` answering false (io.hpp:336-347 §13 ruling).
 
@@ -127,10 +149,10 @@ source order; statics after instance fields, in source order.** Base-first match
 language already does — `create_instance` seeds parent defaults before own defaults
 (class_definition.hpp:645-658) and field initializers run in declaration order by explicit
 design (script_class.hpp:138-143). Requires retention item 1. Methods have no layout meaning,
-so `methods_of` sorts by (name, arity) — deterministic with zero retention; one entry **per
+so `reflect::methods` sorts by (name, arity) — deterministic with zero retention; one entry **per
 overload** (host same-arity type-overloads produce multiple entries).
 
-### methods_of entry shape
+### reflect::methods entry shape
 
 `{name, arity, static, access, from, params}` where `params` is an array of
 `{name, type, ref}` for script methods (full `function_decl` fidelity: ast.hpp:92-104,
@@ -147,15 +169,15 @@ the constructor (reported by `construct`ability, not as a method), `~destructor`
 Consistent family text, mirroring `parallel_transform:`'s prefix style (grammar.md §15):
 
 ```
-construct: unknown class 'Gremlin'
-get_field: unknown field 'hp' on class 'Creature'
-set_field: unknown field 'hp' on class 'Creature'
-invoke: unknown method 'roar' on class 'Creature'
-fields_of: unknown class 'Gremlin'
+reflect::construct: unknown class 'Gremlin'
+reflect::get: unknown field 'hp' on class 'Creature'
+reflect::set: unknown field 'hp' on class 'Creature'
+reflect::invoke: unknown method 'roar' on class 'Creature'
+reflect::fields: unknown class 'Gremlin'
 ```
 
 All raise ordinary catchable runtime errors (reusing the nearest existing
-`runtime_error_code`: `class_not_found`, the field/method-missing codes). `set_field` type
+`runtime_error_code`: `class_not_found`, the field/method-missing codes). `reflect::set` type
 failures produce the **same** error as direct assignment (it routes through
 `enforce_field_write`, class_definition.hpp:62/1546 — same text, same code). Access violations
 produce the exact `enforce_member_access` text ("Cannot access private member 'x' of class
@@ -168,17 +190,17 @@ produce the exact `enforce_member_access` text ("Cannot access private member 'x
 **Reads see everything, with access reported; writes and invokes enforce exactly like direct
 syntax; a separate host-side C++ API stays unrestricted.**
 
-- **`fields_of` / `get_field` / `methods_of`: unrestricted, access reported in the entry.**
+- **`reflect::fields` / `reflect::get` / `reflect::methods`: unrestricted, access reported in the entry.**
   Precedent is established and shipping: `to_json` serializes private fields today — the
   script-class path walks raw `instance->get_fields()` with no access filter
   (json_archive.hpp:324-335; verified: `nonpublic_members_` is consulted nowhere in
   serialization). The debugger's Locals view likewise shows everything in scope. grammar.md
-  design note 12 records the ruling: "the host C++ API (`get_field`/`set_field`, serialization,
+  design note 12 records the ruling: "the host C++ API (`reflect::get`/`reflect::set`, serialization,
   reflection) is deliberately unrestricted." Reflection *reads* are tooling (property grids,
   save systems, debuggers) — hiding private state from them makes the features impossible, and
   the information already leaks through `to_json` anyway. The `access` key keeps the label
   visible so tools can *choose* to respect it (see example 3).
-- **`set_field` / `invoke`: enforce from the caller's context, exactly like `v.name = x` /
+- **`reflect::set` / `invoke`: enforce from the caller's context, exactly like `v.name = x` /
   `v.name(args)`.** Reflection must not be an access-control bypass: `set_field(other, "hp", 0)`
   from top-level code on a private field errors precisely like `other.hp = 0` would. Mechanism:
   the builtin asks the backend for `current_access_context()` (retention item 4) and calls the
@@ -199,7 +221,7 @@ syntax; a separate host-side C++ API stays unrestricted.**
   }
   ```
 
-  This adds **no new capability** — `class_instance::set_field`/`get_field` are already public
+  This adds **no new capability** — `class_instance::set_field`/`reflect::get` are already public
   and unrestricted (note 12) — it just gives editor/tooling code a blessed, stable name so
   in-engine editors don't reach into `class_instance` internals directly. The MV editor's
   property grid uses this; script-side reflection never routes through it.
@@ -227,26 +249,26 @@ doesn't have anyway.
   always-paid cost is retention item 1: one `vector<uint64_t>` append per field at class
   *definition* time (cold path, 8 B/field). The access-context accessor is called only inside
   the builtins.
-- **Deterministic output.** Field order = declaration order (retained vector); classes() and
-  methods_of = sorted. Never expose raw unordered_map iteration order — symbol interning order
+- **Deterministic output.** Field order = declaration order (retained vector); reflect::classes() and
+  reflect::methods = sorted. Never expose raw unordered_map iteration order — symbol interning order
   differs per engine, so it is not reproducible across engines/backends (this is the §2 parity
   argument).
-- **Results are snapshots, not live views.** `fields_of`/`methods_of`/`classes`/`bases_of`
+- **Results are snapshots, not live views.** `reflect::fields`/`reflect::methods`/`classes`/`bases_of`
   return ordinary value-semantic arrays/maps minted at call time; a later hot reload or
-  `set_field` does not mutate a result you already hold. `get_field` returns exactly what
+  `reflect::set` does not mutate a result you already hold. `reflect::get` returns exactly what
   reading `v.name` returns (heavy types are O(1) shallow `strong_ptr` copies — normal value
   semantics, not a reference into the instance; use existing `&` reference declarations if you
   want aliasing).
 - **Hot reload.** `class_definition` objects are mutated in place by `redefine_class`, so
-  `fields_of` after a redefinition reports the NEW shape with no extra work. During migration:
+  `reflect::fields` after a redefinition reports the NEW shape with no extra work. During migration:
   `store_field_defaults` runs *before* the per-instance `hot_reload_migrate` hook loop
-  (class_definition.hpp:1160-1172), so a hook calling `fields_of(this)` sees the new shape —
+  (class_definition.hpp:1160-1172), so a hook calling `reflect::fields(this)` sees the new shape —
   which is what a migration hook wants. The order vector must be replaced at the same point as
   `field_defaults_` (same-commit rule as the backends' twin class-decl builders,
   interpreter.cpp:10086 / vm_backend.cpp:6900).
 - **Budget + memory cap.** The builtins run under the caller's execution budget; result
   arrays/maps charge the memory cap like any script allocation. No terminal-error interaction.
-- **construct == the call syntax.** `construct("C", args...)` resolves `"C"` in the global
+- **construct == the call syntax.** `reflect::construct("C", args...)` resolves `"C"` in the global
   environment and calls it — the identical callable `C(args...)` uses (script ctor thunks
   defined at class-decl execution; host `add_overloaded_function` overload sets). Everything
   follows for free: ctor overload resolution by arity+type, trailing-default windows, the
@@ -261,11 +283,11 @@ doesn't have anyway.
 
 ```cpp
 function dump(obj) {
-    print("=== {} ===", type_name_of(obj));
-    for (auto f : fields_of(obj)) {
+    print("=== {} ===", reflect::type_name(obj));
+    for (auto f : reflect::fields(obj)) {
         if (f["static"]) { continue; }
         print("  [{}] {} {} = {}", f["access"], f["type"], f["name"],
-              to_string(get_field(obj, f["name"])));
+              to_string(reflect::get(obj, f["name"])));
     }
 }
 
@@ -297,21 +319,21 @@ var wave = [
 
 var spawned = [];
 for (auto row : wave) {
-    if (!has_field(row["type"], "hp")) { throw `bad spawn table row: ${row["type"]}`; }
-    spawned.push_back(construct_shared(row["type"], row["hp"]));
+    if (!reflect::has_field(row["type"], "hp")) { throw `bad spawn table row: ${row["type"]}`; }
+    spawned.push_back(reflect::construct_shared(row["type"], row["hp"]));
 }
 print("{} spawned, first hp {}", spawned.size(), spawned[0].hp);   // 3 spawned, first hp 25
-// construct("NoSuchClass") -> catchable: "construct: unknown class 'NoSuchClass'"
+// reflect::construct("NoSuchClass") -> catchable: "construct: unknown class 'NoSuchClass'"
 ```
 
 ### 5.3 Save-system sketch: persist public non-static fields only
 
 ```cpp
 function save_public(obj) {
-    var out = {"_type_": type_name_of(obj)};
-    for (auto f : fields_of(obj)) {
+    var out = {"_type_": reflect::type_name(obj)};
+    for (auto f : reflect::fields(obj)) {
         if (f["access"] != "public" || f["static"]) { continue; }
-        out[f["name"]] = get_field(obj, f["name"]);
+        out[f["name"]] = reflect::get(obj, f["name"]);
     }
     return to_json(out);
 }
@@ -321,7 +343,7 @@ function load_public(json) {
     var obj = construct(data["_type_"]);
     for (auto kv : data) {
         if (kv.first == "_type_") { continue; }
-        if (has_field(obj, kv.first)) { set_field(obj, kv.first, kv.second); }
+        if (reflect::has_field(obj, kv.first)) { reflect::set(obj, kv.first, kv.second); }
     }
     return obj;
 }
@@ -336,8 +358,17 @@ guarantee keeps the output diffable).
 ## 6. What v1 excludes (staging)
 
 **v1 (all builtins over existing data + retention items 1/3/4):**
-`fields_of, methods_of, has_field, has_method, get_field, set_field, invoke, construct,
-construct_shared, classes, bases_of, type_name_of`.
+`reflect::fields, methods, has_field, has_method, get, set, invoke, construct,
+construct_shared, classes, bases, type_name, instances, generation` — plus the
+reserved-namespace enforcement itself (declaration-time error, both backends) and its two
+contract pins: script extension of `math::` WORKS (openness is a contract too), and a script
+`namespace reflect {}` errors identically on both backends.
+
+`reflect::instances` walks the existing weak instance registry
+(`class_definition::instances_` — the hot-reload migration list), purging expired entries;
+engine-scoped by construction. `reflect::generation` is one counter on `class_definition`
+bumped by `redefine_class`/migration — the cheap "should I re-ask" poll that completes the
+live-query model (front door §C).
 
 `invoke` is deliberately IN v1 — it looked like v2 but is the cheapest of the set:
 `class_definition::get_method(id)` already returns the bound dispatcher
@@ -349,15 +380,21 @@ check. Same story made `construct` cheap (env lookup + call).
 **v2 candidates (each needs new machinery, none blocks v1):**
 - **Metatype values / `typeof(T)`** — a first-class type value (new `script_value` alternative
   or an interned handle). Touches value layout → invariant #1 territory. Strings-as-type-names
-  are v1's deliberate stand-in.
+  are v1's deliberate stand-in (ladder names compare with `==` and never drift from `$type`).
 - **Attributes/annotations** (`@editor_range(0, 100) int hp;`) — parser + AST + retention work;
-  the natural consumer is the editor property grid. Design separately.
+  the natural consumer is the editor property grid. Design separately, ONCE, with the editor
+  campaign's hints-metadata gap — **reference design is GDScript's export-hint system** (the
+  only one designed editor-consumer-first), not C# attributes.
 - **Host param names** — dynamic_binder API extension (retention gap 2).
 - **Field type constraints as values** (querying `array<int>`'s element type as a navigable
-  object rather than parsing `type_name_of`'s string) — falls out of metatypes.
+  object rather than parsing `reflect::type_name`'s string) — falls out of metatypes.
 - **Namespace / enum / free-function reflection** (`functions_of("game::combat")`) — different
   registries, same pattern.
-- **Debugger integration** — DAP `variablesReference` field expansion reusing `fields_of`.
+- **Debugger integration** — DAP `variablesReference` field expansion reusing `reflect::fields`.
+- **Opt-in member-miss hook** (Lua-metatable/`__getattr__`-shaped interception) — member-miss
+  RAISES today, so a per-class fallback hook lives entirely on the error path: zero hot cost
+  when unused. Unlocks RPC stubs, mocks, lazy proxies. Future-spec; must not touch the member
+  dispatch fast path.
 
 ---
 
@@ -389,10 +426,10 @@ suite runs on both backends via `--backend=vm`):
 - Error-text pins for every family message in §2 (parity: identical on vm).
 - Host-bound type: property list + types from a `dynamic_binder` fixture; read_only property
   set_field error; method params report types; opaque token → empty + `is_registered_type`
-  false; array/map/primitive → empty; `type_name_of` covers typed/any containers.
+  false; array/map/primitive → empty; `reflect::type_name` covers typed/any containers.
 - construct: overload resolution, trailing defaults, non-converting-ctor ruling holds through
   `construct`, `construct_shared` reference semantics (mutation visible through the copy).
-- Hot-reload: `fields_of` inside a `hot_reload_migrate` hook sees the new shape; snapshot
+- Hot-reload: `reflect::fields` inside a `hot_reload_migrate` hook sees the new shape; snapshot
   results unaffected by a subsequent reload.
 - Perf guard: existing benchmark suite unchanged (no hot path touched — assert no new
   regressions in the core-ops rows rather than adding a reflection bench; reflection itself is

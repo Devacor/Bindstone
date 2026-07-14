@@ -361,11 +361,20 @@ public:
         // Adopt an auto-registered projection of this type (base_class<B> materializes
         // unregistered property_owner bases under their derived name): the explicit
         // registration continues configuring the SAME definition — parent edges and
-        // schema bindings survive — and stamps the curated name. Registration phase,
-        // so no instances carry the placeholder identity yet. The placeholder name
-        // stays mapped as an alias.
+        // schema bindings survive — and stamps the curated name. The placeholder name
+        // stays mapped as an alias. INVARIANT: adoption renames the definition, and a
+        // rename under live instances would break their interned type checks — so
+        // explicit registrations must land before scripts construct auto-registered
+        // placeholders. Violations throw here, loudly, at the registration site.
         if (auto existing = engine.get_class_definition_by_type(std::type_index(typeid(T)));
             existing && existing->auto_registered()) {
+            if (existing->has_live_instances()) {
+                throw std::runtime_error("dynamic_binder<T>(engine, \"" + class_name +
+                    "\"): adopting the auto-registered definition '" + existing->get_name() +
+                    "' while script instances of it are alive would change their type identity. "
+                    "Complete explicit registrations before running scripts that construct "
+                    "auto-registered bases (or keep constructing via '" + existing->get_name() + "').");
+            }
             class_def_ = existing;
             class_def_->set_auto_registered(false);
             class_def_->rename(class_name, type_id);

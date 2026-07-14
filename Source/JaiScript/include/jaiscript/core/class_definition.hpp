@@ -1044,6 +1044,12 @@ public:
         name_ = name;
         type_id_ = type_id;
     }
+    bool has_live_instances() const {
+        for (const auto& weak_instance : instances_) {
+            if (!weak_instance.expired()) { return true; }
+        }
+        return false;
+    }
 
     engine* get_engine() const { return engine_; }
 

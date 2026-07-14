@@ -106,6 +106,24 @@ and MutedVision's <code>Clickable</code> component declares six <code>JAI_SIGNAL
 (<code>onPress</code>, <code>onAccept</code>, <code>onDrag</code>, …) whose script-connected handlers survive
 scene save/load.</p>
 
+<h2 id="three-doors">Three doors, each an explicit opt-in<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h2>
+<p>The pieces above are a deliberate layering — a type's visibility widens only when you ask:</p>
+<ul>
+<li><strong>Declaring</strong> (<code>property_owner</code> + the macros) gives a type its identity,
+inheritance, properties, and serialization. A declaration alone is never script-visible.</li>
+<li><strong><code>jai::registrar&lt;T&gt;</code></strong> opts the <em>type</em> in: one static line, and
+every engine the host hands to <code>bind_registrar</code> knows it. Engines that never make that call —
+sandboxes, workers, network peers — know nothing.</li>
+<li><strong><code>dynamic_binder&lt;T&gt;(eng, "Name")</code></strong> opts one <em>engine</em> in, with a
+curated name and engine-specific methods.</li>
+</ul>
+<p>Whichever door a type enters, its <code>property_owner</code> bases follow it inside that engine
+(<a href="#inheritance-and-polymorphism">inheritance</a>, below), and it carries one name everywhere —
+the in-class pin when declared, else the bare class name, always matching the serialization
+<code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
+on its own, which is exactly what makes an empty engine a sandbox
+(<a href="05-safety-rails.html">Safety Rails</a>).</p>
+
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
 <p>Superpower one. No glue was written for <code>id</code>, <code>level</code>, <code>interval</code>, or
 <code>onWave</code>, yet property access, method calls, and signal connection all read like the class was

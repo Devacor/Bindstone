@@ -11,6 +11,21 @@
 
 namespace jai {
 
+	// Emission rights are granted by WHICH TYPE a member exposes: signal<Sig> is the
+	// non-emittable consumer view (connect/disconnect/connected only), signal_emitter<Sig>
+	// adds emit(args...) so script can fire receivers connected in C++ or script.
+	template<typename Sig>
+	struct signal_emit_binder;
+
+	template<typename R, typename... Args>
+	struct signal_emit_binder<R(Args...)> {
+		static void add_emit(dynamic_binder<signal_emitter<R(Args...)>>& a_builder) {
+			a_builder.method("emit", [](signal_emitter<R(Args...)>& a_self, Args... a_args) {
+				a_self.emit(std::forward<Args>(a_args)...);
+			});
+		}
+	};
+
 	// Named connections are owned by the signal, so they persist for its lifetime.
 	// Registers both jai::signal<Sig> (a_name) and jai::signal_emitter<Sig>
 	// (a_name + "Emitter") — members are exposed as either.
@@ -49,6 +64,7 @@ namespace jai {
 			builder.method("connected", [](signal_emitter<Sig>& a_self, const std::string& a_id) {
 				return a_self.connected(a_id);
 			});
+			signal_emit_binder<Sig>::add_emit(builder);
 			builder.build();
 		}
 	}

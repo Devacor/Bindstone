@@ -59,6 +59,18 @@ public:
             check_eq((int64_t)3, e->execute("1 + 2").as_int());
         });
 
+        // ---- chained subscript on a temporary across the execute boundary ----
+        // The result of [temp][0]["k"] is a map-entry reference holding the LAST pin on
+        // the temporary map; the boundary collapse `x = x.deref()` assigned from storage
+        // x itself owned, and destroy-then-copy in storage::operator= read freed memory
+        // (0xDD under Debug). Pins the pin-before-destroy assignment order, both backends.
+        test("chained_subscript_on_temporary_survives_boundary", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("zz"), e->execute("[{\"name\":\"zz\"}][0][\"name\"]").as<std::string>());
+            check_eq((int64_t)7, e->execute("[[7]][0][0]").as_int());
+            check_eq(std::string("deep"), e->execute("{\"a\": [{\"b\": \"deep\"}]}[\"a\"][0][\"b\"]").as<std::string>());
+        });
+
         // ---- #19 range-for inside a function ----
         test("range_for_in_function", [this]() {
             auto e = make_engine();

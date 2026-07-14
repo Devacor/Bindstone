@@ -944,6 +944,12 @@ namespace jai::vm {
             return nullptr;
         }
 
+        // Caller context for builtins (reflect::set/invoke enforcement): a builtin call
+        // pushes no vm frame, so the innermost live frame answers for the caller
+        const class_definition* current_access_context() const override {
+            return frames_.empty() ? nullptr : frame_access_context(*frames_.back());
+        }
+
         // Frame-first 'this': method frames carry the receiver on the record
         // (identical to the method env's copy by construction); the env-kind lookup
         // stays as the fallback for closure/coroutine frames whose 'this' flows

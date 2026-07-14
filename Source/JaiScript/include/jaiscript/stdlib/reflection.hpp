@@ -14,7 +14,10 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <jaiscript/properties/property_schema.hpp>
+#include <cctype>
 #include <string>
 #include <typeindex>
 #include <vector>
@@ -98,6 +101,117 @@ inline void expect_args(const std::vector<script_value>& args, size_t n, const c
         throw runtime_error(std::string("reflect::") + who + " expects " +
                             std::to_string(n) + (n == 1 ? " argument" : " arguments"));
     }
+}
+
+inline void expect_min_args(const std::vector<script_value>& args, size_t n, const char* who) {
+    if (args.size() < n) {
+        throw runtime_error(std::string("reflect::") + who + " expects at least " +
+                            std::to_string(n) + (n == 1 ? " argument" : " arguments"));
+    }
+}
+
+inline std::string expect_name(const std::vector<script_value>& args, size_t i, const char* who) {
+    const script_value& d = args[i].deref();
+    if (!d.is_string()) {
+        throw runtime_error(std::string("reflect::") + who + ": name must be a string");
+    }
+    return d.as_string();
+}
+
+// The B-group doors. KEEP ALIGNED with interpreter::resolve_member_target — the ONE
+// object-shape resolution direct member syntax uses (class_instance wrappers, cpp_bound
+// holders, raw holders resolved by engine registration).
+struct member_door {
+    std::shared_ptr<class_instance> instance;       // fields door; null for host holders
+    std::shared_ptr<class_definition> engine_def;   // anchors engine-resolved definitions
+    class_definition* def = nullptr;                // methods/accessors, both shapes
+};
+
+inline member_door resolve_member_door(engine* eng, const script_value& value) {
+    member_door door;
+    const script_value& v = value.deref();
+    auto holder = const_cast<script_value&>(v).get_object_holder();
+    if (!holder) { return door; }
+    if (holder->is_class_instance_wrapper) {
+        door.instance = std::static_pointer_cast<class_instance>(holder->data);
+        if (door.instance) { door.def = door.instance->get_class_definition(); }
+    } else {
+        door.engine_def = holder->type_id != UINT64_MAX
+            ? eng->get_class_definition(holder->type_id)
+            : eng->get_class_definition(holder->type_name);
+        door.def = door.engine_def.get();
+    }
+    return door;
+}
+
+// The caller's class context at builtin-call time (a builtin pushes no script frame,
+// so the backend's current environment belongs to the caller)
+inline const class_definition* caller_context(engine* eng) {
+    auto* be = eng->get_execution_backend();
+    return be ? be->current_access_context() : nullptr;
+}
+
+// Surface a kernel error with the SAME final text the backends produce at their
+// boundary: plain {0}/{1} substitution through the symbolizer (checked_result.hpp)
+template <typename T>
+[[noreturn]] inline void throw_kernel_error(engine* eng, const checked_result<T>& r) {
+    throw runtime_error(format_error_message(r.message(),
+        eng->get_symbolizer()->get_string(r.symbol_id()),
+        eng->get_symbolizer()->get_string(r.symbol_id2())));
+}
+
+inline void enforce_member_access_or_throw(engine* eng, const class_definition* def,
+                                           uint64_t member_id) {
+    auto access = detail::enforce_member_access(def, member_id, caller_context(eng));
+    if (!access) { throw_kernel_error(eng, access); }
+}
+
+// Strict `ident(::ident)*` shape — the gate before a name string may be evaluated
+// as a member expression (never an expression-injection surface)
+inline bool is_qualified_identifier(const std::string& name) {
+    auto ident_start = [](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; };
+    auto ident_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    size_t i = 0;
+    while (i < name.size()) {
+        if (!ident_start(name[i])) { return false; }
+        ++i;
+        while (i < name.size() && ident_char(name[i])) { ++i; }
+        if (i == name.size()) { return true; }
+        if (name[i] != ':' || i + 1 >= name.size() || name[i + 1] != ':') { return false; }
+        i += 2;
+    }
+    return false;
+}
+
+// Resolve the callable a free-form name means: "ns::fn" through the engine's script
+// namespaces, a bare name through the global environment — the same places direct
+// call syntax resolves.
+inline script_value resolve_free_callable(engine* eng, const std::string& name, const char* who) {
+    if (auto pos = name.find("::"); pos != std::string::npos) {
+        auto& spaces = eng->script_namespaces();
+        auto ns_it = spaces.find(eng->get_symbolizer()->intern(name.substr(0, pos)));
+        if (ns_it != spaces.end() && ns_it->second) {
+            const uint64_t member_id = eng->get_symbolizer()->intern(name.substr(pos + 2));
+            auto var_it = ns_it->second->variables.find(member_id);
+            if (var_it != ns_it->second->variables.end() && var_it->second.is_function()) {
+                return var_it->second;
+            }
+            // Script-declared namespace functions are AST overload sets, not values.
+            // Evaluating the (identifier-shape-validated) name AS the member expression
+            // mints the very callable direct syntax uses — overload pick, defaults,
+            // namespace-variable environment, byte-identical behavior by construction.
+            if (ns_it->second->functions.count(member_id) && is_qualified_identifier(name)) {
+                script_value fn = eng->execute(name);
+                if (fn.is_function()) { return fn; }
+            }
+        }
+    } else {
+        auto found = eng->get_global_environment()->get(name);
+        if (found && found.value().is_function()) {
+            return std::move(found.value());
+        }
+    }
+    throw runtime_error(std::string("reflect::") + who + ": unknown function '" + name + "'");
 }
 
 // A C++ value type's script-facing name for field entries (host property types)
@@ -274,6 +388,177 @@ inline void register_reflection_functions(engine& eng_ref) {
                 script_value::make_object(def->get_name(), std::move(inst), eng));
         }
         return arr;
+    });
+
+    // ---- B group: act (read, write, call, construct). The one rule: reflection is a
+    // spelling, not a bypass — writes and invokes run the SAME access/type kernels as
+    // direct syntax (byte-identical error text); reads see everything (the to_json rule).
+
+    add("get", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 2, "get");
+        const std::string name = reflect_detail::expect_name(args, 1, "get");
+        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const script_value& target = args[0].deref();
+        if (target.is_string()) {   // class form: static read
+            auto* def = reflect_detail::resolve_class(eng, target, "get");
+            if (const script_value* field = def->get_static_field_ptr(id)) {
+                return field->deref();
+            }
+            throw runtime_error("reflect::get: class '" + def->get_name() +
+                                "' has no static field '" + name + "'");
+        }
+        auto door = reflect_detail::resolve_member_door(eng, target);
+        if (!door.instance && !door.def) {
+            throw runtime_error("reflect::get expects an object or class name");
+        }
+        // Getter first, like direct reads: a _get_<name> method SHADOWS the field
+        // (script classes synthesize an auto-getter whose body is the verbatim field
+        // read, so this is raw-read-equivalent there; host .property() bindings and
+        // computed getters only answer here). No access check: reads see everything.
+        if (door.def) {
+            script_value getter = door.def->get_method(
+                eng->get_symbolizer()->intern("_get_" + name), false);
+            if (getter.is_function()) {
+                return make_bound_method(target, getter).as_function()({});
+            }
+        }
+        if (door.instance) {
+            if (const script_value* field = door.instance->find_field_value(id)) {
+                return field->deref();
+            }
+        }
+        if (door.def) {
+            if (const script_value* field = door.def->get_static_field_ptr(id)) {
+                return field->deref();
+            }
+        }
+        throw runtime_error("reflect::get: '" +
+            (door.def ? door.def->get_name() : std::string("object")) +
+            "' has no member '" + name + "'");
+    });
+
+    add("set", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 3, "set");
+        const std::string name = reflect_detail::expect_name(args, 1, "set");
+        const uint64_t id = eng->get_symbolizer()->intern(name);
+        script_value value = args[2].deref();
+        const script_value& target = args[0].deref();
+        if (target.is_string()) {   // class form: static write
+            auto* def = reflect_detail::resolve_class(eng, target, "set");
+            if (!def->get_static_field_ptr(id)) {
+                throw runtime_error("reflect::set: class '" + def->get_name() +
+                                    "' has no static field '" + name + "'");
+            }
+            reflect_detail::enforce_member_access_or_throw(eng, def, id);
+            (void)def->set_static_field(id, std::move(value));
+            return script_value(std::monostate{}, eng);
+        }
+        auto door = reflect_detail::resolve_member_door(eng, target);
+        if (!door.instance && !door.def) {
+            throw runtime_error("reflect::set expects an object or class name");
+        }
+        // Setter first, like direct writes: a _set_<name> method shadows the field
+        // (the script auto-setter body IS enforce_field_write + store, so this is
+        // raw-store-equivalent there; host property setters only answer here).
+        // Access enforces from the caller's context BEFORE either door — the same
+        // kernel and text as `v.name = x`.
+        if (door.def) {
+            script_value setter = door.def->get_method(
+                eng->get_symbolizer()->intern("_set_" + name), false);
+            if (setter.is_function()) {
+                reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
+                return make_bound_method(target, setter).as_function()({std::move(value)});
+            }
+        }
+        if (door.instance && door.instance->find_field_value(id)) {
+            if (door.def) { reflect_detail::enforce_member_access_or_throw(eng, door.def, id); }
+            auto converted = door.instance->enforce_field_write(id, std::move(value));
+            if (!converted) { reflect_detail::throw_kernel_error(eng, converted); }
+            door.instance->set_field_unchecked(id, std::move(converted.value()));
+            return script_value(std::monostate{}, eng);
+        }
+        if (door.def && door.def->get_static_field_ptr(id)) {
+            reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
+            (void)door.def->set_static_field(id, std::move(value));
+            return script_value(std::monostate{}, eng);
+        }
+        throw runtime_error("reflect::set: '" +
+            (door.def ? door.def->get_name() : std::string("object")) +
+            "' has no member '" + name + "'");
+    });
+
+    add("invoke", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_min_args(args, 2, "invoke");
+        const std::string name = reflect_detail::expect_name(args, 1, "invoke");
+        const uint64_t id = eng->get_symbolizer()->intern(name);
+        std::vector<script_value> call_args(args.begin() + 2, args.end());
+        const script_value& target = args[0].deref();
+        if (target.is_string()) {   // class form: static method
+            auto* def = reflect_detail::resolve_class(eng, target, "invoke");
+            script_value method = def->get_static_method(id, false);
+            if (method.is_function()) {
+                reflect_detail::enforce_member_access_or_throw(eng, def, id);
+                return method.as_function()(call_args);
+            }
+            throw runtime_error("reflect::invoke: class '" + def->get_name() +
+                                "' has no static method '" + name + "'");
+        }
+        auto door = reflect_detail::resolve_member_door(eng, target);
+        if (!door.def) {
+            throw runtime_error("reflect::invoke expects an object or class name");
+        }
+        script_value dispatcher = door.def->get_method(id, false);
+        if (!dispatcher.is_function()) {
+            throw runtime_error("reflect::invoke: '" + door.def->get_name() +
+                                "' has no method '" + name + "'");
+        }
+        reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
+        return make_bound_method(target, dispatcher).as_function()(call_args);
+    });
+
+    add("call", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_min_args(args, 1, "call");
+        const std::string name = reflect_detail::expect_name(args, 0, "call");
+        std::vector<script_value> call_args(args.begin() + 1, args.end());
+        script_value fn = reflect_detail::resolve_free_callable(eng, name, "call");
+        return fn.as_function()(call_args);
+    });
+
+    add("construct", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_min_args(args, 1, "construct");
+        const std::string name = reflect_detail::expect_name(args, 0, "construct");
+        std::vector<script_value> call_args(args.begin() + 1, args.end());
+        // The same global the direct spelling Class(...) resolves
+        auto ctor = eng->get_global_environment()->get(name);
+        if (!ctor || !ctor.value().is_function()) {
+            throw runtime_error(std::string("reflect::construct: unknown class '") + name + "'");
+        }
+        return ctor.value().as_function()(call_args);
+    });
+
+    add("construct_shared", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_min_args(args, 1, "construct_shared");
+        const std::string name = reflect_detail::expect_name(args, 0, "construct_shared");
+        std::vector<script_value> call_args(args.begin() + 1, args.end());
+        auto ctor = eng->get_global_environment()->get(name);
+        if (!ctor || !ctor.value().is_function()) {
+            throw runtime_error(std::string("reflect::construct_shared: unknown class '") + name + "'");
+        }
+        auto result = ctor.value().as_function()(call_args);
+        if (!result) { return result; }
+        script_value value = std::move(result.value());
+        // `new Class(...)` semantics: shared_ptr is a TYPE MARKER, not storage — mark
+        // the constructed object exactly like the backends' new-expr paths
+        if (value.type() == script_value_type::jai_object_type) {
+            type_info* pointee = value.get_type_info().get();
+            if (!pointee) {
+                if (auto def = eng->get_class_definition(name)) {
+                    pointee = def->get_type_info().get();
+                }
+            }
+            value.set_type_info(eng->get_type_info_shared_ptr(pointee));
+        }
+        return value;
     });
 }
 

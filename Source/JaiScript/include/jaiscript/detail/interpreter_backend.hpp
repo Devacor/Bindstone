@@ -27,7 +27,11 @@ public:
     checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override {
         return interpreter_->execute_callable(payload, args);
     }
-    
+
+    const class_definition* current_access_context() const override {
+        return interpreter_->current_access_context();
+    }
+
     // Variable access
     script_value get_variable(const std::string& name) const override {
         return interpreter_->get_variable(name);

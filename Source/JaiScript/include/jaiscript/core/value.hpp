@@ -1929,19 +1929,28 @@ namespace jai {
                 std::memcpy(&p_, &o.p_, sizeof(p_));
                 o.index_ = TYPEID_NULL;
             }
+            // Both assignments pin/steal o BEFORE destroy(): o may live inside our own
+            // payload (x = x.deref() through a map-entry reference holding the last pin
+            // on a temporary map), and destroy-then-copy reads freed memory there.
             storage& operator=(const storage& o) noexcept {
                 if (this != &o) {
+                    storage pinned(o);
                     destroy();
-                    new (this) storage(o);
+                    index_ = pinned.index_;
+                    std::memcpy(&p_, &pinned.p_, sizeof(p_));
+                    pinned.index_ = TYPEID_NULL;
                 }
                 return *this;
             }
             storage& operator=(storage&& o) noexcept {
                 if (this != &o) {
-                    destroy();
-                    index_ = o.index_;
-                    std::memcpy(&p_, &o.p_, sizeof(p_));
+                    const auto stolen_index = o.index_;
+                    payload stolen;
+                    std::memcpy(&stolen, &o.p_, sizeof(p_));
                     o.index_ = TYPEID_NULL;
+                    destroy();
+                    index_ = stolen_index;
+                    std::memcpy(&p_, &stolen, sizeof(p_));
                 }
                 return *this;
             }

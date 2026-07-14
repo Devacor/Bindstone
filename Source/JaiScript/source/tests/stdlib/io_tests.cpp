@@ -13,6 +13,43 @@ public:
 
     void forge_tests() override {
         // ============================================================
+        // The bare-engine print contract (the docs' two-line hello):
+        // engine::make() ships a basic print (concatenation, no {} formatting,
+        // host-controlled stream); register_all upgrades it IN PLACE — same
+        // name, one registration, never a stacked double-print.
+        // ============================================================
+
+        test("bare_engine_ships_basic_print", [this]() {
+            auto engine = jai::engine::make();   // NO register_all
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute("print(\"hello\");");
+            check(capture->str().find("hello") != std::string::npos);
+        });
+
+        test("bare_print_concatenates_without_formatting", [this]() {
+            auto engine = jai::engine::make();   // NO register_all
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute("print(\"Value: {}\", 42);");
+            std::string output = capture->str();
+            check(output.find("Value: {}42") != std::string::npos,
+                "bare print concatenates; {} stays literal until stdlib upgrades it");
+        });
+
+        test("stdlib_upgrade_replaces_print_exactly_once", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute("print(\"once\");");
+            std::string output = capture->str();
+            check(output.find("once") != std::string::npos);
+            check_eq(output.find("once"), output.rfind("once"),
+                "one registration fires: the upgrade replaced the basic print, not stacked on it");
+        });
+
+        // ============================================================
         // Output stream redirection
         // ============================================================
 

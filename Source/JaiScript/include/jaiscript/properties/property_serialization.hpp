@@ -962,8 +962,10 @@ namespace jai {
 		} else {
 			// For non-default-constructible types, read as a generic script_value to
 			// advance the stream past this property's data and prevent corruption
+			// (null-engine monostate spelling: the default ctor is private, and this
+			// non-dependent statement is checked at template definition time)
 			ar.dispatch([](auto& concrete_ar) {
-				script_value dummy_val;
+				script_value dummy_val(std::monostate{}, static_cast<engine*>(nullptr));
 				concrete_ar.read_custom(dummy_val);
 			});
 		}

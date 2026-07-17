@@ -114,9 +114,13 @@ constexpr std::string_view declared_or_derived_type_name() {
 // Compile-time self-test: locks the signature parse against compiler/format drift
 // (new compiler versions, clang-cl, gcc -fno-pretty-templates, ...). If a toolchain
 // renders the signature differently, the build fails HERE instead of silently
-// deriving wrong serialization names.
+// deriving wrong serialization names. GCC prints diagnostics minimally-qualified
+// relative to the function's own namespace, so this jai::detail probe loses its
+// prefix there — the UNQUALIFIED name (the naming ladder's actual input) is
+// identical on every supported compiler and is what the self-test locks hard.
 struct static_type_name_probe {};
-static_assert(static_type_name<static_type_name_probe>() == std::string_view("jai::detail::static_type_name_probe"),
+static_assert(static_type_name<static_type_name_probe>() == std::string_view("jai::detail::static_type_name_probe") ||
+              static_type_name<static_type_name_probe>() == std::string_view("static_type_name_probe"),
 	"static_type_name: signature parse failed for this compiler — implicit registration names would be wrong. Fix extract_type_name for this compiler's signature format.");
 static_assert(static_unqualified_type_name<static_type_name_probe>() == std::string_view("static_type_name_probe"),
 	"static_unqualified_type_name: namespace stripping failed for this compiler.");

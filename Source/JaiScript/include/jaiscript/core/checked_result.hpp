@@ -199,9 +199,11 @@ private:
     uint64_t symbol_id2_ = 0;
 
 public:
-    // Success constructor from reference
+    // Success constructor from reference (direct reference_wrapper construction:
+    // libstdc++ declares the wrapper through <type_traits>/<utility> but std::ref
+    // itself lives in <functional>, which stays OFF this universal header)
     checked_result(T& value) noexcept
-        : value_(std::ref(value)), has_value_(true) {}
+        : value_(value), has_value_(true) {}
 
     // Error constructor without message
     checked_result(std::error_code ec) noexcept

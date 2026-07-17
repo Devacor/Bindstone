@@ -41,28 +41,25 @@ namespace jai {
     public:
         enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2 };
 
-        script_array() = default;
-        explicit script_array(kind_t k) : kind_(k) {}
+        // Every body that instantiates a vector<script_value> member (including the
+        // DEFAULTED special members - construction paths instantiate the vector dtor
+        // for unwind cleanup) lives in value.hpp where script_value is complete: MSVC
+        // defers those instantiations, Clang/GCC perform them here per the standard.
+        script_array();
+        explicit script_array(kind_t k);
+        script_array(const script_array&);
+        script_array(script_array&&) noexcept;
+        script_array& operator=(const script_array&);
+        script_array& operator=(script_array&&) noexcept;
+        ~script_array();
 
         kind_t kind() const noexcept { return kind_; }
         bool is_typed() const noexcept { return kind_ != kind_t::hetero; }
 
-        size_t size() const noexcept {
-            switch (kind_) {
-                case kind_t::i64: return ints_.size();
-                case kind_t::f64: return floats_.size();
-                default: return values_.size();
-            }
-        }
+        size_t size() const noexcept;
         bool empty() const noexcept { return size() == 0; }
-        void clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); }
-        void reserve(size_t n) {
-            switch (kind_) {
-                case kind_t::i64: ints_.reserve(n); break;
-                case kind_t::f64: floats_.reserve(n); break;
-                default: values_.reserve(n); break;
-            }
-        }
+        void clear() noexcept;
+        void reserve(size_t n);
 
         std::vector<script_value>& values() noexcept { return values_; }
         const std::vector<script_value>& values() const noexcept { return values_; }

@@ -729,6 +729,56 @@ public:
             check_eq((int64_t)100, r3.as_int());
         });
 
+        test("global_qualified_escape_hatch", [this]() {
+            // ::name reaches a deliberately shadowed global for every access form.
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int hp = 100;
+                string flavor(int n) { return "global " + to_string(n); }
+                class Tea {
+                    int hp = 5;
+                    string flavor() { return "member"; }
+                    string sip() { return ::flavor(7) + "/" + flavor(); }
+                    int read_both() { return hp * 1000 + ::hp; }
+                    void write_global() { ::hp = 42; }
+                    void bump_global() { ::hp += 8; ::hp++; }
+                }
+                auto t = Tea();
+                var a = t.sip();
+                var b = t.read_both();
+                t.write_global();
+                t.bump_global();
+                a + "|" + to_string(b) + "|" + to_string(hp) + "|" + to_string(t.hp)
+            )");
+            check_eq(std::string("global 7/member|5100|51|5"), r.as<std::string>());
+        });
+
+        test("global_qualified_misses_locals_and_errors", [this]() {
+            auto e = make_stdlib_engine();
+            e->execute("int g = 1;");
+            check_eq((int64_t)1, e->execute("int f() { int g = 9; return ::g; } f()").as_int());
+            check_throws([&]() { e->execute("void h() { int only_local = 3; ::only_local; } h();"); });
+            check_eq((int64_t)1, e->execute("::g").as_int());
+        });
+
+        test("global_qualified_ref_arg_and_index", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int ammo = 10;
+                var grid = [1, 2, 3];
+                void refill(int& x) { x = 77; }
+                class Gun {
+                    int ammo = 0;
+                    var grid = [9, 9, 9];
+                    int use() { refill(::ammo); return ::grid[1] + grid[1]; }
+                }
+                auto g = Gun();
+                var v = g.use();
+                to_string(v) + "|" + to_string(ammo)
+            )");
+            check_eq(std::string("11|77"), r.as<std::string>());
+        });
+
         test("member_shadow_is_by_name_not_signature", [this]() {
             // C++ contract: shadowing is by NAME. A member with no viable overload
             // hides the global rather than falling back to it -- the call errors.

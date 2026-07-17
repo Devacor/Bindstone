@@ -35,6 +35,29 @@ public:
     void forge_tests() override {
         // ------------------------------------------------------------ mode API
 
+        test("member_global_collision_warns", [this]() {
+            // Same-unit member/global name collisions warn (bare name in methods means
+            // the member; ::name reaches the global). Engine-registered names stay
+            // silent - shadowing to_string is the established print-integration idiom.
+            auto e = make_engine();
+            auto r = e->check(R"(
+                int hp = 100;
+                string ping() { return "g"; }
+                class Creature {
+                    int hp = 5;
+                    string ping() { return "m"; }
+                    string to_string() { return "c"; }
+                }
+            )");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)2, warning_count(r));
+            check_true(r.diagnostics[0].message.find("shadows the global") != std::string::npos);
+            auto quiet = e->check(R"(
+                class Plain { int solo = 1; string to_string() { return "p"; } }
+            )");
+            check_eq((size_t)0, quiet.diagnostics.size());
+        });
+
         test("off_by_default_and_mode_roundtrip", [this]() {
             auto e = make_engine();
             check_true(e->static_checking() == check_mode::off);

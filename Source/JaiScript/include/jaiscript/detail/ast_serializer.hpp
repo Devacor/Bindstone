@@ -36,7 +36,8 @@ namespace jai::detail {
     //   v3: \xNN escapes in string/char literals (lexer; literal bytes baked into AST)
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
-    inline constexpr uint32_t k_jaibite_version = 4;
+    // v5: identifier_expr carries global_qualified (the ::name escape hatch)
+    inline constexpr uint32_t k_jaibite_version = 5;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -221,6 +222,7 @@ namespace jai::detail {
                     str(e->name);
                     symbol(e->symbol_id, UINT64_MAX);
                     slot(e->slot_index);
+                    flag(e->global_qualified);   // ::name is pure syntax - not re-derivable
                     break;
                 }
                 case node_type::binary_expr: {
@@ -788,6 +790,7 @@ namespace jai::detail {
                     auto e = std::make_shared<identifier_expr>(loc, name, sym);
                     e->result_type = rt;
                     e->slot_index = slot_val();
+                    e->global_qualified = flag();
                     result = e;
                     break;
                 }

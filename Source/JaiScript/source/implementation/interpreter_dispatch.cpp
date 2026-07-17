@@ -251,7 +251,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
             const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
             if (b == 0) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
             }
             script_int r;
             if (!ints::try_div(a, b, r)) return overflow_error("Integer overflow in '/'");  // INT64_MIN / -1
@@ -261,7 +261,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
             if (rf == 0.0) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
             }
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             return make_float_fast(lf / rf);
@@ -278,7 +278,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
         if (b == 0) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
         }
         script_int r;
         if (!ints::try_div(a, b, r)) return overflow_error("Integer overflow in '/'");  // INT64_MIN / -1
@@ -289,7 +289,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         if (rf == 0.0) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
         }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         return make_float_fast(lf / rf);
@@ -320,7 +320,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
             const script_int b = right.unchecked_as_int();
             if (b == 0) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+                return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
             }
             return make_int_fast(ints::mod(left.unchecked_as_int(), b));  // handles a % -1 == 0 (no trap)
         }
@@ -328,7 +328,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
             if (rf == 0.0) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+                return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
             }
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             return make_float_fast(std::fmod(lf, rf));
@@ -345,7 +345,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         const script_int b = unwrapped_right.unchecked_as_int();
         if (b == 0) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
         }
         return make_int_fast(ints::mod(unwrapped_left.unchecked_as_int(), b));  // handles a % -1 == 0 (no trap)
     }
@@ -354,7 +354,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         if (rf == 0.0) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
         }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         return make_float_fast(std::fmod(lf, rf));

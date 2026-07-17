@@ -196,6 +196,10 @@ namespace jai {
         std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t symbol_id;     // Interned symbol ID - must be set by parser
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = use environment)
+        // C++ ::name spelling: resolution is GLOBAL-ENV-ONLY - locals, captures, and
+        // the member scope are all skipped (the escape hatch for deliberately shadowed
+        // globals). Parser never assigns a slot when set.
+        bool global_qualified = false;
         // Parser resolution: false when this name statically resolves to a REFERENCE
         // declaration (ref param / auto& decl / auto& loop var). Simple stores consult it
         // when the storage holds a cell: value-decl names write the cell like the variable

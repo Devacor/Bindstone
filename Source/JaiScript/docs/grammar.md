@@ -345,6 +345,7 @@ postfixOperator = "++"
 
 primaryExpression = literal
                   | IDENTIFIER
+                  | "::" IDENTIFIER              // global-qualified: resolves in the global scope ONLY
                   | "this"
                   | "super"
                   | newExpression

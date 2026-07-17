@@ -867,7 +867,17 @@ class engine;
                             !is_specialization_v<base_type, std::vector> &&
                             !is_specialization_v<base_type, std::map>) {
                     auto ptr = actual_arg.as<std::shared_ptr<base_type>>();
-                    return std::ref(*ptr);
+                    if (ptr) {
+                        return std::ref(*ptr);
+                    }
+                    // Non-owning holders (cpp_bound property reads: embedded members,
+                    // T& returns) carry no shared_ptr - extract the LIVE reference the
+                    // way the mutable-ref branch below does. Forming *ptr on the null
+                    // handle was UB: MSVC silently minted a null reference, libstdc++'s
+                    // hardened shared_ptr aborts the process. A truly null/incompatible
+                    // arg still throws out of as<T&> (candidate rejected, exactly like
+                    // the sibling conversion failures above).
+                    return std::ref(const_cast<script_value&>(actual_arg).as<base_type&>());
                 } else if constexpr (std::is_same_v<base_type, script_value>) {
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;

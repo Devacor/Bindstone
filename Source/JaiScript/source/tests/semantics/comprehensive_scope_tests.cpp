@@ -452,6 +452,303 @@ public:
     }
 };
 
+// C++ unqualified-lookup order inside methods: locals -> class members -> globals.
+// Pins the member-shadows-global contract (a same-named global must never hide a
+// field or method inside the class's own methods) across every bare-identifier
+// path: calls, reads, stores, compound stores, ++/--, index bases, ref args,
+// closures, statics, inheritance, and hot-reload flips.
+class member_shadowing_tests : public suite {
+public:
+    member_shadowing_tests() : suite("Member Shadowing Tests") {}
+
+    static std::shared_ptr<jai::engine> make_stdlib_engine() {
+        auto e = make_engine();
+        stdlib::register_all(*e);
+        return e;
+    }
+
+    void forge_tests() override {
+        test("method_shadows_global_same_arity", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                string who = "";
+                void greet(int n) { who = "global"; }
+                class A {
+                    void greet(int n) { who = "method"; }
+                    void go() { greet(1); }
+                }
+                auto a = A();
+                a.go();
+                who
+            )");
+            check_eq(std::string("method"), r.as<std::string>());
+        });
+
+        test("method_shadows_global_wrong_arity_global", [this]() {
+            // The jaidoom shape: 0-arg global + 1-arg method, bare 1-arg call.
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                string who = "";
+                void sync_exit() { who = "global"; }
+                class Level {
+                    int exits = 0;
+                    void sync_exit(int player) { who = "method " + to_string(player); exits += 1; }
+                    void trigger(int player) { sync_exit(player); }
+                }
+                auto l = Level();
+                l.trigger(3);
+                who + "/" + to_string(l.exits)
+            )");
+            check_eq(std::string("method 3/1"), r.as<std::string>());
+        });
+
+        test("field_shadows_global_read_write_compound", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int hp = 999;
+                class Creature {
+                    int hp = 5;
+                    int read_hp() { return hp; }
+                    void write_hp() { hp = 42; }
+                    void bump_hp() { hp += 1; hp++; }
+                }
+                auto c = Creature();
+                int before = c.read_hp();
+                c.write_hp();
+                c.bump_hp();
+                to_string(before) + "/" + to_string(c.hp) + "/" + to_string(hp)
+            )");
+            check_eq(std::string("5/44/999"), r.as<std::string>());
+        });
+
+        test("local_shadows_field_shadows_global", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int v = 1;
+                class B {
+                    int v = 2;
+                    int local_wins() { int v = 3; return v; }
+                    int field_wins() { return v; }
+                    int param_wins(int v) { return v; }
+                }
+                auto b = B();
+                to_string(b.local_wins()) + "/" + to_string(b.field_wins()) + "/" + to_string(b.param_wins(4))
+            )");
+            check_eq(std::string("3/2/4"), r.as<std::string>());
+        });
+
+        test("inherited_members_shadow_globals", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int score = 100;
+                string ping() { return "global"; }
+                class Base {
+                    int score = 7;
+                    string ping() { return "base"; }
+                }
+                class Derived : Base {
+                    string probe() { return ping() + "/" + to_string(score); }
+                    void raise() { score += 3; }
+                }
+                auto d = Derived();
+                d.raise();
+                d.probe() + "/" + to_string(score)
+            )");
+            check_eq(std::string("base/10/100"), r.as<std::string>());
+        });
+
+        test("ctor_name_bare_call_still_constructs", [this]() {
+            // The class-name global stays the constructor: a bare Fact(...) inside a
+            // method of Fact must build a NEW instance, never self-bind as a member.
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                class Fact {
+                    int n = 0;
+                    Fact(int v) { n = v; }
+                    Fact successor() { return Fact(n + 1); }
+                }
+                auto f = Fact(5);
+                f.successor().n
+            )");
+            check_eq((int64_t)6, r.as_int());
+        });
+
+        test("closure_in_method_member_over_global", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int fuel = 500;
+                class Rocket {
+                    int fuel = 3;
+                    int probe() {
+                        int local = 9;
+                        auto f = [=]() { return fuel * 100 + local; };
+                        return f();
+                    }
+                }
+                auto rk = Rocket();
+                rk.probe()
+            )");
+            check_eq((int64_t)309, r.as_int());
+        });
+
+        test("statics_shadow_globals_in_static_methods", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int count = 1000;
+                string tick() { return "global"; }
+                class S {
+                    static int count = 0;
+                    static string tick() { count += 1; return "static"; }
+                    static string go() { return tick(); }
+                }
+                S::go() + "/" + to_string(S::count) + "/" + to_string(count)
+            )");
+            check_eq(std::string("static/1/1000"), r.as<std::string>());
+        });
+
+        test("statics_shadow_globals_in_instance_methods", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int total = 1000;
+                class T {
+                    static int total = 0;
+                    void add(int n) { total += n; }
+                }
+                auto t = T();
+                t.add(5);
+                to_string(T::total) + "/" + to_string(total)
+            )");
+            check_eq(std::string("5/1000"), r.as<std::string>());
+        });
+
+        test("index_base_field_shadows_global", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                var grid = [100, 200, 300];
+                class Board {
+                    var grid = [1, 2, 3];
+                    int read(int i) { return grid[i]; }
+                    void write(int i, int v) { grid[i] = v; }
+                    void bump(int i) { grid[i] += 10; }
+                }
+                auto b = Board();
+                b.write(0, 7);
+                b.bump(1);
+                to_string(b.read(0)) + "/" + to_string(b.read(1)) + "/" + to_string(grid[0]) + "/" + to_string(grid[1])
+            )");
+            check_eq(std::string("7/12/100/200"), r.as<std::string>());
+        });
+
+        test("ref_arg_field_shadows_global", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int ammo = 999;
+                void reload(int& x) { x = 30; }
+                class Gun {
+                    int ammo = 0;
+                    void refill() { reload(ammo); }
+                }
+                auto g = Gun();
+                g.refill();
+                to_string(g.ammo) + "/" + to_string(ammo)
+            )");
+            check_eq(std::string("30/999"), r.as<std::string>());
+        });
+
+        test("no_member_no_shadow_globals_unchanged", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int power = 11;
+                string shout() { return "global"; }
+                class Plain {
+                    int other = 0;
+                    string go() { power += 1; return shout() + "/" + to_string(power); }
+                }
+                auto p = Plain();
+                p.go()
+            )");
+            check_eq(std::string("global/12"), r.as<std::string>());
+        });
+
+        test("member_shadow_hot_ladder_warm", [this]() {
+            // IC-warmth: bare shadowed field reads/writes in a hot loop must stay on
+            // the member after the per-site caches arm.
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int acc = 100000;
+                class W {
+                    int acc = 0;
+                    int spin() {
+                        for (int i = 0; i < 1000; i++) { acc += 1; }
+                        return acc;
+                    }
+                }
+                auto w = W();
+                to_string(w.spin()) + "/" + to_string(acc)
+            )");
+            check_eq(std::string("1000/100000"), r.as<std::string>());
+        });
+
+        test("bare_method_call_hot_loop_stays_member", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int step() { return 1000; }
+                class Walker {
+                    int steps = 0;
+                    int step() { return 1; }
+                    int walk() {
+                        int sum = 0;
+                        for (int i = 0; i < 100; i++) { sum += step(); }
+                        return sum;
+                    }
+                }
+                auto wk = Walker();
+                wk.walk()
+            )");
+            check_eq((int64_t)100, r.as_int());
+        });
+
+        test("hot_reload_flips_bare_resolution", [this]() {
+            auto e = make_stdlib_engine();
+            auto r1 = e->execute(R"(
+                int power = 100;
+                class R { int get() { int s = 0; for (int i = 0; i < 50; i++) { s = get_once(); } return s; } int get_once() { return power; } }
+                auto r = R();
+                r.get()
+            )");
+            check_eq((int64_t)100, r1.as_int());
+            auto r2 = e->execute(R"(
+                class R { int power = 7; int get() { int s = 0; for (int i = 0; i < 50; i++) { s = get_once(); } return s; } int get_once() { return power; } }
+                r.get()
+            )");
+            check_eq((int64_t)7, r2.as_int());
+            auto r3 = e->execute(R"(
+                class R { int get() { int s = 0; for (int i = 0; i < 50; i++) { s = get_once(); } return s; } int get_once() { return power; } }
+                r.get()
+            )");
+            check_eq((int64_t)100, r3.as_int());
+        });
+
+        test("member_shadow_is_by_name_not_signature", [this]() {
+            // C++ contract: shadowing is by NAME. A member with no viable overload
+            // hides the global rather than falling back to it -- the call errors.
+            auto e = make_stdlib_engine();
+            e->execute(R"(
+                string flavor(int n) { return "global"; }
+                class Tea {
+                    string flavor() { return "member"; }
+                    string sip() { return flavor(42); }
+                }
+                auto cup = Tea();
+            )");
+            check_throws([&]() { e->execute("cup.sip();"); });
+            check_eq(std::string("member"), e->execute("cup.flavor()").as<std::string>());
+            check_eq(std::string("global"), e->execute("flavor(1)").as<std::string>());
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 FOUNDRY_REGISTER(jai::foundry::tests::comprehensive_scope_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::member_shadowing_tests)

@@ -14,6 +14,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <vector>
@@ -205,6 +206,31 @@ namespace jai::detail {
 			if (symbol_id == UINT64_MAX) {
 				symbol_id = symbolizer->intern(ident->name);
 				const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
+			}
+			// Caller member scope (call_frame stamp): fields/statics outrank globals
+			// between the function's own scopes and the definition/global chain
+			const auto scope_state = caller.metadata
+				? static_cast<member_scope_state>(caller.metadata->scope_state)
+				: member_scope_state::none;
+			if (scope_state == member_scope_state::instance ||
+			    scope_state == member_scope_state::statics) {
+				if (caller_env) {
+					if (script_value* own = own_scope_lookup(caller_env, caller.metadata->scope_floor, symbol_id)) {
+						return own;
+					}
+				}
+				auto member = probe_member_scope(scope_state, caller.metadata->scope_this,
+				                                 caller.metadata->scope_static, symbol_id,
+				                                 /*want_methods*/ false);
+				if (member.value_ptr) { return member.value_ptr; }
+				if (member_scope_has_method(scope_state, caller.metadata->scope_this,
+				                            caller.metadata->scope_static, symbol_id)) {
+					return nullptr;   // a member METHOD shadows: never fall past the class scope
+				}
+				if (caller.metadata->scope_floor) {
+					return caller.metadata->scope_floor->get_value_ptr(symbol_id);
+				}
+				return caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
 			}
 			if (caller_env) {
 				if (const script_value* env_ptr = caller_env->get_value_ptr(symbol_id)) {

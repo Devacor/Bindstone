@@ -9,6 +9,7 @@
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/member_scope.hpp>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -959,6 +960,53 @@ namespace jai::vm {
                 return &f.locals->get_this();
             }
             return environment_->get_value_ptr(this_id_);
+        }
+
+        // Member-shadowing scope (detail/member_scope.hpp): computed lazily per frame
+        // from entry_env/locals - every push re-stamps scope_state = 0 (pooled
+        // call_records reuse the same call_frame), so only bare identifiers that
+        // reach the env walk pay the compute. frame_env = the env chain this frame
+        // resolves against (environment_ for the executing frame; the saved caller
+        // env when computing a CALLER's scope mid-push, e.g. ref-arg binding).
+        void ensure_frame_member_scope(frame& f, environment* frame_env) {
+            if (!f.locals || f.locals->scope_state != 0) { return; }
+            detail::compute_member_scope(*f.locals, f.entry_env.get(), frame_env);
+        }
+        detail::member_scope_state frame_scope_state(const frame& f) const {
+            return f.locals ? static_cast<detail::member_scope_state>(f.locals->scope_state)
+                            : detail::member_scope_state::none;
+        }
+        bool frame_scope_active(const frame& f) const {
+            const auto s = frame_scope_state(f);
+            return s == detail::member_scope_state::instance ||
+                   s == detail::member_scope_state::statics;
+        }
+
+        // The non-slot rungs of the member-scope ladder for POINTER resolvers (the
+        // funnel twins of the interpreter's scoped_env_lookup): own scopes below the
+        // floor, then fields/statics, then (post-member-miss) the per-site cache and
+        // the definition/global chain. A member METHOD answers nullptr - it shadows,
+        // and only value/callee sites mint.
+        script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot) {
+            if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, symbol_id)) {
+                return own;
+            }
+            auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+                                                  f.locals->scope_static, symbol_id, /*want_methods*/ false);
+            if (hit.value_ptr) {
+                return hit.value_ptr;
+            }
+            if (detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
+                                                f.locals->scope_static, symbol_id)) {
+                return nullptr;
+            }
+            if (cache_slot != SIZE_MAX) {
+                if (script_value* cached = env_lookup_cached(f, cache_slot, symbol_id)) {
+                    return cached;
+                }
+            }
+            return f.locals->scope_floor ? f.locals->scope_floor->get_value_ptr(symbol_id)
+                                         : environment_->get_value_ptr(symbol_id);
         }
 
         // This-field IC probe (bare method-field reads, the BST/gameplay heat): the

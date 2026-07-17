@@ -175,6 +175,20 @@ namespace jai {
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
+        // Member-shadowing ladder (detail/member_scope.hpp): stable storage of a method
+        // env's receiver, so closure frames can probe the creation-site 'this' without
+        // copying it per identifier. Null for non-method envs.
+        script_value* method_this_storage() { return kind_ == env_kind::method ? &this_object_ : nullptr; }
+
+        // OWN-storage probe for the member-shadowing ladder's function-scope phase:
+        // names DEFINED in this env only (local_ids_-gated) - never ancestor cache
+        // entries (their provenance spans the whole chain), never kind fallbacks.
+        script_value* get_own_value_ptr(uint64_t id) {
+            if (local_ids_.count(id) == 0) return nullptr;
+            auto it = flat_lookup_.find(id);
+            return it != flat_lookup_.end() ? it->second : nullptr;
+        }
+
         // Generation SERIAL for the vm's env-lookup inline caches (chunk.hpp
         // env_lookup_cache_entry): re-drawn from the per-engine monotonic counter on
         // construction, reset (pool reuse), clear, parent change, and define - the
@@ -336,6 +350,26 @@ namespace jai {
 
         std::shared_ptr<class_definition> static_class_def;
         bool is_static_method = false;
+
+        // Member-shadowing scope (detail/member_scope.hpp): C++ unqualified-lookup
+        // order makes class members resolve between the function's own scopes and the
+        // definition/global environments. scope_floor = the first env in the chain
+        // OUTSIDE the function scope (the member probe runs when a lookup crosses it);
+        // scope_this/scope_static = what to probe. The interpreter stamps these at
+        // frame push (the call branch knows the callee kind); the vm computes them
+        // lazily from entry_env/locals on first use. 0=uncomputed, 1=none,
+        // 2=instance, 3=static (member_scope_state).
+        uint8_t scope_state = 0;
+        environment* scope_floor = nullptr;
+        script_value* scope_this = nullptr;
+        class_definition* scope_static = nullptr;
+
+        void reset_member_scope() noexcept {
+            scope_state = 0;
+            scope_floor = nullptr;
+            scope_this = nullptr;
+            scope_static = nullptr;
+        }
 
         std::string_view function_name;
         const ast_node* current_node = nullptr;

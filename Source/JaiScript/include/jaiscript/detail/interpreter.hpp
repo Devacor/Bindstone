@@ -46,6 +46,7 @@
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
 #include "environment.hpp"
+#include "member_scope.hpp"
 #include "builtin_methods.hpp"
 #include "execution_limits.hpp"
 #include "operator_table.hpp"
@@ -123,6 +124,10 @@ namespace jai {
         std::vector<call_frame> saved_call_stack;
         std::optional<script_value> saved_return_value;
         bool saved_has_return = false;
+        // The yield-point member scope rides the suspension exactly like the env
+        // chain (call_function's yield path skips cleanup, so the ordinary
+        // save/restore never runs for a suspending body).
+        detail::member_scope_ctx saved_member_scope{};
 
         void push_continuation(ast_node* node, size_t index,
                                std::shared_ptr<environment> env = nullptr,
@@ -571,6 +576,12 @@ namespace jai {
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
 
+        // Current frame's member scope (detail/member_scope.hpp): stamped by
+        // call_function's callee-kind branches (and the field-initializer site),
+        // saved/restored around every call like environment_. Drives the C++
+        // members-shadow-globals resolution order in the identifier ladders.
+        detail::member_scope_ctx member_scope_{};
+
         // Pending call-site context (set by visit_call around the invoke, consumed by
         // the next call_function entered): ref params bind against the caller's
         // variables through it. Save/restored as a single pointer by nested calls.
@@ -876,14 +887,40 @@ namespace jai {
             valueStack_.push(std::move(value));
         }
 
-        // Resolve variable: slot-based O(1) first, then environment fallback
+        // Resolve variable: slot-based O(1) first, then the scope ladder. Inside a
+        // member scope (detail/member_scope.hpp) the order is C++ unqualified lookup:
+        // the function's own scopes, the class's members, then the definition/global
+        // chain. A member METHOD hit answers nullptr - it shadows (never fall past
+        // the class scope to a same-named global) but only value/callee sites mint,
+        // so pointer callers land on their existing miss paths.
         [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id) noexcept {
             if (slot_index != SIZE_MAX && !call_stack_.empty()) {
                 if (auto* ptr = call_stack_.back().get_local(slot_index)) {
                     return ptr;
                 }
             }
+            if (member_scope_.active()) {
+                return scoped_env_lookup(symbol_id);
+            }
             return environment_->get_value_ptr(symbol_id);
+        }
+
+        // The non-slot rungs of the member-scope ladder (member_scope_.active() only).
+        script_value* scoped_env_lookup(uint64_t symbol_id) noexcept {
+            if (script_value* own = detail::own_scope_lookup(environment_.get(), member_scope_.floor, symbol_id)) {
+                return own;
+            }
+            auto hit = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                  member_scope_.statics, symbol_id, /*want_methods*/ false);
+            if (hit.value_ptr) {
+                return hit.value_ptr;
+            }
+            if (detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
+                                                member_scope_.statics, symbol_id)) {
+                return nullptr;
+            }
+            return member_scope_.floor ? member_scope_.floor->get_value_ptr(symbol_id)
+                                       : environment_->get_value_ptr(symbol_id);
         }
 
         // Resolve variable with error on not found (avoids value copy vs environment_->get())

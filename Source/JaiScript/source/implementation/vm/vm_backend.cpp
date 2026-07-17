@@ -1431,15 +1431,29 @@ script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t
 			return ptr;
 		}
 	}
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) {
+			return member_scope_env_lookup(f, symbol_id, SIZE_MAX);
+		}
+	}
 	return environment_->get_value_ptr(symbol_id);
 }
 
 // resolve_local_or_env with the env path memoized per instruction (slot 2*ip); the
-// get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks)
+// get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks).
+// Member scopes consult the cache only PAST the member rungs (a cached global cell
+// must never outrank a same-named member).
 script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
 	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
+		}
+	}
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) {
+			return member_scope_env_lookup(f, symbol_id, f.ip * 3 + 2);
 		}
 	}
 	if (script_value* cached = env_lookup_cached(f, f.ip * 3 + 2, symbol_id)) {
@@ -3125,6 +3139,49 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 		stack_.push_back(*ic_field);
 		return {};
 	}
+	// Member scope (detail/member_scope.hpp): C++ unqualified-lookup order - own
+	// scopes, then the class's members (fields minting the same copy the old tail
+	// pushed, methods minting the same bound thunk), then the cache/chain. The
+	// this-field IC above stays sound: its serial-guarded walk-miss proof covers
+	// the own-scope phase too. Non-scope frames keep the original ladder untouched.
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) {
+			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
+				stack_.push_back(own->deref());
+				return {};
+			}
+			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			                                         f.locals->scope_static, sym, /*want_methods*/ true);
+			if (member) {
+				if (member.what == detail::member_probe_hit::kind::method) {
+					if (member.instance && f.locals->scope_this) {
+						stack_.push_back(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
+					} else {
+						stack_.push_back(std::move(member.method_value));
+					}
+					return {};
+				}
+				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
+					this_field_ic_arm(f, f.ip * 3, member.instance, sym);
+				}
+				stack_.push_back(*member.value_ptr);
+				return {};
+			}
+			if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
+				stack_.push_back(cached->deref());
+				return {};
+			}
+			if (script_value* beyond = f.locals->scope_floor
+			        ? f.locals->scope_floor->get_value_ptr(sym)
+			        : environment_->get_value_ptr(sym)) {
+				stack_.push_back(beyond->deref());
+				return {};
+			}
+			return raise_(make_error_code(runtime_error_code::undefined_variable),
+				"Undefined variable '{0}'", sym);
+		}
+	}
 	if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
 		stack_.push_back(cached->deref());
 		return {};
@@ -3256,10 +3313,26 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		}
 	}
 
+	// Member scope: a member (field, static, or method - shadowing is by NAME)
+	// outranks anything past the function's own scopes, so an env hit that could
+	// only be a global yields to the kind-aware member path below.
+	bool member_wins = false;
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f) &&
+		    !detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
+			member_wins = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			                                         f.locals->scope_static, sym,
+			                                         /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
+			              detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
+			                                              f.locals->scope_static, sym);
+		}
+	}
+
 	// ONE fallback-free walk replaces the old contains() + get_value_ptr() +
 	// assign()-rewalk TRIPLE walk (non-null exactly when contains(); this/static
 	// field stores keep falling through to the kind-aware path below)
-	if (script_value* env_store_target = environment_->get_env_var_ptr(sym)) {
+	if (script_value* env_store_target = member_wins ? nullptr : environment_->get_env_var_ptr(sym)) {
 		script_value* currentVal = env_store_target;
 		if (currentVal->is_reference()) {
 			// Escape-boxed variable (cell) named as itself: redirect to the cell inner and
@@ -3619,6 +3692,28 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 							}
 						}
 					}
+				}
+			}
+		}
+	}
+
+	// Static-method scope: bare static stores have no 'this' to route through, and
+	// member_wins keeps them off the env walk - land them on the scope's class
+	// (same set_static_field kernel as the instance tail above).
+	if (!assigned_to_member && frame_scope_state(f) == detail::member_scope_state::statics &&
+	    f.locals && f.locals->scope_static) {
+		if (f.locals->scope_static->has_static_field(sym)) {
+			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+				value = value.detached_for_store();
+			}
+			if (rhs_lvalue) {
+				if (f.locals->scope_static->set_static_field(sym, clone_for_assignment(value))) {
+					assigned_to_member = true;
+				}
+			} else {
+				if (f.locals->scope_static->set_static_field(sym, std::move(value))) {
+					value = f.locals->scope_static->get_static_field(sym);
+					assigned_to_member = true;
 				}
 			}
 		}
@@ -4296,6 +4391,44 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 		scratch.emplace(*ic_field);
 		return &scratch.value();
 	}
+	// Member scope: exec_load's ladder verbatim in fused shape (own scopes ->
+	// members -> cache/chain); member hits land in scratch exactly like the old
+	// tail's copies, so downstream consumers are untouched.
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) {
+			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
+				return &own->deref();
+			}
+			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			                                         f.locals->scope_static, sym, /*want_methods*/ true);
+			if (member) {
+				if (member.what == detail::member_probe_hit::kind::method) {
+					if (member.instance && f.locals->scope_this) {
+						scratch.emplace(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
+					} else {
+						scratch.emplace(std::move(member.method_value));
+					}
+					return &scratch.value();
+				}
+				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
+					this_field_ic_arm(f, cache_slot, member.instance, sym);
+				}
+				scratch.emplace(*member.value_ptr);
+				return &scratch.value();
+			}
+			if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
+				return &cached->deref();
+			}
+			if (script_value* beyond = f.locals->scope_floor
+			        ? f.locals->scope_floor->get_value_ptr(sym)
+			        : environment_->get_value_ptr(sym)) {
+				return &beyond->deref();
+			}
+			return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
+				"Undefined variable '{0}'", sym);
+		}
+	}
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
 		return &cached->deref();
 	}
@@ -4681,6 +4814,14 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 		}
 		return nullptr;
 	}
+	// Member scope: fields/statics outrank env cells past the function's own scopes;
+	// a member-METHOD shadow answers nullptr and the caller bails to the pair.
+	if (f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) {
+			return member_scope_env_lookup(f, f.code->symbols[operand.symbol], cache_slot);
+		}
+	}
 	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
 }
 
@@ -4769,7 +4910,17 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 			varPtr = frame_slot(f, cp.slot);
 		}
 		if (!varPtr) {
-			varPtr = env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
+			// Member scope: a shadowed field/static IS the compound target (in-place,
+			// the same pointer the interpreter's funnel mutates); a member-method
+			// shadow answers nullptr and the slow pair below raises correctly.
+			if (f.locals && !f.top_level) {
+				ensure_frame_member_scope(f, environment_.get());
+				varPtr = frame_scope_active(f)
+					? member_scope_env_lookup(f, f.code->symbols[cp.symbol], f.ip * 3 + 2)
+					: env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
+			} else {
+				varPtr = env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
+			}
 		}
 		if (varPtr && varPtr->raw_storage_index() == script_value::TYPEID_INT) {
 			script_int rhs = 0;
@@ -6628,6 +6779,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		// surface as-is; the kernel's generic non-lvalue verdict (computed property,
 		// C++-backed field, non-instance receiver) keeps the decl's own error text.
 		// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
+		ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
 		auto resolved = detail::resolve_ref_lvalue(decl->initializer.get(), caller_view(&f),
 		                                           environment_.get(), engine_, symbolizer_);
 		if (!resolved && resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
@@ -6925,6 +7077,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
+	rec.locals.reset_member_scope();
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
@@ -7475,7 +7628,25 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				}
 				if (is_overridden) continue;
 
-				if (environment_->contains(var_id)) {
+				// Member scope: the capture env is self-contained (parent = global env),
+				// so a FIELD used under [=]/[&] must be materialized here with the C++
+				// shadowing order - the old contains()/get() walk snapshotted a
+				// same-named GLOBAL over the member. (KEEP BYTE-PARALLEL with the
+				// interpreter's visit_lambda_expr default-capture loop.)
+				script_value* scoped_target = nullptr;
+				if (f.locals && !f.top_level) {
+					ensure_frame_member_scope(f, environment_.get());
+					if (frame_scope_active(f)) {
+						scoped_target = member_scope_env_lookup(f, var_id, SIZE_MAX);
+					}
+				}
+				if (scoped_target) {
+					if (capture_by_ref_default) {
+						captureEnv->define(var_id, share_env_ref(*scoped_target));
+					} else {
+						captureEnv->define(var_id, vm_clone_for_capture(scoped_target->deref(), symbolizer_));
+					}
+				} else if (!(f.locals && !f.top_level && frame_scope_active(f)) && environment_->contains(var_id)) {
 					if (capture_by_ref_default) {
 						script_value* targetPtr = environment_->get_value_ptr(var_id);
 						if (targetPtr) {
@@ -11101,6 +11272,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 }
 
 op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
+	ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
 	auto resolved = detail::resolve_ref_lvalue(
 		static_cast<const expression*>(f.code->nodes[ins.a].get()),
 		caller_view(&f), environment_.get(), engine_, symbolizer_);
@@ -12061,6 +12233,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
+	rec.locals.reset_member_scope();
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
 	// fallbacks gate field-vs-shadowing precedence)
@@ -12251,6 +12424,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
+	rec.locals.reset_member_scope();
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
@@ -12406,6 +12580,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
+	rec.locals.reset_member_scope();
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
 	// lexically correct) and NO method env at all — 'this', fields, and the access
@@ -13078,6 +13253,11 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				// helper into an owner-pinned reference (Tier 1)
 				const uint32_t lvalue_node = i < site->arg_lvalue_nodes.size() ? site->arg_lvalue_nodes[i] : k_invalid_u32;
 				if (lvalue_node != k_invalid_u32 && caller_code) {
+					if (caller_frame) {
+						// the kernel resolves in the CALLER's member scope (environment_
+						// already points at the callee's chain mid-push)
+						ensure_frame_member_scope(*caller_frame, caller_env.get());
+					}
 					auto resolved = detail::resolve_ref_lvalue(
 						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
 						caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
@@ -13095,9 +13275,44 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				}
 
 				if (symbol_id != UINT64_MAX && caller_env) {
-					script_value* argPtr = caller_env->get_value_ptr(symbol_id);
-					if (!argPtr && caller_frame) {
-						argPtr = frame_this_member_ptr(*caller_frame, symbol_id);   // method-lazy caller: bare field args
+					// Caller member scope: a field/static outranks a same-named global
+					// as a ref target (bound as raw storage, exactly like the old
+					// fallback bound the same pointer when no global collided).
+					// (KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter.)
+					script_value* argPtr = nullptr;
+					bool member_shadowed = false;
+					if (caller_frame && caller_frame->locals) {
+						ensure_frame_member_scope(*caller_frame, caller_env.get());
+						if (frame_scope_active(*caller_frame)) {
+							const auto caller_scope = frame_scope_state(*caller_frame);
+							argPtr = detail::own_scope_lookup(caller_env.get(),
+							                                  caller_frame->locals->scope_floor, symbol_id);
+							if (!argPtr) {
+								auto member = detail::probe_member_scope(caller_scope,
+								                                         caller_frame->locals->scope_this,
+								                                         caller_frame->locals->scope_static,
+								                                         symbol_id, /*want_methods*/ false);
+								argPtr = member.value_ptr;
+							}
+							if (!argPtr) {
+								if (detail::member_scope_has_method(caller_scope,
+								                                    caller_frame->locals->scope_this,
+								                                    caller_frame->locals->scope_static, symbol_id)) {
+									member_shadowed = true;
+								} else {
+									argPtr = caller_frame->locals->scope_floor
+										? caller_frame->locals->scope_floor->get_value_ptr(symbol_id)
+										: caller_env->get_value_ptr(symbol_id);
+								}
+							}
+						}
+					}
+					if (!argPtr && !member_shadowed &&
+					    !(caller_frame && caller_frame->locals && frame_scope_active(*caller_frame))) {
+						argPtr = caller_env->get_value_ptr(symbol_id);
+						if (!argPtr && caller_frame) {
+							argPtr = frame_this_member_ptr(*caller_frame, symbol_id);   // method-lazy caller: bare field args
+						}
 					}
 					if (!argPtr) {
 						return raise_(

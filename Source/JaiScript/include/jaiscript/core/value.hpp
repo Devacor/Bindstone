@@ -10,6 +10,7 @@
 #include "strong_ptr.hpp"
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <variant>
+#include <tuple>
 #include <memory>
 #include <compare>
 #include <cassert>
@@ -1966,10 +1967,22 @@ namespace jai {
 
             JAI_FORCEINLINE size_t index() const noexcept { return index_; }
 
-            template <size_t I> JAI_FORCEINLINE auto* get_if() noexcept {
+            // Index -> alternative TYPE map (must mirror alt()'s payload dispatch).
+            // Explicit return types below instead of deduced auto: script_value's
+            // non-template member bodies above use get_if/get lexically BEFORE these
+            // definitions, which deduced-return functions forbid ([dcl.spec.auto]) -
+            // MSVC's delayed parse tolerated it, Clang/GCC reject it.
+            template <size_t I> using alt_t = std::tuple_element_t<I, std::tuple<
+                std::monostate, script_int, script_float, strong_ptr<script_string>,
+                script_char, script_bool, strong_ptr<script_array>, strong_ptr<script_map>,
+                strong_ptr<object_holder>, strong_ptr<script_function>, strong_ptr<reference_holder>,
+                strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
+                strong_ptr<cpp_bound_holder>, parallel_borrow_tag>>;
+
+            template <size_t I> JAI_FORCEINLINE alt_t<I>* get_if() noexcept {
                 return index_ == I ? &alt<I>() : nullptr;
             }
-            template <size_t I> JAI_FORCEINLINE const auto* get_if() const noexcept {
+            template <size_t I> JAI_FORCEINLINE const alt_t<I>* get_if() const noexcept {
                 return index_ == I ? &alt<I>() : nullptr;
             }
             template <typename T> JAI_FORCEINLINE T* get_if() noexcept {
@@ -1979,8 +1992,8 @@ namespace jai {
                 return index_ == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
             }
             // Precondition: the alternative is engaged (callers keep check-then-get)
-            template <size_t I> JAI_FORCEINLINE auto& get() noexcept { assert(index_ == I); return alt<I>(); }
-            template <size_t I> JAI_FORCEINLINE const auto& get() const noexcept { assert(index_ == I); return alt<I>(); }
+            template <size_t I> JAI_FORCEINLINE alt_t<I>& get() noexcept { assert(index_ == I); return alt<I>(); }
+            template <size_t I> JAI_FORCEINLINE const alt_t<I>& get() const noexcept { assert(index_ == I); return alt<I>(); }
             template <typename T> JAI_FORCEINLINE T& get() noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
             template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
 
@@ -2300,6 +2313,34 @@ namespace jai {
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----
+
+    // Out-of-line SPECIAL MEMBERS + size/clear/reserve (types.hpp declares them):
+    // script_value is complete here, so the vector<script_value> member
+    // instantiations these trigger are legal on Clang/GCC, not just under MSVC's
+    // deferred instantiation.
+    inline script_array::script_array() = default;
+    inline script_array::script_array(kind_t k) : kind_(k) {}
+    inline script_array::script_array(const script_array&) = default;
+    inline script_array::script_array(script_array&&) noexcept = default;
+    inline script_array& script_array::operator=(const script_array&) = default;
+    inline script_array& script_array::operator=(script_array&&) noexcept = default;
+    inline script_array::~script_array() = default;
+
+    inline size_t script_array::size() const noexcept {
+        switch (kind_) {
+            case kind_t::i64: return ints_.size();
+            case kind_t::f64: return floats_.size();
+            default: return values_.size();
+        }
+    }
+    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); }
+    inline void script_array::reserve(size_t n) {
+        switch (kind_) {
+            case kind_t::i64: ints_.reserve(n); break;
+            case kind_t::f64: floats_.reserve(n); break;
+            default: values_.reserve(n); break;
+        }
+    }
 
     inline script_value script_array::get(size_t i, engine* eng) const {
         switch (kind_) {

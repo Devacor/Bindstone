@@ -370,13 +370,13 @@ namespace jai {
 		template<typename T>
 		T* property_value(const std::string& name) {
 			auto* p = find_owned_property(name);
-			return p ? p->value_as<T>() : nullptr;
+			return p ? p->template value_as<T>() : nullptr;
 		}
 
 		template<typename T>
 		const T* property_value(const std::string& name) const {
 			auto* p = find_owned_property(name);
-			return p ? p->value_as<T>() : nullptr;
+			return p ? p->template value_as<T>() : nullptr;
 		}
 
 		template<typename T>

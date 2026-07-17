@@ -93,6 +93,10 @@ else()
         -Wextra
         -Wpedantic
     )
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # COFF's /bigobj twin: Debug template-heavy TUs overflow the 2^16 section limit
+        target_compile_options(jaiscript PRIVATE -Wa,-mbig-obj)
+    endif()
 endif()
 
 # Precompiled headers - parse heavy templates once instead of per-TU
@@ -108,3 +112,10 @@ set_target_properties(jaiscript PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
+
+# The DAP connector uses Winsock. MSVC picks it up via connector.cpp's
+# #pragma comment(lib) - GCC/Clang GNU drivers ignore that mechanism, so the
+# dependency must live here (PUBLIC: the static lib's consumers do the final link).
+if(WIN32)
+    target_link_libraries(jaiscript PUBLIC ws2_32)
+endif()

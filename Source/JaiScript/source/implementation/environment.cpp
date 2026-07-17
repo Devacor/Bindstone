@@ -13,6 +13,12 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// GetCurrentThreadStackLimits needs the Windows 8 API surface; MinGW headers
+// default _WIN32_WINNT lower and hide it (MSVC's default is already high enough)
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0602
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 #include <windows.h>
 #endif
 

@@ -598,7 +598,12 @@ struct engine::implementation {
     
     struct import_record {
         std::string resolved_path;
-        std::filesystem::file_time_type last_modified;
+        // (mtime, size) stamp via stat_mtime_size, matching the script cache: 100 ns
+        // FILETIME on Windows on every compiler - libstdc++'s last_write_time answers
+        // whole SECONDS there, which missed same-second edits (save + import inside
+        // one second never re-imported under GCC builds)
+        uint64_t mtime = 0;
+        uint64_t size = 0;
     };
     std::unordered_map<std::string, import_record> import_cache;
 
@@ -2845,15 +2850,16 @@ script_value engine::execute_import(const std::string& resolved_path) {
                 should_import = true;
             } else {
                 // Check if file has been modified
-                try {
-                    auto current_time = std::filesystem::last_write_time(resolved_path);
-                    should_import = (current_time != it->second.last_modified);
+                uint64_t current_mtime = 0, current_size = 0;
+                if (implementation::stat_mtime_size(resolved_path, current_mtime, current_size)) {
+                    should_import = (current_mtime != it->second.mtime || current_size != it->second.size);
                     if (should_import) {
-                        // Update the timestamp for next check
-                        it->second.last_modified = current_time;
+                        // Update the stamp for next check
+                        it->second.mtime = current_mtime;
+                        it->second.size = current_size;
                     }
-                } catch (...) {
-                    // If we can't get the file time, import it
+                } else {
+                    // If we can't stat the file, import it
                     should_import = true;
                 }
             }
@@ -2875,15 +2881,11 @@ script_value engine::execute_import(const std::string& resolved_path) {
         // Attribute the imported unit to its resolved path (stack traces / debugger).
         auto result = execute_source(content, instance_variables{}, resolved_path);
 
-        // Update import cache
+        // Update import cache (zero stamp when the file can't be statted: the next
+        // file_timestamp check then re-imports, matching the old epoch-time fallback)
         implementation::import_record record;
         record.resolved_path = resolved_path;
-        try {
-            record.last_modified = std::filesystem::last_write_time(resolved_path);
-        } catch (...) {
-            // Use epoch time if we can't get file time
-            record.last_modified = std::filesystem::file_time_type::min();
-        }
+        implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
         impl->import_cache[resolved_path] = record;
         
         return result;

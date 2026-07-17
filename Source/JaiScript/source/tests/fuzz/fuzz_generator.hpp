@@ -158,6 +158,17 @@ namespace jai::fuzz {
 			if (vs.empty()) return nullptr;
 			return vs[rng_.below(static_cast<uint32_t>(vs.size()))];
 		}
+		bool is_global_var(const var_info* v) const {
+			for (const auto& g : scopes_.front()) if (&g == v) return true;
+			return false;
+		}
+		// ::name spelling for reads of GLOBAL-scope vars (~8%): the escape-hatch
+		// grammar. Inner-scope vars never gain the qualifier (::local is an
+		// undefined-variable error by contract, not a divergence generator).
+		std::string spell(const var_info* v) {
+			if (rng_.chance(8) && is_global_var(v)) return "::" + v->name;
+			return v->name;
+		}
 		void declare(const std::string& name, vt t, int class_idx = -1, bool is_var = false) {
 			scopes_.back().push_back({name, t, class_idx, is_var});
 		}
@@ -211,7 +222,7 @@ namespace jai::fuzz {
 		std::string int_expr(int depth) {
 			if (depth <= 0) {
 				if (rng_.chance(45)) {
-					if (const var_info* v = random_var(vt::i)) return v->name;
+					if (const var_info* v = random_var(vt::i)) return spell(v);
 				}
 				return int_literal();
 			}
@@ -300,7 +311,7 @@ namespace jai::fuzz {
 		}
 		std::string int_leaf_or_var() {
 			if (rng_.chance(50)) {
-				if (const var_info* v = random_var(vt::i)) return v->name;
+				if (const var_info* v = random_var(vt::i)) return spell(v);
 			}
 			return int_literal();
 		}
@@ -308,7 +319,7 @@ namespace jai::fuzz {
 		std::string float_expr(int depth) {
 			if (depth <= 0) {
 				if (rng_.chance(40)) {
-					if (const var_info* v = random_var(vt::f)) return v->name;
+					if (const var_info* v = random_var(vt::f)) return spell(v);
 				}
 				return float_literal();
 			}
@@ -331,7 +342,7 @@ namespace jai::fuzz {
 		std::string bool_expr(int depth) {
 			if (depth <= 0) {
 				if (rng_.chance(35)) {
-					if (const var_info* v = random_var(vt::b)) return v->name;
+					if (const var_info* v = random_var(vt::b)) return spell(v);
 				}
 				return bool_literal();
 			}
@@ -396,7 +407,7 @@ namespace jai::fuzz {
 		std::string string_expr(int depth) {
 			if (depth <= 0) {
 				if (rng_.chance(40)) {
-					if (const var_info* v = random_var(vt::s)) return v->name;
+					if (const var_info* v = random_var(vt::s)) return spell(v);
 				}
 				return string_literal();
 			}
@@ -464,7 +475,7 @@ namespace jai::fuzz {
 			(void)depth;
 			if (classes_.empty()) return int_literal();
 			if (rng_.chance(55)) {
-				if (const var_info* v = random_var(vt::obj)) return v->name;
+				if (const var_info* v = random_var(vt::obj)) return spell(v);
 			}
 			const class_info& ci = classes_[rng_.below(static_cast<uint32_t>(classes_.size()))];
 			int arity = ci.ctor_arities.empty() ? 0 : ci.ctor_arities[rng_.below(static_cast<uint32_t>(ci.ctor_arities.size()))];

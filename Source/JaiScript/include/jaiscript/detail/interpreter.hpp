@@ -893,7 +893,11 @@ namespace jai {
         // chain. A member METHOD hit answers nullptr - it shadows (never fall past
         // the class scope to a same-named global) but only value/callee sites mint,
         // so pointer callers land on their existing miss paths.
-        [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id) noexcept {
+        [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id, bool global_only = false) noexcept {
+            if (global_only) [[unlikely]] {
+                // ::name - GLOBAL env only (locals, captures, member scope all skipped)
+                return get_global_environment()->get_value_ptr(symbol_id);
+            }
             if (slot_index != SIZE_MAX && !call_stack_.empty()) {
                 if (auto* ptr = call_stack_.back().get_local(slot_index)) {
                     return ptr;
@@ -925,8 +929,8 @@ namespace jai {
 
         // Resolve variable with error on not found (avoids value copy vs environment_->get())
         [[nodiscard]] JAI_FORCEINLINE checked_result<script_value*> resolve_variable_required(
-            size_t slot_index, uint64_t symbol_id) noexcept {
-            if (auto* ptr = resolve_local_or_env(slot_index, symbol_id)) {
+            size_t slot_index, uint64_t symbol_id, bool global_only = false) noexcept {
+            if (auto* ptr = resolve_local_or_env(slot_index, symbol_id, global_only)) {
                 return ptr;
             }
             return checked_result<script_value*>(

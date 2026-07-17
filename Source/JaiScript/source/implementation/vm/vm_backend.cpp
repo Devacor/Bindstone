@@ -1862,7 +1862,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
 			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
 			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 			}
 			script_int r;
 			if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
@@ -1872,7 +1872,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 			}
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(lf / rf, engine_);
@@ -1889,7 +1889,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
 		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 		}
 		script_int r;
 		if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
@@ -1900,7 +1900,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
 		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
 		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 		}
 		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
 		return script_value(lf / rf, engine_);
@@ -1930,7 +1930,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
 			const script_int b = right.unchecked_as_int();
 			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 			}
 			return script_value(ints::mod(left.unchecked_as_int(), b), engine_);
 		}
@@ -1938,7 +1938,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
 			}
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(std::fmod(lf, rf), engine_);
@@ -1955,7 +1955,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 		const script_int b = unwrapped_right.unchecked_as_int();
 		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 		}
 		return script_value(ints::mod(unwrapped_left.unchecked_as_int(), b), engine_);
 	}
@@ -1964,7 +1964,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
 		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
 		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
 		}
 		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
 		return script_value(std::fmod(lf, rf), engine_);
@@ -3107,6 +3107,15 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
 #endif
 	const uint64_t sym = f.code->symbols[ins.b];
+	if (ins.c & load_flag_global_only) {
+		// ::name - GLOBAL env only (locals, captures, catch var, member scope all skipped)
+		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
+			stack_.push_back(g->deref());
+			return {};
+		}
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
+			"Undefined variable '{0}'", sym);
+	}
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		stack_.push_back(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
 		return {};
@@ -3317,7 +3326,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	// outranks anything past the function's own scopes, so an env hit that could
 	// only be a global yields to the kind-aware member path below.
 	bool member_wins = false;
-	if (f.locals && !f.top_level) {
+	if (!(ins.c & store_flag_global_only) && f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f) &&
 		    !detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
@@ -3332,7 +3341,18 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	// ONE fallback-free walk replaces the old contains() + get_value_ptr() +
 	// assign()-rewalk TRIPLE walk (non-null exactly when contains(); this/static
 	// field stores keep falling through to the kind-aware path below)
-	if (script_value* env_store_target = member_wins ? nullptr : environment_->get_env_var_ptr(sym)) {
+	script_value* store_target = nullptr;
+	if (ins.c & store_flag_global_only) {
+		// ::name store - GLOBAL env only; a miss is an error, never a member/implicit define
+		store_target = engine_->get_global_environment()->get_env_var_ptr(sym);
+		if (!store_target) {
+			return raise_(make_error_code(runtime_error_code::undefined_variable),
+				"Undefined variable '{0}'", sym);
+		}
+	} else if (!member_wins) {
+		store_target = environment_->get_env_var_ptr(sym);
+	}
+	if (script_value* env_store_target = store_target) {
 		script_value* currentVal = env_store_target;
 		if (currentVal->is_reference()) {
 			// Escape-boxed variable (cell) named as itself: redirect to the cell inner and
@@ -3740,7 +3760,9 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 
-	script_value* varPtr = resolve_local_or_env_cached(f, ins.b, sym);
+	script_value* varPtr = (ins.c & compound_flag_global_only)
+		? engine_->get_global_environment()->get_value_ptr(sym)
+		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
 		// so the compound result honors the constraint like subscript compounds do
@@ -4036,7 +4058,12 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
-	// Implicit this.member fallback
+	// Implicit this.member fallback (::name targets never reach members - a global
+	// miss is an error, sequenced after the rhs like every undefined-target store)
+	if (ins.c & compound_flag_global_only) {
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
+			"Undefined variable '{0}'", sym);
+	}
 	script_value* frame_this = current_this(f);
 	if (!frame_this || !frame_this->is_object()) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
@@ -4176,7 +4203,9 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
 	const bool isIncrement = (ins.c & incdec_flag_increment) != 0;
 
-	script_value* varPtr = resolve_local_or_env_cached(f, ins.b, sym);
+	script_value* varPtr = (ins.c & incdec_flag_global_only)
+		? engine_->get_global_environment()->get_value_ptr(sym)
+		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
 		// TYPED array element ref: deref hands back the holder scratch - the in-place
 		// mutation below must commit it to the raw buffer (KEEP BYTE-PARALLEL with the
@@ -4243,6 +4272,11 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		}
 	}
 
+	// ::name targets never reach the implicit this.member fallback
+	if (ins.c & incdec_flag_global_only) {
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
+			"Undefined variable '{0}'", sym);
+	}
 	script_value* frame_this = current_this(f);
 	if (frame_this && frame_this->is_object()) {
 		script_value this_val = *frame_this;
@@ -4358,6 +4392,14 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
                                                                   std::optional<script_value>& scratch,
                                                                   size_t cache_slot) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
+	if (operand.load_flags & load_flag_global_only) {
+		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
+		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
+			return &g->deref();
+		}
+		return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
+			"Undefined variable '{0}'", sym);
+	}
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		scratch.emplace(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
 		return &scratch.value();
@@ -4805,7 +4847,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (operand.is_subscript()) {
 		return nullptr;   // element reads bail to the pair (exec_binary_fused resolves them)
 	}
-	if (operand.load_flags & load_flag_type_ctor) {
+	if (operand.load_flags & (load_flag_type_ctor | load_flag_global_only)) {
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
@@ -13275,6 +13317,17 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				}
 
 				if (symbol_id != UINT64_MAX && caller_env) {
+					// ::name ref args bind against the GLOBAL env only
+					if (i < site->arg_global.size() && site->arg_global[i] != 0) {
+						script_value* g = engine_->get_global_environment()->get_value_ptr(symbol_id);
+						if (!g) {
+							return raise_(
+								make_error_code(runtime_error_code::undefined_variable),
+								"Cannot take reference of undefined variable");
+						}
+						VM_TRY(bind_reference_to_storage(*g, callee, param.slot_index));
+						continue;
+					}
 					// Caller member scope: a field/static outranks a same-named global
 					// as a ref target (bound as raw storage, exactly like the old
 					// fallback bound the same pointer when no global collided).

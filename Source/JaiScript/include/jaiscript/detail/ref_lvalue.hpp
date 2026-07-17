@@ -207,6 +207,10 @@ namespace jai::detail {
 				symbol_id = symbolizer->intern(ident->name);
 				const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
 			}
+			// ::name bases resolve against the GLOBAL env only
+			if (ident->global_qualified) {
+				return eng ? eng->get_global_environment()->get_value_ptr(symbol_id) : nullptr;
+			}
 			// Caller member scope (call_frame stamp): fields/statics outrank globals
 			// between the function's own scopes and the definition/global chain
 			const auto scope_state = caller.metadata

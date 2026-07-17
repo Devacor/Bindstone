@@ -150,6 +150,8 @@ namespace jai::vm {
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
+    inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
+                                                         // (locals/captures/member scope all skipped)
 
     // op_store c flags
     inline constexpr uint32_t store_flag_rhs_lvalue = 1; // RHS was identifier/member/subscript
@@ -161,6 +163,7 @@ namespace jai::vm {
                                                          // (assignment_expr::typed_store_provable):
                                                          // exec_store may skip type enforcement after
                                                          // its runtime type-tag guard confirms
+    inline constexpr uint32_t store_flag_global_only = 16; // ::name store target (global env only)
 
     // op_compound_store c layout: low 3 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0x7;
@@ -171,11 +174,13 @@ namespace jai::vm {
     inline constexpr uint32_t compound_percent = 4;
     inline constexpr uint32_t compound_flag_result_needed = 0x8;
     inline constexpr uint32_t compound_flag_no_result = 0x10; // statement position: nothing pushed
+    inline constexpr uint32_t compound_flag_global_only = 0x20; // ::name target (global env only)
 
     // op_incdec c flags
     inline constexpr uint32_t incdec_flag_postfix = 1;
     inline constexpr uint32_t incdec_flag_increment = 2;
     inline constexpr uint32_t incdec_flag_no_result = 4;  // statement position: run() pops the result
+    inline constexpr uint32_t incdec_flag_global_only = 8; // ::name target (global env only)
 
     // op_binary b operand shapes (mirror the interpreter's AST-shape fast paths)
     inline constexpr uint32_t binary_shape_none = 0;

@@ -364,7 +364,10 @@ size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 // the then path skip the store entirely.
 void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags, const expression* rhs) {
 	auto& code = chunk_->code;
-	if (!code.empty() && rhs) {
+	// ::name targets stay on the plain op (compound_fused's fast path resolves its
+	// target through the frame/env ladder; the global-only door lives in
+	// exec_compound_store and this path is cold by definition)
+	if (!code.empty() && rhs && !(kind_flags & compound_flag_global_only)) {
 		compound_fused_proto cp;
 		bool fuse = false;
 		switch (rhs->get_type()) {
@@ -462,7 +465,10 @@ bool vm_compiler::symbol_is_env_only(uint64_t symbol_id) const {
 // full op_index semantics per level for any non-array shape). Truly N-level - the
 // depth cap is a sanity bound, not a semantic limit.
 static bool fusable_subscript_index(const expression* e) {
-	if (e->get_type() == node_type::identifier_expr) return true;
+	if (e->get_type() == node_type::identifier_expr) {
+		// ::name indexes can't ride fused levels (fused_subscript_index has no flags)
+		return !static_cast<const identifier_expr*>(e)->global_qualified;
+	}
 	return e->get_type() == node_type::literal_expr &&
 	       static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_INT;
 }
@@ -479,7 +485,11 @@ static bool fusable_subscript_operand(const expression* e) {
 		if (++levels > k_max_fused_subscript_depth) return false;
 		cur = sub->left.get();
 	}
-	return levels > 0 && cur->get_type() == node_type::identifier_expr;
+	if (levels == 0 || cur->get_type() != node_type::identifier_expr) return false;
+	// ::name bases/indexes stay off the fused-subscript path (fused_subscript_index
+	// carries no load flags; the generic op_load/op_index pair honors the qualifier)
+	if (static_cast<const identifier_expr*>(cur)->global_qualified) return false;
+	return true;
 }
 
 uint32_t vm_compiler::binary_shape(binary_expr* expr) {
@@ -1372,6 +1382,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
 				if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 				else if (assign->typed_store_provable) flags |= store_flag_type_provable;
+				if (ident->global_qualified) flags |= store_flag_global_only;
 				// Dest-addressed peephole, no-result-door edition (compile_assignment's
 				// twin): a fused-binary RHS runs op_store's exact post-pop tail with no
 				// push/pop round-trip. In-place rewrite, jump targets never shift.
@@ -1394,7 +1405,9 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 			} else {
 				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
-				     compound_kind_for(assign->op.type) | compound_flag_no_result, assign->value.get());
+				     compound_kind_for(assign->op.type) | compound_flag_no_result |
+				         (ident->global_qualified ? compound_flag_global_only : 0u),
+				     assign->value.get());
 			}
 			return true;
 		}
@@ -1418,6 +1431,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			uint32_t flags = incdec_flag_no_result;
 			if (un->is_postfix) flags |= incdec_flag_postfix;
 			if (un->op.type == token_type::plus_plus) flags |= incdec_flag_increment;
+			if (ident->global_qualified) flags |= incdec_flag_global_only;
 			emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 			return true;
 		}
@@ -1531,6 +1545,9 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 
 void vm_compiler::compile_identifier_load(identifier_expr* ident) {
 	uint32_t flags = 0;
+	if (ident->global_qualified) {
+		flags |= load_flag_global_only;
+	}
 	if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
 	    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 		flags |= load_flag_type_ctor;
@@ -1796,6 +1813,9 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 		auto* ident = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(e));
 		out.slot = identifier_slot_operand(ident);
 		out.symbol = add_symbol(ident->symbol_id);
+		if (ident->global_qualified) {
+			out.load_flags |= load_flag_global_only;
+		}
 		if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
 		    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 			out.load_flags |= load_flag_type_ctor;
@@ -1822,6 +1842,9 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 		auto* base = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(cur));
 		out.slot = identifier_slot_operand(base);
 		out.symbol = add_symbol(base->symbol_id);
+		if (base->global_qualified) {
+			out.load_flags |= load_flag_global_only;
+		}
 	} else {
 		out.const_index = add_constant(static_cast<const literal_expr*>(e)->value);
 	}
@@ -1835,6 +1858,7 @@ void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {
 			uint32_t flags = 0;
 			if (expr->is_postfix) flags |= incdec_flag_postfix;
 			if (expr->op.type == token_type::plus_plus) flags |= incdec_flag_increment;
+			if (ident->global_qualified) flags |= incdec_flag_global_only;
 			emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			compile_expression(expr->operand);
@@ -1916,6 +1940,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 			else if (expr->typed_store_provable) flags |= store_flag_type_provable;
+			if (ident->global_qualified) flags |= store_flag_global_only;
 			// Dest-addressed peephole (flatstack stage 6): a fused-binary rhs runs
 			// op_store's exact post-pop tail with no push/pop round-trip. In-place
 			// rewrite like emit_compound_store, so jump targets never shift.
@@ -1947,6 +1972,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			default: kind = compound_plus; break;
 			}
 			if (!as_statement) kind |= compound_flag_result_needed;
+			if (ident->global_qualified) kind |= compound_flag_global_only;
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get());
 		}
 		return;
@@ -2082,6 +2108,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 					site.arg_symbols.push_back(arg_ident->symbol_id);
 					site.arg_slots.push_back(identifier_slot_operand(arg_ident));
+					if (arg_ident->global_qualified) {
+						site.arg_global.resize(expr->arguments.size(), 0);
+						site.arg_global[site.arg_symbols.size() - 1] = 1;
+					}
 				} else {
 					site.arg_symbols.push_back(UINT64_MAX);
 					site.arg_slots.push_back(k_invalid_u32);
@@ -2128,6 +2158,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 			site.arg_symbols.push_back(arg_ident->symbol_id);
 			site.arg_slots.push_back(identifier_slot_operand(arg_ident));
+			if (arg_ident->global_qualified) {
+				site.arg_global.resize(expr->arguments.size(), 0);
+				site.arg_global[site.arg_symbols.size() - 1] = 1;
+			}
 		} else {
 			site.arg_symbols.push_back(UINT64_MAX);
 			site.arg_slots.push_back(k_invalid_u32);

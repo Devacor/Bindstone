@@ -2830,6 +2830,16 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
 }
 
 checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
+    // ::name - GLOBAL env only (locals, captures, catch var, member scope all skipped).
+    // KEEP BYTE-PARALLEL with vm exec_load's global-only door.
+    if (expr->global_qualified) {
+        if (script_value* g = get_global_environment()->get_value_ptr(expr->symbol_id)) {
+            push_value(g->deref());
+            return checked_result<void>();
+        }
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+            "Undefined variable '{0}'", expr->symbol_id);
+    }
     if (expr->symbol_id == getValue_id_) {
     }
     // Check if this identifier is the current catch variable (fast symbol_id comparison)
@@ -2985,11 +2995,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
-				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
+				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
 				if (!leftResult) return leftResult.error_value();
 				const script_value& leftVal = leftResult.value()->deref();
 
-				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id);
+				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id, rightId->global_qualified);
 				if (!rightResult) return rightResult.error_value();
 				const script_value& rightVal = rightResult.value()->deref();
 
@@ -3130,7 +3140,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
 			else if (expr->right->get_type() == node_type::literal_expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
+				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
 				if (!leftResult) return leftResult.error_value();
 				const script_value& leftVal = leftResult.value()->deref();
 				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
@@ -3246,7 +3256,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
-				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id);
+				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id, rightId->global_qualified);
 				if (!rightResult) return rightResult.error_value();
 				script_value rightVal = rightResult.value()->deref();
 
@@ -3798,7 +3808,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
                 // Try fast path: slot-based locals first (function params and typed locals
                 // live in call-frame slots, not the environment), then environment
-                script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
+                script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (varPtr) {
                     // TYPED array element ref: deref hands back the holder scratch - the
                     // in-place mutation below must commit it to the raw buffer (KEEP
@@ -3867,6 +3877,11 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                             return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
                     }
                 } else {
+                    // ::name targets never reach the implicit this.member fallback
+                    if (identifier->global_qualified) {
+                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                            "Undefined variable '{0}'", identifier->symbol_id);
+                    }
                     // Fallback: identifier is an implicit this.member access
                     // Check if 'this' exists and has this field
                     script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
@@ -3998,7 +4013,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Slot-based O(1) first, then environment fallback
-            script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
+            script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
             if (varPtr) {
                 // Constrained element/field ref (Tier 1 bind): route through the shared
                 // helper so the compound result honors the constraint like subscript
@@ -4084,7 +4099,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         if (rhs_id->symbol_id == UINT64_MAX) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
-                        script_value* rhs_ptr = resolve_local_or_env(rhs_id->slot_index, rhs_id->symbol_id);
+                        script_value* rhs_ptr = resolve_local_or_env(rhs_id->slot_index, rhs_id->symbol_id, rhs_id->global_qualified);
                         if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                             script_int rhs_val = rhs_ptr->unchecked_as_int();
                             script_int& tref = target.unchecked_as_int_ref();
@@ -4130,7 +4145,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
                                     }
-                                    script_value* left_ptr = resolve_local_or_env(left_id->slot_index, left_id->symbol_id);
+                                    script_value* left_ptr = resolve_local_or_env(left_id->slot_index, left_id->symbol_id, left_id->global_qualified);
                                     if (left_ptr && left_ptr->raw_storage_index() == script_value::TYPEID_INT) {
                                         script_int left_val = left_ptr->unchecked_as_int();
                                         script_int right_val = right_lit->value.unchecked_as_int();
@@ -4456,6 +4471,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 script_value rightValue = pop_value();
 
+                // ::name targets never reach the implicit this.member fallback
+                if (identifier->global_qualified) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Undefined variable '{0}'", identifier->symbol_id);
+                }
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
                 script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
@@ -4775,7 +4795,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (base_ident->symbol_id == UINT64_MAX) {
                         base_ident->symbol_id = string_symbolizer_->intern(base_ident->name);
                     }
-                    script_value* base_ptr = resolve_local_or_env(base_ident->slot_index, base_ident->symbol_id);
+                    script_value* base_ptr = resolve_local_or_env(base_ident->slot_index, base_ident->symbol_id, base_ident->global_qualified);
                     script_value* array_val = base_ptr ? &base_ptr->deref() : nullptr;
                     if (array_val && array_val->raw_storage_index() == script_value::TYPEID_ARRAY) {
                         // Index: ident or int literal only (re-evaluation-safe)
@@ -4790,7 +4810,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             if (idx_ident->symbol_id == UINT64_MAX) {
                                 idx_ident->symbol_id = string_symbolizer_->intern(idx_ident->name);
                             }
-                            if (script_value* idx_ptr = resolve_local_or_env(idx_ident->slot_index, idx_ident->symbol_id)) {
+                            if (script_value* idx_ptr = resolve_local_or_env(idx_ident->slot_index, idx_ident->symbol_id, idx_ident->global_qualified)) {
                                 const script_value& idx_v = idx_ptr->deref();
                                 if (idx_v.raw_storage_index() == script_value::TYPEID_INT) {
                                     index = idx_v.unchecked_as_int();
@@ -4945,7 +4965,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // FIX #5: Enforce type compatibility for compound assignments
-                script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
+                script_value* currentVal = identifier->global_qualified
+                    ? get_global_environment()->get_value_ptr(identifier->symbol_id)
+                    : environment_->get_value_ptr(identifier->symbol_id);
                 if (currentVal) {
                     type_info_ptr target_type = currentVal->get_type_info();
                     if (target_type && target_type->base_type != script_value_type::jai_any_type) {
@@ -4967,7 +4989,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // FIX #3/#4: Save result before moving to avoid returning moved-from value
                 script_value returnValue = resultValue.clone();
-                JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
+                if (identifier->global_qualified) {
+                    JAISCRIPT_TRY(get_global_environment()->assign(identifier->symbol_id, std::move(resultValue)));
+                } else {
+                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
+                }
                 push_value(std::move(returnValue));
             } else {
                 // Fall back to AST creation for complex lvalues
@@ -5080,7 +5106,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // outranks everything past the function's own scopes, so an env hit that
             // could only be a global must yield to the member-store kernel below.
             bool member_wins = false;
-            if (member_scope_.active() &&
+            if (!identifier->global_qualified && member_scope_.active() &&
                 !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
                 member_wins = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                          member_scope_.statics, identifier->symbol_id,
@@ -5089,9 +5115,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                                               member_scope_.statics, identifier->symbol_id);
             }
 
+            // ::name resolves and stores against the GLOBAL env only
+            environment* ident_env = identifier->global_qualified
+                ? get_global_environment().get() : environment_.get();
+
             // Get the current value to check if it's a reference (environment path)
-            if (!member_wins && environment_->contains(identifier->symbol_id)) {
-                script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
+            if (!member_wins && ident_env->contains(identifier->symbol_id)) {
+                script_value* currentVal = ident_env->get_value_ptr(identifier->symbol_id);
                 bool boxed_cell = false;
                 bool store_through = false;
                 if (currentVal && currentVal->is_reference()) {
@@ -5113,7 +5143,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         *currentVal = std::move(v);
                         return {};
                     }
-                    return environment_->assign(identifier->symbol_id, std::move(v));
+                    return ident_env->assign(identifier->symbol_id, std::move(v));
                 };
                 if (store_through) {
                     // This is a reference - assign through it (deep copy the value)
@@ -5428,14 +5458,19 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     } else {
                         // Temporary value - move directly (like C++ RVO/move semantics)
                         // No clone needed - the temporary becomes the stored value
-                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
+                        JAISCRIPT_TRY(ident_env->assign(identifier->symbol_id, std::move(value)));
                         // Get the stored value back for the expression result
                         // Use shallow copy (shares object_holder) - like C++ returning lvalue reference
-                        script_value* stored = environment_->get_value_ptr(identifier->symbol_id);
+                        script_value* stored = ident_env->get_value_ptr(identifier->symbol_id);
                         push_value(stored ? *stored : make_value());  // Shallow copy, not clone
                     }
                 }
             } else {
+                // ::name targets never reach members - a global miss is an error
+                if (identifier->global_qualified) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Undefined variable '{0}'", identifier->symbol_id);
+                }
                 // Variable doesn't exist in environment
                 // Try static_method_environment's assign (which handles static fields)
                 // or instance method's 'this' field assignment
@@ -6056,7 +6091,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // "undefined variable" for every slot-resident local. Env storage is
             // pointer-stable (unordered_map); slots are stable within the frame and
             // the share below boxes into an escape-legal cell immediately.
-            script_value* targetPtr = resolve_local_or_env(identExpr->slot_index, targetSymbolId);
+            script_value* targetPtr = resolve_local_or_env(identExpr->slot_index, targetSymbolId, identExpr->global_qualified);
             if (!targetPtr) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
             }
@@ -6742,9 +6777,12 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             // the ladder (a string FIELD shadows a same-named global string): resolve
             // through the shadowing ladder first, then wrap the same way get_ref would.
             checked_result<std::reference_wrapper<script_value>> ref_result =
-                member_scope_.active()
+                (member_scope_.active() || ident->global_qualified)
                     ? [&]() -> checked_result<std::reference_wrapper<script_value>> {
-                          if (script_value* scoped = scoped_env_lookup(ident->symbol_id)) {
+                          script_value* scoped = ident->global_qualified
+                              ? get_global_environment()->get_value_ptr(ident->symbol_id)
+                              : scoped_env_lookup(ident->symbol_id);
+                          if (scoped) {
                               return std::ref(*scoped);
                           }
                           return checked_result<std::reference_wrapper<script_value>>(
@@ -8869,6 +8907,14 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
     JAISCRIPT_TRY(dispatch_expr(expr->condition.get()));
     script_value conditionValue = pop_value();
 
+    // A script throw unwinding out of the condition leaves a null PLACEHOLDER, not a
+    // bool: the unchecked read below would deref get_if<BOOL>()'s nullptr (fuzz seed
+    // 285 AV), and neither branch may run. Placeholder result, unwind propagates.
+    if (is_unwinding_) {
+        push_value(make_value());
+        return {};
+    }
+
     // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
     bool conditionIsTruthy;
     if (expression_returns_bool(expr->condition.get())) {
@@ -9082,6 +9128,13 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
         JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
         script_value conditionValue = pop_value();
 
+        // Throw unwinding out of the condition: the popped value is a null
+        // placeholder (unchecked_as_bool would deref nullptr - fuzz seed 285 AV)
+        // and neither branch may run
+        if (is_unwinding_) {
+            return {};
+        }
+
         // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
         if (expression_returns_bool(stmt->condition.get())) {
             is_true = conditionValue.unchecked_as_bool();
@@ -9130,6 +9183,13 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         } else {
             // Evaluate the condition
             JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
+
+            // Throw unwinding out of the condition: placeholder on the stack, not a
+            // bool (fuzz seed 285 AV) - stop the loop, the unwind propagates
+            if (is_unwinding_) {
+                valueStack_.discard();
+                break;
+            }
 
             const auto& val = valueStack_.top();
             bool is_true;
@@ -9252,7 +9312,8 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                     }
                 }
                 // Check if step is an identifier (i += j where j is int)
-                else if (update_assign->value->get_type() == node_type::identifier_expr) {
+                else if (update_assign->value->get_type() == node_type::identifier_expr &&
+                         !static_cast<identifier_expr*>(update_assign->value.get())->global_qualified) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
@@ -9279,7 +9340,8 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                     }
                 }
                 // Check if step is an identifier (i -= j where j is int)
-                else if (update_assign->value->get_type() == node_type::identifier_expr) {
+                else if (update_assign->value->get_type() == node_type::identifier_expr &&
+                         !static_cast<identifier_expr*>(update_assign->value.get())->global_qualified) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
@@ -9323,9 +9385,11 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                         end_literal = cond_lit->value.unchecked_as_int();
                         has_end = true;
                     }
-                } else if (cond_binary->right->get_type() == node_type::identifier_expr) {
+                } else if (cond_binary->right->get_type() == node_type::identifier_expr &&
+                           !static_cast<identifier_expr*>(cond_binary->right.get())->global_qualified) {
                     auto* cond_end_id = static_cast<identifier_expr*>(cond_binary->right.get());
-                    // End is a variable - we'll bind to its pointer
+                    // End is a variable - we'll bind to its pointer (::name bounds stay
+                    // on the generic loop: the cached slot/id pair can't carry the flag)
                     end_var_id = cond_end_id->symbol_id;
                     end_var_slot = cond_end_id->slot_index;
                     has_end = true;
@@ -9623,6 +9687,13 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         auto result = dispatch_expr(stmt->condition.get());
         if (!result) {
             error = result;  // Capture error, signal loop termination
+            return false;
+        }
+
+        // Throw unwinding out of the condition: placeholder on the stack, not a
+        // bool (fuzz seed 285 AV) - exit the loop, the unwind propagates
+        if (is_unwinding_) {
+            valueStack_.discard();
             return false;
         }
 
@@ -12161,6 +12232,18 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         if (symbol_id == UINT64_MAX) {
             symbol_id = string_symbolizer_->intern(identExpr->name);
             const_cast<identifier_expr*>(identExpr)->symbol_id = symbol_id;
+        }
+
+        // ::name ref args bind against the GLOBAL env only
+        if (identExpr->global_qualified) {
+            script_value* g = get_global_environment()->get_value_ptr(symbol_id);
+            if (!g) {
+                return checked_result<void>(
+                    make_error_code(runtime_error_code::undefined_variable),
+                    "Cannot take reference of undefined variable"
+                );
+            }
+            return bind_reference_to_storage(*g, frame_index, param.slot_index);
         }
 
         // Caller frame-slot local (env lookup can't see slot locals and would walk to

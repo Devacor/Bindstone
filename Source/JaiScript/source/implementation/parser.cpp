@@ -1115,6 +1115,19 @@ checked_result<expression_ptr> parser::primary() {
         return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
     }
 
+    // Global-qualified identifier (C++ ::name): reach a global deliberately shadowed by
+    // a class member. The identifier resolves GLOBAL-ENV-ONLY; the ordinary postfix loop
+    // then applies, so ::f(1), ::hp = 5, and ::arr[i] compose naturally. Only the
+    // prefix form is consumed here - infix :: (Class::member, ns::fn) parses postfix.
+    if (check(token_type::colon_colon) && current_ + 1 < tokens_.size() &&
+        tokens_[current_ + 1].type == token_type::identifier) {
+        advance();   // '::'
+        token identToken = advance();
+        auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
+        id_expr->global_qualified = true;
+        return id_expr;
+    }
+
     // Check if a keyword is being used as a namespace identifier (e.g., string::length)
     // This must come before identifier handling
     if (peek().type != token_type::identifier && peek().type != token_type::eof) {

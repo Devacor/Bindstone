@@ -12,6 +12,30 @@ public:
     exception_handling_tests() : suite("Exception Handling") {}
     
     void forge_tests() override {
+        test("throw_unwinding_out_of_condition_positions", [this]() {
+            // Fuzz seed 285 (pre-existing both backends at 7/13): a throw unwinding out
+            // of a COMPARISON condition left a null placeholder that the
+            // expression_returns_bool fast path fed to unchecked_as_bool (nullptr deref;
+            // truthiness conditions were safe). Every condition position must propagate
+            // the throw - no branch/body runs, no crash, engine stays usable.
+            const char* shapes[] = {
+                "int f() { throw \"boom\"; } if (f() > 0) { mark = 1; } else { mark = 2; }",           // if, cmp-literal
+                "int f() { throw \"boom\"; } if (f() != f()) { mark = 1; } else { mark = 2; }",        // if, cmp-call
+                "int f() { throw \"boom\"; } if (f()) { mark = 1; } else { mark = 2; }",               // if, truthiness
+                "int f() { throw \"boom\"; } void g() { if (f() > 0) { mark = 1; } } g();",            // nested frame
+                "int f() { throw \"boom\"; } while (f() > 0) { mark = 1; }",                           // while
+                "int f() { throw \"boom\"; } for (int i = 0; f() > i; i++) { mark = 1; }",             // for
+                "int f() { throw \"boom\"; } mark = f() > 0 ? 1 : 2;",                                 // ternary
+            };
+            for (const char* shape : shapes) {
+                auto e = make_engine();
+                e->execute("var mark = 0;");
+                check_throws([&]() { e->execute(shape); });
+                check_eq((int64_t)0, e->execute("mark").as_int());       // neither branch ran
+                check_eq((int64_t)3, e->execute("1 + 2").as_int());      // engine usable after
+            }
+        });
+
         test("basic_throw_catch", [this]() {
             auto engine = make_engine();
             

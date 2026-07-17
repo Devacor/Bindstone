@@ -1599,6 +1599,20 @@ private:
         }
     }
 
+    // Member-name / global-name collision (same source unit only - engine-registered
+    // names like to_string stay quiet: shadowing them is the established
+    // print-integration idiom). Warning severity like every shadowing diagnostic:
+    // bare 'name' in this class's methods resolves to the MEMBER (C++ order),
+    // ::name is the spelling that still reaches the global.
+    void warn_member_shadows_global(std::string_view kind, std::string_view name,
+                                    std::string_view cls, const source_location& loc) {
+        if (global_var_names_.count(name) == 0 && functions_.count(name) == 0) { return; }
+        diag(diag_level::warning, loc,
+             std::string(kind) + " '" + std::string(name) + "' of class '" + std::string(cls) +
+             "' shadows the global '" + std::string(name) + "' - bare '" + std::string(name) +
+             "' in methods means the member; spell ::" + std::string(name) + " for the global");
+    }
+
     void walk_class(const class_decl* cd) {
         auto it = classes_.find(cd->name);
         if (it == classes_.end()) { return; }
@@ -1610,6 +1624,8 @@ private:
             if (!m.declaration) { continue; }
             if (m.declaration->get_type() == node_type::variable_decl) {
                 auto* f = static_cast<variable_decl*>(m.declaration.get());
+                warn_member_shadows_global(f->is_static ? "static field" : "field",
+                                           f->name, cd->name, f->location);
                 if (f->initializer) {
                     ctype init = infer(f->initializer.get());
                     if (f->type) {
@@ -1623,6 +1639,10 @@ private:
                 }
             } else if (m.declaration->get_type() == node_type::function_decl) {
                 auto* fn = static_cast<function_decl*>(m.declaration.get());
+                if (fn->name != cd->name) {   // ctors carry the class name by construction
+                    warn_member_shadows_global(fn->is_static ? "static method" : "method",
+                                               fn->name, cd->name, fn->location);
+                }
                 // A class method that shadows a builtin shared_ptr handle method WINS over
                 // the builtin (Dev ruling 2026-07) - point at the now-unreachable builtin.
                 for (std::string_view b : k_shadowable_handle_method_names) {

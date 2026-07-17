@@ -2647,6 +2647,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         script_valueStack saved_values;
         std::optional<script_value> saved_return;
         bool saved_has_return = false;
+        detail::member_scope_ctx saved_member_scope{};
 
         explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->execute_depth_ != 0) {
             if (reentrant) {
@@ -2658,6 +2659,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 saved_return = std::move(self->returnValue_);
                 saved_has_return = self->hasReturnValue_;
                 self->environment_ = self->get_global_environment();
+                saved_member_scope = self->member_scope_;
+                self->member_scope_ = {};
             }
             // Counted, not a flag (Dev ruling): a nested execute's exit decrements
             // symmetrically and can never clear the outer run's in-flight state
@@ -2670,6 +2673,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_ = std::move(saved_values);
                 self->returnValue_ = std::move(saved_return);
                 self->hasReturnValue_ = saved_has_return;
+                self->member_scope_ = saved_member_scope;
             }
             --self->execute_depth_;
         }
@@ -2869,6 +2873,44 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         // Fall through to normal error handling if not found
     }
     
+    // Member scope (detail/member_scope.hpp): C++ unqualified-lookup order - the
+    // function's own scopes, then the class's members, then the definition/global
+    // chain. Field/static pushes copy WITHOUT deref (the old fallback's exact shape);
+    // method hits mint the same bound method the old post-walk fallback minted.
+    if (member_scope_.active()) {
+        if (script_value* own = detail::own_scope_lookup(environment_.get(), member_scope_.floor, expr->symbol_id)) {
+            push_value(own->deref());
+            return checked_result<void>();
+        }
+        auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                 member_scope_.statics, expr->symbol_id, /*want_methods*/ true);
+        if (member) {
+            if (member.what == detail::member_probe_hit::kind::method) {
+                if (member.instance && member_scope_.this_storage) {
+                    push_value(create_bound_method(*member_scope_.this_storage, member.method_value));
+                } else {
+                    push_value(std::move(member.method_value));   // static method: unbound callable
+                }
+            } else {
+                push_value(*member.value_ptr);
+            }
+            return checked_result<void>();
+        }
+        if (script_value* beyond = member_scope_.floor ? member_scope_.floor->get_value_ptr(expr->symbol_id)
+                                                       : environment_->get_value_ptr(expr->symbol_id)) {
+            push_value(beyond->deref());
+            return checked_result<void>();
+        }
+        if (current_class_context_ && current_class_context_->in_method) {
+            current_class_context_->unresolved_identifiers.insert(expr->symbol_id);
+            push_value(make_value());
+            return checked_result<void>();
+        }
+        uint64_t scoped_name_id = string_symbolizer_->intern(expr->name);
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+            "Undefined variable '{0}'", scoped_name_id);
+    }
+
     // Use parser's pre-computed symbol ID (always set by parser)
     // With lazy caching, environment_ will cache lookups automatically.
     // get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper.
@@ -5034,8 +5076,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
             }
 
+            // Member scope: a member (field, static, or method - shadowing is by NAME)
+            // outranks everything past the function's own scopes, so an env hit that
+            // could only be a global must yield to the member-store kernel below.
+            bool member_wins = false;
+            if (member_scope_.active() &&
+                !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
+                member_wins = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                         member_scope_.statics, identifier->symbol_id,
+                                                         /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
+                              detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
+                                                              member_scope_.statics, identifier->symbol_id);
+            }
+
             // Get the current value to check if it's a reference (environment path)
-            if (environment_->contains(identifier->symbol_id)) {
+            if (!member_wins && environment_->contains(identifier->symbol_id)) {
                 script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
                 bool boxed_cell = false;
                 bool store_through = false;
@@ -6683,8 +6738,20 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         if (!member->is_static && member->object->get_type() == node_type::identifier_expr) {
             auto* ident = static_cast<identifier_expr*>(member->object.get());
 
-            // Try to get a mutable reference to the variable
-            auto ref_result = environment_->get_ref(ident->symbol_id);
+            // Try to get a mutable reference to the variable. Member scope reorders
+            // the ladder (a string FIELD shadows a same-named global string): resolve
+            // through the shadowing ladder first, then wrap the same way get_ref would.
+            checked_result<std::reference_wrapper<script_value>> ref_result =
+                member_scope_.active()
+                    ? [&]() -> checked_result<std::reference_wrapper<script_value>> {
+                          if (script_value* scoped = scoped_env_lookup(ident->symbol_id)) {
+                              return std::ref(*scoped);
+                          }
+                          return checked_result<std::reference_wrapper<script_value>>(
+                              make_error_code(runtime_error_code::undefined_variable),
+                              "Undefined variable '{0}'", ident->symbol_id);
+                      }()
+                    : environment_->get_ref(ident->symbol_id);
             if (ref_result && ref_result.value().get().is_string()) {
                 // Found a string variable - check if method exists
                 auto methodIt = string_methods_.find(member->member_id);
@@ -8320,8 +8387,19 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
 
                 if (!is_overridden) {
-                    // Check environment first, then call-frame slots (locals live there).
-                    if (environment_->contains(var_id)) {
+                    // Member scope: the capture env is self-contained (parent = global
+                    // env), so a FIELD used under [=]/[&] must be materialized here with
+                    // the C++ shadowing order - the old contains()/get() walk snapshotted
+                    // a same-named GLOBAL over the member.
+                    script_value* scoped_target = member_scope_.active()
+                        ? scoped_env_lookup(var_id) : nullptr;
+                    if (scoped_target) {
+                        if (capture_by_ref) {
+                            captureEnv->define(var_id, share_boxed_env_storage(*scoped_target, engine_));
+                        } else {
+                            captureEnv->define(var_id, clone_for_capture(scoped_target->deref(), string_symbolizer_));
+                        }
+                    } else if (!member_scope_.active() && environment_->contains(var_id)) {
                         if (capture_by_ref) {
                             script_value* targetPtr = environment_->get_value_ptr(var_id);
                             if (targetPtr) {
@@ -11428,9 +11506,19 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     // Now evaluate this class's field initializers
     const auto& field_initializers = class_def->get_field_initializer_asts();
 
-    // Temporarily switch to the init environment for evaluation
+    // Temporarily switch to the init environment for evaluation. Field initializers
+    // run in the new instance's member scope (no call frame is pushed here), so the
+    // shadowing ladder needs an explicit stamp - earlier fields and members of the
+    // class under construction outrank same-named globals, exactly like ctor bodies.
     auto old_env = environment_;
     environment_ = init_env;
+    const detail::member_scope_ctx old_scope = member_scope_;
+    member_scope_ = {};
+    if (script_value* init_this = init_env->method_this_storage()) {
+        member_scope_.state = detail::member_scope_state::instance;
+        member_scope_.this_storage = init_this;
+        member_scope_.floor = init_env->parent_raw();
+    }
 
     for (const auto& [field_id, initializer_ast] : field_initializers) {
         if (initializer_ast) {
@@ -11439,6 +11527,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
             if (!result) {
                 // Restore environment before throwing
                 environment_ = old_env;
+                member_scope_ = old_scope;
                 throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
             }
             script_value field_value = pop_value();
@@ -11455,6 +11544,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
 
     // Restore environment
     environment_ = old_env;
+    member_scope_ = old_scope;
 }
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
@@ -12081,6 +12171,44 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             }
         }
 
+        // Caller member scope: a field/static outranks a same-named global as a ref
+        // target (bound as raw storage, exactly like the old post-walk fallback bound
+        // the same pointer when no global collided).
+        const auto caller_state = caller_locals
+            ? static_cast<detail::member_scope_state>(caller_locals->scope_state)
+            : detail::member_scope_state::none;
+        if (caller_state == detail::member_scope_state::instance ||
+            caller_state == detail::member_scope_state::statics) {
+            if (script_value* own = caller_env
+                    ? detail::own_scope_lookup(caller_env.get(), caller_locals->scope_floor, symbol_id)
+                    : nullptr) {
+                return bind_reference_to_storage(*own, frame_index, param.slot_index);
+            }
+            auto member = detail::probe_member_scope(caller_state, caller_locals->scope_this,
+                                                     caller_locals->scope_static, symbol_id,
+                                                     /*want_methods*/ false);
+            if (member.value_ptr) {
+                return bind_reference_to_storage(*member.value_ptr, frame_index, param.slot_index);
+            }
+            if (detail::member_scope_has_method(caller_state, caller_locals->scope_this,
+                                                caller_locals->scope_static, symbol_id)) {
+                return checked_result<void>(
+                    make_error_code(runtime_error_code::undefined_variable),
+                    "Cannot take reference of undefined variable"
+                );
+            }
+            script_value* beyond = caller_locals->scope_floor
+                ? caller_locals->scope_floor->get_value_ptr(symbol_id)
+                : (caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr);
+            if (!beyond) {
+                return checked_result<void>(
+                    make_error_code(runtime_error_code::undefined_variable),
+                    "Cannot take reference of undefined variable"
+                );
+            }
+            return bind_reference_to_storage(*beyond, frame_index, param.slot_index);
+        }
+
         script_value* argPtr = caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
         if (!argPtr) {
             return checked_result<void>(
@@ -12297,8 +12425,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
+    const detail::member_scope_ctx previousScope = member_scope_;
+    member_scope_ = {};
 
-    // Determine closure environment and method context
+    // Determine closure environment and method context; each branch stamps the
+    // frame's member scope (detail/member_scope.hpp) - the C++ shadowing ladder
+    // needs the callee KIND, which only these branches know (a plain function's
+    // env parents on the CALLER's chain, so the chain alone cannot distinguish
+    // lexical member scope from dynamic parenting).
     // NOTE: Re-access call_stack_[frame_index] each time instead of caching reference
     if (method_ctx) {
         // Direct method dispatch: same net effect as the closure_env->is_method_env()
@@ -12308,6 +12442,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         call_stack_[frame_index].closure_env = *method_ctx->definition_env;
         environment_ = get_pooled_method_environment(*method_ctx->definition_env, *method_ctx->this_obj,
                                                      method_ctx->access_ctx);
+        member_scope_.state = detail::member_scope_state::instance;
+        member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
+        member_scope_.floor = method_ctx->definition_env->get();
     } else if (function.closure_env) {
         if (function.closure_env->is_method_env()) {
             // Method call - store 'this' in the call frame
@@ -12317,6 +12454,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // Set environment to a method environment for 'this' field lookups in body
             environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj,
                                                          function.closure_env->get_access_context());
+            member_scope_.state = detail::member_scope_state::instance;
+            member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
+            member_scope_.floor = function.closure_env->parent_raw();
         } else if (function.closure_env->is_static_method_env()) {
             // Static method - store class definition in frame
             call_stack_[frame_index].static_class_def = function.closure_env->get_class_definition();
@@ -12328,16 +12468,46 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 env_symbolizer_,
                 function.closure_env->get_class_definition()
             );
+            member_scope_.state = detail::member_scope_state::statics;
+            member_scope_.statics = call_stack_[frame_index].static_class_def.get();
+            member_scope_.floor = function.closure_env->parent_raw();
         } else {
             // Regular closure
             call_stack_[frame_index].closure_env = function.closure_env;
             environment_ = get_pooled_environment(function.closure_env);
+            // A closure created inside a method sees that method's class scope
+            // (lexically, through its captured chain) between its own scopes and
+            // the globals - the boundary env's OWN storage (the enclosing call's
+            // escaped locals) stays on the far side of the members.
+            if (environment* boundary = detail::find_member_boundary(function.closure_env.get())) {
+                if (boundary->is_method_env()) {
+                    if (script_value* this_storage = boundary->method_this_storage()) {
+                        member_scope_.state = detail::member_scope_state::instance;
+                        member_scope_.this_storage = this_storage;
+                        member_scope_.floor = (boundary == function.closure_env.get())
+                                                  ? boundary->parent_raw() : boundary;
+                    }
+                } else if (auto boundary_class = boundary->get_class_definition()) {
+                    member_scope_.state = detail::member_scope_state::statics;
+                    member_scope_.statics = boundary_class.get();
+                    member_scope_.floor = (boundary == function.closure_env.get())
+                                              ? boundary->parent_raw() : boundary;
+                }
+            }
         }
     } else {
         // Regular function - use current environment for closures
         call_stack_[frame_index].closure_env = previousEnv;
         environment_ = get_pooled_environment(previousEnv);
     }
+
+    // Mirror the member scope onto the frame: the shared ref-lvalue kernel
+    // (detail/ref_lvalue.hpp) reads it through caller_frame_view, and the vm reads
+    // the same call_frame fields (its frames compute them lazily instead).
+    call_stack_[frame_index].scope_state = static_cast<uint8_t>(member_scope_.state);
+    call_stack_[frame_index].scope_floor = member_scope_.floor;
+    call_stack_[frame_index].scope_this = member_scope_.this_storage;
+    call_stack_[frame_index].scope_static = member_scope_.statics;
 
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
@@ -12365,6 +12535,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         }
         environment_ = previousEnv;
+        member_scope_ = previousScope;
         release_environment(function_env, false);
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
@@ -12545,11 +12716,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
             coro_state.saved_return_value = std::move(returnValue_);
             coro_state.saved_has_return = hasReturnValue_;
+            coro_state.saved_member_scope = member_scope_;
         }
         call_stack_.erase(call_stack_.begin() + frame_index, call_stack_.end());
         // Restore caller's environment WITHOUT releasing
         // (the coroutine now owns its environment chain and call frames)
         environment_ = previousEnv;
+        member_scope_ = previousScope;
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
         return result;
@@ -13034,11 +13207,13 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         auto caller_call_stack = std::move(call_stack_);
         auto caller_return_value = std::move(returnValue_);
         bool caller_has_return = hasReturnValue_;
+        const detail::member_scope_ctx caller_member_scope = member_scope_;
 
         environment_ = state.saved_environment;
         call_stack_ = std::move(state.saved_call_stack);
         returnValue_ = std::move(state.saved_return_value);
         hasReturnValue_ = state.saved_has_return;
+        member_scope_ = state.saved_member_scope;
 
         // The continuations are consumed LIFO (outermost first).
         // The outermost continuation is for the function body (call_function's loop).
@@ -13091,6 +13266,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 state.saved_call_stack = std::move(call_stack_);
                 state.saved_return_value = std::move(returnValue_);
                 state.saved_has_return = hasReturnValue_;
+                state.saved_member_scope = member_scope_;
                 handle.set_status(coroutine_handle::status::suspended);
             } else if (hasReturnValue_) {
                 handle.set_status(coroutine_handle::status::completed);
@@ -13131,6 +13307,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         call_stack_ = std::move(caller_call_stack);
         returnValue_ = std::move(caller_return_value);
         hasReturnValue_ = caller_has_return;
+        member_scope_ = caller_member_scope;
     }
 
     active_coroutine_ = prev_coroutine;

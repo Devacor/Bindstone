@@ -1026,12 +1026,14 @@ public:
             }
         });
 
-        test("name_resolution_globals_shadow_fields", [this]() {
+        test("name_resolution_fields_shadow_globals", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = make_engine();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
-                // reads AND writes go to the global; this.g always reaches the field;
-                // a global defined AFTER the class steals bare reads from then on
+                // C++ unqualified lookup: inside a method, the FIELD shadows a
+                // same-named global for reads AND writes; the global is untouched and
+                // stays reachable at top level; a global defined AFTER the class never
+                // steals bare member reads
                 auto r = e->execute(R"(
                     var g = "global";
                     class C {
@@ -1049,7 +1051,7 @@ public:
                     var v = "late-global";
                     c.read_bare() + "|" + c.read_this() + "|" + g + "|" + before_late + "|" + lc.probe()
                 )");
-                check_eq(std::string("written|field|written|field|late-global"), r.as<std::string>());
+                check_eq(std::string("written|written|global|field|field"), r.as<std::string>());
             }
         });
 

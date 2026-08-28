@@ -41,11 +41,13 @@ namespace MV {
 		std::string headerAndContent() const;
 
 		uint32_t headerAndContentSize() const;
+		const std::string& wire();
 
 		asio::streambuf buffer;
 		std::array<uint8_t, 4> headerBuffer = {0, 0, 0, 0};
 
 		std::string content;
+		std::string wireBytes;
 	};
 
 
@@ -79,6 +81,7 @@ namespace MV {
 		}
 
 		void send(const std::string &a_content);
+		void writeNext();
 
 		void update();
 
@@ -149,6 +152,7 @@ namespace MV {
 		asio::io_context ioService;
 		asio::ip::tcp::resolver resolver;
 		std::shared_ptr<asio::ip::tcp::socket> socket;
+		std::deque<std::shared_ptr<NetworkMessage>> outbox;
 
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
@@ -215,6 +219,7 @@ namespace MV {
 		}
 
 		void send(const std::string &a_content);
+		void writeNext();
 
 		void initiateRead();
 		size_t update(double a_dt);
@@ -239,6 +244,7 @@ namespace MV {
 		asio::io_context& ioService;
 
 		std::shared_ptr<asio::ip::tcp::socket> socket;
+		std::deque<std::shared_ptr<NetworkMessage>> outbox;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;

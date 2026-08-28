@@ -176,14 +176,25 @@ namespace MV {
 	void Client::send(const std::string &a_content) {
 		require<DeviceException>(connected(), "Failed to send message due to lack of connection.");
 		auto self = shared_from_this();
-		ioService.post([=] {
-			self;
-			auto message = std::make_shared<NetworkMessage>(a_content);
-			asio::async_write(*socket, asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](asio::error_code a_err, size_t a_amount) {
-				if (a_err) {
-					self->handleError(a_err, "write");
-				}
-			});
+		auto message = std::make_shared<NetworkMessage>(a_content);
+		ioService.post([self, message] {
+			self->outbox.push_back(message);
+			if (self->outbox.size() == 1) { self->writeNext(); }
+		});
+	}
+
+	// One async_write in flight per socket: overlapping writes interleave their bytes on the wire.
+	void Client::writeNext() {
+		auto self = shared_from_this();
+		auto message = outbox.front();
+		asio::async_write(*socket, asio::buffer(message->wire()), [self, message](asio::error_code a_err, size_t a_amount) {
+			self->outbox.pop_front();
+			if (a_err) {
+				self->handleError(a_err, "write");
+				self->outbox.clear();
+			} else if (!self->outbox.empty()) {
+				self->writeNext();
+			}
 		});
 	}
 
@@ -276,13 +287,24 @@ namespace MV {
 
 	void Connection::send(const std::string &a_content) {
 		auto self = shared_from_this();
-		ioService.post([this, self, a_content] {
-			auto message = std::make_shared<NetworkMessage>(a_content);
-			asio::async_write(*socket, asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](asio::error_code a_err, size_t a_amount) {
-				if (a_err) {
-					self->handleError(a_err, "write");
-				}
-			});
+		auto message = std::make_shared<NetworkMessage>(a_content);
+		ioService.post([self, message] {
+			self->outbox.push_back(message);
+			if (self->outbox.size() == 1) { self->writeNext(); }
+		});
+	}
+
+	void Connection::writeNext() {
+		auto self = shared_from_this();
+		auto message = outbox.front();
+		asio::async_write(*socket, asio::buffer(message->wire()), [self, message](asio::error_code a_err, size_t a_amount) {
+			self->outbox.pop_front();
+			if (a_err) {
+				self->handleError(a_err, "write");
+				self->outbox.clear();
+			} else if (!self->outbox.empty()) {
+				self->writeNext();
+			}
 		});
 	}
 
@@ -384,6 +406,12 @@ namespace MV {
 
 	uint32_t NetworkMessage::headerAndContentSize() const {
 		return 4 + static_cast<uint32_t>(content.size());
+	}
+
+	// Owned by the message for the whole async_write: a temporary would be freed mid-send.
+	const std::string& NetworkMessage::wire() {
+		if (wireBytes.empty()) { wireBytes = headerAndContent(); }
+		return wireBytes;
 	}
 
 }

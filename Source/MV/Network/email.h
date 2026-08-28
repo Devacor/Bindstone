@@ -292,7 +292,8 @@ namespace MV {
 			auto self = shared_from_this();
 			ioService->post([=] {
 				self; //force capture
-				asio::async_write(*socket, asio::buffer(a_content, a_content.size()), [this,a_validResponses,self,a_callback](asio::error_code a_err, size_t a_amount) {
+				auto payload = std::make_shared<std::string>(a_content);
+				asio::async_write(*socket, asio::buffer(*payload), [this,a_validResponses,self,a_callback,payload](asio::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessage(a_validResponses, a_callback);
@@ -327,7 +328,8 @@ namespace MV {
 			ioService->post([=] {
 				auto self = shared_from_this();
 
-				asio::async_write(socket->next_layer(), asio::buffer(a_content, a_content.size()), [this, a_validResponses, self, a_callback](asio::error_code a_err, size_t a_amount) {
+				auto payload = std::make_shared<std::string>(a_content);
+				asio::async_write(socket->next_layer(), asio::buffer(*payload), [this, a_validResponses, self, a_callback, payload](asio::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessageUnsecure(a_validResponses, a_callback);

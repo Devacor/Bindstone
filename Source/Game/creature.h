@@ -143,6 +143,7 @@ public:
 	void target(int64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
 	void target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
+	void target(const MV::Point<> &a_location, float a_range, MV::PathMode a_mode, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
 	std::shared_ptr<ServerCreature> self() const;
 
@@ -178,6 +179,7 @@ private:
 	ServerCreature* targetCreature = nullptr;
 
 	float range = 0.0f;
+	MV::PathMode pathMode = MV::PathMode::search;
 	bool arrived = false;
 	std::function<void(TargetPolicy &)> succeed;
 	std::function<void(TargetPolicy &)> fail;

@@ -43,6 +43,12 @@ static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolic
 	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, jai::script_value a_succeed) {
 		a_self.target(a_location, 0.0f, jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
 	});
+	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, int64_t a_mode, jai::script_value a_succeed) {
+		a_self.target(a_location, 0.0f, static_cast<MV::PathMode>(a_mode), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
+	});
+	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, double a_range, int64_t a_mode, jai::script_value a_succeed) {
+		a_self.target(a_location, static_cast<float>(a_range), static_cast<MV::PathMode>(a_mode), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
+	});
 	builder.method("self", &TargetPolicy::self);
 	builder.method("active", &TargetPolicy::active);
 	builder.method("stunned", &TargetPolicy::stunned);
@@ -253,6 +259,12 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
 	}
 }
 
+void TargetPolicy::target(const MV::Point<> &a_location, float a_range, MV::PathMode a_mode, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
+	pathMode = a_mode;
+	target(a_location, a_range, a_succeed, a_fail);
+	pathMode = MV::PathMode::search;
+}
+
 void TargetPolicy::target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
 	clearTarget();
 	if (!stunDuration && selfCreature) {
@@ -267,7 +279,7 @@ void TargetPolicy::target(const MV::Point<> &a_location, float a_range, std::fun
 			fail = a_fail;
 			range = a_range;
 			registerPathfindingListeners();
-			selfCreature->agent()->gridGoal(a_location, range);
+			selfCreature->agent()->gridGoal(a_location, range, pathMode);
 			return;
 		}
 	}

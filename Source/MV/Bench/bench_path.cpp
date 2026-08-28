@@ -180,11 +180,11 @@ namespace {
 		return result;
 	}
 
-	AgentTrack makeTrack(const std::shared_ptr<Map>& a_map, const Point<int>& a_start, const Point<int>& a_goal, float a_speed, float a_acceptable) {
+	AgentTrack makeTrack(const std::shared_ptr<Map>& a_map, const Point<int>& a_start, const Point<int>& a_goal, float a_speed, float a_acceptable, PathMode a_mode = PathMode::search) {
 		AgentTrack track;
 		track.agent = NavigationAgent::make(a_map, a_start);
 		track.agent->speed(a_speed);
-		track.agent->goal(a_goal, a_acceptable);
+		track.agent->goal(a_goal, a_acceptable, a_mode);
 		track.goal = track.agent->goal();
 		track.last = track.agent->position();
 		track.straight = std::max(0.0, static_cast<double>(distance(track.last, track.goal)) - static_cast<double>(a_acceptable));
@@ -231,7 +231,7 @@ namespace {
 		auto map = Map::make(Size<int>(64, 24), mapsUseCorners);
 		for (int y = 0; y < 24; ++y) { if (y % 6 != 3 && y % 6 != 4) { map->get(Point<int>(32, y)).staticBlock(); } }
 		std::vector<AgentTrack> tracks;
-		for (int i = 0; i < 64; ++i) { tracks.push_back(makeTrack(map, Point<int>(2 + i % 8, 8 + i / 8), Point<int>(60, 12), 6.0f, 6.0f)); }
+		for (int i = 0; i < 64; ++i) { tracks.push_back(makeTrack(map, Point<int>(2 + i % 8, 8 + i / 8), Point<int>(60, 12), 6.0f, 6.0f, PathMode::flowField)); }
 		return runSwarm(map, tracks, a_ticks, 1.0 / 60.0);
 	}
 
@@ -242,7 +242,7 @@ namespace {
 		AgentTrack track;
 		track.agent = NavigationAgent::make(map, Point<int>(2, 8), 3);
 		track.agent->speed(6.0f);
-		track.agent->goal(Point<int>(58, 10), 1.0f);
+		track.agent->goal(Point<int>(58, 10), 1.0f, PathMode::flowField);
 		track.acceptable = 1.0;
 		track.goal = track.agent->goal();
 		track.last = track.agent->position();
@@ -260,7 +260,7 @@ namespace {
 			AgentTrack track;
 			track.agent = NavigationAgent::make(map, Point<int>(2 + (i % 4) * 3, 5 + (i / 4) * 3), 3);
 			track.agent->speed(6.0f);
-			track.agent->goal(Point<int>(58, 10), 6.0f);
+			track.agent->goal(Point<int>(58, 10), 6.0f, PathMode::flowField);
 			track.acceptable = 6.0;
 			track.goal = track.agent->goal();
 			track.last = track.agent->position();
@@ -321,7 +321,7 @@ namespace {
 				AgentTrack track;
 				track.agent = NavigationAgent::make(map, spawn, 3);
 				track.agent->speed(6.0f);
-				track.agent->goal(Point<int>(236, 48), 8.0f);
+				track.agent->goal(Point<int>(236, 48), 8.0f, PathMode::flowField);
 				track.acceptable = 8.0;
 				track.goal = track.agent->goal();
 				track.last = track.agent->position();
@@ -337,8 +337,8 @@ namespace {
 		auto map = Map::make(Size<int>(48, 3), mapsUseCorners);
 		std::vector<AgentTrack> tracks;
 		for (int i = 0; i < 16; ++i) {
-			tracks.push_back(makeTrack(map, Point<int>(i % 6, i / 6), Point<int>(46, 1), 6.0f, 6.0f));
-			tracks.push_back(makeTrack(map, Point<int>(47 - i % 6, 2 - i / 6), Point<int>(1, 1), 6.0f, 6.0f));
+			tracks.push_back(makeTrack(map, Point<int>(i % 6, i / 6), Point<int>(46, 1), 6.0f, 6.0f, PathMode::flowField));
+			tracks.push_back(makeTrack(map, Point<int>(47 - i % 6, 2 - i / 6), Point<int>(1, 1), 6.0f, 6.0f, PathMode::flowField));
 		}
 		return runSwarm(map, tracks, a_ticks, 1.0 / 60.0);
 	}

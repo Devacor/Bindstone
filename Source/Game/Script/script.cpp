@@ -16,11 +16,24 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/ArtificialIntelligence/pathfinding.h"
 #include <jaiscript/stdlib/stdlib.hpp>
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/generalUtility.h"
 
 namespace MV {
+	// Script-visible spelling of MV::PathMode: PathMode.search / PathMode.flowField
+	struct PathModeValues {
+		int64_t search = static_cast<int64_t>(MV::PathMode::search);
+		int64_t flowField = static_cast<int64_t>(MV::PathMode::flowField);
+	};
+	static jai::registrar<PathModeValues, MV::Services> _hookPathModeValues("PathModeValues",
+		[](jai::dynamic_binder<PathModeValues>& builder, const MV::Services&) {
+		builder.property("search", &PathModeValues::search);
+		builder.property("flowField", &PathModeValues::flowField);
+	});
+
 
 	namespace {
 		bool environmentFlag(const char* a_name) {
@@ -121,6 +134,7 @@ namespace MV {
 		jai::stdlib::register_all(*engine);
 		jai::bind_registrar<MV::Services>(*engine, a_services);
 		engine->add_global("InEditMode", jai::script_value(editMode(), engine.get()));
+		engine->add_global("PathMode", engine->make_object(std::make_shared<PathModeValues>()));
 		if (editMode()) {
 			MV::info("Script engine: edit mode (InEditMode=true, gameplay script hot-reload on)");
 		}

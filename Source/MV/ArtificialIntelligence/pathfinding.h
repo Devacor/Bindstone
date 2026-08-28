@@ -28,6 +28,11 @@ namespace MV {
 	class Path;
 	class NavigationAgent;
 	class FlowField;
+
+	// How an agent turns a goal into a path. search = A* every time (the default). flowField = a
+	// field shared by everyone heading for the same goal region, with A* only while no field exists
+	// yet; opt in for goals many agents share (the enemy well), keep search for chasing one target.
+	enum class PathMode : uint8_t { search, flowField };
 	class MapNode {
 		friend TemporaryCost;
 		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
@@ -250,6 +255,18 @@ namespace MV {
 		// Sized so a full-map path completes in one search on the game's 250x100 grid: at ~160 ns/node
 		// even a fully spent budget is ~5 ms of server tick; typical ticks spend a fraction of it
 		static constexpr int64_t FRAME_NODE_BUDGET = 128000;
+		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 16000;
+
+		// Runtime tunables (defaults above): nodes per tick shared by every agent, nodes one search
+		// may spend before it yields its slice, fields (re)computed per tick, fields kept cached
+		int64_t searchBudget() const { return frameNodeBudget; }
+		void searchBudget(int64_t a_nodesPerTick) { frameNodeBudget = std::max<int64_t>(MIN_SEARCH_NODES, a_nodesPerTick); }
+		int64_t searchLimit() const { return searchLimitPerRequest; }
+		void searchLimit(int64_t a_nodesPerSearch) { searchLimitPerRequest = std::max<int64_t>(MIN_SEARCH_NODES, a_nodesPerSearch); }
+		int fieldsPerTick() const { return fieldsPerTickAllowance; }
+		void fieldsPerTick(int a_fields) { fieldsPerTickAllowance = std::max(0, a_fields); }
+		size_t maxFlowFields() const { return flowFieldCapacity; }
+		void maxFlowFields(size_t a_fields) { flowFieldCapacity = std::max<size_t>(1, a_fields); }
 		static constexpr double BUDGET_RESET_INTERVAL = 1.0 / 60.0;
 
 		void ensureCellsInitialized();
@@ -300,6 +317,10 @@ namespace MV {
 		std::shared_ptr<FlowField> flowFieldFor(const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize);
 		static constexpr size_t MAX_FLOW_FIELDS = 16;
 		static constexpr int FIELDS_PER_TICK = 1;
+		int64_t frameNodeBudget = FRAME_NODE_BUDGET;
+		int64_t searchLimitPerRequest = DEFAULT_SEARCH_LIMIT;
+		int fieldsPerTickAllowance = FIELDS_PER_TICK;
+		size_t flowFieldCapacity = MAX_FLOW_FIELDS;
 
 		// Fields depend on static blocks and base costs only; agents' temporary path costs never
 		// invalidate them (they would, every tick, and every agent would fall back to searching)
@@ -343,11 +364,11 @@ namespace MV {
 		}
 
 		bool hasBudget() const {
-			return nodesUsedThisFrame < FRAME_NODE_BUDGET;
+			return nodesUsedThisFrame < frameNodeBudget;
 		}
 
 		int64_t remainingBudget() const {
-			return std::max(int64_t(0), FRAME_NODE_BUDGET - nodesUsedThisFrame);
+			return std::max(int64_t(0), frameNodeBudget - nodesUsedThisFrame);
 		}
 
 		void consumeBudget(int64_t nodes) const {
@@ -707,7 +728,7 @@ namespace MV {
 
 		std::vector<PathNode> path(bool a_allowRecalculate = true) {
 			if (dirtyPath && a_allowRecalculate) {
-				do { recalculate(); } while (searchInProgress);
+				do { recalculate(map->searchLimit()); } while (searchInProgress);
 			}
 			return calculatedPath;
 		}
@@ -750,6 +771,29 @@ namespace MV {
 
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal) {
 			return goal(a_newGoal, 0.0f);
+		}
+
+		std::shared_ptr<NavigationAgent> goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance, PathMode a_mode) {
+			pathMode(a_mode);
+			return goal(cast<PointPrecision>(a_newGoal), a_acceptableDistance);
+		}
+
+		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance, PathMode a_mode) {
+			pathMode(a_mode);
+			return goal(a_newGoal, a_acceptableDistance);
+		}
+
+		PathMode pathMode() const {
+			return ourPathMode;
+		}
+
+		std::shared_ptr<NavigationAgent> pathMode(PathMode a_mode) {
+			if (ourPathMode != a_mode) {
+				ourPathMode = a_mode;
+				followingField = false;
+				markDirty();
+			}
+			return shared_from_this();
 		}
 
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
@@ -953,7 +997,7 @@ namespace MV {
 		// A shared field for the goal gives the next stretch of path by gradient descent: no search,
 		// no budget, every agent every tick. Falls back to A* while no fresh field is available.
 		bool followFlowField() {
-			if (!useFlowFields || footprintDisabled) { return false; }
+			if (ourPathMode != PathMode::flowField || footprintDisabled) { return false; }
 			auto field = map->flowFieldFor(goalCell(), acceptableDistance, unitSize);
 			if (!field || !field->reachable(currentCell())) { return false; }
 			auto nodes = field->descend(map, currentCell(), FLOW_STEPS, this);
@@ -975,7 +1019,7 @@ namespace MV {
 
 		// One slice of search per call; an unfinished search resumes next call (same start/goal)
 		// instead of restarting, so a path that needs more than one budget grant still completes.
-		void recalculate(int64_t searchLimit = DEFAULT_SEARCH_LIMIT) {
+		void recalculate(int64_t searchLimit) {
 			if (followFlowField()) { return; }
 			followingField = false;
 			receivers.clear();
@@ -1094,13 +1138,12 @@ namespace MV {
 		bool dirtyPath = true;
 
 		static constexpr int RECALC_URGENCY_THRESHOLD = 3;
-		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 16000;
 		static constexpr int MAX_SEARCH_SLICES = 8;
 		static constexpr size_t MAX_LOOKAHEAD = 8;
 		static constexpr size_t FLOW_STEPS = 12;
 		static constexpr size_t FLOW_EXTEND_AT = 4;   // nodes left when the next stretch is derived
 		bool followingField = false;
-		bool useFlowFields = true;
+		PathMode ourPathMode = PathMode::search;
 		bool searchInProgress = false;
 		int searchSlices = 0;
 

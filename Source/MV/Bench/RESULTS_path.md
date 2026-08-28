@@ -255,3 +255,20 @@ Baseline findings:
   never ran. The crowd_lane row above is from the run that completed.
 - Baseline already includes the 2026-08-27 budget fixes (actual nodes charged, `MIN_SEARCH_LIMIT`,
   retry backoff, nearby placement); the pre-fix code charged the search limit per attempt.
+
+## I8 — opt-in path modes and runtime tunables
+
+`PathMode { search, flowField }` on every agent, default `search`; `goal(cell, distance, mode)` and
+`pathMode(mode)` switch it (a switch marks the path dirty). Map tunables are members with setters
+(`searchBudget`, `searchLimit`, `fieldsPerTick`, `maxFlowFields`; the constants remain the defaults).
+Script surface: `PathMode.search` / `PathMode.flowField` globals, `agent.gridGoal(cell, range, mode)`,
+`agent.pathMode()`, the PathMap setters, and `targeting().target(location[, range], mode, succeed)`
+— a location target carries its mode into every re-goal; creature targets stay `search`. Every
+creature's well march (`Assets/Creatures/*/main.script`) opts into `PathMode.flowField`.
+
+Bench scenarios now spell their mode: shared-goal ones (`crowd_lane`, `crowd_big`, `corridor_swap`,
+`lane_march`) use `flowField`, the random-goal ones (`spawn_contention`, `dynamic_replan`) and
+`solo_big` use `search` — so their node counts rise (spawn 11k → 110k, dynamic 323k → 1.43M on
+4-conn) while arrivals/stuck/mobility are unchanged; the flow-field rows are byte-identical to I5
+except `corridor_swap` 4-conn 78% → 75% (one agent; not investigated). Live game: stalled 0 at every
+report, 58–61 of ~80 moving, attacks per client 5.3k / 4.1k, zero script or wire errors.

@@ -13,6 +13,14 @@ static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 	builder.method("resizeGrid", &MV::Scene::PathMap::resizeGrid);
 	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::PathMap::*)() const>(&MV::Scene::PathMap::cellSize));
 	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::PathMap>(MV::Scene::PathMap::*)(const MV::Size<>&)>(&MV::Scene::PathMap::cellSize));
+	builder.method("searchBudget", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchBudget(); });
+	builder.method("searchBudget", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchBudget(a_nodes); });
+	builder.method("searchLimit", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.searchLimit(); });
+	builder.method("searchLimit", [](MV::Scene::PathMap& a_self, int64_t a_nodes) { return a_self.searchLimit(a_nodes); });
+	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.fieldsPerTick(); });
+	builder.method("fieldsPerTick", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.fieldsPerTick(static_cast<int>(a_fields)); });
+	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self) -> int64_t { return a_self.maxFlowFields(); });
+	builder.method("maxFlowFields", [](MV::Scene::PathMap& a_self, int64_t a_fields) { return a_self.maxFlowFields(a_fields); });
 	builder.method("gridSize", &MV::Scene::PathMap::gridSize);
 
 	builder.method("nodeFromGrid", static_cast<MV::MapNode&(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::nodeFromGrid));
@@ -45,6 +53,10 @@ static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAg
 
 	builder.method("gridGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridGoal));
 	builder.method("gridGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridGoal));
+	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<int>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); });
+	builder.method("gridGoal", [](MV::Scene::PathAgent& a_self, const MV::Point<>& a_goal, double a_distance, int64_t a_mode) { return a_self.gridGoal(a_goal, static_cast<MV::PointPrecision>(a_distance), static_cast<MV::PathMode>(a_mode)); });
+	builder.method("pathMode", [](MV::Scene::PathAgent& a_self) -> int64_t { return static_cast<int64_t>(a_self.pathMode()); });
+	builder.method("pathMode", [](MV::Scene::PathAgent& a_self, int64_t a_mode) { return a_self.pathMode(static_cast<MV::PathMode>(a_mode)); });
 	builder.method("localGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localGoal));
 	builder.method("localGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localGoal));
 

@@ -878,14 +878,14 @@ namespace MV {
 			if (shown++ < 3) { detail += "\n    " + agent->debugState(); }
 		}
 		std::cerr << "[path] tick " << tickCount << " agents " << agents.size() << " moving " << moving << " stalled " << stalled << " idle " << idle
-			<< " queue " << searchQueue.size() << " budget used " << nodesUsedThisFrame << "/" << FRAME_NODE_BUDGET << detail << std::endl;
+			<< " queue " << searchQueue.size() << " budget used " << nodesUsedThisFrame << "/" << frameNodeBudget << detail << std::endl;
 	}
 
 	std::shared_ptr<FlowField> Map::flowFieldFor(const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize) {
 		for (auto& field : flowFields) {
 			if (field->goal() == a_goal && field->unitSize() == a_unitSize && equals(field->radius(), a_radius)) {
 				if (field->generation == flowGeneration) { field->lastUsedTick = tickCount; return field; }
-				if (fieldsComputedThisTick >= FIELDS_PER_TICK) { return nullptr; }
+				if (fieldsComputedThisTick >= fieldsPerTickAllowance) { return nullptr; }
 				++fieldsComputedThisTick;
 				field = std::make_shared<FlowField>(shared_from_this(), a_goal, a_radius, a_unitSize);
 				field->generation = flowGeneration;
@@ -893,12 +893,12 @@ namespace MV {
 				return field;
 			}
 		}
-		if (fieldsComputedThisTick >= FIELDS_PER_TICK) { return nullptr; }
+		if (fieldsComputedThisTick >= fieldsPerTickAllowance) { return nullptr; }
 		++fieldsComputedThisTick;
 		auto field = std::make_shared<FlowField>(shared_from_this(), a_goal, a_radius, a_unitSize);
 		field->generation = flowGeneration;
 		field->lastUsedTick = tickCount;
-		if (flowFields.size() >= MAX_FLOW_FIELDS) {
+		if (flowFields.size() >= flowFieldCapacity) {
 			auto oldest = std::min_element(flowFields.begin(), flowFields.end(), [](const std::shared_ptr<FlowField>& a_lhs, const std::shared_ptr<FlowField>& a_rhs) { return a_lhs->lastUsedTick < a_rhs->lastUsedTick; });
 			*oldest = field;
 		} else {
@@ -1044,7 +1044,7 @@ namespace MV {
 
 	void NavigationAgent::performSearch() {
 		softSearch = ticksWithoutProgress >= SOFT_SEARCH_TICKS;
-		int64_t searchLimit = std::min(map->remainingBudget(), DEFAULT_SEARCH_LIMIT);
+		int64_t searchLimit = std::min(map->remainingBudget(), map->searchLimit());
 		recalculate(searchLimit);
 		if (ourPath) { map->consumeBudget(std::max<int64_t>(1, std::min(searchLimit, ourPath->stepNodes()))); }
 	}

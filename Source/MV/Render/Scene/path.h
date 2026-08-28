@@ -15,16 +15,6 @@ namespace MV {
 			friend class jai::access;
 
 		public:
-			// JaiScript serialization - must be public for trait detection (templated for CRTP archives)
-			template<typename Archive>
-			static void load_and_construct(Archive& ar,
-			                               jai::serialization::construct<PathMap>& c)
-				requires jai::serialization::jai_archive<Archive> {
-				c(std::shared_ptr<Node>(), Size<int>());
-				c->property_mgr.load(ar);
-				c->initialize();
-			}
-
 			DrawableDerivedAccessorsNoShowHide(PathMap)
 
 
@@ -54,6 +44,11 @@ namespace MV {
 
 			Size<> cellSize() const {
 				return cellDimensions.get();
+			}
+
+			// Once per simulation tick, before agents move: resets the search budget and serves queued searches
+			void beginTick() {
+				map->beginTick();
 			}
 
 			Size<int> gridSize() const {
@@ -332,7 +327,7 @@ namespace MV {
 			}
 
 			bool hasFootprint() const {
-				return !agent->hasFootprint();
+				return agent->hasFootprint();
 			}
 
 		protected:

@@ -12,7 +12,6 @@
 static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
 	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
-	builder.auto_bind();
 
 	builder.method("visible", &MV::Scene::Drawable::visible);
 	builder.method("show", &MV::Scene::Drawable::show);
@@ -299,6 +298,7 @@ namespace MV {
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
 			jai::property_owner<Drawable, Component>(a_owner),
 			ourAnchors(property_mgr, "anchors", {this}) {
+			ourAnchors.set_custom_clone([](jai::property<Anchors>& a_source, jai::property<Anchors>& a_target) { a_target.get() = a_source.get(); });
 			points->resize(4);
 		}
 
@@ -355,6 +355,7 @@ namespace MV {
 				hookupTextureSizeWatchers();
 				rebuildTextureCache();
 			}
+			refreshBounds(); // localBounds is transient: loaded points must rebuild it before any anchor reads worldBounds()
 		}
 
 		void Drawable::hookupTextureSizeWatchers() {
@@ -379,6 +380,12 @@ namespace MV {
 		}
 
 		void Drawable::postLoadInitialize() {
+			if (!materialId->empty() && (!materialInstance || materialInstance->id() != materialId.get())) {
+				materialInstance = owner()->renderer().getMaterial(materialId.get());
+				if (!materialInstance) {
+					warning("Material [", materialId.get(), "] not found for [", owner()->id(), "].[", id(), "] - id kept for re-save");
+				}
+			}
 			ourAnchors->postLoadInitialize();
 		}
 
@@ -397,27 +404,26 @@ namespace MV {
 		}
 
 		Anchors::Anchors(const Anchors& a_rhs) :
-			parentAnchors(a_rhs.parentAnchors),
-			ourOffset(a_rhs.ourOffset),
-			pivotPercent(a_rhs.pivotPercent),
 			selfReference(a_rhs.selfReference) {
-
-			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
-				parentIdLoaded = a_rhs.parentReference.lock()->id();
-			} else {
-				parentReference = a_rhs.parentReference;
-			}
+			*this = a_rhs;
 		}
 
-		Anchors& Anchors::operator=(const Anchors& a_rhs){
+		Anchors& Anchors::operator=(const Anchors& a_rhs) {
+			if (this == &a_rhs) { return *this; }
+			removeFromParent();
 			parentAnchors = a_rhs.parentAnchors;
 			ourOffset = a_rhs.ourOffset;
 			pivotPercent = a_rhs.pivotPercent;
-
-			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
-				parentIdLoaded = a_rhs.parentReference.lock()->id();
-			} else {
-				parentReference = a_rhs.parentReference;
+			applyingPosition = a_rhs.applyingPosition;
+			parentIdLoaded = a_rhs.parentIdLoaded;
+			if (auto sourceParent = a_rhs.parentReference.lock()) {
+				bool parentInSourceAncestry = a_rhs.selfReference && a_rhs.selfReference->ownerIsAlive() &&
+					sourceParent == a_rhs.selfReference->owner()->componentInParents(sourceParent->id(), false, true).self();
+				if (parentInSourceAncestry) {
+					parentIdLoaded = sourceParent->id();
+				} else {
+					parentReference = sourceParent;
+				}
 			}
 			return *this;
 		}
@@ -500,7 +506,8 @@ namespace MV {
 					auto scaledParentAnchors = parentAnchors * toScale(parentSize);
 
 					auto ourPosition = selfReference->owner()->worldPosition();
-					pivotPercent = (ourPosition - childBounds.minPoint) / toPoint(childBounds.size());
+					auto childSize = childBounds.size();
+					pivotPercent = (childSize.width > 0.0f && childSize.height > 0.0f) ? (ourPosition - childBounds.minPoint) / toPoint(childSize) : Point<>();
 
 					ourOffset = childBounds - (scaledParentAnchors + parentBounds.minPoint);
 				}
@@ -537,7 +544,10 @@ namespace MV {
 
 		void Anchors::registerWithParent() {
 			if (auto lockedParent = parentReference.lock()) {
-				lockedParent->childAnchors.push_back(this);
+				auto& siblings = lockedParent->childAnchors;
+				if (std::find(siblings.begin(), siblings.end(), this) == siblings.end()) {
+					siblings.push_back(this);
+				}
 				apply();
 			} else {
 				ourOffset.clear();

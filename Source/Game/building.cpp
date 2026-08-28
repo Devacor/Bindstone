@@ -52,8 +52,9 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 	});
 }
 
-static jai::registrar<Building, MV::Services> _hookBuilding("Building",
+static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding("Building",
 	[](jai::dynamic_binder<Building>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
 	jai::bind_signal_type<void(std::shared_ptr<Building>)>(builder.bound_engine(), "SignalBuilding");
 	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
 	builder.method("upgrade", &Building::upgrade);
@@ -71,13 +72,6 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, in
 	owningPlayer(a_player),
 	gameInstance(a_instance),
 	onUpgraded(onUpgradedSignal){
-
-	if (auto lockedOwner = a_owner.lock()) {
-		auto spawnObject = lockedOwner->get("spawn", false);
-		if (spawnObject) {
-			spawnPoint = spawnObject->position();
-		}
-	}
 }
 
 void Building::initialize() {
@@ -85,6 +79,7 @@ void Building::initialize() {
 
 	newNode->serializable(false);
 	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>(true, false).get();
+	spawnNode = newNode->get("spawn", false);
 
 	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());

@@ -37,11 +37,14 @@ public:
 
 	TeamSide side() const { return ourSide; }
 
+	int health() const { return ourHealth; }
+	void damage(int a_amount);
+
 private:
 	GameInstance& game;
 
 	std::shared_ptr<InGamePlayer> player;
-	int health;
+	int ourHealth;
 	TeamSide ourSide;
 
 	MV::Point<> ourWellPosition;

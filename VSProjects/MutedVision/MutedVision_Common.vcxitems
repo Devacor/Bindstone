@@ -17,7 +17,6 @@
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\jaiscript.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp" />
@@ -51,7 +50,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.cpp" />
@@ -69,8 +67,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_map.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\builtin_methods.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\checked_result.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder_serialization.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_registry.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_fwd.hpp" />
@@ -84,16 +80,13 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\function_binder.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\parameter_storage.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\parse_errors.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\property_type_converter.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\registrar.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\runtime_errors.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\script_class.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\serialization.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\strong_ptr.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\types.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\type_info.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_ext.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_impl.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\ast.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter.hpp" />
@@ -114,7 +107,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\binary_archive.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\json_archive.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serialization_metadata.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serializer.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\receiver_owner.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\signal.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\signal_impl.hpp" />
@@ -124,10 +116,8 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\json.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\math.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\stdlib.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\vector.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\package.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.h" />
@@ -140,7 +130,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\package.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\precompiled.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\glext.h" />
@@ -174,7 +163,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\makeNvp.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp" />
@@ -184,12 +172,10 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\messenger.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\optionalCalls.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\package.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\properties.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\require.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\scopeGuard.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\services.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\signal.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stopwatch.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stringUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\task.h" />
@@ -199,8 +185,5 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tupleHelpers.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\visitor.hpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i" />
   </ItemGroup>
 </Project>

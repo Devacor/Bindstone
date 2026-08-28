@@ -161,7 +161,7 @@ namespace MV {
 			std::shared_ptr<Spine> unbindAll();
 
 			std::map<std::string, std::set<std::string>> boundSlots() const {
-				return slotsToNodes;
+				return *slotsToNodes;
 			}
 
 			MV::Point<> slotPosition(const std::string &a_slotId) const;
@@ -186,7 +186,7 @@ namespace MV {
 			bool loaded() const;
 
 			FileBundle bundle() const {
-				return fileBundle;
+				return *fileBundle;
 			}
 		protected:
 			virtual void initialize() override;
@@ -214,20 +214,12 @@ namespace MV {
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const{
 				property_mgr.save(archive);
-				archive(
-					jai::serialization::make_nvp("fileBundle", fileBundle),
-					jai::serialization::make_nvp("slotsToNodes", slotsToNodes)
-				);
 				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
 				property_mgr.load(archive);
-				archive(
-					jai::serialization::make_nvp("fileBundle", fileBundle),
-					jai::serialization::make_nvp("slotsToNodes", slotsToNodes)
-				);
 				Drawable::load(archive, 0);
 			}
 
@@ -239,7 +231,7 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Spine>(fileBundle).self());
+				return cloneHelper(a_parent->attach<Spine>(*fileBundle).self());
 			}
 
 			std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -256,7 +248,7 @@ namespace MV {
 			FileTextureDefinition * loadSpineSlotIntoPoints(spSlot* slot);
 			FileTextureDefinition *getSpineTextureFromSlot(spSlot* slot) const;
 
-			FileBundle fileBundle;
+			JAI_PROPERTY((FileBundle), fileBundle);
 
 			spSkeleton* skeleton = nullptr;
 			spAnimationState* animationState = nullptr;
@@ -276,7 +268,7 @@ namespace MV {
 
 			int defaultTrack = 0;
 			std::map<int, std::unique_ptr<AnimationTrack>> tracks;
-			std::map<std::string, std::set<std::string>> slotsToNodes;
+			JAI_PROPERTY((std::map<std::string, std::set<std::string>>), slotsToNodes);
 		};
 
 

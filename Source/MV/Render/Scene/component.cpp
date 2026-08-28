@@ -7,8 +7,6 @@
 
 static jai::registrar<MV::Scene::Component, MV::Services> _hookComponent("Component",
 	[](jai::dynamic_binder<MV::Scene::Component>& builder, const MV::Services&) {
-	builder.auto_bind();
-
 	builder.method("id", static_cast<std::string(MV::Scene::Component::*)() const>(&MV::Scene::Component::id));
 	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const std::string&)>(&MV::Scene::Component::id));
 

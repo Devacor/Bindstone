@@ -13,9 +13,6 @@
     <Filter Include="Game\Instance">
       <UniqueIdentifier>{f8f26102-eddb-4451-9a03-7f5448fa6327}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Editor">
-      <UniqueIdentifier>{1d2b999a-0310-4eb4-823e-c84d0095c683}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Game\Script">
       <UniqueIdentifier>{80a48338-8672-4827-8666-942d83862250}</UniqueIdentifier>
     </Filter>
@@ -33,31 +30,10 @@
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.cpp">
       <Filter>Game\NetworkLayer</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\battleEffect.cpp">
       <Filter>Game</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\building.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\editorControls.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\editorFactories.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp">
       <Filter>Game</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\creature.cpp">
@@ -110,35 +86,11 @@
     <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.h">
       <Filter>Game\NetworkLayer</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\componentPanels.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Game\building.h">
       <Filter>Game</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Game\battleEffect.h">
       <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editComponents.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editor.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editorControls.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editorDefines.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\editorFactories.h">
-      <Filter>Editor</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Game\gameEditor.h">
       <Filter>Game</Filter>
@@ -184,9 +136,6 @@
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Game\standardScriptMethods.h">
       <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Source\Editor\texturePicker.h">
-      <Filter>Editor</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)Source\Game\wallet.h">
       <Filter>Game</Filter>

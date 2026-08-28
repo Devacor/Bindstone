@@ -1,4 +1,6 @@
 target_sources(BindStone PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/battleEffect.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/battleEffect.h
   ${CMAKE_CURRENT_SOURCE_DIR}/building.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/building.h
   ${CMAKE_CURRENT_SOURCE_DIR}/creature.cpp
@@ -7,10 +9,10 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/game.h
   ${CMAKE_CURRENT_SOURCE_DIR}/gameEditor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gameEditor.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/managers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/managers.h
   ${CMAKE_CURRENT_SOURCE_DIR}/player.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/player.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/standardScriptMethods.h
   ${CMAKE_CURRENT_SOURCE_DIR}/state.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/state.h
   ${CMAKE_CURRENT_SOURCE_DIR}/wallet.cpp
@@ -27,12 +29,15 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/accountActions.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/clientActions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/clientActions.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkAction.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/package.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/Script/script.cpp
 )

@@ -6,7 +6,8 @@ Bindstone is a game engine built on MutedVision (MV) framework. Dev builds this 
 
 ### For Bindstone Integration Work
 
-**Solution file:** `C:\git\Bindstone\bindstone.sln`
+**Solution file:** `<repo>\Bindstone.sln` (`<repo>` = this checkout, e.g. `D:\git\Bindstone`; the drive letter
+drifts per machine — substitute it in every command below)
 
 **Main targets:**
 - `BindstoneClient_Windows` - Main client executable
@@ -17,7 +18,7 @@ Bindstone is a game engine built on MutedVision (MV) framework. Dev builds this 
 naive invocation fails). Example (verified, ~35s clean rebuild of the engine lib):
 
 ```bash
-powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d C:\git\Bindstone && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=C:\git\Bindstone\ /m 2>&1'"
+powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d <repo> && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=<repo>\ /m 2>&1'"
 ```
 
 Use `/t:Rebuild` for a clean build. MSBuild auto-resolves project-to-project references.
@@ -29,16 +30,24 @@ When fixing integration issues between JaiScript and Bindstone:
 2. Build via the command above (or Dev builds in VS) to verify
 3. Iterate as needed
 
+### Game gates
+
+The client (`Builds\Windows\x64\<Config>\Bindstone.exe`, run from `<repo>`) carries headless
+self-checks; exit code is the verdict:
+- `-verifyassets` — loads/round-trips every scene, `.bindsnap` and catalog; evals gameplay scripts, static-checks interface scripts.
+- `-loginshot [frames]` — renders the Login page for N frames and writes `login_shot.bmp`.
+- `-workbenchsmoke` / `-workbenchshot` — 120-frame Workbench self-test, the latter writes `workbench_shot.bmp`.
+
 ### For JaiScript-Only Work
 
 When adding features or fixing bugs in JaiScript itself (not integration), use the JaiScript build system:
 
 ```bash
 # Build JaiScript tests (Release BENCHMARKS config)
-powershell.exe -Command "cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat\" >nul 2>&1 && cd /d \"C:\git\Bindstone\Source\JaiScript\out\build\x64-Release BENCHMARKS\" && \"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe\" --build . --target jaiscript_tests 2>&1'"
+powershell.exe -Command "cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat\" >nul 2>&1 && cd /d \"<repo>\Source\JaiScript\out\build\x64-Release BENCHMARKS\" && \"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe\" --build . --target jaiscript_tests 2>&1'"
 
 # Run JaiScript tests
-powershell.exe -Command "cd 'C:\git\Bindstone\Source\JaiScript\out\build\x64-Release BENCHMARKS'; ./bin/jaiscript_tests.exe 2>&1"
+powershell.exe -Command "cd '<repo>\Source\JaiScript\out\build\x64-Release BENCHMARKS'; ./bin/jaiscript_tests.exe 2>&1"
 ```
 
 See `Source/JaiScript/CLAUDE.md` for detailed JaiScript development instructions.
@@ -74,7 +83,8 @@ SDL/Win libs); the renderer is constructed headless via `Draw2D::makeHeadless()`
 - `Source/MV/` - MutedVision engine (rendering, UI, AI, networking)
 - `Source/JaiScript/` - JaiScript scripting language (has its own CLAUDE.md)
 - `Source/Game/` - Game-specific code
-- `Source/Editor/` - Level editor code
+- `Source/Workbench/` - The editor (dockable panels, reflection inspector, `.jai` panels)
+- `Source/Editor/` - Legacy in-game editor, kept until the Workbench reaches authoring parity
 - `External/` - Third-party dependencies (glm, asio, gl3w, Box2D, spine, openssl, etc.)
 
 ## Key Patterns

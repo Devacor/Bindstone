@@ -4,6 +4,7 @@
 #include "Game/game.h"
 #include "Game/managers.h"
 #include "Game/NetworkLayer/package.h"
+#ifndef BINDSTONE_SERVER
 #include "Editor/editor.h"
 
 class GameEditor {
@@ -11,8 +12,15 @@ public:
 	GameEditor(std::string a_username, std::string a_password, bool a_autoStart);
 
 	void start() {
+		if (autoStartGame) {
+			runGame();
+			resumeTitleMusic();
+		}
 		runLimbo();
 	}
+
+	int runFrames(int a_frameCount, const std::string& a_capturePath);
+	void dumpSlicedSprites();
 private:
 	void resumeTitleMusic();
 
@@ -58,19 +66,15 @@ private:
 	}
 
 	void runGame() {
-		game.returnFromBackground();
-		managers.timer.start();
-		managers.timer.delta("tick");
-		while (game.update(managers.timer.delta("tick"))) {
-			game.handleInput();
-			game.render();
-			std::this_thread::yield();
-		}
+		runGameFrames(-1, "");
 		const Uint8 *state = SDL_GetKeyboardState(NULL);
 		if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
 			runLimbo();
 		}
 	}
+
+	int runGameFrames(int a_frameLimit, const std::string& a_capturePath);
+	void captureScreenshot(const std::string& a_path);
 
 	void updateFps(double a_dt) {
 		lastUpdateDelta = a_dt;
@@ -102,5 +106,6 @@ private:
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 };
+#endif
 
 #endif

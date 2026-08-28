@@ -2,6 +2,7 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
 #include "MV/Utility/services.hpp"
 
 static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
@@ -30,6 +31,12 @@ static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAg
 	[](jai::dynamic_binder<MV::Scene::PathAgent>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
+
+	jai::bind_signal_type<MV::Scene::PathAgent::CallbackSignature>(builder.bound_engine(), "SignalPathAgent");
+	builder.property("onArrive", [](MV::Scene::PathAgent& a_self) -> jai::signal<MV::Scene::PathAgent::CallbackSignature>& { return a_self.onArrive; }, nullptr);
+	builder.property("onBlocked", [](MV::Scene::PathAgent& a_self) -> jai::signal<MV::Scene::PathAgent::CallbackSignature>& { return a_self.onBlocked; }, nullptr);
+	builder.property("onStop", [](MV::Scene::PathAgent& a_self) -> jai::signal<MV::Scene::PathAgent::CallbackSignature>& { return a_self.onStop; }, nullptr);
+	builder.property("onStart", [](MV::Scene::PathAgent& a_self) -> jai::signal<MV::Scene::PathAgent::CallbackSignature>& { return a_self.onStart; }, nullptr);
 
 	builder.method("gridPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridPosition));
 	builder.method("gridPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridPosition));

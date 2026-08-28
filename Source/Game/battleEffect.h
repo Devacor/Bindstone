@@ -180,7 +180,7 @@ protected:
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
 		MV::require<MV::LogicException>(false, "CloneImplementation not implemented for ServerBattleEffect");
-		return cloneHelper(a_parent->attach<ServerBattleEffect>(statTemplate.id, state->self()->creatureOwnerId, "", gameInstance).self());
+		return nullptr;
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {

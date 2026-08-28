@@ -1,0 +1,126 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Editor">
+      <UniqueIdentifier>{1d2b999a-0310-4eb4-823e-c84d0095c683}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Workbench">
+      <UniqueIdentifier>{913de4ca-f17b-42bf-b45a-fef4d0f4a7a6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Game">
+      <UniqueIdentifier>{c7c10710-fede-4ac7-989b-96b4360dd068}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorControls.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorFactories.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\widgets.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\dock.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\sceneTreePanel.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\inspector.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\workbench.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\projectPanel.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\scriptPanel.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Workbench\gizmos.cpp">
+      <Filter>Workbench</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\componentPanels.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editComponents.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editor.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorControls.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorDefines.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorFactories.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\texturePicker.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\theme.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\focus.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\widgets.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\dock.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\sceneTreePanel.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\inspector.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\workbench.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\treeView.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\commands.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\projectPanel.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\scriptPanel.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Workbench\gizmos.h">
+      <Filter>Workbench</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

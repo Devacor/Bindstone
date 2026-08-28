@@ -710,6 +710,8 @@ namespace MV {
 			if (packFound) {
 				auto ids = packFound->handleIds();
 				if (std::find(ids.begin(), ids.end(), debugName) != ids.end()) {
+					bool wasFlippedX = flipX();
+					bool wasFlippedY = flipY();
 					if (debugName == "CONTENT_HANDLE") {
 						handlePercent = packFound->contentPercent();
 					} else if (debugName == "FULL_HANDLE") {
@@ -719,8 +721,13 @@ namespace MV {
 						slicePercent = shapeFound.slice;
 						handlePercent = packFound->percentBounds(shapeFound.bounds);
 					}
+					if (wasFlippedX) { std::swap(handlePercent.minPoint.x, handlePercent.maxPoint.x); }
+					if (wasFlippedY) { std::swap(handlePercent.minPoint.y, handlePercent.maxPoint.y); }
 					auto textureFound = packFound->texture();
 					if (textureFound) {
+						if (textureDefinition && textureDefinition != textureFound) {
+							textureDefinition->unload(this);
+						}
 						textureDefinition = textureFound;
 						textureDefinition->registerHandle(shared_from_this());
 						needsLoad = false;
@@ -825,24 +832,24 @@ namespace MV {
 		9  5   6 12
 		1 10  11  2
 	\*Vertex Indices*/
+	static void squeezeSliceMargins(PointPrecision &a_leading, PointPrecision &a_trailing, PointPrecision a_extent, PointPrecision a_logicalExtent) {
+		if (a_leading + a_trailing > a_extent && a_logicalExtent > 0.0f) {
+			auto ratio = std::max(a_extent, 0.0f) / a_logicalExtent;
+			a_leading *= ratio;
+			a_trailing *= ratio;
+		}
+	}
+
 	bool TextureHandle::applySlicePosition(std::vector<DrawPoint> &a_points) const {
 		if(a_points.size() == 16){
 			auto parentBounds = BoxAABB<>(a_points[0].point(), a_points[2].point());
-			auto sliceBounds = logicalSlice();
-			
-			sliceBounds.maxPoint = parentBounds.maxPoint - (toPoint(logicalSize()) - sliceBounds.maxPoint);
-			sliceBounds.minPoint = parentBounds.minPoint + sliceBounds.minPoint;
-
-			auto intermediateSliceBounds = sliceBounds;
-			if (intermediateSliceBounds.maxPoint.x < intermediateSliceBounds.minPoint.x) {
-				sliceBounds.maxPoint.x = parentBounds.minPoint.x + (parentBounds.width() * (slicePercent.minPoint.x + (slicePercent.width() / 2.0f)));
-				sliceBounds.minPoint.x = sliceBounds.maxPoint.x;
-			}
-
-			if (intermediateSliceBounds.minPoint.y > intermediateSliceBounds.maxPoint.y) {
-				sliceBounds.maxPoint.y = parentBounds.minPoint.y + (parentBounds.height() * (slicePercent.minPoint.y + (slicePercent.height() / 2.0f)));
-				sliceBounds.minPoint.y = sliceBounds.maxPoint.y;
-			}
+			auto slice = logicalSlice();
+			auto leading = slice.minPoint;
+			auto logical = logicalSize();
+			auto trailing = toPoint(logical) - slice.maxPoint;
+			squeezeSliceMargins(leading.x, trailing.x, parentBounds.width(), logical.width);
+			squeezeSliceMargins(leading.y, trailing.y, parentBounds.height(), logical.height);
+			auto sliceBounds = BoxAABB<>(parentBounds.minPoint + leading, parentBounds.maxPoint - trailing);
 
 			a_points[4] = sliceBounds.minPoint;
 			a_points[5] = point(sliceBounds.minPoint.x, sliceBounds.maxPoint.y);
@@ -878,7 +885,7 @@ namespace MV {
 	Size<PointPrecision> TextureHandle::logicalSize() const{
 		auto sanitizedBounds = handlePercent;
 		sanitizedBounds.sanitize();
-		return (sanitizedBounds.size() * cast<PointPrecision>(textureDefinition->contentSize())) * textureDefinition->scale();
+		return (sanitizedBounds.size() * cast<PointPrecision>(textureDefinition->size())) * textureDefinition->scale();
 	}
 	//logical slice == percentSlice * logicalSize
 	BoxAABB<PointPrecision> TextureHandle::logicalSlice() const{

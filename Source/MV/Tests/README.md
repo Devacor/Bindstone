@@ -29,6 +29,19 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   `recalculateMatrixCalls == 0` over 500 idle frames of a static clipped subtree. That gate is a
   *deterministic* guard (a count, not a timing) against re-introducing the per-frame matrix
   re-dirty that the Clipped dirty-flag fix removed.
+- **MV Scene Serialization** — Node JSON save→load round trips through a headless `Services`
+  host (`mv_scene_host.hpp`: renderer, TextLibrary, TapDevice, SharedTextures, script engine):
+  a loaded `Text` re-attaches its `TEXT_`/`CURSOR_` nodes under its owner and a re-save never
+  writes them at any depth; `postLoadStep` ×3 leaves child and anchor counts alone; Button
+  views survive the childComponents-before-childNodes wire order; Stencil/Palette keep their
+  own `$type`; PathMap keeps Drawable-level state; `Component::clone` copies the whole
+  property chain; a persisted Clickable script receiver fires after load. Uses
+  `Assets/Fonts/Verdana.ttf` (resolved from the tests dir or the repo root).
+- **MV Texture Handles** — 9-slice margins squeeze proportionally in a box smaller than the
+  margins; flipX survives a pack-based `postLoadInitialize`; `logicalSize` scales by texture
+  size, not content size.
+- **Pathfinding** — `Map` budget, `NavigationAgent` paths/signals, footprint block counts
+  across moves, clones and off-map placement.
 
 ## Benchmarks (measurement, not assertions)
 

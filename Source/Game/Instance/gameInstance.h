@@ -10,6 +10,7 @@
 #include "Game/NetworkLayer/gameServer.h"
 
 #include "Game/Instance/team.h"
+#include <jaiscript/signals/signal.hpp>
 
 class Missile;
 class GameInstance {
@@ -20,10 +21,14 @@ class GameInstance {
 	GameInstance& operator=(const GameInstance &) = delete;
 protected:
 	virtual void initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer);
-	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep);
+	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep, size_t a_maxFixedStepsPerUpdate);
+
+	jai::signal_emitter<void(Team&)> onTeamDefeatedSignal;
 
 public:
-	static const int GameCameraId = 1;
+	static const int GameCameraId = 2;
+
+	jai::signal<void(Team&)> onTeamDefeated;
 
 	~GameInstance();
 
@@ -160,6 +165,7 @@ protected:
 	MV::Task cameraAction;
 
 	float timeStep = 0.0f;
+	size_t maxFixedStepsPerUpdate = 1;
 
 	bool hasActiveTouch = false;
 

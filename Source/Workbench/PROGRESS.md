@@ -384,14 +384,15 @@ split(true,.70, leaf({Scene}), leaf({Project})), leaf({Inspector}))).
 - Gates: client build clean, -workbenchsmoke exit 0 / 0 script errors / edit-mode line,
   -workbenchgizmoshot exit 0 + 240 frames + "Workbench loaded: Scenes/map.scene".
 
-## v1 known gaps (next increments)
-- Inspector enum rows fall back to "(TypeName)" labels — wire makeCycleButton + enum label
-  registry (BlendMode/BoundsType/TextWrapMethod/TextJustification).
-- Vector-ish rows are space-separated float fields (works, not pretty); Color row should open
-  the Palette picker.
-- Tab drag to empty space = no-op (floating windows next); no drag-reparent in tree yet.
-- ~~Viewport gizmos~~ LANDED increment 13 (old-editor deletion still awaits Dev's parity sign-off).
+## Known gaps (next increments)
+- Tab drag to empty space = no-op (floating windows next).
 - Write-notify = postLoadStep coarse hook; refine per-component.
-- No undo/redo yet (property mementos designed — see artifact).
+- Authoring verbs still only in Source/Editor: create/delete/duplicate node, attach/detach
+  component, save selection as BindSnap, texture picker, anchor editor — old-editor deletion
+  awaits that parity (Dev sign-off).
+- Gizmo residue (increment 13): aspect-lock not ported; inspector refreshes at gesture end;
+  selection rubber band deferred.
 - Bindstone_Common.vcxitems is shared with the Android client project — Workbench compiles
   there too; verify Android build when next touched.
+- Landed and no longer gaps: enum rows + Palette color picker + VectorRows (increment 4),
+  tree hover + drag-reparent (5), undo/redo (6), gizmos (13).

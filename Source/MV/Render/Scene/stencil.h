@@ -3,12 +3,13 @@
 
 #include "sprite.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Stencil : public Sprite {
+		class Stencil : public jai::property_owner<Stencil, Sprite> {
 			friend Node;
 			friend jai::access;
 
@@ -23,6 +24,10 @@ namespace MV {
 			}
 		protected:
 			Stencil(const std::weak_ptr<Node> &a_owner);
+			Stencil(const Stencil&) = delete;
+			Stencil& operator=(const Stencil&) = delete;
+			Stencil(Stencil&&) = delete;
+			Stencil& operator=(Stencil&&) = delete;
 
 			void drawStencil();
 
@@ -30,11 +35,13 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				property_mgr.save(archive);
 				Sprite::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
+				property_mgr.load(archive);
 				Sprite::load(archive, 0);
 			}
 

@@ -1,6 +1,9 @@
 #include "gameEditor.h"
 #include "Editor/editorDefines.h"
 #include "Editor/editorFactories.h"
+#include <cstring>
+#include <iostream>
+#include <vector>
 
 
 void GameEditor::resumeTitleMusic() {
@@ -57,7 +60,7 @@ void GameEditor::handleInput(){
 }
 
 GameEditor::GameEditor(std::string a_username, std::string a_password, bool a_autoStart) :
-	managers({ a_username, a_password }),
+	managers({ a_username, a_password, a_autoStart }),
 	game(managers),
 	autoStartGame(a_autoStart && !a_username.empty() && !a_password.empty()),
 	editor(managers),
@@ -149,11 +152,6 @@ GameEditor::GameEditor(std::string a_username, std::string a_password, bool a_au
 			}
 		});
 
-
-	if (autoStartGame) {
-		gameButton->press();
-	}
-	
 // 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 // 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 // 		if (client) {
@@ -162,4 +160,70 @@ GameEditor::GameEditor(std::string a_username, std::string a_password, bool a_au
 // 	});
 
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).parent(screenScaler.self(), true);
+}
+
+int GameEditor::runGameFrames(int a_frameLimit, const std::string& a_capturePath) {
+	game.returnFromBackground();
+	managers.timer.start();
+	managers.timer.delta("tick");
+	int frame = 0;
+	for (; (a_frameLimit < 0 || frame < a_frameLimit) && game.update(managers.timer.delta("tick")); ++frame) {
+		game.handleInput();
+		if (!a_capturePath.empty() && frame == a_frameLimit - 1) {
+			managers.renderer.clearScreen();
+			if (game.instance()) {
+				game.instance()->scene()->draw();
+			}
+			game.root()->draw();
+			captureScreenshot(a_capturePath);
+			managers.renderer.updateScreen();
+		} else {
+			game.render();
+		}
+		std::this_thread::yield();
+	}
+	return frame;
+}
+
+void GameEditor::dumpSlicedSprites() {
+	for (auto&& entry : game.gui().root()->componentsInChildren<MV::Scene::Sprite>(false, true)) {
+		auto sprite = std::get<0>(entry).self();
+		if (!sprite || sprite->pointSize() != 16 || !sprite->texture()) { continue; }
+		auto handle = sprite->texture();
+		auto percent = handle->rawPercent();
+		auto slice = handle->slice();
+		auto logical = handle->logicalSize();
+		std::cout << "[slice] " << sprite->owner()->id() << "." << sprite->id() << " handle=" << handle->name()
+			<< " percent=(" << percent.minPoint.x << "," << percent.minPoint.y << ")-(" << percent.maxPoint.x << "," << percent.maxPoint.y << ")"
+			<< " slice=(" << slice.minPoint.x << "," << slice.minPoint.y << ")-(" << slice.maxPoint.x << "," << slice.maxPoint.y << ")"
+			<< " logical=" << logical.width << "x" << logical.height << " texture=" << handle->texture()->size().width << "x" << handle->texture()->size().height
+			<< " visible=" << sprite->owner()->visible() << std::endl;
+		for (size_t i = 0; i < 16; ++i) {
+			auto& p = sprite->point(i);
+			std::cout << "    p" << i << "=(" << p.x << "," << p.y << ") uv=(" << p.textureX << "," << p.textureY << ")" << std::endl;
+		}
+	}
+}
+
+int GameEditor::runFrames(int a_frameCount, const std::string& a_capturePath) {
+	int frames = runGameFrames(a_frameCount, a_capturePath);
+	dumpSlicedSprites();
+	std::cout << "Game frames completed (" << frames << "/" << a_frameCount << ")" << std::endl;
+	return frames == a_frameCount ? 0 : 1;
+}
+
+void GameEditor::captureScreenshot(const std::string& a_path) {
+	auto size = managers.renderer.window().drawableSize();
+	SDL_Surface* surface = SDL_CreateRGBSurface(0, size.width, size.height, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+	std::vector<uint8_t> pixels(static_cast<size_t>(size.width) * size.height * 4);
+	glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	auto* target = static_cast<uint8_t*>(surface->pixels);
+	for (int y = 0; y < size.height; ++y) {
+		std::memcpy(target + static_cast<size_t>(y) * surface->pitch,
+			pixels.data() + static_cast<size_t>(size.height - 1 - y) * size.width * 4,
+			static_cast<size_t>(size.width) * 4);
+	}
+	SDL_SaveBMP(surface, a_path.c_str());
+	SDL_FreeSurface(surface);
+	std::cout << "Game screenshot: " << a_path << std::endl;
 }

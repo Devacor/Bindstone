@@ -2,6 +2,7 @@
 #define _MV_SCENE_NODE_H_
 
 #include "component.h"
+#include <optional>
 
 namespace MV {
 
@@ -236,12 +237,12 @@ namespace MV {
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents->end()) {
 					auto sharedComponent = (*foundComponent);
-					auto originalOwner = sharedComponent->componentOwner;
+					auto originalOwner = sharedComponent->componentOwner.get();
 					sharedComponent->detachImplementation();
 					childComponents->erase(foundComponent);
 					onDetachSignal(sharedComponent);
-					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
-						sharedComponent->componentOwner.reset();
+					if (sharedComponent->componentOwner->lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner->reset();
 					}
 				}
 				return self;
@@ -418,7 +419,7 @@ namespace MV {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
 				} else if (!childNodes->empty()) {
 					for (auto&& childNode : childNodes) {
-						auto childComponent = componentInChildren<ComponentType>(a_componentId, false);
+						auto childComponent = childNode->componentInChildren<ComponentType>(a_componentId, false, true);
 						if (childComponent) {
 							return childComponent;
 						}
@@ -643,8 +644,8 @@ namespace MV {
 				}
 			}
 
-			size_t indexOf(const std::shared_ptr<const Node> &a_childItem) const;
-			size_t myIndex() const;
+			std::optional<size_t> indexOf(const std::shared_ptr<const Node> &a_childItem) const;
+			int64_t myIndex() const;
 
 			std::vector<int64_t> parentIndexList(int64_t a_globalPriority = 0);
 			std::vector<std::shared_ptr<MV::Scene::Node>> parents();
@@ -858,9 +859,24 @@ namespace MV {
 			Node(const Node& a_rhs) = delete;
 			Node& operator=(const Node& a_rhs) = delete;
 
-			std::shared_ptr<Node> cloneInternal(const std::shared_ptr<Node> &a_parent);
+			std::shared_ptr<Node> cloneInternal(const std::string &a_newId, const std::shared_ptr<Node> &a_parent);
 
 			bool allowSerialize = true;
+
+			class SerializableChildrenScope {
+			public:
+				explicit SerializableChildrenScope(Node& a_node);
+				~SerializableChildrenScope();
+				SerializableChildrenScope(const SerializableChildrenScope&) = delete;
+				SerializableChildrenScope& operator=(const SerializableChildrenScope&) = delete;
+			private:
+				Node& node;
+				std::vector<std::shared_ptr<Node>> originalChildNodes;
+				std::vector<std::shared_ptr<Component>> originalChildComponents;
+			};
+
+			template <typename MakeReader>
+			static std::shared_ptr<Node> loadFile(const char* a_loader, const std::string& a_filename, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader);
 
 			void markMatrixDirty(bool a_rootCall = true);
 
@@ -870,11 +886,15 @@ namespace MV {
 			Node(Draw2D &a_draw2d, const std::string &a_id);
 
 			void fixChildOwnership();
+			void requireNotAncestor(const std::shared_ptr<Node> &a_child) const;
+			void adopt(const std::shared_ptr<Node> &a_child);
 
 			// Note: Uses save/load_and_construct pattern because Node requires constructor args
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				const_cast<Node*>(this)->property_mgr.save(archive);
+				auto* self = const_cast<Node*>(this);
+				SerializableChildrenScope serializableOnly(*self);
+				self->property_mgr.save(archive);
 			}
 
 			// Pass 2: per-object reconnection/finalization. Fires on every deserialized
@@ -959,6 +979,10 @@ namespace MV {
 
 			bool dirtyLocalBounds = false;
 			bool dirtyChildBounds = false;
+
+			std::vector<std::shared_ptr<Node>> silencedChildRemovals;
+			std::vector<std::shared_ptr<Node>> silencedChildOrderChanges;
+			std::vector<std::shared_ptr<Component>> silencedComponentUpdates;
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);

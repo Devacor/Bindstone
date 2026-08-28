@@ -10,7 +10,6 @@
 static jai::registrar<MV::Scene::Clipped, MV::Services> _hookClipped("Clipped",
 	[](jai::dynamic_binder<MV::Scene::Clipped>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Sprite>();
-	builder.auto_bind();
 
 	builder.method("refreshTexture", &MV::Scene::Clipped::refreshTexture);
 	builder.method("refreshEveryFrame", static_cast<bool(MV::Scene::Clipped::*)() const>(&MV::Scene::Clipped::refreshEveryFrame));

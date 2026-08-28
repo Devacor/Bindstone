@@ -13,11 +13,13 @@
 |-----------------|-------------|
 | `Source/`       | All custom game and engine code
 | `Source/MV`     | MutedVision (MV) game engine with all core systems
-| `Source/Game`   | Bindstone Specific game code. Both client and server share a code base with server code wrapped in #ifndef BINDSTONE_SERVER #endif
-| `Source/Editor` | All of the editor code. The editor allows for creating and modifying game assets similar to Unreal Engine or Unity editors, and focuses on prefabs and scenes (same concept in game.)
-| `Assets/`       | Art, JSON, Spine animations, **ChaiScript** gameplay scripts |
+| `Source/Game`   | Bindstone-specific game code. Client and servers share one code base; server-only code is wrapped in `#ifdef BINDSTONE_SERVER` |
+| `Source/Editor` | Legacy in-game editor (scene/BindSnap authoring), kept until `Source/Workbench` reaches authoring parity |
+| `Source/Workbench` | The editor: dockable panels, reflection-driven inspector, undo/redo, gizmos, hot-reloaded `.jai` panels (`Bindstone.exe -workbench`) |
+| `Source/JaiScript` | JaiScript: the scripting language, property system and archives everything above serializes through (own CLAUDE.md) |
+| `Assets/`       | Art, JSON catalogs, Spine animations, `.scene`/`.bindsnap` files, JaiScript `.script` gameplay/UI scripts and `.jai` Workbench panels |
 | `VSProjects/`   | Windows Visual Studio solutions |
-| `External/`     | Third-party libs (SDL2, Box2D, Asio, ChaiScript, cereal, glm, …) | Safe to ignore these unless referencing, do not make changes in this folder.
+| `External/`     | Third-party libs (Box2D, Asio, glm, gl3w, spine, openssl/wolfssl, libpqxx, Vulkan-Headers, …). Do not make changes in this folder. |
 
 ## Style Guide
 * **Tabs** for indentation (never spaces). *If you see mixed spaces: fix the block.*
@@ -117,173 +119,105 @@ private:
 };
 ```
 - Header files should end with a new line. Generally speaking all files should.
-- We use the C++11 library cereal to serialize times, we typically want to include a version and use the versioned save/load, but can just use the versioned serialize if we aren't using properties in that class.
+- Serialization goes through JaiScript archives (next chapter); every level of a serializable class carries `save`/`load`/`load_and_construct`.
 
 ## Serialization & Property System
 
-Bindstone uses a reflection-lite/data-driven layer on top of [cereal](https://uscilab.github.io/cereal/).
+Bindstone serializes through JaiScript's property system and archives (`Source/JaiScript`);
+MV's wrappers live in `Source/MV/Serialization/serialize.h`. One declaration feeds the file
+format, the Workbench inspector, script access and reflection.
 
-### Quick Reference
+### Declaring properties
 ```cpp
-// In class declaration (inheriting from Component/Drawable/etc):
-// Always wrap the type in parentheses for consistency:
-MV_PROPERTY((type), name, default_value)              // Auto-serialized member
-MV_OBSERVABLE_PROPERTY((type), name, default_value)   // + change notifications  
-MV_DELETED_PROPERTY((type), name)                     // Consumes old data
-
-// Examples:
-MV_PROPERTY((int), count, 0);
-MV_PROPERTY((std::string), name, "");
-MV_PROPERTY((std::pair<Point<>, Point<>>), cellPadding);
-MV_PROPERTY((std::vector<GLuint>), vertexIndices, {});
-MV_PROPERTY((std::vector<std::shared_ptr<CloneableType>>), items, {}, [](auto& src, auto& dst) {
-    dst->clear();
-    for (const auto& item : *src) {
-        if (item) {
-            dst->push_back(item->clone());
-        }
-    }
-});
-
-// The parentheses ensure the preprocessor treats the entire type as a single argument.
-// The MV_REMOVE_PARENS macro will strip these parentheses during expansion.
-// This is especially important for template types with commas, but should be done
-// consistently for all types to maintain uniformity.
-
-// Access like normal members:
-myComponent->position = Point<>(10, 20);
-float opacity = myComponent->opacity;
-```
-
-### Core Concepts
-- **`Property<T>`** - Wraps values, auto-registers with parent, handles serialization (`MV/Utility/properties.hpp`)
-- **`PropertyRegistry`** - Container in each serializable class storing property pointers
-- **`ObservableProperty<T>`** - Property variant that emits change notifications
-- **`DeletedProperty<T>`** - Placeholder for removed fields to maintain compatibility
-
-### Standard Serialization Pattern
-
-Every serializable class should follow this pattern (see Drawable.cpp for reference):
-
-```cpp
-// In header file
-class MyDrawable : public Drawable {
-    // ... your properties ...
-};
-
-// In cpp file - ALWAYS include these for polymorphic types
-CEREAL_REGISTER_TYPE(MV::Scene::MyDrawable);
-CEREAL_CLASS_VERSION(MV::Scene::MyDrawable, 0);  // Start at 0, increment when structure changes
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scene_mydrawable);
-
-// In class implementation
-template <class Archive>
-void save(Archive& archive, std::uint32_t const /*version*/) const {
-    // Configure any conditional serialization here - optional and unlikely to be common
-    points.serializeEnabled(serializePoints());  // Example from Drawable
-    
-    // Save base class AFTER configuration
-    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-    // Properties auto-save through base class chain
-}
-
-template <class Archive>
-void load(Archive& archive, std::uint32_t const version) {
-    // Handle version migration
-    if (version == 0) {
-        // Version 0 format
-        points.serializeEnabled(serializePoints());
-    }
-    // Add more versions as needed
-    
-    // Load base class
-    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-}
-
-// Required for cereal construction
-template <class Archive>
-static void load_and_construct(Archive& archive, cereal::construct<MyDrawable>& construct, 
-                               std::uint32_t const version) {
-    construct(std::shared_ptr<Node>());  // Construct with null owner
-    construct->load(archive, version);   // Load data
-    construct->initialize();             // Post-load init
-}
-```
-
-### Version Migration Examples
-
-```cpp
-// When properties need different handling per version
-template <class Archive>
-void load(Archive& archive, std::uint32_t const version) {
-    if (version == 0) {
-        // Original format - manual key order for pre-property system
-        properties.load(archive, {"shouldDraw", "texture", "position"});
-    }
-    else if (version == 1) {
-        // Added new field
-        properties.load(archive, {"shouldDraw", "texture", "position", "rotation"});
-    }
-    else if (version == 2) {
-        // Renamed field
-        properties.load(archive, {}, {{"texture", "textures"}});  // rename map
-    }
-    else {
-        // Current version - properties handle themselves
-        points.serializeEnabled(serializePoints());
-    }
-    
-    archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
-}
-```
-
-### Common Patterns
-
-#### 1. Declaring Properties
-```cpp
-class MyComponent : public Component {
-    MV_PROPERTY(std::string, name, "");
-    MV_PROPERTY(Point<>, position, {});
-    MV_OBSERVABLE_PROPERTY(float, opacity, 1.0f);
-    
-    // Optional custom clone behavior via lambda (4th parameter)
-    MV_PROPERTY(std::vector<Item>, items, {}, 
-        [](auto& src, auto& dst) {
-            dst->clear();
-            for (auto& item : src) dst->push_back(item.clone());
-        });
+class Sprite : public jai::property_owner<Sprite, Drawable> {      // Derived first, then bases
+	friend Node;
+	friend jai::access;                                             // save/load stay protected
+	...
+	JAI_PROPERTY((std::string), componentId);                       // serialized member
+	JAI_PROPERTY((int), count, 0);                                  // with a default
+	JAI_NAMED_PROPERTY((uint16_t), "subdivisions", ourSubdivisions, 0); // file key differs from member
+	JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);               // reflected, never written
+	JAI_DELETED_PROPERTY((int), oldField);                          // consumes a removed key on load
+	JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onAccept);           // emitter onAcceptSignal + view onAccept; script receivers persist
 };
 ```
+Types are always parenthesized (commas in templates). Macros:
+`Source/JaiScript/include/jaiscript/properties/macros.hpp` and `signals/signal_property.hpp`.
+A `jai::property<T>` reads and assigns like the member it wraps (`sprite->points[0]`,
+`ourTextures->find(0)` through a smart pointer).
 
-#### 2. Observable Property Callbacks
+### The save/load ladder
+Every level owns a `property_mgr`; each level saves its own then calls the base (`sprite.h`):
 ```cpp
-myComponent->opacity.onChanged.connect([](const float& newVal, const float& oldVal, bool fromLoad) {
-    if (!fromLoad) {  // Only react to runtime changes
-        std::cout << "Opacity changed from " << oldVal << " to " << newVal;
-    }
+template<class Archive>
+void save(Archive& archive, std::uint32_t const) const {
+	property_mgr.save(archive);
+	Drawable::save(archive, 0);
+}
+
+template<class Archive>
+void load(Archive& archive, std::uint32_t const) {
+	property_mgr.load(archive);
+	Drawable::load(archive, 0);
+}
+
+template<typename Archive>
+static void load_and_construct(Archive& ar, jai::serialization::construct<Sprite>& construct) {
+	construct(std::shared_ptr<Node>());   // ctor args; the shared_ptr is registered before load runs
+	construct->load(ar, 0);
+	construct->initialize();
+}
+```
+All levels write into one flat object; JSON loads seek each property by name, so unknown keys are
+ignored and missing keys keep the constructor default (`JAI_DELETED_PROPERTY` only swallows a key
+you want consumed). `Component` ends the chain with `archive(property_mgr)`. `Node` reads `nodeId`
+first and constructs with the `Draw2D` from the `MV::Services` user context (`node.h`). Plain data
+types (`NetworkAction` subclasses, `BattleEffectData`) implement `void serialize(Archive&)` over
+`jai::serialization::make_nvp("key", member)`.
+
+### Polymorphic identity
+```cpp
+static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider("Collider",
+	[](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
+	builder.auto_bind();
 });
 ```
+One registrar per concrete type, in its `.cpp` (`collider.cpp`, `clickable.cpp`), gives the script
+name, the `$type` tag and the base links a load through `shared_ptr<Base>` needs. `jai::bases<...>`
+lists the C++ bases an archive may hold the type as. Types with no registrar relate through
+`jai::serialization::register_relation<Derived, Base>` (`textures.cpp`). A level with neither is
+saved sliced as its nearest registered base.
 
-### Key Rules
-- **Always** include save/load/load_and_construct in classes derived from any class that is set up with a PropertyRegistry.
-- **Always** only have one PropertyRegistry per class heirarchy in the base serializable level of that heirarchy.
-- **Always** register polymorphic types (concrete/non-derivable types are excluded) with cereal (CEREAL_REGISTER_TYPE, etc.)
-- **Always** start version at 0, increment for structural changes. If you migrate from a version without properties to one with properties, incrementing is needed. If you simply add new properties, you do not.
-- Properties serialize by key name, not declaration order
-- Call `properties.save(ar)`/`properties.load(ar)` only in the base class that owns the registry
-- Use `cereal::base_class<ParentClass>(this)` to chain serialization
-- Properties have many convenience pass-throughs: `sprite->name = "Bob"` `sprite->points[0]` (operator[] and operator() pass through), `sprite->ourAnchors->size()` (operator -> can access member functions and variables of its underlying class. If the underlying class is something like a shared_ptr then operator-> will call the underlying shared_ptr's object rather than requiring a second level of de-reference.)
-- Do evaluate the cloneHelper function to see what the "clone" behavior should be for a given property. If a property was not cloned, it should override a do-nothing clone method. If a property is cloned, but does a deep copy, use that implementation in the Property and remove it from the cloneHelper.
+### Entry points
+- `MV::toJson` / `fromJson<T>` / `toBinaryString` / `fromBinaryString<T>` / `toBase64` (`serialize.h`)
+  pull the `jai::engine` from `MV::Services`.
+- `Node::load` / `loadBinary` / `saveJai` / `saveBinary` / `loadChild` (`node.h`) read and write
+  `.scene` and `.bindsnap` files; the reader carries `MV::Services` as user context and a
+  `LoadOptions` so `load_complete()` runs `postLoadStep()` once on the root.
+- `serializable(false)` on a node or component keeps runtime-built objects (creatures, buildings,
+  effects) out of the file.
 
-### Common Mistakes to Avoid
-- Don't create multiple PropertyRegistries in a class hierarchy
-- Don't forget CEREAL_REGISTER_TYPE for polymorphic types
-- Don't call properties.save/load in derived classes (only base) unless dealing with versioned migration (see Drawable::load for a complex example.)
-- Don't make every member variable a property, save property creation for types we want to serialize (mentioned in the save/load functions.)
-- Don't try to convert Signal or SignalRegister type variables to Property. They do need to be serialized in some cases (they save script bindings), however they have custom rules for how to do so and basically are best used with basic archive(cereal::make_nvp("onPress", onPressSignal)) (for example)
+### Wire-format contract
+`{"$id": N, "$type": "Sprite", "$val": {...}}` at an object's first reference, `{"$id": N}` for every
+later `shared_ptr` to it, `{"$ref": N}` for a `weak_ptr` (`componentOwner`). Properties are written in
+`property_mgr` order (a `std::map`, so `childComponents` precedes `childNodes`): a Button's views carry
+their payload under `activeView`/`idleView`/`disabledView` and the owner's `childNodes` entries are
+id-only. Reading in an order other than the written one yields nulls, so never reorder
+`childNodes`/`childComponents`, and never rename a property key without re-saving the corpus.
 
-### When to Increment Cereal Class Version
-- YES: Converting from manual serialization to properties
-- YES: Changing fundamental structure
-- NO: Adding new MV_PROPERTY fields
-- NO: Adding new methods
+### The gate
+`Bindstone.exe -verifyassets` loads every shipped `.scene`/`.bindsnap` headless, round-trips it
+JSON→binary→JSON, compares the resaved `$type` multiset with the original (a sliced component shows
+up here), round-trips `NetworkAction`s, loads the three catalogs, evaluates every gameplay `main.script`/
+`mainClient.script`, static-checks every interface script and checks the Login button's script
+receiver loads armed. Run it
+after any change to a property, registrar or loader.
+
+### Rules
+- `friend jai::access` on every level; `save`/`load`/`load_and_construct` stay protected.
+- New level = `property_owner<Derived, Base>` + registrar + the three functions above.
+- Adding a `JAI_PROPERTY` is free; renaming one changes the file key (`JAI_NAMED_PROPERTY` keeps
+  the old key).
+- Signals are `JAI_SIGNAL_PROPERTY`, never a hand-written property.
+- `cloneHelper` copies what `clone` must carry; check it when adding a property.

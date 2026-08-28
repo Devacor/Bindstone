@@ -66,11 +66,11 @@ namespace MV {
 		private:
 			JAI_PROPERTY((std::shared_ptr<Node>), contentView);
 
-			PointPrecision dragStartThreshold = 5.0f;
-			PointPrecision cancelTimeThreshold = 1.25f;
+			JAI_PROPERTY((PointPrecision), dragStartThreshold, 5.0f);
+			JAI_PROPERTY((PointPrecision), cancelTimeThreshold, 1.25f);
 
-			bool horizontalAllowed = true;
-			bool verticalAllowed = true;
+			JAI_PROPERTY((bool), horizontalAllowed, true);
+			JAI_PROPERTY((bool), verticalAllowed, true);
 			
 			bool isDragging = false;
 			bool outOfBounds = false;

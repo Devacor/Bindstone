@@ -186,6 +186,7 @@ namespace MV {
 			virtual void updateImplementation(double a_dt);
 
 			virtual void initialize() override;
+			virtual void postLoadInitialize() override;
 
 			virtual void defaultDrawImplementation() {
 				Drawable::defaultDrawImplementation();
@@ -222,7 +223,8 @@ namespace MV {
 				construct(std::shared_ptr<Node>(), *services->template get<MV::TextLibrary>());
 				construct->formattedText->scene()->removeFromParent();
 				construct->load(ar, 0);
-				construct->initialize();
+				// Glyph nodes attach in postLoadInitialize: an attach mid-load is undone when the owner's childNodes property loads.
+				construct->Drawable::initialize();
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
@@ -232,6 +234,9 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
 		private:
+			void attachGlyphNodes();
+			bool ownerHasChild(const std::shared_ptr<Node>& a_node) const;
+
 			void setCursor(int64_t a_value) {
 				if (a_value != cursor) {
 					auto maxCursor = formattedText->size();
@@ -278,7 +283,7 @@ namespace MV {
 			size_t cursor = 0;
 			std::shared_ptr<MV::Scene::Sprite> cursorSprite;
 
-			std::string fontIdentifier;
+			JAI_PROPERTY((std::string), fontIdentifier, "");
 			double accumulatedTime = 0.0;
 			static const double BLINK_DURATION;
 		};

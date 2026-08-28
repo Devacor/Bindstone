@@ -3,22 +3,16 @@ self.spawn = [=](var& self) -> void {
 		var targets = self.enemiesInRange(20);
 		if (!targets.empty()) {
 			var target = targets[0].networkId();
-			print("Target Id:");
-			print(target);
 			var activeTarget = self.getVar("activeTarget");
-			print(activeTarget);
 			if (activeTarget != target) {
-				print("ComparisonDone");
 				self.setVar("activeTarget", target);
 				self.targeting().target(target, 10, [target](var& targeting) -> void {
 					targeting.self().setVar("activeTarget", 0);
 					targeting.self().setVar("attacking", true);
-					print("ATTACKING VAR: " + to_string(targeting.self().getVar("attacking")));
 					auto spine = targeting.self().spine();
 					spine.animate("attack", false);
 					spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
 						if (eventData.name == "launch") {
-							print("LAUNCHING");
 							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
 							newMissile.duration = 1.25;
 							newMissile.targetType = TargetType_CREATURE;
@@ -26,16 +20,13 @@ self.spawn = [=](var& self) -> void {
 							auto effect = spawnOnNetwork(newMissile);
 							effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
 								if (battleEffect.targetCreature() != null) {
-									print("Damage!");
 									battleEffect.targetCreature().changeHealth(-5);
 								}
 							});
 						}
 					});
 					spine.onEnd.connect("unlock", [targeting](var& spine, int index) -> void {
-						print("ATTACK" + spine.track(index).name());
 						if (spine.track(index).name() == "attack") {
-							print("ATTACK FALSE");
 							targeting.self().setVar("attacking", false);
 						}
 					});
@@ -50,7 +41,6 @@ self.spawn = [=](var& self) -> void {
 
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
 		self.targeting().target(self.team().enemyWell(), [=](var& targeting) -> void {
-			print(to_string(targeting.self().networkId()) + " made it!");
 			targeting.self().fall();
 		});
 	});
@@ -67,7 +57,5 @@ self.update = [=](var& self, double dt) -> void {
 			var applyDefaultTarget = self.getVar("applyDefaultTarget");
 			applyDefaultTarget(self);
 		}
-	} else {
-		print("Attacking: " + to_string(self.getVar("activeTarget")));
 	}
 };

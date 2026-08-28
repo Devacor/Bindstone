@@ -1,7 +1,8 @@
 # Game Instance
 
-Components that manage a match or session.
+Components that manage a match.
 
 Files:
-- `gameInstance.*` – client side representation of a match.
-- `team.*` – holds team/unit data in a match.
+- `gameInstance.*` – `GameInstance` (shared match state, building slots, network object pool) with
+  `ClientGameInstance` and, under `BINDSTONE_SERVER`, `ServerGameInstance` (authoritative spawns).
+- `team.*` – `Team` / `TeamSide`: a side's player, buildings and health.

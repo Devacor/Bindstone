@@ -88,7 +88,7 @@ namespace MV {
 				auto connector = jai::debug::listen(a_engine, candidate);
 				if (connector->port() == candidate) {
 					lastScriptDebugPort_ = candidate;
-					MV::info("Script debugger listening on 127.0.0.1:", candidate, " (VS Code: Attach to JaiScript; breakpoints need MV_SCRIPT_INTERPRETER=1)");
+					MV::info("Script debugger listening on 127.0.0.1:", candidate, " (VS Code: Attach to JaiScript)");
 					return;
 				}
 				a_engine.set_debug_connector(nullptr);

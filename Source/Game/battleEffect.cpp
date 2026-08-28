@@ -52,8 +52,9 @@ static jai::registrar<BattleEffectData, MV::Services> _hookBattleEffectData("Bat
 	builder.property("id", &BattleEffectData::id);
 });
 
-static jai::registrar<BattleEffect, MV::Services> _hookBattleEffect("BattleEffect",
+static jai::registrar<BattleEffect, MV::Services, jai::bases<MV::Scene::Component>> _hookBattleEffect("BattleEffect",
 	[](jai::dynamic_binder<BattleEffect>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
 	jai::bind_signal_type<BattleEffect::CallbackSignature>(builder.bound_engine(), "SignalBattleEffect");
 	builder.method("game", &BattleEffect::game);
 	builder.method("alive", &BattleEffect::alive);
@@ -175,20 +176,22 @@ ClientBattleEffect::ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 		a_gameInstance.data().battleEffects().data(a_state->self()->effectTypeId),
 		a_state
 	) {
-	if (state->self()->targetType == TargetType::NONE) {
-		state->self()->onNetworkDeath = [&]() {
-			animateExplodeAndRemove();
-		};
-	} else if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
+	if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
 		activeTargetPosition = targetCreature->owner()->position();
 	}
-	state->self()->onNetworkSynchronize = [&] {
-		onNetworkSynchronize();
-	};
 }
 
 void ClientBattleEffect::initialize() {
 	BattleEffect::initialize();
+	std::weak_ptr<ClientBattleEffect> weakSelf = std::static_pointer_cast<ClientBattleEffect>(shared_from_this());
+	if (state->self()->targetType == TargetType::NONE) {
+		state->self()->onNetworkDeath = [weakSelf] {
+			if (auto self = weakSelf.lock()) { self->animateExplodeAndRemove(); }
+		};
+	}
+	state->self()->onNetworkSynchronize = [weakSelf] {
+		if (auto self = weakSelf.lock()) { self->onNetworkSynchronize(); }
+	};
 	offsetDepth = owner()->componentInParents<MV::Scene::PathMap>()->cellSize().height / 2.0f;
 
 	auto newNode = owner()->make(assetPath(), gameInstance.services());

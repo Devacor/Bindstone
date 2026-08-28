@@ -150,10 +150,12 @@ protected:
 	void rawScaleAroundCenter(float a_amount);
 	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
 
-	// The view may never show past the map (hard); past the inset soft edge it is allowed briefly,
-	// then eases back. Scale has the same two tiers.
+	// map.scene marks the view's limits with TopLeft_Hard/BottomRight_Hard and the _Soft pair: the
+	// view may never show past the hard box; past the soft box it is allowed briefly, then eases
+	// back. Zoom-out stops where the view fits each box; zoom-in keeps the scale caps below.
 	MV::BoxAABB<> visibleMapBounds();
 	bool mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft);
+	bool cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix);
 	float scaleToFit(const MV::BoxAABB<>& a_bounds);
 	MV::Point<> viewCorrection(const MV::BoxAABB<>& a_bounds);
 	void clampToHardBounds(const MV::Point<int>& a_pointerCenter);
@@ -190,9 +192,10 @@ protected:
 	const MV::PointPrecision maxScaleHard = 3.5f;
 	const MV::PointPrecision maxScaleSoft = 3.0f;
 
-	const MV::PointPrecision minScaleHard = .625f;
+	const MV::PointPrecision minScaleHard = .625f;   // fallbacks for a scene without corner markers
 	const MV::PointPrecision minScaleSoft = .675f;
-	const MV::PointPrecision viewSoftInset = .04f;   // of the map's size, per edge
+	const MV::PointPrecision viewSoftInset = .04f;
+	float minScale(bool a_soft);
 	const double viewEaseSeconds = 0.25;
 	const double viewEaseHoldSeconds = 0.1;
 

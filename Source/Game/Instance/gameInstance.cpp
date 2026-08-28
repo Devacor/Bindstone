@@ -25,8 +25,9 @@ void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position
 		if (finalScale > maxScaleHard) {
 			screenScale -= finalScale - maxScaleHard;
 		}
-		if (finalScale < minScaleHard) {
-			screenScale -= finalScale - minScaleHard;
+		auto floorScale = minScale(false);
+		if (finalScale < floorScale) {
+			screenScale -= finalScale - floorScale;
 		}
 		if (std::abs(screenScale) > 0.00000001f) {
 			rawScaleAroundScreenPoint(worldScene->scale().x + screenScale, a_position);
@@ -40,7 +41,17 @@ MV::BoxAABB<> GameInstance::visibleMapBounds() {
 	return worldScene->localFromScreen(MV::BoxAABB<int>(MV::Point<int>(), MV::toPoint(gameData.managers().renderer.window().drawableSize())));
 }
 
+bool GameInstance::cornerBounds(MV::BoxAABB<>& a_bounds, const std::string& a_suffix) {
+	auto topLeft = worldScene->get("TopLeft_" + a_suffix, false);
+	auto bottomRight = worldScene->get("BottomRight_" + a_suffix, false);
+	if (!topLeft || !bottomRight) { return false; }
+	a_bounds = MV::BoxAABB<>(worldScene->localFromWorld(topLeft->worldPosition()), worldScene->localFromWorld(bottomRight->worldPosition()));
+	a_bounds.sanitize();
+	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
+}
+
 bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
+	if (cornerBounds(a_bounds, a_soft ? "Soft" : "Hard")) { return true; }
 	if (!pathMap) { return false; }
 	a_bounds = worldScene->localFromWorld(pathMap->owner()->worldBounds(false));
 	if (a_soft) {
@@ -49,6 +60,12 @@ bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
 		a_bounds.maxPoint -= inset;
 	}
 	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
+}
+
+float GameInstance::minScale(bool a_soft) {
+	MV::BoxAABB<> bounds;
+	if (cornerBounds(bounds, a_soft ? "Soft" : "Hard")) { return scaleToFit(bounds); }
+	return a_soft ? minScaleSoft : minScaleHard;
 }
 
 float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {
@@ -205,7 +222,7 @@ void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter)
 	MV::BoxAABB<> soft;
 	bool haveSoft = mapViewBounds(soft, true);
 	auto startScale = worldScene->scale().x;
-	auto endScale = std::clamp(startScale, haveSoft ? std::max(minScaleSoft, scaleToFit(soft)) : minScaleSoft, maxScaleSoft);
+	auto endScale = std::clamp(startScale, minScale(true), maxScaleSoft);
 	bool outsideSoft = haveSoft && viewCorrection(soft) != MV::Point<>();
 	if (endScale == startScale && !outsideSoft) {
 		return;

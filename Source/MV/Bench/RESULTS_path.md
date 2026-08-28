@@ -283,6 +283,10 @@ use), and only exceeds it while every field is pinned. `Map::resize` drops every
 changed); pinned agents keep their object and re-request. The stall report prints
 `fields N (pinned M)` plus per-field goal/radius/size/users/reachable-cell counts.
 
+The lease is RAII in the engine's handle idiom (`TextureDefinition::makeHandle`, `signal::connect`
+receivers): `FlowField::makeHandle()` returns a `FlowFieldHandle` that counts the field as in use for
+exactly as long as it exists; the agent holds one and resets it, nothing calls acquire/release.
+
 **Chase mode.** `TargetPolicy` keeps the mode per target: a location target keeps the mode it was
 given, a creature target is always `search`. Before this, the agent's sticky mode meant every chase
 re-goal minted a new field key (`fields 16` at cap, thrash) — the live cache is now `fields 2`.

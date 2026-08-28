@@ -80,7 +80,7 @@ namespace {
 	};
 
 	// Idle within two cells of a full goal region is waiting for room, not a stall
-	constexpr double CAPACITY_SLACK = 2.0;
+	constexpr double CAPACITY_SLACK = 4.0;
 
 	constexpr int STUCK_TICKS = 180;
 

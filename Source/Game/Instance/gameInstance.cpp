@@ -71,7 +71,7 @@ float GameInstance::minScale(bool a_soft) {
 float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {
 	auto visible = visibleMapBounds();
 	auto ratio = std::max(visible.width() / a_bounds.width(), visible.height() / a_bounds.height());
-	return ratio > 1.0f ? worldScene->scale().x * ratio : worldScene->scale().x;
+	return worldScene->scale().x * ratio;   // the scale at which the view exactly fits, larger or smaller than now
 }
 
 MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {

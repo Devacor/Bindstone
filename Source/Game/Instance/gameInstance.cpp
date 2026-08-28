@@ -46,12 +46,14 @@ void GameInstance::rawScaleAroundScreenPoint(float a_scale, const MV::Point<int>
 	MV::info("CurrentScale: ", worldScene->scale());
 }
 
-GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep) :
-	worldScene(a_root->make("Scenes/map.scene", services())->depth(0)->cameraId(GameCameraId)),
+GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep, size_t a_maxFixedStepsPerUpdate) :
+	worldScene(a_root->make("Scenes/map.scene", services())->depth(-1)->cameraId(GameCameraId)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
-	scriptEngine(a_gameData.managers().services) {
+	maxFixedStepsPerUpdate(a_maxFixedStepsPerUpdate),
+	scriptEngine(a_gameData.managers().services),
+	onTeamDefeated(onTeamDefeatedSignal) {
 }
 
 void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {
@@ -85,17 +87,10 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	left->initialize();
 	right->initialize();
 
-#ifdef BINDSTONE_SERVER
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		fixedUpdate(a_dt);
 		return true;
-	}).recent()->interval(timeStep, 1);
-#else
-	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
-		fixedUpdate(a_dt);
-		return true;
-	});
-#endif
+	}).recent()->interval(timeStep, maxFixedStepsPerUpdate);
 }
 
 GameInstance::~GameInstance() {
@@ -115,6 +110,7 @@ void GameInstance::beginMapDrag() {
 }
 
 void GameInstance::fixedUpdate(double a_dt) {
+	if (pathMap) { pathMap->beginTick(); }
 	worldScene->update(static_cast<float>(a_dt), true);
 	fixedUpdateImplementation(a_dt);
 }
@@ -184,7 +180,7 @@ bool GameInstance::requestCamera() {
 }
 
 ClientGameInstance::ClientGameInstance(Game& a_game) :
-	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f),
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f, 4),
 	game(a_game) {
 
 	synchronizedObjects.onSpawn<BuildingNetworkState>([this](std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> a_newItem) {
@@ -239,8 +235,12 @@ bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlaye
 
 #ifdef BINDSTONE_SERVER
 ServerGameInstance::ServerGameInstance(GameServer& a_game) :
-	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f),
-	gameServer(a_game){
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f, 1),
+	gameServer(a_game) {
+	onTeamDefeated.connect("reportMatchResult", [this](Team& a_team) {
+		gameServer.reportMatchResult(!a_team.side());
+	});
+
 	synchronizedObjects.onSpawn<CreatureNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
 		a_newItem->self()->netId = a_newItem->id();
 	});

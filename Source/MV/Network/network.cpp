@@ -212,9 +212,19 @@ namespace MV {
 	}
 
 	Server::Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
-		acceptor(ioService, a_endpoint),
+		acceptor(ioService),
 		connectionStateFactory(a_connectionStateFactory),
 		work(std::make_unique<asio::io_context::work>(ioService)) {
+		acceptor.open(a_endpoint.protocol());
+#ifdef _WIN32
+		// asio's endpoint constructor would set SO_REUSEADDR, which on Windows lets another process
+		// bind a specific address over this wildcard port and capture its loopback connections
+		acceptor.set_option(asio::detail::socket_option::boolean<SOL_SOCKET, SO_EXCLUSIVEADDRUSE>(true));
+#else
+		acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+#endif
+		acceptor.bind(a_endpoint);
+		acceptor.listen();
 		info("Server Startup");
 		acceptClients();
 		info("Accept Clients");

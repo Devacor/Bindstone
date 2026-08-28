@@ -381,7 +381,14 @@ struct debug_connector::impl {
         listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (listener_ == kInvalid) return false;
         int yes = 1;
+#ifdef _WIN32
+        // SO_REUSEADDR on Windows lets this bind land on top of another process's wildcard
+        // listener on the same port (an OS-assigned game port, say) and then steal its loopback
+        // connections; exclusive use makes that bind fail so the port ladder moves on
+        ::setsockopt(listener_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
+#else
         ::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+#endif
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(static_cast<uint16_t>(requested_port));

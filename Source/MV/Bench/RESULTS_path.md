@@ -304,3 +304,19 @@ sample; **search budget 128,000/128,000 with queue 22–47 → 80–1,070 nodes 
 at every sample, 33–37 moving of ~56, attacks 4.8k / 3.6k, zero script or wire errors. mv_tests 65/65.
 Bench arrivals/stuck/nodes byte-identical to I8 (bench goals were always standable); its ms columns
 overlapped the live match this round and are not comparable.
+
+## S2 — what a flow field costs (250×100 lane map, bench `field`, min of 5)
+
+| grid | unit size | build | memory | descend (12 steps) |
+|---|---|---|---|---|
+| 4-conn | 1 | 0.97 ms | 97.7 KB | 0.25 µs |
+| 4-conn | 3 | 1.49 ms | 97.7 KB | 0.25 µs |
+| 8-conn (the game) | 1 | 1.64 ms | 97.7 KB | 0.45 µs |
+| 8-conn (the game) | 3 | 3.75 ms | 97.7 KB | 1.08 µs |
+
+A build is one multi-source Dijkstra over every cell (`float` per cell), paid once per
+(goal, radius, size) until a static block or base cost changes — in the live game that is two builds
+per match. A descent is what an agent pays per path extension (every ~8 cells), so a hundred marching
+creatures cost ~0.1 ms/s of descents against a 1/60 tick. For comparison the 8-conn A* the well march
+used to run was ~344k nodes per 400 searches at 230 ns/node (S1), and the live budget report went
+from 128,000/128,000 nodes every tick to 80–1,070.

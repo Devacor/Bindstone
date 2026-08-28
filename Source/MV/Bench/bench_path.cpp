@@ -304,13 +304,47 @@ namespace {
 
 	// S6: the game's scale - 250x100 grid, building footprints, 3x3 units spawning in waves of 8
 	// every 3 s from two spawn points, all heading for one enemy base region.
-	SwarmResult benchLaneMarch(int a_ticks) {
+	std::shared_ptr<Map> laneMarchMap() {
 		auto map = Map::make(Size<int>(250, 100), mapsUseCorners);
 		auto building = [&](int a_x, int a_y, int a_w, int a_h) {
 			for (int x = a_x; x < a_x + a_w; ++x) { for (int y = a_y; y < a_y + a_h; ++y) { map->get(Point<int>(x, y)).staticBlock(); } }
 		};
 		building(60, 30, 12, 12); building(60, 58, 12, 12); building(120, 44, 10, 12); building(180, 30, 12, 12); building(180, 58, 12, 12);
 		for (int y = 0; y < 100; ++y) { if (y < 20 || y > 79) { map->get(Point<int>(125, y)).staticBlock(); } }
+		return map;
+	}
+
+	// S2: what a shared field costs on the game's map - one build per (goal, radius, size) until the
+	// static map changes, then a 12-step descent per agent per path extension
+	void benchFlowField(int a_reps) {
+		auto map = laneMarchMap();
+		for (int size : { 1, 3 }) {
+			double bestBuild = 1e9;
+			size_t reachable = 0;
+			for (int rep = 0; rep < a_reps; ++rep) {
+				map->invalidateFlowFields();
+				map->beginTick();
+				auto start = Clock::now();
+				auto field = map->flowFieldFor(Point<int>(236, 48), 8.0f, size);
+				bestBuild = std::min(bestBuild, msSince(start));
+				reachable = field->reachableCells();
+			}
+			auto field = map->flowFieldFor(Point<int>(236, 48), 8.0f, size);
+			double bestDescend = 1e9;
+			const int descents = 2000;
+			size_t nodes = 0;
+			for (int rep = 0; rep < a_reps; ++rep) {
+				auto start = Clock::now();
+				nodes = 0;
+				for (int i = 0; i < descents; ++i) { nodes += field->descend(map, Point<int>(2 + (i % 40), 2 + (i % 90)), 12, nullptr).size(); }
+				bestDescend = std::min(bestDescend, msSince(start) * 1000.0 / descents);
+			}
+			std::printf("| field size=%d    | 25000 cells | %6zu reachable | build %7.3f ms | %6.1f KB | descend(12) %6.2f us, %.1f nodes avg |\n", size, reachable, bestBuild, 25000 * sizeof(float) / 1024.0, bestDescend, static_cast<double>(nodes) / descents);
+		}
+	}
+
+	SwarmResult benchLaneMarch(int a_ticks) {
+		auto map = laneMarchMap();
 		std::vector<AgentTrack> tracks(48);
 		return runSwarm(map, tracks, a_ticks, 1.0 / 60.0, [&](int tick) {
 			if (tick % 180 != 0 || tick / 180 >= 6) { return; }
@@ -355,6 +389,10 @@ int main(int argc, char** argv) {
 	if (wants("search")) {
 		std::printf("\n## S1 raw search (min of %d reps)\n\n", reps);
 		benchSearch(reps);
+	}
+	if (wants("field")) {
+		std::printf("\n## S2 flow field on the 250x100 lane map (min of %d reps)\n\n", reps);
+		benchFlowField(reps);
 	}
 
 	std::printf("\n## Swarm scenarios (fixed 1/60 tick, min total ms of %d reps; counts from the last rep)\n\n", reps);

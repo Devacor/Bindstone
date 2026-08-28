@@ -265,8 +265,12 @@ namespace MV {
 		void searchLimit(int64_t a_nodesPerSearch) { searchLimitPerRequest = std::max<int64_t>(MIN_SEARCH_NODES, a_nodesPerSearch); }
 		int fieldsPerTick() const { return fieldsPerTickAllowance; }
 		void fieldsPerTick(int a_fields) { fieldsPerTickAllowance = std::max(0, a_fields); }
+		// Soft cap: idle fields are trimmed to it (least recently requested first); fields agents are
+		// actively following are pinned, so the cache only exceeds the cap while every field is in use
 		size_t maxFlowFields() const { return flowFieldCapacity; }
-		void maxFlowFields(size_t a_fields) { flowFieldCapacity = std::max<size_t>(1, a_fields); }
+		void maxFlowFields(size_t a_fields) { flowFieldCapacity = std::max<size_t>(1, a_fields); trimFlowFields(); }
+		size_t flowFieldCount() const { return flowFields.size(); }
+		size_t pinnedFlowFields() const;
 		static constexpr double BUDGET_RESET_INTERVAL = 1.0 / 60.0;
 
 		void ensureCellsInitialized();
@@ -392,6 +396,7 @@ namespace MV {
 		uint64_t flowGeneration = 1;
 		int fieldsComputedThisTick = 0;
 		std::vector<std::shared_ptr<FlowField>> flowFields;
+		void trimFlowFields();
 		uint32_t agentIds = 0;
 		uint32_t registerAgent() {
 			return ++agentIds;
@@ -626,6 +631,11 @@ namespace MV {
 		int unitSize() const { return footprint; }
 		uint64_t generation = 0;
 		uint64_t lastUsedTick = 0;
+		// Agents following this field toward an active goal; a field with users is never evicted
+		int users() const { return activeUsers; }
+		size_t reachableCells() const { size_t n = 0; for (auto d : distances) { if (d != UNREACHABLE) { ++n; } } return n; }
+		void acquire() { ++activeUsers; }
+		void release() { --activeUsers; }
 
 		static constexpr float UNREACHABLE = std::numeric_limits<float>::infinity();
 	private:
@@ -643,6 +653,7 @@ namespace MV {
 		int width;
 		int height;
 		bool corners;
+		int activeUsers = 0;
 		std::vector<float> distances;
 	};
 
@@ -690,7 +701,12 @@ namespace MV {
 		}
 
 		~NavigationAgent() {
+			releaseField();
 			unblockMap();
+		}
+
+		std::shared_ptr<FlowField> flowField() const {
+			return activeField;
 		}
 
 		std::shared_ptr<NavigationAgent> clone(const std::shared_ptr<Map> &a_map = nullptr) const {
@@ -737,6 +753,7 @@ namespace MV {
 			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
 			ourGoal = ourPosition;
+			releaseField();
 			if (wasMoving) {
 				onStopSignal(shared_from_this());
 			}
@@ -754,6 +771,7 @@ namespace MV {
 			ourPosition = a_newPosition + centerOffset;
 			ourGoal = a_newPosition + centerOffset;
 			blockMap();
+			releaseField();
 			markDirty();
 			if (wasMoving) {
 				onArriveSignal(shared_from_this());
@@ -791,6 +809,7 @@ namespace MV {
 			if (ourPathMode != a_mode) {
 				ourPathMode = a_mode;
 				followingField = false;
+				releaseField();
 				markDirty();
 			}
 			return shared_from_this();
@@ -803,6 +822,7 @@ namespace MV {
 			if (!wasMoving || ourGoal != potentialNewGoal) {
 				ourGoal = potentialNewGoal;
 				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
+				releaseField();
 				markDirty();
 				if (!pathfinding()) {
 					onArriveSignal(shared_from_this());
@@ -999,7 +1019,8 @@ namespace MV {
 		bool followFlowField() {
 			if (ourPathMode != PathMode::flowField || footprintDisabled) { return false; }
 			auto field = map->flowFieldFor(goalCell(), acceptableDistance, unitSize);
-			if (!field || !field->reachable(currentCell())) { return false; }
+			if (!field || !field->reachable(currentCell())) { releaseField(); return false; }
+			bindField(field);
 			auto nodes = field->descend(map, currentCell(), FLOW_STEPS, this);
 			if (nodes.size() < 2) { return false; }
 			receivers.clear();
@@ -1144,6 +1165,21 @@ namespace MV {
 		static constexpr size_t FLOW_EXTEND_AT = 4;   // nodes left when the next stretch is derived
 		bool followingField = false;
 		PathMode ourPathMode = PathMode::search;
+		std::shared_ptr<FlowField> activeField;
+
+		void bindField(const std::shared_ptr<FlowField>& a_field) {
+			if (activeField == a_field) { return; }
+			releaseField();
+			activeField = a_field;
+			if (activeField) { activeField->acquire(); }
+		}
+
+		void releaseField() {
+			if (activeField) {
+				activeField->release();
+				activeField.reset();
+			}
+		}
 		bool searchInProgress = false;
 		int searchSlices = 0;
 

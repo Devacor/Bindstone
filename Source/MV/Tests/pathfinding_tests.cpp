@@ -280,6 +280,83 @@ public:
             check_true(movingTicks * 10 >= pathfindingTicks * 3, "at least 30% of agent-ticks were spent moving (a packed 4x4 block of 3x3 units unpacks from the front): " + std::to_string(movingTicks) + "/" + std::to_string(pathfindingTicks));
         });
 
+        test("active_goals_pin_their_flow_field_against_eviction", [this]() {
+            auto map = MV::Map::make(MV::Size<int>(40, 40));
+            map->maxFlowFields(2);
+            auto agent = MV::NavigationAgent::make(map, MV::Point<int>(2, 2));
+            agent->goal(MV::Point<int>(36, 36), 1.0f, MV::PathMode::flowField);
+            map->beginTick();
+            agent->update(1.0 / 60.0);
+            auto pinned = agent->flowField();
+            check_true(pinned != nullptr, "a followed field is held by the agent");
+            check_eq(1, pinned->users(), "one user");
+            check_eq(size_t(1), map->pinnedFlowFields(), "the map sees the pin");
+            for (int i = 0; i < 4; ++i) {
+                map->beginTick();
+                check_true(map->flowFieldFor(MV::Point<int>(10 + i, 5), 1.0f, 1) != nullptr, "other goals get fields");
+            }
+            check_eq(size_t(2), map->flowFieldCount(), "idle fields are trimmed to the cap");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(36, 36), 1.0f, 1) == pinned, "the pinned field survived four evictions");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(20, 20), 1.0f, 1) != nullptr, "a third live key");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(21, 20), 1.0f, 1) != nullptr, "a fourth");
+            check_eq(size_t(2), map->flowFieldCount(), "still at the cap: the idle ones rotate, the pinned one stays");
+            agent->stop();
+            check_true(agent->flowField() == nullptr, "stopping releases the field");
+            check_eq(0, pinned->users(), "no users");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(22, 20), 1.0f, 1) != nullptr, "insert after release");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(23, 20), 1.0f, 1) != nullptr, "and again");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(36, 36), 1.0f, 1) != pinned, "the released field was evicted and rebuilt on demand");
+        });
+
+        test("cache_exceeds_the_cap_only_while_every_field_is_pinned", [this]() {
+            auto map = MV::Map::make(MV::Size<int>(40, 40));
+            map->maxFlowFields(1);
+            map->fieldsPerTick(3);
+            std::vector<std::shared_ptr<MV::NavigationAgent>> agents;
+            for (int i = 0; i < 3; ++i) {
+                auto agent = MV::NavigationAgent::make(map, MV::Point<int>(2, 2 + i * 4));
+                agent->goal(MV::Point<int>(36, 4 + i * 12), 1.0f, MV::PathMode::flowField);
+                agents.push_back(agent);
+            }
+            for (int tick = 0; tick < 3; ++tick) {
+                map->beginTick();
+                for (auto& agent : agents) { agent->update(1.0 / 60.0); }
+            }
+            check_eq(size_t(3), map->flowFieldCount(), "three active goals, three fields despite a cap of one");
+            check_eq(size_t(3), map->pinnedFlowFields(), "all pinned");
+            agents.clear();
+            check_eq(size_t(0), map->pinnedFlowFields(), "destroyed agents release");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(30, 30), 1.0f, 1) != nullptr, "the next insert trims");
+            check_eq(size_t(1), map->flowFieldCount(), "back to the cap");
+        });
+
+        test("goal_inside_a_static_block_seeds_the_nearest_standable_ring", [this]() {
+            auto map = MV::Map::make(MV::Size<int>(40, 40));
+            for (int x = 18; x <= 22; ++x) { for (int y = 18; y <= 22; ++y) { map->get(MV::Point<int>(x, y)).staticBlock(); } }
+            auto field = map->flowFieldFor(MV::Point<int>(20, 20), 0.0f, 1);
+            check_true(field != nullptr && field->reachableCells() > 0, "a blocked goal still yields a field");
+            check_true(field->reachable(MV::Point<int>(2, 2)), "the far corner descends toward it");
+            check_true(!field->reachable(MV::Point<int>(20, 20)), "the blocked cell itself is not part of it");
+            map->beginTick();
+            auto big = map->flowFieldFor(MV::Point<int>(20, 20), 0.0f, 3);
+            check_true(big != nullptr && big->reachableCells() > 0, "a 3x3 footprint gets its own standable ring");
+            auto agent = MV::NavigationAgent::make(map, MV::Point<int>(2, 2), 3);
+            agent->goal(MV::Point<int>(20, 20), 0.0f, MV::PathMode::flowField);
+            agent->speed(6.0f);
+            for (int tick = 0; tick < 600 && agent->flowField() == nullptr; ++tick) { map->beginTick(); agent->update(1.0 / 60.0); }
+            check_true(agent->flowField() == big, "the creature-sized agent follows the field to the building");
+            for (int tick = 0; tick < 1200; ++tick) { map->beginTick(); agent->update(1.0 / 60.0); }
+            auto cell = agent->currentCell();
+            check_true(std::max(std::abs(cell.x - 20), std::abs(cell.y - 20)) <= 5, "it ends up beside the block, not stuck at spawn");
+        });
+
         test("path_mode_defaults_to_search_and_is_opt_in", [this]() {
             auto map = MV::Map::make(MV::Size<int>(30, 30));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(1, 1));

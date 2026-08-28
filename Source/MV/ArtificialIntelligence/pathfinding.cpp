@@ -346,6 +346,8 @@ namespace MV {
 			for (auto&& square : column) { square.map = this; square.resetObservation(); }
 		}
 
+		flowFields.clear();
+		++flowGeneration;
 		hookUpObservation();
 		cellsInitialized = false;
 		ensureCellsInitialized();
@@ -665,6 +667,7 @@ namespace MV {
 
 			if (!pathfinding()) {
 				receivers.clear();
+				releaseField();
 				auto self = shared_from_this();
 				onArriveSignal(self);
 			}
@@ -878,7 +881,12 @@ namespace MV {
 			if (shown++ < 3) { detail += "\n    " + agent->debugState(); }
 		}
 		std::cerr << "[path] tick " << tickCount << " agents " << agents.size() << " moving " << moving << " stalled " << stalled << " idle " << idle
-			<< " queue " << searchQueue.size() << " budget used " << nodesUsedThisFrame << "/" << frameNodeBudget << detail << std::endl;
+			<< " queue " << searchQueue.size() << " budget used " << nodesUsedThisFrame << "/" << frameNodeBudget
+			<< " fields " << flowFields.size() << " (pinned " << pinnedFlowFields() << ")" << detail;
+		for (auto& field : flowFields) {
+			std::cerr << "\n    field goal " << field->goal().x << "," << field->goal().y << " r " << field->radius() << " size " << field->unitSize() << " users " << field->users() << " reachable " << field->reachableCells();
+		}
+		std::cerr << std::endl;
 	}
 
 	std::shared_ptr<FlowField> Map::flowFieldFor(const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize) {
@@ -898,13 +906,27 @@ namespace MV {
 		auto field = std::make_shared<FlowField>(shared_from_this(), a_goal, a_radius, a_unitSize);
 		field->generation = flowGeneration;
 		field->lastUsedTick = tickCount;
-		if (flowFields.size() >= flowFieldCapacity) {
-			auto oldest = std::min_element(flowFields.begin(), flowFields.end(), [](const std::shared_ptr<FlowField>& a_lhs, const std::shared_ptr<FlowField>& a_rhs) { return a_lhs->lastUsedTick < a_rhs->lastUsedTick; });
-			*oldest = field;
-		} else {
-			flowFields.push_back(field);
-		}
+		flowFields.push_back(field);
+		trimFlowFields();
 		return field;
+	}
+
+	void Map::trimFlowFields() {
+		while (flowFields.size() > flowFieldCapacity) {
+			auto idle = flowFields.end();
+			for (auto i = flowFields.begin(); i != flowFields.end(); ++i) {
+				bool inUse = (*i)->users() > 0 || (*i)->lastUsedTick == tickCount;
+				if (!inUse && (idle == flowFields.end() || (*i)->lastUsedTick < (*idle)->lastUsedTick)) { idle = i; }
+			}
+			if (idle == flowFields.end()) { return; }
+			flowFields.erase(idle);
+		}
+	}
+
+	size_t Map::pinnedFlowFields() const {
+		size_t pinned = 0;
+		for (auto& field : flowFields) { if (field->users() > 0) { ++pinned; } }
+		return pinned;
 	}
 
 	FlowField::FlowField(const std::shared_ptr<Map>& a_map, const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize) :
@@ -923,17 +945,37 @@ namespace MV {
 		struct Entry { float cost; int x; int y; };
 		auto later = [](const Entry& a_lhs, const Entry& a_rhs) { return a_lhs.cost > a_rhs.cost; };
 		std::vector<Entry> open;
+		auto seed = [&](const Point<int>& a_cell) {
+			distances[index(a_cell)] = 0.0f;
+			open.push_back({ 0.0f, a_cell.x, a_cell.y });
+			std::push_heap(open.begin(), open.end(), later);
+		};
 		int reach = static_cast<int>(std::ceil(goalRadius));
 		for (int x = goalCell.x - reach; x <= goalCell.x + reach; ++x) {
 			for (int y = goalCell.y - reach; y <= goalCell.y + reach; ++y) {
 				Point<int> cell(x, y);
 				auto cellDistance = static_cast<PointPrecision>(distance(cell, goalCell));
 				if (!(cellDistance < goalRadius || equals(cellDistance, goalRadius))) { continue; }
-				if (!a_map->clearedForSizeStatic(cell, footprint)) { continue; }
-				distances[index(cell)] = 0.0f;
-				open.push_back({ 0.0f, x, y });
-				std::push_heap(open.begin(), open.end(), later);
+				if (!inField(cell) || !a_map->clearedForSizeStatic(cell, footprint)) { continue; }
+				seed(cell);
 			}
+		}
+		// A goal a footprint cannot stand in (a building, a wall) is served the way the search serves
+		// it: the nearest cells that can be stood in become the goal
+		for (int ring = reach + 1; open.empty() && ring <= std::max(width, height); ++ring) {
+			std::vector<Point<int>> closest;
+			PointPrecision closestDistance = 0.0f;
+			for (int x = goalCell.x - ring; x <= goalCell.x + ring; ++x) {
+				for (int y = goalCell.y - ring; y <= goalCell.y + ring; ++y) {
+					if (std::abs(x - goalCell.x) != ring && std::abs(y - goalCell.y) != ring) { continue; }
+					Point<int> cell(x, y);
+					if (!inField(cell) || !a_map->clearedForSizeStatic(cell, footprint)) { continue; }
+					auto cellDistance = static_cast<PointPrecision>(distance(cell, goalCell));
+					if (closest.empty() || cellDistance < closestDistance) { closest.assign(1, cell); closestDistance = cellDistance; }
+					else if (equals(cellDistance, closestDistance)) { closest.push_back(cell); }
+				}
+			}
+			for (auto& cell : closest) { seed(cell); }
 		}
 		static const Point<int> offsets[8] = { { -1, 0 }, { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 } };
 		size_t count = corners ? 8 : 4;

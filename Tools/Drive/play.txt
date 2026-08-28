@@ -1,0 +1,20 @@
+# Login is automatic with -n/-p; click Play like a person, then zoom and pan in the match.
+wait 6
+dump Play
+shot drive_main.bmp
+click node Play
+wait 25
+dump PathMap
+shot drive_game.bmp
+scroll -3 960 600
+wait 0.6
+shot drive_zoomout.bmp
+scroll -8 960 600
+wait 0.6
+shot drive_zoomout_floor.bmp
+scroll 4 960 600
+wait 0.6
+drag 960 600 500 300 15
+wait 0.6
+shot drive_dragged.bmp
+quit

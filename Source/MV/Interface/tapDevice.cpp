@@ -21,13 +21,32 @@ namespace MV{
 		update();
 	}
 
+	void TapDevice::simulate(const MV::Point<int>& a_position, bool a_left, bool a_right, bool a_middle) {
+		simulated = true;
+		simulatedPosition = a_position;
+		simulatedLeft = a_left;
+		simulatedRight = a_right;
+		simulatedMiddle = a_middle;
+	}
+
+	void TapDevice::stopSimulating() {
+		simulated = false;
+	}
+
 	void TapDevice::update() {
 		MV::Point<int> newPosition;
-		uint32_t state = SDL_GetMouseState(&newPosition.x, &newPosition.y);
-
-		bool newLeft = (state & SDL_BUTTON(SDL_BUTTON_LEFT)) != false;
-		bool newMiddle = (state & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != false;
-		bool newRight = (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) != false;
+		bool newLeft, newMiddle, newRight;
+		if (simulated) {
+			newPosition = simulatedPosition;
+			newLeft = simulatedLeft;
+			newMiddle = simulatedMiddle;
+			newRight = simulatedRight;
+		} else {
+			uint32_t state = SDL_GetMouseState(&newPosition.x, &newPosition.y);
+			newLeft = (state & SDL_BUTTON(SDL_BUTTON_LEFT)) != false;
+			newMiddle = (state & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != false;
+			newRight = (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) != false;
+		}
 
 		if(newPosition != mousePosition){
 			oldMousePosition = mousePosition;

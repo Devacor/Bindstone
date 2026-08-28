@@ -46,6 +46,11 @@ namespace MV{
 
 		void update();
 
+		// Automation: while simulating, update() reads this instead of the hardware mouse
+		void simulate(const MV::Point<int>& a_position, bool a_left, bool a_right = false, bool a_middle = false);
+		void stopSimulating();
+		bool simulating() const { return simulated; }
+
 		void updateTouch(SDL_Event a_event, MV::Size<int> screenSize);
 
 		MV::Point<int> position() const;
@@ -65,6 +70,11 @@ namespace MV{
 		bool right = false;
 		MV::Point<int> mousePosition;
 		MV::Point<int> oldMousePosition;
+		bool simulated = false;
+		MV::Point<int> simulatedPosition;
+		bool simulatedLeft = false;
+		bool simulatedRight = false;
+		bool simulatedMiddle = false;
 		MV::Point<int> touchPosition;
 
 		void updateButtonState(bool &oldState, bool newState, jai::signal_emitter<CallbackSignature> &onDown, jai::signal_emitter<CallbackSignature> &onUp, jai::signal_emitter<CallbackSignature> &onDownEnd, jai::signal_emitter<CallbackSignature> &onUpEnd);

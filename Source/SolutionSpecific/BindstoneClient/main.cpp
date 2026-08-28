@@ -200,7 +200,7 @@ static void RunButtonWiring() {
 // exist yet when the assets were converted. Reassigns handles from the assembled UI atlas
 // and re-saves. Run: BindstoneClient.exe -fixloginui (saveJai writes via the %APPDATA%
 // redirect - copy the result back to the repo Assets).
-static void RunLoginUiRepair() {
+static void RunLoginUiRepair(const char* a_onlyPath = nullptr) {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
@@ -257,6 +257,7 @@ static void RunLoginUiRepair() {
 	};
 	using SceneFixup = std::function<void(const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>&)>;
 	auto repairScene = [&](const char* a_path, const SceneFixup& a_fixup) {
+		if (a_onlyPath && std::strcmp(a_path, a_onlyPath) != 0) { return; }
 		try {
 			auto root = MV::Scene::Node::load(a_path, managers.services, false);
 			fakeRoot->add(root);
@@ -303,7 +304,20 @@ static void RunLoginUiRepair() {
 	repairScene("Assets/Prefabs/SimpleButton.bindsnap", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
 		button->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(100.0f, 30.0f)));
 	});
-	repairScene("Assets/Interface/Main/view.scene", nullptr);
+	// The Play button's own rectangle is centred on its node (-75..75 x -20..20, anchored to the
+	// ScreenScaler's centre); the conversion left its state views unanchored, untextured and unlabelled.
+	repairScene("Assets/Interface/Main/view.scene", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
+		MV::BoxAABB<> viewBox(MV::point(-75.0f, -20.0f), MV::point(75.0f, 20.0f));
+		MV::BoxAABB<> fill(MV::point(0.0f, 0.0f), MV::point(1.0f, 1.0f));
+		if (button->id().empty()) { button->id("Play"); }   // anchors persist their parent by component id
+		for (auto& viewNode : { button->activeNode(), button->idleNode(), button->disabledNode() }) {
+			viewNode->component<MV::Scene::Sprite>().self()->anchors().parent(button).anchor(fill).offset(MV::BoxAABB<>());
+			auto label = viewNode->component<MV::Scene::Text>().self();
+			label->anchors().parent(button).anchor(fill).offset(MV::BoxAABB<>());
+			label->text(MV::UtfString("Play"));
+		}
+		retextureViews(button, viewBox);
+	});
 	repairScene("Assets/Prefabs/LoginName.bindsnap", nullptr);
 }
 
@@ -838,6 +852,10 @@ int main(int argc, char *argv[]) {
 			RunLoginUiRepair();
 			return 0;
 		}
+		if (strcmp(argv[i], "-fixmainui") == 0) {
+			RunLoginUiRepair("Assets/Interface/Main/view.scene");
+			return 0;
+		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {
 			RunEmitterBenchmark();
 			return 0;
@@ -853,6 +871,10 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-workbenchgizmoshot") == 0) {
 			return RunWorkbench(true, "workbench_shot.bmp", true, true);
+		}
+		if (strcmp(argv[i], "-drive") == 0 && i + 1 < argc) {
+			GameEditor menu(name, pass, autoStart);
+			return menu.runDriver(argv[i + 1]);
 		}
 		if (strcmp(argv[i], "-loginshot") == 0) {
 			int frames = 120;

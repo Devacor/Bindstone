@@ -4,6 +4,9 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <fstream>
+#include <sstream>
+#include <optional>
 
 
 void GameEditor::resumeTitleMusic() {
@@ -183,6 +186,167 @@ int GameEditor::runGameFrames(int a_frameLimit, const std::string& a_capturePath
 		std::this_thread::yield();
 	}
 	return frame;
+}
+
+// Verbs (one per line, # comments):
+//   wait S | move X Y | move node ID | down | up | click X Y | click node ID | drag X1 Y1 X2 Y2 [STEPS]
+//   scroll AMOUNT [X Y] | type TEXT | key NAME (SDL key name: Return, Escape, Backspace, Tab...)
+//   shot FILE.bmp | dump ID | print TEXT | quit
+// Mouse position/buttons are injected into the game's TapDevice; wheel and keys are real SDL events.
+int GameEditor::runDriver(const std::string& a_scriptPath) {
+	struct Step { std::string op; std::vector<std::string> args; int remaining = 0; };
+	std::vector<Step> steps;
+	{
+		std::ifstream in(a_scriptPath);
+		if (!in) { std::cerr << "[drive] cannot open " << a_scriptPath << std::endl; return 2; }
+		std::string line;
+		while (std::getline(in, line)) {
+			if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+			auto hash = line.find('#');
+			if (hash == 0) { continue; }
+			std::istringstream words(line);
+			Step step;
+			if (!(words >> step.op)) { continue; }
+			if (step.op == "type" || step.op == "print") {
+				std::string rest;
+				std::getline(words, rest);
+				step.args.push_back(rest.empty() ? rest : rest.substr(1));
+			} else {
+				std::string word;
+				while (words >> word) { step.args.push_back(word); }
+			}
+			auto push = [&](const std::string& a_op, std::vector<std::string> a_args = {}) { steps.push_back({ a_op, std::move(a_args) }); };
+			if (step.op == "click") {
+				push("move", step.args); push("down"); push("wait", { "0.05" }); push("up"); push("wait", { "0.05" });
+			} else if (step.op == "drag" && step.args.size() >= 4) {
+				push("move", { step.args[0], step.args[1] }); push("down"); push("wait", { "0.05" });
+				push("moveto", { step.args[2], step.args[3], step.args.size() > 4 ? step.args[4] : "12" });
+				push("wait", { "0.05" }); push("up"); push("wait", { "0.05" });
+			} else {
+				steps.push_back(step);
+			}
+		}
+	}
+
+	auto findNode = [&](const std::string& a_id) -> std::shared_ptr<MV::Scene::Node> {
+		auto node = game.gui().root()->get(a_id, false);
+		if (!node && game.instance()) { node = game.instance()->scene()->get(a_id, false); }
+		return node;
+	};
+	// A node's own box includes its origin; a clickable's hit rectangle is what a person aims at
+	auto hitBox = [](const std::shared_ptr<MV::Scene::Node>& a_node) {
+		auto clickable = a_node->component<MV::Scene::Clickable>(false, false);
+		return clickable ? a_node->screenFromLocal(clickable->bounds()) : a_node->screenBounds();
+	};
+	auto center = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
+		auto bounds = hitBox(a_node);
+		return MV::Point<int>((bounds.minPoint.x + bounds.maxPoint.x) / 2, (bounds.minPoint.y + bounds.maxPoint.y) / 2);
+	};
+	auto target = [&](const std::vector<std::string>& a_args) -> std::optional<MV::Point<int>> {
+		if (a_args.size() >= 2 && a_args[0] == "node") {
+			auto node = findNode(a_args[1]);
+			if (!node) { std::cout << "[drive] no node " << a_args[1] << std::endl; return std::nullopt; }
+			return center(node);
+		}
+		if (a_args.size() >= 2) { return MV::Point<int>(std::atoi(a_args[0].c_str()), std::atoi(a_args[1].c_str())); }
+		return std::nullopt;
+	};
+	auto pushKey = [](SDL_Keycode a_key, bool a_down) {
+		SDL_Event event{};
+		event.type = a_down ? SDL_KEYDOWN : SDL_KEYUP;
+		event.key.state = a_down ? SDL_PRESSED : SDL_RELEASED;
+		event.key.keysym.sym = a_key;
+		event.key.keysym.scancode = SDL_GetScancodeFromKey(a_key);
+		SDL_PushEvent(&event);
+	};
+
+	auto& mouse = game.mouse();
+	MV::Point<int> cursor(managers.renderer.window().drawableSize().width / 2, managers.renderer.window().drawableSize().height / 2);
+	bool left = false;
+	double waitRemaining = 0.0;
+	size_t next = 0;
+	std::string capture;
+	bool quit = false;
+
+	game.returnFromBackground();
+	managers.timer.start();
+	managers.timer.delta("tick");
+	mouse.simulate(cursor, left);
+	while (!quit) {
+		double dt = managers.timer.delta("tick");
+		waitRemaining -= dt;
+		while (!quit && next < steps.size() && waitRemaining <= 0.0) {
+			auto& step = steps[next];
+			bool advance = true;
+			if (step.op == "wait") { waitRemaining = step.args.empty() ? 0.0 : std::atof(step.args[0].c_str()); }
+			else if (step.op == "move") { if (auto to = target(step.args)) { cursor = *to; } }
+			else if (step.op == "moveto") {
+				if (step.remaining == 0) { step.remaining = std::max(1, std::atoi(step.args.size() > 2 ? step.args[2].c_str() : "12")); }
+				if (auto to = target(step.args)) {
+					cursor += (*to - cursor) / step.remaining;
+					if (--step.remaining > 0) { advance = false; }
+					else { cursor = *to; }
+				}
+				waitRemaining = 1.0 / 60.0;
+			}
+			else if (step.op == "down") { left = true; waitRemaining = 1.0 / 60.0; }
+			else if (step.op == "up") { left = false; waitRemaining = 1.0 / 60.0; }
+			else if (step.op == "scroll") {
+				if (step.args.size() >= 3) { cursor = MV::Point<int>(std::atoi(step.args[1].c_str()), std::atoi(step.args[2].c_str())); }
+				SDL_Event event{};
+				event.type = SDL_MOUSEWHEEL;
+				event.wheel.y = step.args.empty() ? 1 : std::atoi(step.args[0].c_str());
+				SDL_PushEvent(&event);
+				waitRemaining = 1.0 / 60.0;
+			}
+			else if (step.op == "type") {
+				const std::string& text = step.args.empty() ? std::string() : step.args[0];
+				for (size_t i = 0; i < text.size(); i += 31) {
+					SDL_Event event{};
+					event.type = SDL_TEXTINPUT;
+					auto chunk = text.substr(i, 31);
+					std::memcpy(event.text.text, chunk.c_str(), chunk.size() + 1);
+					SDL_PushEvent(&event);
+				}
+			}
+			else if (step.op == "key") {
+				auto key = step.args.empty() ? SDLK_UNKNOWN : SDL_GetKeyFromName(step.args[0].c_str());
+				if (key == SDLK_UNKNOWN) { std::cout << "[drive] unknown key " << (step.args.empty() ? "" : step.args[0]) << std::endl; }
+				else { pushKey(key, true); pushKey(key, false); }
+			}
+			else if (step.op == "shot") { capture = step.args.empty() ? "drive_shot.bmp" : step.args[0]; }
+			else if (step.op == "dump") {
+				auto node = step.args.empty() ? nullptr : findNode(step.args[0]);
+				if (!node) { std::cout << "[drive] dump: no node " << (step.args.empty() ? "" : step.args[0]) << std::endl; }
+				else {
+					auto bounds = node->screenBounds();
+					auto hit = hitBox(node);
+					std::cout << "[drive] " << step.args[0] << " visible " << node->visible() << " screen (" << bounds.minPoint.x << "," << bounds.minPoint.y << ")-(" << bounds.maxPoint.x << "," << bounds.maxPoint.y << ") hit (" << hit.minPoint.x << "," << hit.minPoint.y << ")-(" << hit.maxPoint.x << "," << hit.maxPoint.y << ") children " << node->size() << " active " << node->active() << std::endl;
+				}
+			}
+			else if (step.op == "print") { std::cout << "[drive] " << (step.args.empty() ? "" : step.args[0]) << std::endl; }
+			else if (step.op == "quit") { quit = true; }
+			else { std::cout << "[drive] unknown verb " << step.op << std::endl; }
+			if (advance) { ++next; }
+		}
+		mouse.simulate(cursor, left);
+		if (!game.update(dt)) { break; }
+		game.handleInput();
+		if (!capture.empty()) {
+			managers.renderer.clearScreen();
+			if (game.instance()) { game.instance()->scene()->draw(); }
+			game.root()->draw();
+			captureScreenshot(capture);
+			managers.renderer.updateScreen();
+			capture.clear();
+		} else {
+			game.render();
+		}
+		std::this_thread::yield();
+	}
+	mouse.stopSimulating();
+	std::cout << "[drive] done (" << next << "/" << steps.size() << " steps)" << std::endl;
+	return next == steps.size() ? 0 : 1;
 }
 
 void GameEditor::dumpSlicedSprites() {

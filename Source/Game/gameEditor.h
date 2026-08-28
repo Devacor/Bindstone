@@ -20,6 +20,8 @@ public:
 	}
 
 	int runFrames(int a_frameCount, const std::string& a_capturePath);
+	// Plays the game from a line-per-action script (see runDriver in gameEditor.cpp for the verbs)
+	int runDriver(const std::string& a_scriptPath);
 	void dumpSlicedSprites();
 private:
 	void resumeTitleMusic();

@@ -107,10 +107,19 @@ public:
                 if (a_registerCreature->alive()) {
                         creatures[a_registerCreature->netId()] = a_registerCreature;
                         a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
+                                lastKnownCreaturePositions[a_creature->netId()] = a_creature->owner()->position();
                                 creatures.erase(a_creature->netId());
                         });
                 }
         }
+
+	// Where a creature stood when it died, for effects that outlive their target
+	bool lastKnownCreaturePosition(int64_t a_id, MV::Point<> &a_position) const {
+		auto found = lastKnownCreaturePositions.find(a_id);
+		if (found == lastKnownCreaturePositions.end()) { return false; }
+		a_position = found->second;
+		return true;
+	}
 
         const std::shared_ptr<Creature> &creature(int64_t a_id) {
                 static std::shared_ptr<Creature> nullCreature;
@@ -140,10 +149,19 @@ protected:
 	void handleScroll(float a_amount, const MV::Point<int> &a_position);
 	void rawScaleAroundCenter(float a_amount);
 	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
+
+	// The view may never show past the map (hard); past the inset soft edge it is allowed briefly,
+	// then eases back. Scale has the same two tiers.
+	MV::BoxAABB<> visibleMapBounds();
+	bool mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft);
+	float scaleToFit(const MV::BoxAABB<>& a_bounds);
+	MV::Point<> viewCorrection(const MV::BoxAABB<>& a_bounds);
+	void clampToHardBounds(const MV::Point<int>& a_pointerCenter);
 	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
 
         std::vector<std::shared_ptr<Building>> buildings;
         std::map<int64_t, std::shared_ptr<Creature>> creatures;
+        std::unordered_map<int64_t, MV::Point<>> lastKnownCreaturePositions;
 
 	GameData& gameData;
 
@@ -174,6 +192,9 @@ protected:
 
 	const MV::PointPrecision minScaleHard = .625f;
 	const MV::PointPrecision minScaleSoft = .675f;
+	const MV::PointPrecision viewSoftInset = .04f;   // of the map's size, per edge
+	const double viewEaseSeconds = 0.25;
+	const double viewEaseHoldSeconds = 0.1;
 
 	BindstoneNetworkObjectPool synchronizedObjects;
 };

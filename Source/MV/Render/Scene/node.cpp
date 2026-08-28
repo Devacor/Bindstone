@@ -21,8 +21,6 @@
 
 static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
-	builder.auto_bind();
-
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make));
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make));
 	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet);
@@ -63,6 +61,28 @@ static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	builder.method("screenBounds", &MV::Scene::Node::screenBounds);
 
 	builder.method("clone", &MV::Scene::Node::clone);
+
+	builder.property("onChildAdd", &MV::Scene::Node::onChildAdd);
+	builder.property("onChildRemove", &MV::Scene::Node::onChildRemove);
+	builder.property("onChildOrderChange", &MV::Scene::Node::onChildOrderChange);
+	builder.property("onAdd", &MV::Scene::Node::onAdd);
+	builder.property("onRemove", &MV::Scene::Node::onRemove);
+	builder.property("onEnable", &MV::Scene::Node::onEnable);
+	builder.property("onDisable", &MV::Scene::Node::onDisable);
+	builder.property("onPause", &MV::Scene::Node::onPause);
+	builder.property("onResume", &MV::Scene::Node::onResume);
+	builder.property("onShow", &MV::Scene::Node::onShow);
+	builder.property("onHide", &MV::Scene::Node::onHide);
+	builder.property("onBoundsRequest", &MV::Scene::Node::onBoundsRequest);
+	builder.property("onTransformChange", &MV::Scene::Node::onTransformChange);
+	builder.property("onLocalBoundsChange", &MV::Scene::Node::onLocalBoundsChange);
+	builder.property("onChildBoundsChange", &MV::Scene::Node::onChildBoundsChange);
+	builder.property("onOrderChange", &MV::Scene::Node::onOrderChange);
+	builder.property("onAlphaChange", &MV::Scene::Node::onAlphaChange);
+	builder.property("onChange", &MV::Scene::Node::onChange);
+	builder.property("onAttach", &MV::Scene::Node::onAttach);
+	builder.property("onDetach", &MV::Scene::Node::onDetach);
+	builder.property("onComponentUpdate", &MV::Scene::Node::onComponentUpdate);
 });
 
 namespace MV {
@@ -222,18 +242,19 @@ namespace MV {
 			return load(a_filename, a_services, "", a_doPostLoadStep);
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+		template <typename MakeReader>
+		std::shared_ptr<Node> Node::loadFile(const char* a_loader, const std::string& a_filename, MV::Services& a_services, const std::string& a_newNodeId, bool a_doPostLoadStep, MakeReader a_makeReader) {
 			auto contents = fileContents(a_filename);
-			require<ResourceException>(!contents.empty(), "File not found for Node::load: ", a_filename);
+			require<ResourceException>(!contents.empty(), "File not found for ", a_loader, ": ", a_filename);
 
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 			auto* engine = a_services.get<jai::engine>();
 
 			const auto tParse0 = std::chrono::steady_clock::now();
-			jai::serialization::json_archive_reader ar(contents, engine);
+			auto ar = a_makeReader(contents, engine);
 			const auto tParse1 = std::chrono::steady_clock::now();
 
-			ar.set_user_context<MV::Services>(&a_services);
+			ar.template set_user_context<MV::Services>(&a_services);
 			std::shared_ptr<Node> result;
 			ar(result);  // load_complete() fires on root via post_load depth tracking. File
 			             // textures stream in via SharedTextures (async decode on the pool +
@@ -248,11 +269,17 @@ namespace MV {
 				auto ms = [](auto a, auto b) {
 					return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count() / 1000.0;
 				};
-				std::cout << "\n[Node::load " << a_filename << " " << contents.size() << " bytes]"
+				std::cout << "\n[" << a_loader << " " << a_filename << " " << contents.size() << " bytes]"
 					<< "  parse: " << ms(tParse0, tParse1) << " ms"
 					<< "  walk+postLoad: " << ms(tParse1, tWalk1) << " ms\n";
 			}
 			return result;
+		}
+
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+			return loadFile("Node::load", a_filename, a_services, a_newNodeId, a_doPostLoadStep, [](const std::string& a_contents, jai::engine* a_engine) {
+				return jai::serialization::json_archive_reader(a_contents, a_engine);
+			});
 		}
 
 		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
@@ -260,22 +287,9 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
-			auto contents = fileContents(a_filename);
-			require<ResourceException>(!contents.empty(), "File not found for Node::loadBinary: ", a_filename);
-
-			auto* engine = a_services.get<jai::engine>();
-			jai::serialization::binary_archive_reader ar(reinterpret_cast<const uint8_t*>(contents.data()), contents.size(), engine);
-			ar.set_user_context<MV::Services>(&a_services);
-			std::shared_ptr<Node> result;
-			ar(result);
-
-			if (!a_newNodeId.empty()) {
-				result->id(a_newNodeId);
-			}
-			if (a_doPostLoadStep) {
-				result->postLoadStep();
-			}
-			return result;
+			return loadFile("Node::loadBinary", a_filename, a_services, a_newNodeId, a_doPostLoadStep, [](const std::string& a_contents, jai::engine* a_engine) {
+				return jai::serialization::binary_archive_reader(a_contents.data(), a_contents.size(), a_engine);
+			});
 		}
 
 		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile) {
@@ -290,22 +304,6 @@ namespace MV {
 			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
 			nodeId = a_newId;
 			myParent = nullptr;
-
-			// Filter non-serializable children/components (editor scaffolding), same as saveJai.
-			auto originalChildNodes = childNodes.get();
-			auto originalChildComponents = childComponents.get();
-			std::vector<std::shared_ptr<Node>> filteredChildren;
-			std::copy_if(originalChildNodes.begin(), originalChildNodes.end(), std::back_inserter(filteredChildren),
-				[](const auto& child) { return child->serializable(); });
-			std::vector<std::shared_ptr<Component>> filteredComponents;
-			std::copy_if(originalChildComponents.begin(), originalChildComponents.end(), std::back_inserter(filteredComponents),
-				[](const auto& comp) { return comp->serializable(); });
-			childNodes = filteredChildren;
-			childComponents = filteredComponents;
-			SCOPE_EXIT{
-				childNodes = originalChildNodes;
-				childComponents = originalChildComponents;
-			};
 
 			auto* engine = a_services.get<jai::engine>();
 			jai::serialization::binary_archive_writer ar(engine);
@@ -346,26 +344,6 @@ namespace MV {
 			nodeId = a_newId;
 			myParent = nullptr;
 
-			auto originalChildNodes = childNodes.get();
-			auto originalChildComponents = childComponents.get();
-
-			std::vector<std::shared_ptr<Node>> filteredChildren;
-			std::copy_if(originalChildNodes.begin(), originalChildNodes.end(),
-				std::back_inserter(filteredChildren),
-				[](const auto& child) { return child->serializable(); });
-
-			std::vector<std::shared_ptr<Component>> filteredComponents;
-			std::copy_if(originalChildComponents.begin(), originalChildComponents.end(),
-				std::back_inserter(filteredComponents),
-				[](const auto& comp) { return comp->serializable(); });
-
-			childNodes = filteredChildren;
-			childComponents = filteredComponents;
-			SCOPE_EXIT{
-				childNodes = originalChildNodes;
-				childComponents = originalChildComponents;
-			};
-
 			// Serialize directly as shared_ptr (bypasses to_json wrapper which adds incompatible outer object)
 			auto* engine = a_services.get<jai::engine>();
 			jai::serialization::json_archive_writer ar(0, engine);  // indent=0: compact JSON
@@ -379,39 +357,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
-			auto contents = fileContents(a_filename);
-			require<ResourceException>(!contents.empty(), "File not found for Node::loadJai: ", a_filename);
-
-			auto* engine = a_services.get<jai::engine>();
-
-			const auto tParse0 = std::chrono::steady_clock::now();
-			jai::serialization::json_archive_reader ar(contents, engine);
-			const auto tParse1 = std::chrono::steady_clock::now();
-
-			ar.set_user_context<MV::Services>(&a_services);
-			std::shared_ptr<Node> result;
-			ar(result);
-			const auto tWalk1 = std::chrono::steady_clock::now();
-
-			if (!a_newNodeId.empty()) {
-				result->id(a_newNodeId);
-			}
-
-			if (a_doPostLoadStep) {
-				result->postLoadStep();
-			}
-			const auto tPost1 = std::chrono::steady_clock::now();
-
-			if (contents.size() > 100000) {
-				auto ms = [](auto a, auto b) {
-					return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count() / 1000.0;
-				};
-				std::cout << "\n[loadJai " << a_filename << " " << contents.size() << " bytes]"
-					<< "  parse: " << ms(tParse0, tParse1) << " ms"
-					<< "  walk: " << ms(tParse1, tWalk1) << " ms"
-					<< "  postLoad: " << ms(tWalk1, tPost1) << " ms\n";
-			}
-			return result;
+			return load(a_filename, a_services, a_newNodeId, a_doPostLoadStep);
 		}
 
 		std::shared_ptr<Node> Node::loadChildJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId) {
@@ -431,11 +377,25 @@ namespace MV {
 			return make(MV::guid("id_"));
 		}
 
-		std::shared_ptr<Node> Node::add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth) {
-			Node* parentCheck = this;
-			while (parentCheck = parentCheck->myParent) {
-				MV::require<RangeException>(parentCheck != a_child.get(), "Adding [", a_child->id(), "] to [", id(), "] would result in a circular ownership!");
+		void Node::requireNotAncestor(const std::shared_ptr<Node> &a_child) const {
+			for (const Node* ancestor = this; ancestor; ancestor = ancestor->myParent) {
+				MV::require<RangeException>(ancestor != a_child.get(), "Adding [", a_child->id(), "] to [", id(), "] would result in a circular ownership!");
 			}
+		}
+
+		void Node::adopt(const std::shared_ptr<Node> &a_child) {
+			requireNotAncestor(a_child);
+			a_child->myParent = this;
+			if (a_child->ourCameraId != ourCameraId) {
+				a_child->cameraIdInternal(ourCameraId);
+			}
+			a_child->onParentAlphaChangeSignal = onAlphaChangeSignal.connect([child = a_child.get()](const std::shared_ptr<Node> &) {
+				child->recalculateAlpha();
+			});
+		}
+
+		std::shared_ptr<Node> Node::add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth) {
+			requireNotAncestor(a_child);
 			if(a_child->myParent != this){
 				remove(a_child->id(), false);
 				a_child->removeFromParent();
@@ -443,10 +403,7 @@ namespace MV {
 					a_child->sortDepth = (childNodes->empty()) ? 0.0f : childNodes[childNodes->size() - 1]->sortDepth + 1.0f;
 				}
 				insertSorted(childNodes.get(), a_child);
-				a_child->myParent = this;
-				if (a_child->ourCameraId != ourCameraId) {
-					a_child->cameraIdInternal(ourCameraId);
-				}
+				adopt(a_child);
 				a_child->onAddSignal(a_child);
 				onChildAddSignal(a_child);
 				a_child->markMatrixDirty(true);
@@ -677,19 +634,20 @@ namespace MV {
 			return self;
 		}
 
-		size_t Node::indexOf(const std::shared_ptr<const Node> &a_childItem) const {
-			size_t i = 0;
-			for(auto&& cell : childNodes){
-				if(cell == a_childItem){
-					return i;
-				}
-				++i;
+		std::optional<size_t> Node::indexOf(const std::shared_ptr<const Node> &a_childItem) const {
+			auto found = std::find(childNodes->cbegin(), childNodes->cend(), a_childItem);
+			if (found == childNodes->cend()) {
+				return std::nullopt;
 			}
-			return i;
+			return static_cast<size_t>(std::distance(childNodes->cbegin(), found));
 		}
 
-		size_t Node::myIndex() const {
-			return (myParent) ? myParent->indexOf(shared_from_this()) : 0;
+		int64_t Node::myIndex() const {
+			if (!myParent) {
+				return 0;
+			}
+			auto index = myParent->indexOf(shared_from_this());
+			return index ? static_cast<int64_t>(*index) : -1;
 		}
 
 		std::vector<int64_t> Node::parentIndexList(int64_t a_globalPriority) {
@@ -776,18 +734,19 @@ namespace MV {
 			recalculateChildBoundsCalls++;
 			{
 				dirtyChildBounds = false;
-				if (!childNodes->empty()) {
-					localChildBounds = childNodes[0]->bounds();
-					for (size_t i = 1; i < childNodes->size(); ++i) {
-						if (childNodes[i]->selfVisible()) {
-							auto nodeBounds = childNodes[i]->bounds();
-							if (!nodeBounds.empty()) {
-								localChildBounds->expandWith(nodeBounds);
-							}
+				localChildBounds = BoxAABB<>();
+				for (auto&& child : childNodes) {
+					if (child->selfVisible()) {
+						auto nodeBounds = child->bounds();
+						if (nodeBounds.empty()) {
+							continue;
+						}
+						if (localChildBounds->empty()) {
+							localChildBounds = nodeBounds;
+						} else {
+							localChildBounds->expandWith(nodeBounds);
 						}
 					}
-				} else {
-					localChildBounds = BoxAABB<>();
 				}
 			}
 			markParentBoundsDirty();
@@ -867,9 +826,6 @@ namespace MV {
 				{
 					*blockOnChange = true;
 					SCOPE_EXIT{ *blockOnChange = false; };
-					onParentAlphaChangeSignal = myParent->onAlphaChangeSignal.connect([&, blockOnChange](const std::shared_ptr<Node> &a_parent) {
-						recalculateAlpha();
-					});
 					markBoundsDirty();
 					recalculateAlpha();
 				}
@@ -921,6 +877,20 @@ namespace MV {
 				}
 			});
 
+			auto recordOnce = [](auto &a_silenced, const auto &a_item) {
+				if (std::find(a_silenced.begin(), a_silenced.end(), a_item) == a_silenced.end()) {
+					a_silenced.push_back(a_item);
+				}
+			};
+			onChildRemoveSignal.set_blocked_callback([this, recordOnce](const std::shared_ptr<Node> &, const std::shared_ptr<Node> &a_child) {
+				recordOnce(silencedChildRemovals, a_child);
+			});
+			onChildOrderChangeSignal.set_blocked_callback([this, recordOnce](const std::shared_ptr<Node> &, const std::shared_ptr<Node> &a_child) {
+				recordOnce(silencedChildOrderChanges, a_child);
+			});
+			onComponentUpdateSignal.set_blocked_callback([this, recordOnce](const std::shared_ptr<Component> &a_component) {
+				recordOnce(silencedComponentUpdates, a_component);
+			});
 		}
 
 		void Node::safeOnChange() {
@@ -948,6 +918,25 @@ namespace MV {
 
 		bool Node::serializable() const {
 			return allowSerialize;
+		}
+
+		Node::SerializableChildrenScope::SerializableChildrenScope(Node& a_node) :
+			node(a_node),
+			originalChildNodes(a_node.childNodes.get()),
+			originalChildComponents(a_node.childComponents.get()) {
+			std::vector<std::shared_ptr<Node>> filteredChildren;
+			std::copy_if(originalChildNodes.begin(), originalChildNodes.end(), std::back_inserter(filteredChildren),
+				[](const auto& child) { return child->serializable(); });
+			std::vector<std::shared_ptr<Component>> filteredComponents;
+			std::copy_if(originalChildComponents.begin(), originalChildComponents.end(), std::back_inserter(filteredComponents),
+				[](const auto& comp) { return comp->serializable(); });
+			node.childNodes = filteredChildren;
+			node.childComponents = filteredComponents;
+		}
+
+		Node::SerializableChildrenScope::~SerializableChildrenScope() {
+			node.childNodes = originalChildNodes;
+			node.childComponents = originalChildComponents;
 		}
 
 		std::shared_ptr<Node> Node::enable() {
@@ -1066,7 +1055,7 @@ namespace MV {
 
 		void Node::fixChildOwnership() {
 			for (auto &&childNode : childNodes) {
-				childNode->myParent = this;
+				adopt(childNode);
 			}
 			// The enclosing node IS the owner; never trust a deserialized componentOwner
 			// (conversion-era assets carry null/stale refs — a dead owner throws on first
@@ -1228,7 +1217,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::worldRotation(const AxisAngles &a_newAngle) {
-			return worldRotationRad(toDegrees(a_newAngle));
+			return worldRotationRad(toRadians(a_newAngle));
 		}
 
 		MV::Scale Node::worldScale() const {
@@ -1299,35 +1288,7 @@ namespace MV {
 			} else if (myParent) {
 				newNodeId = myParent->getUniqueId(nodeId);
 			}
-			std::shared_ptr<Node> result = Node::make(draw2d, newNodeId);
-
-			//myParent set later
-			result->myParent = nullptr;
-			result->allowDraw = allowDraw;
-			result->allowUpdate = allowUpdate;
-			result->translateTo = translateTo;
-			result->rotateTo = rotateTo;
-			result->scaleTo = scaleTo;
-			result->sortDepth = sortDepth;
-			result->nodeAlpha = nodeAlpha;
-			result->localBounds = localBounds;
-			result->localChildBounds = localChildBounds;
-			result->allowSerialize = allowSerialize;
-			result->ourCameraId = ourCameraId;
-			result->localMatrixDirty = true;
-			result->worldMatrixDirty = true;
-
-			for (auto&& childNode : childNodes) {
-				if (childNode->serializable()) {
-					result->childNodes->push_back(childNode->cloneInternal(result));
-				}
-			}
-
-			for (auto&& childComponent : childComponents) {
-				if (childComponent->serializable()) {
-					childComponent->clone(result);
-				}
-			}
+			std::shared_ptr<Node> result = cloneInternal(newNodeId, nullptr);
 
 			result->quietLocalAndChildMatrixFix();
 
@@ -1343,33 +1304,30 @@ namespace MV {
 			return result;
 		}
 
-		std::shared_ptr<Node> Node::cloneInternal(const std::shared_ptr<Node> &a_parent) {
-			std::shared_ptr<Node> result = Node::make(draw2d, nodeId);
-
-			result->myParent = a_parent.get();
-			result->allowDraw = allowDraw;
-			result->allowUpdate = allowUpdate;
-			result->translateTo = translateTo;
-			result->rotateTo = rotateTo;
-			result->scaleTo = scaleTo;
-			result->sortDepth = sortDepth;
-			result->nodeAlpha = nodeAlpha;
-			result->localBounds = localBounds;
-			result->localChildBounds = localChildBounds;
+		std::shared_ptr<Node> Node::cloneInternal(const std::string &a_newId, const std::shared_ptr<Node> &a_parent) {
+			std::shared_ptr<Node> result = Node::make(draw2d, a_newId);
+			visit_reflected_properties([&](const std::string &a_name, jai::property_base *a_property) {
+				if (a_name == "childNodes" || a_name == "childComponents" || a_name == "nodeId") {
+					return;
+				}
+				a_property->clone_to_target(*result->find_reflected_property(a_name));
+			});
 			result->allowSerialize = allowSerialize;
-			result->ourCameraId = ourCameraId;
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
+			if (a_parent) {
+				a_parent->adopt(result);
+			}
 
 			for (auto&& childNode : childNodes) {
 				if (childNode->serializable()) {
-					result->childNodes->push_back(childNode->cloneInternal(result));
+					result->childNodes->push_back(childNode->cloneInternal(childNode->nodeId.get(), result));
 				}
 			}
 
 			for (auto&& childComponent : childComponents) {
 				if (childComponent->serializable()) {
-					childComponent->clone(result);
+					childComponent->cloneWithoutPostLoad(result);
 				}
 			}
 
@@ -1399,174 +1357,86 @@ namespace MV {
 		void Node::unsilenceInternal(bool a_callBatched /*= true*/, bool a_callChanged /*= true*/) {
 			const std::shared_ptr<Node> self = shared_from_this();
 			bool changed = false;
-			if (onChildAddSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onChildAddSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
+			auto unblock = [&](auto &a_signal, bool a_stateMatches = true) {
+				bool calledWhileBlocked = a_signal.unblock() && a_stateMatches;
+				changed = changed || calledWhileBlocked;
+				return calledWhileBlocked;
+			};
+			auto replay = [&](auto &a_signal, auto&&... a_args) {
+				if (!a_callBatched) {
+					return;
 				}
-				changed = true;
+				try {
+					a_signal(a_args...);
+				} catch (std::exception &e) {
+					std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+				}
+			};
+
+			if (unblock(onChildAddSignal)) {
+				replay(onChildAddSignal, self);
+			}
+			if (unblock(onChildRemoveSignal)) {
+				for (auto&& child : std::exchange(silencedChildRemovals, {})) {
+					replay(onChildRemoveSignal, self, child);
+				}
+			}
+			if (unblock(onChildOrderChangeSignal)) {
+				for (auto&& child : std::exchange(silencedChildOrderChanges, {})) {
+					replay(onChildOrderChangeSignal, self, child);
+				}
 			}
 
-			if (onChildRemoveSignal.unblock()) {
-				//TODO: call for each child removed
-				changed = true;
+			if (unblock(onAddSignal)) {
+				replay(onAddSignal, self);
 			}
-			if (onChildOrderChangeSignal.unblock()) {
-				//TODO: call for each child 
-				changed = true;
+			if (unblock(onRemoveSignal)) {
+				replay(onRemoveSignal, self);
 			}
 
-			if (onAddSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onAddSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
+			if (unblock(onEnableSignal, allowUpdate && allowDraw)) {
+				replay(onEnableSignal, self);
 			}
-			if (onRemoveSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onRemoveSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
+			if (unblock(onDisableSignal, !allowDraw && !allowUpdate)) {
+				replay(onDisableSignal, self);
+			}
+			if (unblock(onPauseSignal, !allowUpdate)) {
+				replay(onPauseSignal, self);
+			}
+			if (unblock(onResumeSignal, allowUpdate)) {
+				replay(onResumeSignal, self);
+			}
+			if (unblock(onShowSignal, allowDraw)) {
+				replay(onShowSignal, self);
+			}
+			if (unblock(onHideSignal, !allowDraw)) {
+				replay(onHideSignal, self);
 			}
 
-			if (onEnableSignal.unblock() && (allowUpdate && allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onEnableSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onDisableSignal.unblock() && (!allowDraw && !allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onDisableSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onPauseSignal.unblock() && (!allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onPauseSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onResumeSignal.unblock() && (allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onResumeSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onShowSignal.unblock() && (allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onShowSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onHideSignal.unblock() && (!allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onHideSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
+			if (unblock(onBoundsRequestSignal)) {
+				replay(onBoundsRequestSignal, self);
 			}
 
-			if (onBoundsRequestSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onBoundsRequestSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
+			if (unblock(onTransformChangeSignal)) {
+				replay(onTransformChangeSignal, self);
+			}
+			if (unblock(onLocalBoundsChangeSignal)) {
+				replay(onLocalBoundsChangeSignal, self);
+			}
+			if (unblock(onChildBoundsChangeSignal)) {
+				replay(onChildBoundsChangeSignal, self);
+			}
+			if (unblock(onOrderChangeSignal)) {
+				replay(onOrderChangeSignal, self);
+			}
+			if (unblock(onAlphaChangeSignal)) {
+				replay(onAlphaChangeSignal, self);
 			}
 
-			if (onTransformChangeSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onTransformChangeSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
+			if (unblock(onComponentUpdateSignal)) {
+				for (auto&& component : std::exchange(silencedComponentUpdates, {})) {
+					replay(onComponentUpdateSignal, component);
 				}
-				changed = true;
-			}
-			if (onLocalBoundsChangeSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onLocalBoundsChangeSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onChildBoundsChangeSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onChildBoundsChangeSignal(self);
-					}
-					catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onOrderChangeSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onOrderChangeSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onAlphaChangeSignal.unblock()) {
-				if (a_callBatched) {
-					try {
-						onAlphaChangeSignal(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-
-			if (onComponentUpdateSignal.unblock()) {
-				//TODO: call for each component updated
-				changed = true;
 			}
 
 			onChangeSignal.unblock();
@@ -1579,7 +1449,7 @@ namespace MV {
 			std::string spacing(a_node->parentIndexList().size(), ' ');
 			os << spacing << "|->(" << a_node->id() << ")[" << a_node->size() << "]: L:" << a_node->position() << " | W:" << a_node->worldPosition() << " | S:" << a_node->screenPosition() << "\n";
 			for (auto&& child : *a_node) {
-				if (a_node->serializable()){
+				if (child->serializable()){
 					os << child;
 				}
 			}

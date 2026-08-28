@@ -3,7 +3,6 @@
 
 #include "sprite.h"
 #include "MV/Utility/stopwatch.h"
-#include "MV/Utility/signal.hpp"  // For backward-compatible deserialization of old MV::Signal data
 #include "MV/Interface/tapDevice.h"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
@@ -179,9 +178,6 @@ namespace MV {
 			TapDevice& ourMouse;
 
 			Stopwatch dragTimer;
-
-			std::string onAcceptScript;
-			std::string onCancelScript;
 
 			JAI_PROPERTY((std::vector<int64_t>), overrideClickPriority, {}, [](auto&, auto&) {});
 			JAI_PROPERTY((bool), eatTouches, true);

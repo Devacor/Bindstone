@@ -35,8 +35,11 @@ bool LobbyUserConnectionState::authenticate(int64_t a_id, const std::string& a_e
 		}
 		loggedIn = true;
 		return true;
+	} catch (const std::exception& e) {
+		std::cerr << "Failed to authenticate user: " << e.what() << std::endl;
+		return false;
 	} catch (...) {
-		std::cerr << "Failed to authenticate user!" << std::endl;
+		std::cerr << "Failed to authenticate user: unknown exception" << std::endl;
 		return false;
 	}
 }

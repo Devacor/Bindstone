@@ -2,11 +2,14 @@
 #include "gameInstance.h"
 
 #include <jaiscript/core/registrar.hpp>
+#include <algorithm>
 
 static jai::registrar<Team, MV::Services> _hookTeam("Team",
 	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
 	builder.method("ourWell", &Team::ourWell);
 	builder.method("enemyWell", &Team::enemyWell);
+	builder.method("health", &Team::health);
+	builder.method("damage", &Team::damage);
 	builder.method("creaturesInRange", [](Team& a_self, const MV::Point<>& a_location, double a_radius) {
 		return a_self.creaturesInRange(a_location, static_cast<float>(a_radius));
 	});
@@ -16,7 +19,17 @@ Team::Team(std::shared_ptr<InGamePlayer> a_player, TeamSide a_side, GameInstance
 	player(a_player),
 	game(a_game),
 	ourSide(a_side),
-	health(a_game.data().constants().startHealth) {
+	ourHealth(a_game.data().constants().startHealth) {
+}
+
+void Team::damage(int a_amount) {
+	if (ourHealth <= 0) {
+		return;
+	}
+	ourHealth = std::max(0, ourHealth - a_amount);
+	if (ourHealth == 0) {
+		game.onTeamDefeatedSignal(*this);
+	}
 }
 
 void Team::initialize() {

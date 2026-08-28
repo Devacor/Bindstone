@@ -1,0 +1,56 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{79d2b5ce-cae3-42dd-bdbd-8936a9acca35}</ItemsProjectGuid>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorControls.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\widgets.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\dock.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\sceneTreePanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\inspector.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\workbench.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\projectPanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\scriptPanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Workbench\gizmos.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\componentPanels.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editComponents.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorControls.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorDefines.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorFactories.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\texturePicker.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\theme.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\focus.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\widgets.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\dock.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\sceneTreePanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\inspector.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\workbench.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\treeView.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\commands.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\projectPanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\scriptPanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Workbench\gizmos.h" />
+  </ItemGroup>
+</Project>

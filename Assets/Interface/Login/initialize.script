@@ -1,21 +1,15 @@
-print("~~Login Initialize 0");
 self.initialize = [=](var& self) -> void {
-	print("~~Login Initialize 1");
 	auto emailInput = self.root().get("EmailInput").componentText();
 	auto passwordInput = self.root().get("PasswordInput").componentText();
-	print("~~Login Initialize 2");
 	emailInput.text(DefaultLoginId);
 	passwordInput.text(DefaultPassword);
-	print("~~Login Initialize 3");
 	emailInput.onEnter.connect("Deselect", [=](var& textElement) -> void {
 		game.gui().page("Login").removeFocus();
 	});
 	passwordInput.onEnter.connect("Deselect", [=](var& textElement) -> void {
 		game.gui().page("Login").removeFocus();
 	});
-	print("~~Login Initialize 4");
 	if (!DefaultLoginId.empty() && !DefaultPassword.empty()) {
-		print("~~Login Initialize 5");
 		if (game.client.connected()) {
 			print("JAISCRIPT: Already Connected And Trying Login!");
 			self.root().get("LoginButton").componentButton().press();
@@ -27,7 +21,5 @@ self.initialize = [=](var& self) -> void {
 				self.root().get("LoginButton").componentButton().press();
 			});
 		}
-		print("~~Login Initialize 6");
 	}
-	print("~~Login Initialize 7");
 };

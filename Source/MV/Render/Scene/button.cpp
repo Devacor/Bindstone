@@ -11,7 +11,6 @@
 static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Clickable>();
-	builder.auto_bind();
 
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode));
@@ -49,7 +48,7 @@ namespace MV {
 			activeView = a_activeView;
 			if (activeView) {
 				if (inPressEvent() && enabled()) {
-					currentView = activeView;
+					rememberCurrentView(activeView);
 					activeView->show();
 				} else {
 					activeView->hide();
@@ -65,7 +64,7 @@ namespace MV {
 			idleView = a_idleView;
 			if (idleView) {
 				if (!inPressEvent() && enabled()) {
-					currentView = idleView;
+					rememberCurrentView(idleView);
 					idleView->show();
 				} else {
 					idleView->hide();
@@ -82,7 +81,7 @@ namespace MV {
 			disabledView = a_disabledView;
 			if (disabledView) {
 				if (!enabled()) {
-					currentView = disabledView;
+					rememberCurrentView(disabledView);
 					disabledView->show();
 				} else {
 					disabledView->hide();
@@ -119,7 +118,7 @@ namespace MV {
 
 		void Button::setCurrentView(const std::shared_ptr<Node> &a_view) {
 			if (currentView != a_view) {
-				currentView = a_view;
+				rememberCurrentView(a_view);
 
 				showOrHideView(activeView);
 				showOrHideView(idleView);
@@ -135,6 +134,24 @@ namespace MV {
 					a_view->show();
 				} else {
 					a_view->hide();
+				}
+			}
+		}
+
+		void Button::rememberCurrentView(const std::shared_ptr<Node> &a_view) {
+			currentView = a_view;
+			currentViewId = a_view ? a_view->id() : "";
+		}
+
+		void Button::postLoadInitialize() {
+			Clickable::postLoadInitialize();
+			if (currentViewId->empty()) {
+				return;
+			}
+			for (auto&& view : { *activeView, *idleView, *disabledView }) {
+				if (view && view->id() == *currentViewId) {
+					setCurrentView(view);
+					return;
 				}
 			}
 		}

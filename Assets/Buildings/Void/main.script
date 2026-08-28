@@ -1,9 +1,8 @@
 self.spawn = [=](var& self) -> void {
 	self.setVar("nextSpawn", 5.0);
+	self.setVar("T0", [=](var& self, double dt) -> void {});
 
-	self.setVar("None", [=](var& self, double dt) -> void {});
-
-	self.setVar("Basic", [=](var& self, double dt) -> void {
+	self.setVar("T1", [=](var& self, double dt) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);
@@ -11,7 +10,7 @@ self.spawn = [=](var& self) -> void {
 		}
 	});
 
-	self.setVar("Eternal", [=](var& self, double dt) -> void {
+	self.setVar("T2_0", [=](var& self, double dt) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);
@@ -19,7 +18,7 @@ self.spawn = [=](var& self) -> void {
 		}
 	});
 
-	self.setVar("Overwhelming", [=](var& self, double dt) -> void {
+	self.setVar("T2_1", [=](var& self, double dt) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);

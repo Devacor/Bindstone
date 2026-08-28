@@ -51,6 +51,7 @@ Game::Game(Managers& a_managers) :
 	jaiEngine_->add_global("messages", jaiEngine_->make_object(std::shared_ptr<StandardMessages>(&a_managers.messages, [](StandardMessages*) {})));
 	jaiEngine_->add_global("DefaultLoginId", jai::script_value(a_managers.defaultLogin.id, jaiEngine_.get()));
 	jaiEngine_->add_global("DefaultPassword", jai::script_value(a_managers.defaultLogin.password, jaiEngine_.get()));
+	jaiEngine_->add_global("AutoMatch", jai::script_value(a_managers.defaultLogin.autoMatch, jaiEngine_.get()));
 
 	jaiEngine_->add_function("eval_file", [eng = jaiEngine_.get()](const std::string& a_path) {
 		eng->execute(MV::fileContents("Interface/" + a_path, true));
@@ -63,23 +64,18 @@ Game::Game(Managers& a_managers) :
 	if (!MV::RUNNING_IN_HEADLESS) {
 		initializeClientConnection();
 	}
-	initializeData();
 	initializeWindow();
 }
 
-void Game::initializeData() {
-	
-}
-
 void Game::initializeClientConnection() {
-	auto serverAddressConfig = MV::fileLines("ServerConfig/gameServerAddress.config");
-	std::string gameServerAddress = serverAddressConfig.empty() ? "http://localhost:22325" : serverAddressConfig[0];
+	auto lobbyAddressConfig = MV::fileLines("ServerConfig/lobbyClientAddress.config");
+	std::string lobbyAddress = lobbyAddressConfig.empty() ? "http://localhost:22325" : lobbyAddressConfig[0];
 
-	ourLobbyClient = MV::Client::make(MV::Url{ gameServerAddress }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ lobbyAddress }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, gameData.managers().services);
 		value->execute(*this);
 	}, [=](const std::string &a_dcreason) {
-		MV::info("Disconnected [", gameServerAddress, "]: ", a_dcreason);
+		MV::info("Disconnected [", lobbyAddress, "]: ", a_dcreason);
 		gameData.managers().messages.lobbyDisconnect(a_dcreason);
 		task.also("LobbyReconnect").recent()->
 			then("Wait", std::make_shared<MV::BlockForSeconds>(backoffLobbyReconnect)).
@@ -148,8 +144,6 @@ void Game::initializeWindow(){
 		// Interface scenes reference atlas art by packId - the packs must be assembled
 		// before InterfaceManager loads the pages or handles resolve to empty bounds.
 		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
-		//gameData.managers().textures.files("Map");
-		//gameData.managers().textures.files("Images");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
@@ -162,13 +156,18 @@ void Game::initializeWindow(){
 bool Game::update(double dt) {
 	gameData.managers().pool.run();
 	task.update(dt);
-	ourLobbyClient->update();
+	if (ourLobbyClient) {
+		ourLobbyClient->update();
+	}
 	if (ourGameClient) {
 		ourGameClient->update();
 	}
 
 	if (ourInstance) {
 		ourInstance->update(dt);
+	}
+	if (ourGui) {
+		ourGui->update(dt);
 	}
 	rootScene->update(dt);
 
@@ -224,9 +223,6 @@ void Game::handleInput() {
 void Game::render() {
 	gameData.managers().renderer.clearScreen();
 	updateScreenScaler();
-	if (ourInstance) {
-		ourInstance->scene()->draw();
-	}
 	rootScene->draw();
 	
 	gameData.managers().renderer.updateScreen();

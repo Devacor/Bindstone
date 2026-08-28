@@ -21,7 +21,7 @@ Wallet::Wallet() :
 	onChangeCurrency(onChangeCurrencySignal) {
 }
 
-Wallet::Wallet(const std::array<int64_t, 3> &a_initialValues) :
+Wallet::Wallet(const std::array<int64_t, TOTAL> &a_initialValues) :
 	onChange(onChangeSignal),
 	onChangeCurrency(onChangeCurrencySignal),
 	values(a_initialValues.begin(), a_initialValues.end()) {

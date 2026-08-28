@@ -1,17 +1,13 @@
 #include "Game/gameEditor.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Utility/services.hpp"
 
-#include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Serialization/serialize.h"
 #include "MV/Render/Scene/clickable.h"
 //#include "vld.h"
 
-
-#include "MV/Utility/scopeGuard.hpp"
-#include "Game/NetworkLayer/synchronizeAction.h"
 #include "Game/NetworkLayer/clientActions.h"
-#include "MV/Network/networkObject.h"
 
 #include "MV/Script/script.h"
 #include "MV/Utility/generalUtility.h"
@@ -19,8 +15,7 @@
 
 #include <filesystem>
 #include <fstream>
-
-#include "glm/mat4x4.hpp"
+#include <cstdlib>
 
 #include <jaiscript/serialization/json_archive.hpp>
 #include "../../JaiScript/bench/fast_json.hpp"
@@ -28,111 +23,8 @@
 #include <chrono>
 #include <algorithm>
 #include <vector>
-
-struct Base {
-	virtual ~Base() {}
-
-	template <class Archive>
-	void save(Archive & archive, std::uint32_t const) const {
-		archive("baseMember", baseMember);
-	}
-	template <class Archive>
-	void load(Archive & archive, std::uint32_t const /*version*/) {
-		archive("baseMember", baseMember);
-	}
-
-	int baseMember = 1;
-};
-
-struct Derived1 : public Base {
-	template <class Archive>
-	void save(Archive & archive, std::uint32_t const) const {
-		archive("derived1Member", derived1Member);
-		Base::save(archive, 0);
-	}
-	template <class Archive>
-	void load(Archive & archive, std::uint32_t const /*version*/) {
-		archive("derived1Member", derived1Member);
-		Base::load(archive, 0);
-	}
-
-	int derived1Member = 1;
-};
-
-class NetTypeA {
-public:
-	void synchronize(std::shared_ptr<NetTypeA> a_other) {
-		std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
-		name = a_other->name;
-	}
-
-	void destroy(std::shared_ptr<NetTypeA> a_other){
-		std::cout << "A: DESTROY " << name << "\n";
-	}
-
-	template<class Archive> requires jai::serialization::jai_archive<Archive>
-	void serialize(Archive& archive) { serialize(archive, 0); }
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(JAI_NVP(name));
-	}
-
-	std::string name;
-};
-
-class NetTypeB {
-public:
-	void synchronize(std::shared_ptr<NetTypeB> a_other) {
-		std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
-		id = a_other->id;
-	}
-
-	void destroy(std::shared_ptr<NetTypeB> a_other) {
-		std::cout << "B: DESTROY " << id << "\n";
-		id = a_other->id;
-	}
-
-	template<class Archive> requires jai::serialization::jai_archive<Archive>
-	void serialize(Archive& archive) { serialize(archive, 0); }
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(JAI_NVP(id));
-	}
-
-	int id;
-};
-
-void PathfindingTest();
-
-
-template<size_t SizeX, size_t SizeY, size_t Common>
-MV::Matrix<SizeX, Common> M_1(const MV::Matrix<SizeX, SizeY>& a_lhs, const MV::Matrix<SizeY, Common>& a_rhs) {
-	MV::Matrix<SizeX, Common> result;
-	for (size_t x = 0; x != SizeX; ++x) {
-		for (size_t c = 0; c != Common; c++) {
-			for (size_t y = 0; y != SizeY; y++) {
-				result(x, c) += a_lhs(x, y) * a_rhs(y, c);
-			}
-		}
-	}
-	return result;
-}
-
-template<size_t sizeAX, size_t sizeAY, size_t sizeBY>
-MV::Matrix<sizeAX, sizeBY> M_2(const MV::Matrix<sizeAX, sizeAY>& A, const MV::Matrix<sizeAY, sizeBY>& B) {
-	MV::Matrix<sizeAX, sizeBY> result;
-	for (int i = 0; i < sizeAX; i++) {
-		for (int j = 0; j < sizeBY; j++) {
-			for (int k = 0; k < sizeAY; k++) {
-				result(i, j) += A(i, k) * B(k, j);
-			}
-		}
-	}
-	return result;
-}
-
+#include <map>
+#include <sstream>
 
 // Manual benchmark: parse the real scene JSON into the production script_value DOM
 // (std::map<script_value,script_value>) vs the flat arena parser, same input, same run.
@@ -140,8 +32,8 @@ MV::Matrix<sizeAX, sizeBY> M_2(const MV::Matrix<sizeAX, sizeAY>& A, const MV::Ma
 // and how much a flat DOM would save. Run: BindstoneClient.exe -bench
 static void RunJsonParseBenchmark(jai::engine* eng) {
 	const char* candidates[] = {
+		"Assets/Scenes/map.scene",
 		"Scenes/map.scene",
-		"D:/git/Bindstone/Scenes/map.scene",
 	};
 	std::string text;
 	std::string used;
@@ -400,7 +292,7 @@ static void RunLoginUiRepair() {
 			auto clickable = root->get(inputId)->component<MV::Scene::Clickable>().self();
 			clickable->bounds(inputBox);
 			// The conversion also dropped the focus-on-click receivers (legacy audit)
-			clickable->onAccept.connect("script", "auto pageId = \"Login\"; eval_file(\"Shared/selectText.script\");");
+			clickable->onAccept.connect("script", "game.gui().page(\"Login\").focus(arg_0.owner().componentText());");
 			retexture(root->get(inputId), "button.png");
 		}
 		retextureViews(button, MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(104.0f, 36.0f)));
@@ -436,6 +328,80 @@ static void verifyFamilyScripts(MV::Script& a_script, const std::string& a_asset
 			if (ok) { ++a_passed; } else { ++a_failed; }
 		}
 	}
+}
+
+// Interface scripts read game/messages/self, so they are parsed + static-checked, never run;
+// the host-provided names are registered the way Game does so the checker sees the same surface.
+static void verifyInterfaceScripts(jai::engine& a_engine, Managers& a_managers, int& a_passed, int& a_failed) {
+	a_engine.add_global("game", jai::script_value(std::monostate{}, &a_engine));
+	a_engine.add_global("self", jai::script_value(std::monostate{}, &a_engine));
+	a_engine.add_global("messages", a_engine.make_object(std::shared_ptr<StandardMessages>(&a_managers.messages, [](StandardMessages*) {})));
+	a_engine.add_global("DefaultLoginId", jai::script_value(std::string(), &a_engine));
+	a_engine.add_global("DefaultPassword", jai::script_value(std::string(), &a_engine));
+	a_engine.add_global("AutoMatch", jai::script_value(false, &a_engine));
+	std::error_code errorCode;
+	for (std::filesystem::recursive_directory_iterator it("Assets/Interface", errorCode), end; !errorCode && it != end; it.increment(errorCode)) {
+		if (!it->is_regular_file() || it->path().extension() != ".script") { continue; }
+		auto file = it->path().generic_string();
+		std::string detail;
+		bool ok = false;
+		try {
+			auto source = MV::fileContents(file, true);
+			auto report = a_engine.check(source);
+			ok = !report.has_errors();
+			if (!ok) { detail = report.format(source, file); }
+		} catch (std::exception& e) {
+			detail = e.what();
+		}
+		std::cout << (ok ? "[OK]   check " : "[FAIL] check ") << file << std::endl;
+		if (!ok) { std::cout << detail << std::endl; }
+		if (ok) { ++a_passed; } else { ++a_failed; }
+	}
+}
+
+static std::map<std::string, int> typeTagCounts(const std::string& a_json) {
+	std::map<std::string, int> counts;
+	for (size_t at = a_json.find("\"$type\""); at != std::string::npos; at = a_json.find("\"$type\"", at + 7)) {
+		size_t colon = a_json.find(':', at + 7);
+		if (colon == std::string::npos) { break; }
+		size_t open = a_json.find('"', colon + 1);
+		size_t close = open == std::string::npos ? open : a_json.find('"', open + 1);
+		if (close == std::string::npos) { break; }
+		++counts[a_json.substr(open + 1, close - open - 1)];
+	}
+	return counts;
+}
+
+static std::string describeTypeTagDrift(const std::map<std::string, int>& a_original, const std::map<std::string, int>& a_saved) {
+	std::string drift;
+	auto note = [&](const std::string& a_type, int a_before, int a_after) {
+		if (a_before == a_after) { return; }
+		drift += (drift.empty() ? "" : ", ") + a_type + " " + std::to_string(a_before) + "->" + std::to_string(a_after);
+	};
+	for (auto& [type, count] : a_original) {
+		auto saved = a_saved.find(type);
+		note(type, count, saved == a_saved.end() ? 0 : saved->second);
+	}
+	for (auto& [type, count] : a_saved) {
+		if (!a_original.count(type)) { note(type, 0, count); }
+	}
+	return drift;
+}
+
+static std::string describeJsonDifference(const std::string& a_first, const std::string& a_second) {
+	size_t offset = 0;
+	size_t shared = std::min(a_first.size(), a_second.size());
+	while (offset < shared && a_first[offset] == a_second[offset]) { ++offset; }
+	if (offset == shared && a_first.size() == a_second.size()) { return ""; }
+	std::string key = "<root>";
+	size_t keyEnd = a_first.rfind("\":", offset);
+	if (keyEnd != std::string::npos && keyEnd > 0) {
+		size_t keyStart = a_first.rfind('"', keyEnd - 1);
+		if (keyStart != std::string::npos) { key = a_first.substr(keyStart + 1, keyEnd - keyStart - 1); }
+	}
+	auto context = [&](const std::string& a_text) { return a_text.substr(offset > 40 ? offset - 40 : 0, 80); };
+	return "first difference at offset " + std::to_string(offset) + " near key [" + key + "] (sizes " + std::to_string(a_first.size()) + " vs " + std::to_string(a_second.size()) + ")"
+		"\n    first:  ..." + context(a_first) + "...\n    second: ..." + context(a_second) + "...";
 }
 
 #include "Workbench/workbench.h"
@@ -603,8 +569,15 @@ static void RunAssetVerification() {
 		"Assets/Prefabs/SimpleButton.bindsnap",
 	};
 	int passed = 0, failed = 0;
+	const auto scratchDirectory = std::filesystem::temp_directory_path() / "bindstone_verify";
+	auto saveJsonToScratch = [&](const std::shared_ptr<MV::Scene::Node>& a_root, const char* a_name) {
+		auto file = (scratchDirectory / a_name).string();
+		a_root->saveJai(file, managers.services, false);
+		return std::make_pair(file, MV::fileContents(file, true));
+	};
 	for (const char* path : nodeFiles) {
 		try {
+			auto original = MV::fileContents(path, true);
 			auto root = MV::Scene::Node::load(path, managers.services, false);
 			fakeRoot->add(root);
 			root->postLoadStep();
@@ -613,13 +586,63 @@ static void RunAssetVerification() {
 			auto blob = MV::toBinaryString(root, managers.services);
 			auto reloaded = MV::fromBinaryString<std::shared_ptr<MV::Scene::Node>>(blob, managers.services);
 			if (!reloaded) { throw std::runtime_error("save/reload round-trip returned null"); }
-			std::cout << "[OK]   " << path << " (root=" << root->id() << ", round-trip ok)" << std::endl;
+			auto [firstFile, firstJson] = saveJsonToScratch(root, "first.scene");
 			root->removeFromParent();
+			auto again = MV::Scene::Node::load(firstFile, managers.services, false);
+			fakeRoot->add(again);
+			again->postLoadStep();
+			auto secondJson = saveJsonToScratch(again, "second.scene").second;
+			again->removeFromParent();
+			auto drift = describeJsonDifference(firstJson, secondJson);
+			if (!drift.empty()) { throw std::runtime_error("json round-trip drift: " + drift); }
+			auto typeDrift = describeTypeTagDrift(typeTagCounts(original), typeTagCounts(firstJson));
+			if (!typeDrift.empty()) { throw std::runtime_error("$type multiset drift original->resave (sliced component?): " + typeDrift); }
+			std::cout << "[OK]   " << path << " (root=" << root->id() << ", round-trip ok, json stable, " << typeTagCounts(original).size() << " $type kinds)" << std::endl;
 			++passed;
 		} catch (std::exception& e) {
 			std::cout << "[FAIL] " << path << ": " << e.what() << std::endl;
 			++failed;
 		}
+	}
+
+	try {
+		auto login = MV::Scene::Node::load("Assets/Interface/Login/view.scene", managers.services, false);
+		fakeRoot->add(login);
+		login->postLoadStep();
+		auto button = login->get("LoginButton")->component<MV::Scene::Clickable>(false, true).self();
+		auto receiver = button->onAccept.connection("onAccept");
+		if (!receiver) { throw std::runtime_error("LoginButton onAccept has no owned receiver named [onAccept]"); }
+		if (!receiver->script_engine()) { throw std::runtime_error("LoginButton onAccept receiver loaded without an engine (its script can never run)"); }
+		login->removeFromParent();
+		std::cout << "[OK]   LoginButton onAccept receiver armed: " << receiver->script() << std::endl;
+		++passed;
+	} catch (std::exception& e) {
+		std::cout << "[FAIL] LoginButton onAccept receiver: " << e.what() << std::endl;
+		++failed;
+	}
+
+	try {
+		auto probeFile = (scratchDirectory / "clickable_receiver.scene").string();
+		{
+			auto probe = MV::Scene::Node::make(managers.renderer, "ReceiverProbe");
+			probe->attach<MV::Scene::Clickable>(verifyMouse).self()->onAccept.connect("marker", "print(\"VERIFY_RECEIVER_FIRED\");");
+			probe->saveJai(probeFile, managers.services, false);
+		}
+		auto loaded = MV::Scene::Node::load(probeFile, managers.services, false);
+		fakeRoot->add(loaded);
+		loaded->postLoadStep();
+		auto capture = std::make_shared<std::ostringstream>();
+		jaiEngine->set_output_stream(capture);
+		loaded->component<MV::Scene::Clickable>(false, true).self()->press();
+		jaiEngine->set_output_stream(nullptr);
+		loaded->removeFromParent();
+		if (capture->str().find("VERIFY_RECEIVER_FIRED") == std::string::npos) { throw std::runtime_error("owned script receiver loaded from JSON did not run on press()"); }
+		std::cout << "[OK]   loaded Clickable script receiver fires on press()" << std::endl;
+		++passed;
+	} catch (std::exception& e) {
+		jaiEngine->set_output_stream(nullptr);
+		std::cout << "[FAIL] loaded Clickable script receiver: " << e.what() << std::endl;
+		++failed;
 	}
 
 	// Matchmaking-wire round-trip: each NetworkAction is serialized through shared_ptr<NetworkAction>.
@@ -638,10 +661,33 @@ static void RunAssetVerification() {
 		++failed;
 	}
 
+	// Battle wire: the pool variants a live match streams (creature/building states) must survive the binary trip.
+	try {
+		GameData wireData(managers, false);
+		BindstoneNetworkObjectPool pool;
+		auto creatureState = std::make_shared<CreatureNetworkState>(wireData.creatures().data("Life_T1"), 0);
+		pool.spawn(creatureState);
+		pool.spawn(std::make_shared<BuildingNetworkState>(0));
+		auto creatureBack = MV::fromBinaryString<std::shared_ptr<CreatureNetworkState>>(MV::toBinaryString(creatureState, managers.services), managers.services);
+		if (!creatureBack || *creatureBack->creatureTypeId != *creatureState->creatureTypeId) { throw std::runtime_error("CreatureNetworkState did not round-trip"); }
+		std::shared_ptr<NetworkAction> sync = std::make_shared<SynchronizeAction>(pool.all());
+		auto wire = MV::toBinaryStringCast<NetworkAction>(sync, managers.services);
+		auto back = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(wire, managers.services);
+		if (!std::dynamic_pointer_cast<SynchronizeAction>(back)) { throw std::runtime_error("SynchronizeAction did not round-trip"); }
+		auto again = MV::toBinaryStringCast<NetworkAction>(back, managers.services);
+		if (again.size() != wire.size()) { throw std::runtime_error("SynchronizeAction re-serialized to a different size (" + std::to_string(wire.size()) + " vs " + std::to_string(again.size()) + ")"); }
+		std::cout << "[OK]   Battle wire (SynchronizeAction with creature+building states, " << wire.size() << " bytes)" << std::endl;
+		++passed;
+	} catch (std::exception& e) {
+		std::cout << "[FAIL] Battle wire: " << e.what() << std::endl;
+		++failed;
+	}
+
 	MV::Script script(*jaiEngine);
 	verifyFamilyScripts<Creature>(script, "Creatures", passed, failed);
 	verifyFamilyScripts<Building>(script, "Buildings", passed, failed);
 	verifyFamilyScripts<BattleEffect>(script, "BattleEffects", passed, failed);
+	verifyInterfaceScripts(*jaiEngine, managers, passed, failed);
 
 	std::cout << "\n[verify] " << passed << " passed, " << failed << " failed" << std::endl;
 }
@@ -743,32 +789,6 @@ static void InstallTerminateTracer() {
 
 int main(int argc, char *argv[]) {
 	InstallTerminateTracer();
-	MV::info("Hello world!");
-	MV::debug(":D :D :D");
-	MV::warning(":C :C :C");
-	MV::error("Whoopse!");
-
-	MV::Matrix<3, 1> m1;
-	MV::Matrix<1, 3> m2;
-	for (int i = 0; i < 3; ++i) {
-		m1(i, 0) = (float)i + 3;
-		m2(0, i) = (float)i;
-	}
-
-	auto ra = M_1(m2, m1);
-	auto rb = M_2(m2, m1);
-	//auto rc = M_3(m2, m1);
-	MV::info("RESULT 1 a: ", ra);
-	MV::info("RESULT 1 b: ", ra);
-	//MV::info("RESULT 1 b: ", rc);
-
-	auto r2a = M_1(m1, m2);
-	MV::info("RESULT 2 a: ", r2a);
-	auto r2b = M_2(m1, m2);
-	MV::info("RESULT 2 b: ", r2b);
-	//auto r2c = M_3(m1, m2);
-	//MV::info("RESULT 2 c: ", r2c);
-
 	std::string name;
 	std::string pass;
 	bool autoStart = false;
@@ -781,24 +801,21 @@ int main(int argc, char *argv[]) {
 			std::cout << "Got pass: " << pass << std::endl;
 		}
 	}
-	auto derived = std::make_shared<Derived1>();
-	derived->baseMember = 5;
-	derived->derived1Member = 10;
 
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--no-script-debug") == 0) {
 			MV::scriptDebugEnabled(false);
 		}
 	}
-	auto testEngine = MV::makeScriptEngine(MV::Services::instance());
-	MV::Services::instance().connect<jai::engine>(testEngine.get());
+	auto servicesEngine = MV::makeScriptEngine(MV::Services::instance());
+	MV::Services::instance().connect<jai::engine>(servicesEngine.get());
 
 	for (int i = 0; i < argc; ++i) {
 		if (strcmp(argv[i], "-auto") == 0) {
 			autoStart = true;
 		}
 		if (strcmp(argv[i], "-bench") == 0) {
-			RunJsonParseBenchmark(testEngine.get());
+			RunJsonParseBenchmark(servicesEngine.get());
 			return 0;
 		}
 		if (strcmp(argv[i], "-loadbench") == 0) {
@@ -837,117 +854,17 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-workbenchgizmoshot") == 0) {
 			return RunWorkbench(true, "workbench_shot.bmp", true, true);
 		}
+		if (strcmp(argv[i], "-loginshot") == 0) {
+			int frames = 120;
+			if (i + 1 < argc) {
+				if (int parsed = std::atoi(argv[i + 1]); parsed > 0) {
+					frames = parsed;
+				}
+			}
+			GameEditor menu(name, pass, true);
+			return menu.runFrames(frames, "login_shot.bmp");
+		}
 	}
-
-	auto saved = MV::toJson(derived, MV::Services::instance());
-	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved, MV::Services::instance());
-
-	CreatureNetworkState stateSizeTest;
-	stateSizeTest.animationName = "idle";
-	stateSizeTest.creatureTypeId = "Life_T1";
-	stateSizeTest.position = MV::Point<>(0, 0, 0);
-	MV::info("Creature NetworkA DELTA SIZE: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
-
-	stateSizeTest.animationTime = 10.0;
-	stateSizeTest.position = MV::Point<>(0, 0, 0);
-	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
-
-	stateSizeTest.animationTime = 10.0;
-	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
-
-	stateSizeTest.animationLoops = true;
-	MV::info("Creature NetworkA DELTA SIZE NONE: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
-
-	std::cout << "done saveload test.";
-
-	//PathfindingTest();
-	//return 0;
-
-	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
-	// 	pqxx::work txn(c);
-	// 
-	// 
-	// 	txn.exec(
-	// 		"CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;"
-	// 		"CREATE TABLE Instances ("
-	// 		"	Id SERIAL primary key,"
-	// 		"	Available boolean			default false,"
-	// 		"	Host text						default '',"
-	// 		"	Port integer				default 0,"
-	// 		"	PlayerLeft	int				default 0,"
-	// 		"	PlayerRight	int				default 0,"
-	// 		"	LastUpdate timestamp without time zone default (now() at time zone 'utc'),"
-	// 		"	Result JSON"
-	// 		");");
-	// 	txn.commit();
-
-	// 	pqxx::result r = txn.exec(
-	// 		"SELECT state "
-	// 		"FROM players "
-	// 		"WHERE email = " + txn.quote("maxmike@gmail.com"));
-	// 
-	// 	if (r.size() != 1)
-	// 	{
-	// 		std::cerr
-	// 			<< "Expected 1 player with email " << txn.quote("maxmike@gmail.com") << ", "
-	// 			<< "but found " << r.size() << std::endl;
-	// 		return 1;
-	// 	}
-	// 
-	// 	std::string status = r[0][0].c_str();
-	// 	std::cout << "Updating employee #" << status << std::endl;
-
-
-	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
-	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
-// 	{
-// 		std::ofstream codes("codes.txt");
-// 		std::set<std::string> generated;
-// 		while (generated.size() < 1800) {
-// 			generated.insert("VF18_" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4) + "-" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4) + "-" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4));
-// 		}
-// 		for(auto&& codeString : generated)
-// 		{
-// 			codes << codeString << "\n";
-// 		}
-// 	}
-	
-	MV::NetworkObjectPool<NetTypeA, NetTypeB> pool, pool2;
-
-	pool.onSpawn<NetTypeA>([](std::shared_ptr<MV::NetworkObject<NetTypeA>> a_newItem) {
-		std::cout << "1A:" << a_newItem->self()->name << "\n";
-	});
-	pool2.onSpawn<NetTypeA>([&](std::shared_ptr<MV::NetworkObject<NetTypeA>> a_newItem) {
-		std::cout << "2A:" << a_newItem->self()->name << "\n";
-	});
-
-	pool.onSpawn<NetTypeB>([](std::shared_ptr<MV::NetworkObject<NetTypeB>> a_newItem) {
-		std::cout << "1B:" << a_newItem->self()->id << "\n";
-	});
-	pool2.onSpawn<NetTypeB>([&](std::shared_ptr<MV::NetworkObject<NetTypeB>> a_newItem) {
-		std::cout << "2B:" << a_newItem->self()->id << "\n";
-	});
-
-	auto newItem = std::make_shared<NetTypeA>();
-	newItem->name = "Happy!";
-
-	auto newItem2 = std::make_shared<NetTypeB>();
-	newItem2->id = 5;
-
-	auto newObject = pool.spawn(newItem);
-	auto newObject2 = pool.spawn(newItem2);
-	auto testShared = newObject->shared_from_this();
-	
-
-	pool2.synchronize(MV::fromJson<decltype(pool.updated())>(MV::toJson(pool.updated(), MV::Services::instance()), MV::Services::instance()));
-
-	newObject->modify()->name = "Unhappy!";
-
-	pool2.synchronize(pool.updated());
-
-	newObject->destroy();
-
-	pool2.synchronize(pool.updated());
 
 	GameEditor menu(name, pass, autoStart);
 
@@ -955,108 +872,3 @@ int main(int argc, char *argv[]) {
 	
 	return 0;
 }
-
-void PathfindingTest() {
-	auto world = MV::Map::make({ 20, 20 }, false);
-
-	for (int i = 0; i < 20; ++i) {
-		world->get({ 8, i }).staticBlock();
-	}
-
-	world->get({ 8, 6 }).staticUnblock();
-	world->get({ 8, 7 }).staticUnblock();
-
-
-	std::vector<std::shared_ptr<MV::NavigationAgent>> agents{
-		MV::NavigationAgent::make(world, MV::Point<int>(2, 2), 2),
-		MV::NavigationAgent::make(world, MV::Point<int>(0, 2), 2),
-		MV::NavigationAgent::make(world, MV::Point<int>(2, 0), 2),
-		MV::NavigationAgent::make(world, MV::Point<int>(0, 0), 2) };
-
-	for (int i = 0; i < agents.size(); ++i) {
-		agents[i]->debugId(i);
-	}
-	MV::Stopwatch timer;
-
-	for (int i = 0; i < agents.size(); ++i) {
-		agents[i]->onStart.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-			std::cout << (i + 1) << ": START" << std::endl;
-		});
-		agents[i]->onStop.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-			std::cout << (i + 1) << ": STOP" << std::endl;
-		});
-		agents[i]->onBlocked.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-			std::cout << (i + 1) << ": BLOCKED" << std::endl;
-		});
-		agents[i]->onArrive.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-			std::cout << (i + 1) << ": ARRIVED" << std::endl;
-		});
-		agents[i]->goal(MV::Point<int>(10, 17), 0);
-	}
-
-
-	int i = 0;
-
-	/*
-	for (int i = 0; i < 23; ++i) {
-		for (auto&& agent : agents) {
-			agent->update(1.0f);
-			for (int y = 0; y < world->size().height; ++y) {
-				for (int x = 0; x < world->size().width; ++x) {
-					bool wasAgent = false;
-					for (int i = 0; i < agents.size(); ++i) {
-						if (agents[i]->overlaps({ x, y })) {
-							wasAgent = true;
-							break;
-						}
-					}
-					if (!wasAgent) {
-						if (world->blocked({ x, y })) {
-						} else {
-							world->get({ x, y }).clearance();
-						}
-					}
-				}
-			}
-		}
-	}
-	*/
-
-	while (std::find_if(agents.begin(), agents.end(), [](auto&& agent) {
-		return agent->pathfinding();
-	}) != agents.end()) {
-		char a;
-		while (true) {
-			for (auto&& agent : agents) {
-				agent->update(1.0f);
-			}
-			std::vector<MV::PathNode> pathNodes;
-			for (int y = 0; y < world->size().height; ++y) {
-				for (int x = 0; x < world->size().width; ++x) {
-					bool wasAgent = false;
-					for (int k = 0; k < agents.size(); ++k) {
-						if (agents[k]->overlaps({ x, y })) {
-							std::cout << "[" << (char)(k + 65) << "]";
-							wasAgent = true;
-							break;
-						}
-					}
-					if (!wasAgent) {
-						if (world->blocked({ x, y })) {
-							std::cout << " " << "X" << " ";
-						}
-						else {
-							std::cout << " " << world->get({ x, y }).clearance() << " ";
-						}
-					}
-				}
-				std::cout << std::endl;
-			}
-			std::cout << "\n\n\n" << std::endl;
-			++i;
-			std::cin >> a;
-		}
-	}
-	std::cout << "YO" << std::endl;
-}
-

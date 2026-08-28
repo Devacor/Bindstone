@@ -69,14 +69,25 @@ public:
 
 	GameInstance* enterGame(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right, const std::vector<BindstoneNetworkObjectPool::VariantType> &a_poolObjects) {
 		ourInstance = ClientGameInstance::make(a_left, a_right, a_poolObjects, *this);
-		gui().page("Main").hide();
+		if (ourGui) {
+			ourGui->page("Main").hide();
+		}
+		if (gameData.managers().defaultLogin.autoMatch && localPlayer) {
+			auto& me = (a_left && a_left->id == localPlayer->id) ? a_left : a_right;
+			int firstSlot = (static_cast<int>(ourInstance->teamForPlayer(me).side()) - 1) * 8;
+			for (int slot = firstSlot; slot < firstSlot + 8; ++slot) {
+				ourInstance->requestUpgrade(slot, 0);
+			}
+		}
 		return ourInstance.get();
 	}
 
 	void killGame() {
 		ourInstance = nullptr;
 		ourGameClient = nullptr;
-		gui().page("Main").show();
+		if (ourGui) {
+			ourGui->page("Main").show();
+		}
 	}
 
 	void authenticate(LoginResponse& a_response) {
@@ -116,7 +127,6 @@ private:
 	Game& operator=(const Game &) = delete;
 
 	void updateScreenScaler();
-	void initializeData();
 	void initializeWindow();
 
 	void initializeClientConnection();

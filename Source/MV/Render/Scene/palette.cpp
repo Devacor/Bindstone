@@ -1,6 +1,34 @@
 #include "palette.h"
 #include <jaiscript/signals/signal_impl.hpp>
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette("Palette",
+	[](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Drawable>();
+	builder.auto_bind();
+
+	builder.property("onColorChange", [](MV::Scene::Palette& a_self) -> jai::signal<MV::Scene::Palette::PaletteSignalSignture>& { return a_self.onColorChange; }, nullptr);
+	builder.property("onSwatchClicked", [](MV::Scene::Palette& a_self) -> jai::signal<MV::Scene::Palette::PaletteSignalSignture>& { return a_self.onSwatchClicked; }, nullptr);
+
+	builder.method("color", static_cast<MV::Color(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::color));
+	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const MV::Color&)>(&MV::Scene::Palette::color));
+	builder.method("padding", &MV::Scene::Palette::padding);
+	builder.method("selectorPercent", &MV::Scene::Palette::selectorPercent);
+	builder.method("colorAlphaSelector", &MV::Scene::Palette::colorAlphaSelector);
+
+	builder.method("globalPriority", static_cast<int64_t(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::globalPriority));
+	builder.method("globalPriority", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(int64_t)>(&MV::Scene::Palette::globalPriority));
+	builder.method("overridePriority", static_cast<std::vector<int64_t>(MV::Scene::Palette::*)() const>(&MV::Scene::Palette::overridePriority));
+	builder.method("overridePriority", static_cast<std::shared_ptr<MV::Scene::Palette>(MV::Scene::Palette::*)(const std::vector<int64_t>&)>(&MV::Scene::Palette::overridePriority));
+
+	builder.method("startEatingTouches", &MV::Scene::Palette::startEatingTouches);
+	builder.method("stopEatingTouches", &MV::Scene::Palette::stopEatingTouches);
+	builder.method("eatingTouches", &MV::Scene::Palette::eatingTouches);
+});
+
 namespace MV {
 	namespace Scene {
 
@@ -15,7 +43,7 @@ namespace MV {
 		};
 
 		Palette::Palette(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
-			Drawable(a_owner),
+			jai::property_owner<Palette, Drawable>(a_owner),
 			onColorChange(onColorChangeSignal),
 			onSwatchClicked(onSwatchClickedSignal),
 			ourMouse(a_mouse),
@@ -77,15 +105,15 @@ namespace MV {
 			Drawable::initialize();
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](TapDevice& a_mouse) {
 				if (mouseOverMainColor(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority->empty() ? owner()->parentIndexList(globalClickPriority) : *overrideClickPriority), [&]() {
 						acceptMainColorClick();
 					}, []() {}, owner()->id() });
 				} else if (mouseOverSideColor(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority->empty() ? owner()->parentIndexList(globalClickPriority) : *overrideClickPriority), [&]() {
 						acceptSideColorClick();
 					}, []() {}, owner()->id() });
 				} else if (mouseOverAlpha(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority->empty() ? owner()->parentIndexList(globalClickPriority) : *overrideClickPriority), [&]() {
 						acceptAlphaClick();
 					}, []() {}, owner()->id() });
 				}
@@ -94,7 +122,7 @@ namespace MV {
 			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](TapDevice& a_mouse) {
 				currentDragSignal.reset();
 				if (mouseOverSwatch(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority->empty() ? owner()->parentIndexList(globalClickPriority) : *overrideClickPriority), [&]() {
 						acceptSwatchClick();
 					}, []() {}, owner()->id() });
 				}
@@ -137,13 +165,13 @@ namespace MV {
 
 		BoxAABB<> Palette::currentMainColorBounds() {
 			auto fullBounds = bounds();
-			auto mainColorSize = bounds().size() * selectorPercentSize;
+			auto mainColorSize = bounds().size() * selectorPercentSize.get();
 			return { fullBounds.minPoint, fullBounds.minPoint + toPoint(mainColorSize) };
 		}
 
 		BoxAABB<> Palette::currentAlphaBounds() {
 			auto fullBounds = bounds();
-			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
+			auto mainColorSize = bounds().size() * (selectorPercentSize.get() + selectorPercentPadding.get());
 			return {
 				MV::point(fullBounds.minPoint.x, fullBounds.minPoint.y + mainColorSize.height),
 				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.maxPoint.y)
@@ -152,7 +180,7 @@ namespace MV {
 
 		BoxAABB<> Palette::currentSideColorBounds() {
 			auto fullBounds = bounds();
-			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
+			auto mainColorSize = bounds().size() * (selectorPercentSize.get() + selectorPercentPadding.get());
 			return {
 				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y),
 				MV::point(fullBounds.maxPoint.x, fullBounds.minPoint.y + mainColorSize.height)
@@ -161,7 +189,7 @@ namespace MV {
 
 		BoxAABB<> Palette::currentSwatchBounds() {
 			auto fullBounds = bounds();
-			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
+			auto mainColorSize = bounds().size() * (selectorPercentSize.get() + selectorPercentPadding.get());
 			return{
 				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y + mainColorSize.height),
 				MV::point(fullBounds.maxPoint.x, fullBounds.maxPoint.y)
@@ -169,9 +197,9 @@ namespace MV {
 		}
 
 		void Palette::updateColorForPaletteState() {
-			auto currentAlpha = currentColor.A;
+			auto currentAlpha = currentColor->A;
 			currentColor = mix(mix(topRightColor, Color(1.0f, 1.0f, 1.0f), 1.0f - selectorCursorPercent.x), Color(0.0f, 0.0f, 0.0f), selectorCursorPercent.y);
-			currentColor.A = currentAlpha;
+			currentColor->A = currentAlpha;
 			colorInternal(currentColor);
 		}
 
@@ -210,7 +238,7 @@ namespace MV {
 		void Palette::acceptAlphaClick() {
 			auto updateAlpha = [&](TapDevice& a_mouse) {
 				auto percentPosition = owner()->screenFromLocal(currentAlphaBounds()).percent(a_mouse.position());
-				currentColor.A = percentPosition.x;
+				currentColor->A = percentPosition.x;
 				updateColorForPaletteState();
 			};
 			updateAlpha(ourMouse);
@@ -269,13 +297,13 @@ namespace MV {
 
 		std::shared_ptr<Palette> Palette::color(const MV::Color &a_newColor) {
 			currentColor = a_newColor;
-			hsv = currentColor.getHsv(hsv);
+			hsv = currentColor->getHsv(hsv);
 			topRightColor = percentToSliderColor(hsv.invertedPercentHue());
 			selectorCursorPercent.x = hsv.S;
 			selectorCursorPercent.y = 1.0f - hsv.V;
 			applyCurrentColorToPreviewBox();
 
-			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
+			auto middlePointX = currentColor->A * (points[25].x - points[19].x);
 
 			points[20].x = middlePointX;
 			points[21].x = middlePointX;
@@ -292,10 +320,10 @@ namespace MV {
 
 		std::shared_ptr<Palette> Palette::colorInternal(const MV::Color &a_newColor) {
 			currentColor = a_newColor;
-			hsv = currentColor.getHsv(hsv);
+			hsv = currentColor->getHsv(hsv);
 			applyCurrentColorToPreviewBox();
 			
-			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
+			auto middlePointX = currentColor->A * (points[25].x - points[19].x);
 
 			points[20].x = middlePointX;
 			points[21].x = middlePointX;
@@ -313,8 +341,8 @@ namespace MV {
 		void Palette::boundsImplementation(const BoxAABB<> &a_bounds) {
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
 
-			auto selectorPixelSize = Size<>(a_bounds.width(), a_bounds.height()) * selectorPercentSize;
-			auto selectorPixelPadding = Size<>(a_bounds.width(), a_bounds.height()) * selectorPercentPadding;
+			auto selectorPixelSize = Size<>(a_bounds.width(), a_bounds.height()) * selectorPercentSize.get();
+			auto selectorPixelPadding = Size<>(a_bounds.width(), a_bounds.height()) * selectorPercentPadding.get();
 			auto colorSelectorWidth = a_bounds.width() - (selectorPixelSize.width + selectorPixelPadding.width);
 			auto alphaSelectorHeight = a_bounds.height() - (selectorPixelSize.height + selectorPixelPadding.height);
 
@@ -332,7 +360,7 @@ namespace MV {
 			points[17] = a_bounds.topLeftPoint() + MV::point(selectorPixelSize.width, 0.0f);
 
 			auto clippedOffRightX = colorSelectorWidth + selectorPixelPadding.width;
-			auto middlePointX = currentColor.A * (a_bounds.width() - clippedOffRightX);
+			auto middlePointX = currentColor->A * (a_bounds.width() - clippedOffRightX);
 			points[18] = a_bounds.bottomLeftPoint() - MV::point(0.0f, alphaSelectorHeight);
 			points[19] = a_bounds.bottomLeftPoint();
 			points[20] = a_bounds.bottomLeftPoint() + MV::point(middlePointX, 0.0f);
@@ -368,14 +396,14 @@ namespace MV {
 
 		void Palette::applyCurrentColorToPreviewBox() {
 			for (int i = 26; i < 30; ++i) {
-				points[i] = currentColor;
+				points[i] = *currentColor;
 			}
 			for (int i = 14; i < 18; ++i) {
 				points[i] = topRightColor;
 			}
 			auto localBounds = bounds();
-			auto selectorPixelSize = Size<>(localBounds.width(), localBounds.height()) * selectorPercentSize;
-			auto selectorPixelPadding = Size<>(localBounds.width(), localBounds.height()) * selectorPercentPadding;
+			auto selectorPixelSize = Size<>(localBounds.width(), localBounds.height()) * selectorPercentSize.get();
+			auto selectorPixelPadding = Size<>(localBounds.width(), localBounds.height()) * selectorPercentPadding.get();
 			auto colorSelectorWidth = localBounds.width() - (selectorPixelSize.width + selectorPixelPadding.width);
 			auto alphaSelectorHeight = localBounds.height() - (selectorPixelSize.height + selectorPixelPadding.height);
 

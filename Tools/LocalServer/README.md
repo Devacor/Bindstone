@@ -10,12 +10,16 @@ then launches LobbyServer, GameServer, and two clients auto-logged-in as `test1`
 | Process | Listens | Connects to | Config (first line wins) |
 |---|---|---|---|
 | LobbyServer | 22325 (clients), 22326 (game servers) | postgres | `ServerConfig/database.config` |
-| GameServer | ephemeral (advertised to lobby) | lobby :22326 | `ServerConfig/lobbyServerAddress.config` |
-| Client | — | lobby :22325 | `ServerConfig/gameServerAddress.config` |
+| GameServer | ephemeral (advertised to lobby) | lobby :22326 | `ServerConfig/lobbyGameServerAddress.config` |
+| Client | — | lobby :22325 | `ServerConfig/lobbyClientAddress.config` |
 
 `ServerConfig/*` resolves cwd → AppData → `Assets/` (the shipped copies live in
 `Assets/ServerConfig/`). All processes must run with the repo root as working
 directory (the `.vcxproj.user` files already set `$(SolutionDir)`).
+
+Overrides can also live in `%APPDATA%\SnapJaw\Bindstone\ServerConfig\`; copies there still
+named `gameServerAddress.config` / `lobbyServerAddress.config` must be renamed to
+`lobbyClientAddress.config` / `lobbyGameServerAddress.config` or they are silently skipped.
 
 Match flow: both clients queue → lobby pairs them → tells an AVAILABLE game server →
 game server confirms → lobby sends each client the game server endpoint + a secret →

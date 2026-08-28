@@ -68,6 +68,8 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
+			virtual void postLoadInitialize() override;
+
 		private:
 			virtual void acceptDownClick();
 
@@ -76,8 +78,10 @@ namespace MV {
 			void setCurrentView(const std::shared_ptr<Node> &a_view);
 
 			void showOrHideView(const std::shared_ptr<Node> &a_view);
+			void rememberCurrentView(const std::shared_ptr<Node> &a_view);
 
 			std::shared_ptr<Node> currentView;
+			JAI_PROPERTY((std::string), currentViewId, "");
 
 			//Clone is a no-op because it is manually managed in the cloneHelper
 			JAI_PROPERTY((std::shared_ptr<Node>), activeView, nullptr, [](auto&, auto&) {});

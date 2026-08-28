@@ -121,7 +121,7 @@ std::string CreatePlayer::makeSaveString() {
 	IntermediateDbPlayer newPlayer;
 	newPlayer.loadouts["Default"].buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
 	newPlayer.loadouts["Default"].skins = { "", "", "", "", "", "", "", "" };
-	newPlayer.selectedLoadout = "";
+	newPlayer.selectedLoadout = "Default";
 
 	newPlayer.wallet.add(Wallet::CurrencyType::SOFT, DEFAULT_SOFT_CURRENCY);
 	newPlayer.wallet.add(Wallet::CurrencyType::HARD, DEFAULT_HARD_CURRENCY);

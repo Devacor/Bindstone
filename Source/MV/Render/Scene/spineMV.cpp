@@ -32,14 +32,17 @@ static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTra
 static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
-	builder.auto_bind();
 
 	auto& eng = builder.bound_engine();
 	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int)>(eng, "SignalSpineTrack");
 	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>(eng, "SignalSpineEvent");
+	jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int, int)>(eng, "SignalSpineComplete");
+	jai::bind_signal_type<void(MV::Scene::Spine*, int)>(eng, "SignalSpineDispose");
 	builder.property("onStart", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int)>& { return a_self.onStart; }, nullptr);
 	builder.property("onEnd", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int)>& { return a_self.onEnd; }, nullptr);
 	builder.property("onEvent", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>& { return a_self.onEvent; }, nullptr);
+	builder.property("onComplete", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int, int)>& { return a_self.onComplete; }, nullptr);
+	builder.property("onDispose", [](MV::Scene::Spine& a_self) -> jai::signal<void(MV::Scene::Spine*, int)>& { return a_self.onDispose; }, nullptr);
 
 	builder.method("bindNode", &MV::Scene::Spine::bindNode);
 	builder.method("unbindSlot", &MV::Scene::Spine::unbindSlot);
@@ -135,13 +138,13 @@ namespace MV{
 
 		void Spine::initialize() {
 			Drawable::initialize();
-			loadImplementation(fileBundle, false);
+			loadImplementation(*fileBundle, false);
 		}
 
 		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle) :
 			jai::property_owner<Spine, Drawable>(a_owner),
 			autoUpdate(true),
-			fileBundle(a_fileBundle),
+			fileBundle(property_mgr, "fileBundle", a_fileBundle),
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
@@ -248,7 +251,7 @@ namespace MV{
 		void Spine::unloadImplementation() {
 			if (loaded() && !inUpdate) {
 				tracks.clear();
-				slotsToNodes.clear();
+				slotsToNodes->clear();
 				points->clear();
 				vertexIndices->clear();
 				fileBundle = FileBundle();
@@ -356,13 +359,13 @@ namespace MV{
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 		std::shared_ptr<Spine> Spine::unbindSlot(const std::string &a_slotId) {
-			slotsToNodes.erase(a_slotId);
+			slotsToNodes->erase(a_slotId);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 		std::shared_ptr<Spine> Spine::unbindNode(const std::string &a_slotId, const std::string &a_nodeId) {
 			auto& slotToNodeBinding = slotsToNodes[a_slotId];
 			if (slotToNodeBinding.size() == 1 || slotToNodeBinding.empty()) {
-				slotsToNodes.erase(a_slotId);
+				slotsToNodes->erase(a_slotId);
 			} else {
 				slotToNodeBinding.erase(a_nodeId);
 			}
@@ -370,7 +373,7 @@ namespace MV{
 		}
 
 		std::shared_ptr<Spine> Spine::unbindAll() {
-			slotsToNodes.clear();
+			slotsToNodes->clear();
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
@@ -404,8 +407,8 @@ namespace MV{
 						previousTexture = texture;
 						previousBlending = slot->data->blendMode;
 					}
-					auto nodesToRender = slotsToNodes.find(slot->data->name);
-					if (nodesToRender != slotsToNodes.end()) {
+					auto nodesToRender = slotsToNodes->find(slot->data->name);
+					if (nodesToRender != slotsToNodes->end()) {
 						bool interrupted = false;
 						for (auto&& nodeToRender : nodesToRender->second) {
 							auto node = owner()->get(nodeToRender, false);

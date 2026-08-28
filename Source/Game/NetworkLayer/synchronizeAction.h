@@ -6,6 +6,8 @@
 #include "Game/battleEffect.h"
 #include "Game/NetworkLayer/networkAction.h"
 #include "MV/Network/networkObject.h"
+#include <fstream>
+#include <cstdlib>
 
 typedef MV::NetworkObjectPool<BuildingNetworkState, CreatureNetworkState, BattleEffectNetworkState> BindstoneNetworkObjectPool;
 
@@ -34,11 +36,23 @@ public:
 
 inline std::string makeSynchronizeNetworkString(BindstoneNetworkObjectPool &a_networkObjectPool) {
 	auto updated = a_networkObjectPool.updated();
-	if (!updated.empty()) {
-		return makeNetworkString<SynchronizeAction>(updated);
-	} else {
+	if (updated.empty()) {
 		return "";
 	}
+	auto wire = makeNetworkString<SynchronizeAction>(updated);
+	static const bool selfCheck = std::getenv("MV_WIRE_SELFCHECK") != nullptr;
+	if (selfCheck) {
+		try {
+			MV::fromBinaryString<std::shared_ptr<NetworkAction>>(wire, MV::Services::instance());
+		} catch (const std::exception& e) {
+			std::string kinds;
+			for (auto&& object : updated) { kinds += std::to_string(object.index()); }
+			MV::error("WIRE SELFCHECK FAILED: ", e.what(), " objects=", updated.size(), " kinds=", kinds, " bytes=", wire.size());
+			std::ofstream dump("wire_fail.b64", std::ios::trunc);
+			dump << MV::toBase64(wire);
+		}
+	}
+	return wire;
 }
 
 #endif

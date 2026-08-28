@@ -239,21 +239,23 @@ namespace MV {
 	public:
 		// a_device: upload the GPU texture through this device; null keeps the legacy raw-GL path.
 		LoadedTexture(const TextureParameters& a_parameters, Render::Device* a_device = nullptr) {
-			if (a_parameters.cleared) {
-				locallyOwnedParametersValue = std::make_unique<TextureParameters>(a_parameters);
-				locallyOwnedDataValue = std::make_unique<LoadedTextureData>();
-			} else {
+			if (!a_parameters.cleared) {
 				std::scoped_lock guard(lock);
 				auto found = globalLookup.find(a_parameters);
 				if (found == globalLookup.end()) {
-					bool success = false;
-					std::tie(found, success) = globalLookup.insert({ a_parameters, std::move(loadFile(a_parameters, a_device)) });
+					if (auto loaded = loadFile(a_parameters, a_device)) {
+						found = globalLookup.emplace(a_parameters, std::move(loaded)).first;
+					}
 				}
-				// Guard: a failed load() can insert a null unique_ptr.
-				if (found->second) { ++found->second->useCount; }
-				dataValue = found->second.get();
-				parametersValue = &found->first;
+				if (found != globalLookup.end()) {
+					++found->second->useCount;
+					dataValue = found->second.get();
+					parametersValue = &found->first;
+					return;
+				}
 			}
+			locallyOwnedParametersValue = std::make_unique<TextureParameters>(a_parameters);
+			locallyOwnedDataValue = std::make_unique<LoadedTextureData>();
 		}
 		LoadedTexture(std::unique_ptr<LoadedTextureData> a_locallyOwnedDataValue) :
 			locallyOwnedDataValue(a_locallyOwnedDataValue.release()){

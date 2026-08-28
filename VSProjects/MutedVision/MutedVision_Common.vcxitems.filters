@@ -63,9 +63,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp">
       <Filter>MV\ArtificialIntelligence</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.cpp">
-      <Filter>MV\Audio</Filter>
-    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
@@ -184,9 +181,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.cpp">
-      <Filter>MV\Serialization</Filter>
-    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
@@ -199,9 +193,6 @@
       <Filter>MV\ArtificialIntelligence</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\package.h">
-      <Filter>MV\Audio</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.h">
       <Filter>MV\Audio</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\package.h">
@@ -360,9 +351,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.h">
       <Filter>MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\signal.hpp">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stopwatch.h">
       <Filter>MV\Utility</Filter>
     </ClInclude>
@@ -393,9 +381,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\precompiled.h">
-      <Filter>MV</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.h">
       <Filter>MV\Render\Scene</Filter>
@@ -403,17 +388,11 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h">
       <Filter>MV\Script</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\makeNvp.h">
-      <Filter>MV\Serialization</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.h">
       <Filter>MV\Serialization</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h">
       <Filter>MV\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\properties.hpp">
-      <Filter>MV\Utility</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\jaiscript.hpp">
       <Filter>jaiscript</Filter>
@@ -443,12 +422,6 @@
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\checked_result.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder_serialization.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_registry.hpp">
@@ -490,9 +463,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\parse_errors.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\property_type_converter.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\registrar.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
@@ -500,9 +470,6 @@
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\script_class.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\serialization.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\strong_ptr.hpp">
@@ -515,9 +482,6 @@
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_ext.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_impl.hpp">
@@ -556,9 +520,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\stdlib.hpp">
       <Filter>jaiscript\stdlib</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\vector.hpp">
-      <Filter>jaiscript\stdlib</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\receiver_owner.hpp">
       <Filter>jaiscript\signals</Filter>
     </ClInclude>
@@ -583,9 +544,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serialization_metadata.hpp">
       <Filter>jaiscript\serialization</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serializer.hpp">
-      <Filter>jaiscript\serialization</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\macros.hpp">
       <Filter>jaiscript\properties</Filter>
     </ClInclude>
@@ -604,10 +562,5 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\property_serialization.hpp">
       <Filter>jaiscript\properties</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i">
-      <Filter>MV\Utility</Filter>
-    </None>
   </ItemGroup>
 </Project>

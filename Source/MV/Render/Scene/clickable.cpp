@@ -9,7 +9,6 @@
 static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clickable",
 	[](jai::dynamic_binder<MV::Scene::Clickable>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Sprite>();
-	builder.auto_bind();
 
 	builder.method("clickDetectionType", static_cast<MV::Scene::Clickable::BoundsType(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::clickDetectionType));
 	builder.method("clickDetectionType", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(MV::Scene::Clickable::BoundsType)>(&MV::Scene::Clickable::clickDetectionType));

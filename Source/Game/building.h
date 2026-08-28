@@ -68,7 +68,7 @@ struct BuildingData {
 	}
 
 	StandardScriptMethods<Building>& script(MV::Script& a_script) const {
-		return scriptMethods.loadScript(a_script, "Buildings", id, isServer);
+		return scriptMethods.loadScript(a_script, "Buildings", MV::toUpperFirstChar(id), isServer);
 	}
 
 private:
@@ -117,9 +117,7 @@ struct BuildingNetworkState {
 		}
 	}
 
-	void destroy(std::shared_ptr<BuildingNetworkState> a_other) {
-		std::cout << "Buildings don't die... >.>;" << std::endl;
-	}
+	void destroy(std::shared_ptr<BuildingNetworkState>) {}
 
 	template<class Archive>
 	void serialize(Archive& archive) {
@@ -154,11 +152,16 @@ public:
 
 	void initializeNetworkState(std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> a_networkState) {
 		state = a_networkState;
-		state->self()->onUpgrade = [&]() {
-			buildingUpgraded();
+		std::weak_ptr<Building> weakSelf = std::static_pointer_cast<Building>(shared_from_this());
+		state->self()->onUpgrade = [weakSelf] {
+			if (auto self = weakSelf.lock()) {
+				self->buildingUpgraded();
+			}
 		};
-		state->self()->onAnimationChanged = [&] {
-			spine()->animate(state->self()->animationName, state->self()->animationLoops);
+		state->self()->onAnimationChanged = [weakSelf] {
+			if (auto self = weakSelf.lock(); self && self->spine()) {
+				self->spine()->animate(self->state->self()->animationName, self->state->self()->animationLoops);
+			}
 		};
 	}
 
@@ -177,7 +180,8 @@ public:
 	}
 
 	MV::Point<> spawnPositionWorld() const {
-		return owner()->worldFromLocal(spawnPoint);
+		auto spawn = spawnNode.lock();
+		return spawn ? spawn->worldPosition() : owner()->worldPosition();
 	}
 
 	static void jai_auto_bind(jai::dynamic_binder<Building>& builder);
@@ -216,7 +220,7 @@ private:
 
 	int slot;
 	int loadoutSlot;
-	MV::Point<> spawnPoint;
+	std::weak_ptr<MV::Scene::Node> spawnNode;
 	std::shared_ptr<InGamePlayer> owningPlayer;
 	GameInstance& gameInstance;
 

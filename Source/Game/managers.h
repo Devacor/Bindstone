@@ -14,6 +14,7 @@
 struct DefaultLogin {
 	std::string id;
 	std::string password;
+	bool autoMatch = false;
 };
 
 struct StandardMessages {

@@ -2,7 +2,6 @@
 #define _MV_SCENE_DRAWABLE_H_
 
 #include "node.h"
-#include "MV/Render/mv_jai_serialization_fwd.hpp"  // Forward decls for Anchors friend declarations
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 

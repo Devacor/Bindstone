@@ -18,13 +18,12 @@
 #include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.hpp"
-#include "MV/Utility/properties.hpp"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
-	return MV::Scene::SafeComponent<ComponentType>(a_parent, std::static_pointer_cast<ComponentType>(cloneImplementation(a_parent))); \
+	return MV::Scene::Component::clone(a_parent).cast<ComponentType>(); \
 } \
 MV::Scene::SafeComponent<ComponentType> safe() { \
 	return MV::Scene::SafeComponent<ComponentType>(owner(), std::static_pointer_cast<ComponentType>(shared_from_this())); \
@@ -178,9 +177,9 @@ namespace MV {
 			std::shared_ptr<Node> owner() const;
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
-				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
-				reflection().clone_to_target(result->reflection());
-				return result;
+				auto result = cloneWithoutPostLoad(a_parent);
+				result->postLoadInitialize();
+				return SafeComponent<Component>(a_parent, result);
 			}
 
 			SafeComponent<Component const> safe() const {
@@ -236,6 +235,13 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent);
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
+			// Node clones a subtree first and runs postLoadInitialize once it is assembled.
+			std::shared_ptr<Component> cloneWithoutPostLoad(const std::shared_ptr<Node> &a_parent) {
+				auto result = cloneImplementation(a_parent);
+				clone_reflected_to(*result);
+				return result;
+			}
 
 			void notifyParentOfBoundsChange();
 			void notifyParentOfComponentChange();

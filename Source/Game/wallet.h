@@ -48,7 +48,7 @@ public:
 	}
 
 private:
-	std::vector<int64_t> values = { 0, 0, 0 };
+	std::vector<int64_t> values = std::vector<int64_t>(TOTAL, 0);
 	std::array<std::string, TOTAL> names = { "Gold", "Sweat", "Blood" };
 };
 

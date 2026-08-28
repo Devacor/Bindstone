@@ -1,7 +1,8 @@
 # Creature Assets
 
-Each subfolder represents a creature.  Inside you will typically find:
-- `Default/` – prefab data (`unit.prefab` plus images or Spine data).
-- `main.script` and `mainClient.script` – server and client logic for the creature.
+Each subfolder is one creature:
+- `Default/` – `unit.bindsnap` (the node snapshot) plus its art: `unit.atlas`/`unit.json`/`unit.png`
+  and Spine data (`*.spine`).
+- `main.script` and `mainClient.script` – server and client logic (JaiScript; spawn/update/death hooks).
 
-Creature stats and IDs are referenced in `Assets/Catalogs/Creatures.json`.
+Creature stats and ids live in `Assets/Catalogs/Creatures.json`.

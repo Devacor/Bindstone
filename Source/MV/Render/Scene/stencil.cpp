@@ -2,6 +2,16 @@
 #include <jaiscript/signals/signal_impl.hpp>
 #include <memory>
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+static jai::registrar<MV::Scene::Stencil, MV::Services> _hookStencil("Stencil",
+	[](jai::dynamic_binder<MV::Scene::Stencil>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Sprite>();
+	builder.auto_bind();
+});
+
 namespace MV {
 	namespace Scene {
 
@@ -30,7 +40,7 @@ namespace MV {
 		}
 
 		Stencil::Stencil(const std::weak_ptr<Node> &a_owner) :
-			Sprite(a_owner) {
+			jai::property_owner<Stencil, Sprite>(a_owner) {
 			//shaderProgramId = ALPHA_FILTER_ID;
 			auto newColor = Color(0.0f, 0.0f, 0.0f, 1.0f);
 			for (auto&& point : points) {

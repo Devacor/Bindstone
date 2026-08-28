@@ -11,7 +11,6 @@
 #include <algorithm>
 
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/signal.hpp"
 
 namespace MV {
 	class Localization {

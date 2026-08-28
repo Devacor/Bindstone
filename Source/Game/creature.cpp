@@ -67,8 +67,9 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 	});
 }
 
-static jai::registrar<Creature, MV::Services> _hookCreature("Creature",
+static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature("Creature",
 	[](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
 	auto& eng = builder.bound_engine();
 	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
 	jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(eng, "SignalCreatureHealth");
@@ -173,9 +174,11 @@ void ServerCreature::animateDeathAndRemove() {
 	statTemplate.script(gameInstance.script()).death(self);
 	onDeathSignal(self);
 	spineAnimator->animate(*state->self()->animationName, false);
-	spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
-		if (a_self->track(a_track).name() == state->self()->animationName) {
-			owner()->removeFromParent();
+	std::weak_ptr<ServerCreature> weakSelf = self;
+	spineAnimator->onEnd.connect("!", [weakSelf](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+		auto creature = weakSelf.lock();
+		if (creature && a_self->track(a_track).name() == creature->state->self()->animationName) {
+			creature->owner()->removeFromParent();
 		}
 	});
 }
@@ -370,23 +373,31 @@ ClientCreature::ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 		a_gameInstance.data().creatures().data(*a_state->self()->creatureTypeId),
 		a_state
 	){
-	state->self()->onNetworkDeath = [&]() {
-		animateDeathAndRemove();
-	};
-	state->self()->onNetworkSynchronize = [&] {
-		onNetworkSynchronize();
-	};
-	state->self()->onAnimationChanged = [&] {
-		onAnimationChanged();
-	};
 }
 
 void ClientCreature::initialize() {
+	auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
+	std::weak_ptr<ClientCreature> weakSelf = self;
+	state->self()->onNetworkDeath = [weakSelf] {
+		if (auto creature = weakSelf.lock()) {
+			creature->animateDeathAndRemove();
+		}
+	};
+	state->self()->onNetworkSynchronize = [weakSelf] {
+		if (auto creature = weakSelf.lock()) {
+			creature->onNetworkSynchronize();
+		}
+	};
+	state->self()->onAnimationChanged = [weakSelf] {
+		if (auto creature = weakSelf.lock()) {
+			creature->onAnimationChanged();
+		}
+	};
+
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
 
-	auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);
 
 	gameInstance.registerCreature(self);
@@ -407,9 +418,11 @@ void ClientCreature::animateDeathAndRemove() {
 	}
 	task().then("animateAway", [&](MV::Task&) {
 		spineAnimator->animate(*state->self()->animationName, false);
-		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
-			if (a_self->track(a_track).name() == state->self()->animationName) {
-				owner()->removeFromParent();
+		std::weak_ptr<ClientCreature> weakSelf = std::static_pointer_cast<ClientCreature>(shared_from_this());
+		spineAnimator->onEnd.connect("!", [weakSelf](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+			auto creature = weakSelf.lock();
+			if (creature && a_self->track(a_track).name() == creature->state->self()->animationName) {
+				creature->owner()->removeFromParent();
 			}
 		});
 	});

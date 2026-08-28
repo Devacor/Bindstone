@@ -8,7 +8,6 @@
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
-	builder.auto_bind();
 
 	jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(builder.bound_engine(), "SignalText");
 	builder.property("onEnter", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onEnter; }, nullptr);
@@ -58,7 +57,7 @@ namespace MV{
 			textLibrary(a_textLibrary),
 			onEnter(onEnterSignal),
 			onChange(onChangeSignal),
-			fontIdentifier(a_defaultFontIdentifier),
+			fontIdentifier(property_mgr, "fontIdentifier", a_defaultFontIdentifier),
 			formattedText(property_mgr, "formattedText", std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier), [](auto& source, auto& destination) {
 				if (source.get() && destination.get()) {
 					*destination.get() = *source.get();
@@ -76,16 +75,43 @@ namespace MV{
 
 		void Text::initialize() {
 			Drawable::initialize();
-			if (ownerIsAlive()) {
-				auto silenceSelf = owner()->silence();
+			attachGlyphNodes();
+		}
+
+		void Text::postLoadInitialize() {
+			Drawable::postLoadInitialize();
+			attachGlyphNodes();
+		}
+
+		bool Text::ownerHasChild(const std::shared_ptr<Node>& a_node) const {
+			auto parent = owner();
+			return std::find(parent->cbegin(), parent->cend(), a_node) != parent->cend();
+		}
+
+		void Text::attachGlyphNodes() {
+			if (!ownerIsAlive()) {
+				return;
+			}
+			auto glyphs = formattedText->scene();
+			bool glyphsAttached = ownerHasChild(glyphs);
+			bool cursorAlive = cursorSprite && cursorSprite->ownerIsAlive();
+			bool cursorAttached = cursorAlive && ownerHasChild(cursorSprite->owner());
+			if (glyphsAttached && cursorAttached) {
+				return;
+			}
+			auto silenceSelf = owner()->silence();
+			if (!glyphsAttached) {
 				// Runtime-generated glyph container: never serialize it (the persistent data is
 				// the string on formattedText; baked glyph sprites reload with dead
 				// SurfaceTextureDefinitions and render garbage).
-				formattedText->scene()->id(guid("TEXT_"))->serializable(false)->position(points[0]);
-				owner()->add(formattedText->scene());
-
+				glyphs->id(guid("TEXT_"))->serializable(false)->position(points[0]);
+				owner()->add(glyphs);
+			}
+			if (!cursorAlive) {
 				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->bounds(size(2.0f, 5.0f));
 				cursorSprite->hide();
+			} else if (!cursorAttached) {
+				owner()->add(cursorSprite->owner());
 			}
 		}
 

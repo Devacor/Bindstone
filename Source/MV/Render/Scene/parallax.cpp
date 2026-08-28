@@ -9,7 +9,6 @@
 static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax",
 	[](jai::dynamic_binder<MV::Scene::Parallax>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
-	builder.auto_bind();
 
 	builder.method("translateRatio", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::translateRatio));
 	builder.method("translateRatio", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::translateRatio));

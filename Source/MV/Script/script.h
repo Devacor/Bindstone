@@ -37,7 +37,7 @@ namespace MV {
 	// {base, base+10, base+20, ...} where base = 52472 + scriptDebugPortOffset(). The offset
 	// is per build target (Client 0, LobbyServer 1, GameServer 2) so each process type has a
 	// stable attach port. Costs nothing on the script hot path until a session attaches;
-	// breakpoints/stepping need the interpreter backend (MV_SCRIPT_INTERPRETER=1). Bind
+	// both backends carry the debug hook (breakpoints/stepping). Bind
 	// failure logs one line and the engine runs without the listener. Opt out with
 	// MV_SCRIPT_NO_DEBUG=1 or scriptDebugEnabled(false) before engine creation
 	// (BindstoneClient: --no-script-debug).

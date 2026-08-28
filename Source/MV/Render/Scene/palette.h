@@ -3,12 +3,13 @@
 
 #include "drawable.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Palette : public Drawable {
+		class Palette : public jai::property_owner<Palette, Drawable> {
 			friend jai::access;
 			friend Node;
 		public:
@@ -36,10 +37,12 @@ namespace MV {
 
 			std::shared_ptr<Palette> padding(const Size<> &a_padding) {
 				selectorPercentPadding = a_padding;
+				return std::static_pointer_cast<Palette>(shared_from_this());
 			}
 
 			std::shared_ptr<Palette> selectorPercent(MV::Size<> a_newSize) {
 				selectorPercentSize = a_newSize;
+				return std::static_pointer_cast<Palette>(shared_from_this());
 			}
 
 			std::shared_ptr<Palette> colorAlphaSelector(const Color& a_left, const Color& a_right);
@@ -58,6 +61,10 @@ namespace MV {
 			bool eatingTouches() const;
 		protected:
 			Palette(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
+			Palette(const Palette&) = delete;
+			Palette& operator=(const Palette&) = delete;
+			Palette(Palette&&) = delete;
+			Palette& operator=(Palette&&) = delete;
 
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual BoxAABB<> boundsImplementation() override { return Drawable::boundsImplementation(); }
@@ -86,27 +93,13 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					jai::serialization::make_nvp("color", currentColor),
-					jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
-					jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
-					jai::serialization::make_nvp("eatTouches", eatTouches),
-					jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
-					jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
-				);
+				property_mgr.save(archive);
 				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					jai::serialization::make_nvp("color", currentColor),
-					jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
-					jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
-					jai::serialization::make_nvp("eatTouches", eatTouches),
-					jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
-					jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
-				);
+				property_mgr.load(archive);
 				Drawable::load(archive, 0);
 			}
 
@@ -142,18 +135,18 @@ namespace MV {
 			TapDevice::SignalType onLeftMouseUpHandle;
 			TapDevice::SignalType onMouseMoveHandle;
 
-			size_t globalClickPriority = 100;
-			std::vector<int64_t> overrideClickPriority;
-			bool eatTouches = true;
+			JAI_PROPERTY((int64_t), globalClickPriority, 100);
+			JAI_PROPERTY((std::vector<int64_t>), overrideClickPriority);
+			JAI_PROPERTY((bool), eatTouches, true);
 
 			TapDevice& ourMouse;
 
-			Size<> selectorPercentSize = { .85f, 0.85f };
-			Size<> selectorPercentPadding = {0.03f, 0.03f};
+			JAI_PROPERTY((Size<>), selectorPercentSize, Size<>(0.85f, 0.85f));
+			JAI_PROPERTY((Size<>), selectorPercentPadding, Size<>(0.03f, 0.03f));
 
 			Point<> selectorCursorPercent = { 1.0f, 0.0f };
 			Color topRightColor = {1.0f, 0.0f, 0.0f, 1.0f};
-			Color currentColor = {1.0f, 0.0f, 0.0f, 1.0f};
+			JAI_NAMED_PROPERTY((Color), "color", currentColor, Color(1.0f, 0.0f, 0.0f, 1.0f));
 
 			MV::TapDevice::SignalType currentDragSignal;
 			MV::Color::HSV hsv;

@@ -64,8 +64,7 @@ bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
 
 float GameInstance::minScale(bool a_soft) {
 	MV::BoxAABB<> bounds;
-	if (cornerBounds(bounds, a_soft ? "Soft" : "Hard")) { return scaleToFit(bounds); }
-	return a_soft ? minScaleSoft : minScaleHard;
+	return mapViewBounds(bounds, a_soft) ? std::max(scaleSanityFloor, scaleToFit(bounds)) : scaleSanityFloor;
 }
 
 float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {

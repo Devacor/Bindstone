@@ -31,7 +31,54 @@ void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position
 		if (std::abs(screenScale) > 0.00000001f) {
 			rawScaleAroundScreenPoint(worldScene->scale().x + screenScale, a_position);
 		}
+		clampToHardBounds(a_position);
 		easeToBoundsIfExceeded(a_position);
+	}
+}
+
+MV::BoxAABB<> GameInstance::visibleMapBounds() {
+	return worldScene->localFromScreen(MV::BoxAABB<int>(MV::Point<int>(), MV::toPoint(gameData.managers().renderer.window().drawableSize())));
+}
+
+bool GameInstance::mapViewBounds(MV::BoxAABB<>& a_bounds, bool a_soft) {
+	if (!pathMap) { return false; }
+	a_bounds = worldScene->localFromWorld(pathMap->owner()->worldBounds(false));
+	if (a_soft) {
+		auto inset = MV::toPoint(a_bounds.size()) * viewSoftInset;
+		a_bounds.minPoint += inset;
+		a_bounds.maxPoint -= inset;
+	}
+	return a_bounds.width() > 0.0f && a_bounds.height() > 0.0f;
+}
+
+float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {
+	auto visible = visibleMapBounds();
+	auto ratio = std::max(visible.width() / a_bounds.width(), visible.height() / a_bounds.height());
+	return ratio > 1.0f ? worldScene->scale().x * ratio : worldScene->scale().x;
+}
+
+MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {
+	auto visible = visibleMapBounds();
+	MV::Point<> correction;
+	if (visible.width() >= a_bounds.width()) { correction.x = ((a_bounds.minPoint.x + a_bounds.maxPoint.x) - (visible.minPoint.x + visible.maxPoint.x)) / 2.0f; }
+	else if (visible.minPoint.x < a_bounds.minPoint.x) { correction.x = a_bounds.minPoint.x - visible.minPoint.x; }
+	else if (visible.maxPoint.x > a_bounds.maxPoint.x) { correction.x = a_bounds.maxPoint.x - visible.maxPoint.x; }
+	if (visible.height() >= a_bounds.height()) { correction.y = ((a_bounds.minPoint.y + a_bounds.maxPoint.y) - (visible.minPoint.y + visible.maxPoint.y)) / 2.0f; }
+	else if (visible.minPoint.y < a_bounds.minPoint.y) { correction.y = a_bounds.minPoint.y - visible.minPoint.y; }
+	else if (visible.maxPoint.y > a_bounds.maxPoint.y) { correction.y = a_bounds.maxPoint.y - visible.maxPoint.y; }
+	return correction;
+}
+
+void GameInstance::clampToHardBounds(const MV::Point<int>& a_pointerCenter) {
+	MV::BoxAABB<> hard;
+	if (!mapViewBounds(hard, false)) { return; }
+	auto fit = scaleToFit(hard);
+	if (fit > worldScene->scale().x) {
+		rawScaleAroundScreenPoint(fit, a_pointerCenter);
+	}
+	auto correction = viewCorrection(hard);
+	if (correction != MV::Point<>()) {
+		worldScene->translate(correction * -worldScene->scale().x);
 	}
 }
 
@@ -103,9 +150,13 @@ void GameInstance::beginMapDrag() {
 			activeDrag = ourMouse.onMove.connect([this](MV::TapDevice& a_mouse) {
 				if (worldScene) {
 					worldScene->camera().translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+					clampToHardBounds(a_mouse.position());
 				}
 			});
-		}, []() {}, "MapDrag"));
+		}, [this]() {
+			activeDrag.reset();
+			easeToBoundsIfExceeded(ourMouse.position());
+		}, "MapDrag"));
 	}
 }
 
@@ -151,19 +202,30 @@ void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter)
 	if (!cameraIsFree()) {
 		return;
 	}
-	if (worldScene->scale().x < minScaleSoft || worldScene->scale().x > maxScaleSoft) {
-		auto startScale = worldScene->scale().x;
-		auto endScale = worldScene->scale().x > maxScaleSoft ? maxScaleSoft : minScaleSoft;
-		cameraAction.cancel();
-		cameraAction.then(std::make_shared<MV::BlockForSeconds>(0.15f));
-
-		cameraAction.thenAlso("interruptable", [this, startScale, endScale, a_pointerCenter](MV::Task& a_self, double /*a_dt*/) {
-			float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() * 3.0f), 1.0f);
-			rawScaleAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
-			MV::info("WorldBounds: ", worldScene->screenBounds(), " BasicBounds: ", worldScene->bounds(), " DrawableBounds: ", worldScene->renderer().window().drawableSize());
-			return percent != 1.0f;
-		});
+	MV::BoxAABB<> soft;
+	bool haveSoft = mapViewBounds(soft, true);
+	auto startScale = worldScene->scale().x;
+	auto endScale = std::clamp(startScale, haveSoft ? std::max(minScaleSoft, scaleToFit(soft)) : minScaleSoft, maxScaleSoft);
+	bool outsideSoft = haveSoft && viewCorrection(soft) != MV::Point<>();
+	if (endScale == startScale && !outsideSoft) {
+		return;
 	}
+	cameraAction.cancel();
+	cameraAction.then(std::make_shared<MV::BlockForSeconds>(static_cast<float>(viewEaseHoldSeconds)));
+
+	auto eased = std::make_shared<float>(0.0f);
+	cameraAction.thenAlso("interruptable", [this, startScale, endScale, a_pointerCenter, soft, haveSoft, eased](MV::Task& a_self, double /*a_dt*/) {
+		float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / viewEaseSeconds), 1.0f);
+		float easedNow = MV::mixOut(0.0f, 1.0f, percent, 2.0f);
+		rawScaleAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
+		if (haveSoft) {
+			// each frame closes the share of the remaining distance that this frame's easing covers
+			float step = percent >= 1.0f ? 1.0f : std::clamp((easedNow - *eased) / std::max(1.0f - *eased, 0.0001f), 0.0f, 1.0f);
+			worldScene->translate(viewCorrection(soft) * (-worldScene->scale().x * step));
+		}
+		*eased = easedNow;
+		return percent != 1.0f;
+	});
 }
 
 bool GameInstance::cameraIsFree() const {

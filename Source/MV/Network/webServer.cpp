@@ -50,8 +50,8 @@ namespace MV {
 		auto self = shared_from_this();
 
 		ioService.post([this, self, a_content] {
-			std::string content = a_content.to_string();
-			asio::async_write(*socket, asio::buffer(content, content.size()), [self](asio::error_code a_err, size_t a_amount) {
+			auto content = std::make_shared<std::string>(a_content.to_string());
+			asio::async_write(*socket, asio::buffer(*content), [self, content](asio::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->handleError(a_err, "write");
 				} else {

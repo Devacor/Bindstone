@@ -28,6 +28,7 @@ namespace MV {
 	class Path;
 	class NavigationAgent;
 	class FlowField;
+	class FlowFieldHandle;
 
 	// How an agent turns a goal into a path. search = A* every time (the default). flowField = a
 	// field shared by everyone heading for the same goal region, with A* only while no field exists
@@ -616,7 +617,7 @@ namespace MV {
 	// A shared distance field toward one goal region over static obstacles only: every agent
 	// heading there reads its cell's gradient instead of searching. Dynamic blocking is left to
 	// the movement layer (follow / swap / step aside), so a field stays valid while crowds move.
-	class FlowField {
+	class FlowField : public std::enable_shared_from_this<FlowField> {
 	public:
 		FlowField(const std::shared_ptr<Map>& a_map, const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize);
 
@@ -631,11 +632,10 @@ namespace MV {
 		int unitSize() const { return footprint; }
 		uint64_t generation = 0;
 		uint64_t lastUsedTick = 0;
-		// Agents following this field toward an active goal; a field with users is never evicted
+		// A handle is a lease: while any exist the field is in use and never evicted
+		std::shared_ptr<FlowFieldHandle> makeHandle();
 		int users() const { return activeUsers; }
 		size_t reachableCells() const { size_t n = 0; for (auto d : distances) { if (d != UNREACHABLE) { ++n; } } return n; }
-		void acquire() { ++activeUsers; }
-		void release() { --activeUsers; }
 
 		static constexpr float UNREACHABLE = std::numeric_limits<float>::infinity();
 	private:
@@ -655,7 +655,24 @@ namespace MV {
 		bool corners;
 		int activeUsers = 0;
 		std::vector<float> distances;
+		friend class FlowFieldHandle;
 	};
+
+	class FlowFieldHandle {
+	public:
+		~FlowFieldHandle() { --held->activeUsers; }
+		FlowFieldHandle(const FlowFieldHandle&) = delete;
+		FlowFieldHandle& operator=(const FlowFieldHandle&) = delete;
+		const std::shared_ptr<FlowField>& field() const { return held; }
+	private:
+		friend class FlowField;
+		explicit FlowFieldHandle(std::shared_ptr<FlowField> a_field) : held(std::move(a_field)) { ++held->activeUsers; }
+		std::shared_ptr<FlowField> held;
+	};
+
+	inline std::shared_ptr<FlowFieldHandle> FlowField::makeHandle() {
+		return std::shared_ptr<FlowFieldHandle>(new FlowFieldHandle(shared_from_this()));
+	}
 
 	class NavigationAgent : public std::enable_shared_from_this<NavigationAgent> {
 		friend jai::access;
@@ -706,7 +723,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<FlowField> flowField() const {
-			return activeField;
+			return activeField ? activeField->field() : nullptr;
 		}
 
 		std::shared_ptr<NavigationAgent> clone(const std::shared_ptr<Map> &a_map = nullptr) const {
@@ -1165,20 +1182,15 @@ namespace MV {
 		static constexpr size_t FLOW_EXTEND_AT = 4;   // nodes left when the next stretch is derived
 		bool followingField = false;
 		PathMode ourPathMode = PathMode::search;
-		std::shared_ptr<FlowField> activeField;
+		std::shared_ptr<FlowFieldHandle> activeField;
 
 		void bindField(const std::shared_ptr<FlowField>& a_field) {
-			if (activeField == a_field) { return; }
-			releaseField();
-			activeField = a_field;
-			if (activeField) { activeField->acquire(); }
+			if (activeField && activeField->field() == a_field) { return; }
+			activeField = a_field->makeHandle();
 		}
 
 		void releaseField() {
-			if (activeField) {
-				activeField->release();
-				activeField.reset();
-			}
+			activeField.reset();
 		}
 		bool searchInProgress = false;
 		int searchSlices = 0;

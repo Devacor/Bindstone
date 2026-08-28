@@ -357,6 +357,26 @@ public:
             check_true(std::max(std::abs(cell.x - 20), std::abs(cell.y - 20)) <= 5, "it ends up beside the block, not stuck at spawn");
         });
 
+        test("a_flow_field_handle_is_the_lease", [this]() {
+            auto map = MV::Map::make(MV::Size<int>(30, 30));
+            map->maxFlowFields(1);
+            auto field = map->flowFieldFor(MV::Point<int>(25, 25), 1.0f, 1);
+            check_eq(0, field->users(), "unleased");
+            {
+                auto lease = field->makeHandle();
+                auto second = field->makeHandle();
+                check_eq(2, field->users(), "two leases");
+                check_true(lease->field() == field, "the handle reaches its field");
+                map->beginTick();
+                check_true(map->flowFieldFor(MV::Point<int>(5, 5), 1.0f, 1) != nullptr, "another key at cap 1");
+                check_eq(size_t(2), map->flowFieldCount(), "the leased field could not be trimmed");
+            }
+            check_eq(0, field->users(), "both leases gone");
+            map->beginTick();
+            check_true(map->flowFieldFor(MV::Point<int>(6, 5), 1.0f, 1) != nullptr, "the next insert");
+            check_eq(size_t(1), map->flowFieldCount(), "trims the released field");
+        });
+
         test("path_mode_defaults_to_search_and_is_opt_in", [this]() {
             auto map = MV::Map::make(MV::Size<int>(30, 30));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(1, 1));

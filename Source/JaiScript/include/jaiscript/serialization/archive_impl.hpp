@@ -106,6 +106,7 @@ protected:
     const Derived* self() const { return static_cast<const Derived*>(this); }
 
     engine* engine_ref_;
+    std::map<std::type_index, void*> user_contexts_;
 
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
@@ -199,6 +200,32 @@ public:
 
     engine* get_engine() const {
         return engine_ref_;
+    }
+
+    template<typename ContextType>
+    ContextType* get_user_context() const {
+        auto it = user_contexts_.find(std::type_index(typeid(ContextType)));
+        if (it != user_contexts_.end()) {
+            return static_cast<ContextType*>(it->second);
+        }
+        if constexpr (std::is_same_v<std::remove_cv_t<ContextType>, engine>) {
+            return engine_ref_;
+        } else {
+            return nullptr;
+        }
+    }
+
+    template<typename ContextType>
+    void set_user_context(ContextType* context) {
+        user_contexts_[std::type_index(typeid(ContextType))] = context;
+    }
+
+    void* get_user_context_raw(std::type_index ti) const {
+        auto it = user_contexts_.find(ti);
+        if (it != user_contexts_.end()) {
+            return it->second;
+        }
+        return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
     }
 
     std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw_ptr) {
@@ -806,7 +833,11 @@ public:
         if (it != user_contexts_.end()) {
             return static_cast<ContextType*>(it->second);
         }
-        return nullptr;
+        if constexpr (std::is_same_v<std::remove_cv_t<ContextType>, engine>) {
+            return engine_ref_;
+        } else {
+            return nullptr;
+        }
     }
 
     template<typename ContextType>
@@ -814,10 +845,12 @@ public:
         user_contexts_[std::type_index(typeid(ContextType))] = context;
     }
 
-    // Raw accessor for type-erased wrapper (any_archive_reader)
     void* get_user_context_raw(std::type_index ti) const {
         auto it = user_contexts_.find(ti);
-        return it != user_contexts_.end() ? it->second : nullptr;
+        if (it != user_contexts_.end()) {
+            return it->second;
+        }
+        return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
     }
 
     uint32_t get_version() const { return version_; }

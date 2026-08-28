@@ -164,6 +164,79 @@ public:
                 throw test_failure(std::format("Parameter lookup failed: {}", e.what()));
             }
         });
+
+        test("nested_lambda_reads_the_declaring_frame_not_the_creating_frame", [this]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                var stored = null;
+                function stash(var cb) -> void { stored = cb; }
+                function with_probe(var cb) -> void { cb(7); }
+                var run = [=](int outer) -> void {
+                    with_probe([=](var probe) -> void {
+                        stash([outer, probe]() -> int { return probe * 10 + outer; });
+                    });
+                };
+                run(3);
+                stored()
+            )");
+            check_eq((int64_t)73, result.as_int());
+        });
+
+        test("explicit_capture_forwarded_only_through_a_nested_capture_list", [this]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                var stored = null;
+                function stash(var cb) -> void { stored = cb; }
+                function with_probe(var cb) -> void { cb(7); }
+                var run = [=](int outer) -> void {
+                    with_probe([outer](var probe) -> void {
+                        stash([outer, probe]() -> int { return probe * 10 + outer; });
+                    });
+                };
+                run(3);
+                stored()
+            )");
+            check_eq((int64_t)73, result.as_int());
+        });
+
+        test("default_capture_chains_through_two_lambda_levels", [this]() {
+            auto eng = make_engine();
+            auto direct = eng->execute(R"(
+                function f(int k) -> int { var g = [=]() -> int { var h = [=]() -> int { return k; }; return h(); }; return g(); }
+                f(9)
+            )");
+            check_eq((int64_t)9, direct.as_int());
+            auto mixed = eng->execute(R"(
+                function f2(int k) -> int { int j = 1; var g = [=](int m) -> int { var h = [=]() -> int { return k + m + j; }; return h(); }; return g(2); }
+                f2(9)
+            )");
+            check_eq((int64_t)12, mixed.as_int());
+            auto bare = eng->execute(R"(
+                function f3(int k) -> int { var g = []() -> int { var h = []() -> int { return k; }; return h(); }; return g(); }
+                f3(4)
+            )");
+            check_eq((int64_t)4, bare.as_int());
+        });
+
+        test("by_reference_capture_chains_writes_to_the_declaring_local", [this]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                function f() -> int { int k = 1; var g = [&]() -> void { var h = [&]() -> void { k = 5; }; h(); }; g(); return k; }
+                f()
+            )");
+            check_eq((int64_t)5, result.as_int());
+        });
+
+        test("nested_lambda_chain_replays_on_every_creation", [this]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                var made = [];
+                function make(int seed) -> void { var g = [=]() -> int { var h = [=]() -> int { return seed; }; return h(); }; made.push(g); }
+                make(1); make(2); make(3);
+                made[0]() * 100 + made[1]() * 10 + made[2]()
+            )");
+            check_eq((int64_t)123, result.as_int());
+        });
     }
 };
 

@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 5;
+    inline constexpr uint32_t k_jaibite_version = 6;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -278,12 +278,17 @@ namespace jai::detail {
                         str(c.name);
                         flag(c.by_reference);
                         symbol(c.symbol_id, UINT64_MAX);
+                        slot(c.outer_slot);
                     }
                     parameters(e->parameters);
                     type(e->return_type);
                     node(e->body.get());
                     varint(e->local_count);
                     outer_slot_plan(e->outer_slot_plan, e->outer_slot_plan_built);
+                    varint(e->chained_outer_slots.size());
+                    for (const auto& [sym, s] : e->chained_outer_slots) { symbol(sym, UINT64_MAX); slot(s); }
+                    varint(e->chained_outer_names.size());
+                    for (uint64_t sym : e->chained_outer_names) symbol(sym, UINT64_MAX);
                     break;
                 }
                 case node_type::new_expr: {
@@ -862,6 +867,7 @@ namespace jai::detail {
                         bool by_ref = flag();
                         lambda_expr::capture c(cname, by_ref);
                         c.symbol_id = symbol(UINT64_MAX);
+                        c.outer_slot = slot_val();
                         e->captures.push_back(c);
                     }
                     e->parameters = parameters();
@@ -871,6 +877,18 @@ namespace jai::detail {
                     bool built = false;
                     outer_slot_plan(e->outer_slot_plan, built);
                     e->outer_slot_plan_built = built;
+                    uint64_t nchain = varint();
+                    check_count(nchain);
+                    e->chained_outer_slots.reserve(size_t(nchain));
+                    for (uint64_t i = 0; i < nchain; ++i) {
+                        uint64_t sym = symbol(UINT64_MAX);
+                        size_t s = slot_val();
+                        e->chained_outer_slots.emplace_back(sym, s);
+                    }
+                    uint64_t nnames = varint();
+                    check_count(nnames);
+                    e->chained_outer_names.reserve(size_t(nnames));
+                    for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol(UINT64_MAX));
                     result = e;
                     break;
                 }

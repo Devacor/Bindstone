@@ -165,6 +165,8 @@ namespace jai::vm {
         void push_scope() override;
         void pop_scope() override;
         void define_variable(const std::string& name, const script_value& value) override;
+        void push_instance_scope() override;
+        void pop_instance_scope() override;
 
         void set_execution_budget(std::chrono::nanoseconds budget) override;
         void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
@@ -535,6 +537,8 @@ namespace jai::vm {
         // everywhere except a parallel worker; see configure_parallel_worker)
         string_symbolizer* env_symbolizer_ = nullptr;
         std::shared_ptr<environment> environment_;
+        std::vector<std::shared_ptr<environment>> instance_scope_saved_;
+        std::shared_ptr<environment> pending_instance_env_;
         engine* engine_ = nullptr;
         // Step-debugger controller (engine-owned, shared with the interpreter backend).
         // Atomic: engine::debugger() may wire it from another thread mid-run; NOT read per

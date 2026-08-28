@@ -2602,6 +2602,10 @@ void interpreter::prepare_for_execution() {
     // Reset to the engine's global environment directly
     // This fixes issues where the interpreter's environment_ can become disconnected
     // from the engine's actual global (e.g., due to pooled environments or exception unwinding)
+    if (execute_depth_ == 0) {
+        instance_scope_saved_.clear();
+        pending_instance_env_.reset();
+    }
     auto eng_global = get_global_environment();
     if (eng_global) {
         environment_ = eng_global;
@@ -2632,6 +2636,21 @@ void interpreter::define_variable(const std::string& name, const script_value& v
     environment_->define(name, value);
 }
 
+void interpreter::push_instance_scope() {
+    instance_scope_saved_.push_back(environment_);
+    environment_ = get_pooled_environment(get_global_environment());
+    pending_instance_env_ = environment_;
+}
+
+void interpreter::pop_instance_scope() {
+    pending_instance_env_.reset();
+    if (instance_scope_saved_.empty()) { pop_scope(); return; }
+    auto instance_env = environment_;
+    environment_ = std::move(instance_scope_saved_.back());
+    instance_scope_saved_.pop_back();
+    if (instance_env != environment_) { release_environment(instance_env); }
+}
+
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
     // Reentrant execute (a host callback firing mid-script, e.g. hot reload): the
     // nested program must run at TOP LEVEL - global environment, fresh call/value
@@ -2658,12 +2677,15 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_.clear();
                 saved_return = std::move(self->returnValue_);
                 saved_has_return = self->hasReturnValue_;
-                self->environment_ = self->get_global_environment();
+                if (!self->pending_instance_env_) {
+                    self->environment_ = self->get_global_environment();
+                }
                 saved_member_scope = self->member_scope_;
                 self->member_scope_ = {};
             }
             // Counted, not a flag (Dev ruling): a nested execute's exit decrements
             // symmetrically and can never clear the outer run's in-flight state
+            self->pending_instance_env_.reset();
             ++self->execute_depth_;
         }
         ~reentry_isolation() {
@@ -8357,6 +8379,12 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             }
         }
 
+        for (const auto& [sym, slot] : expr->chained_outer_slots) {
+            if (slot < outer_slot_count && outer_slots_captured.insert(sym).second) {
+                outer_slot_refs.push_back({nullptr, sym, slot});
+            }
+        }
+
         // Persist the plan so later closure creations from this AST (whose identifier
         // slots are patched below) can replay the same captures.
         expr->outer_slot_plan.reserve(outer_slot_refs.size());
@@ -8370,6 +8398,12 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     // bare [] lambda (automatic local capture, a stated JaiScript feature).
     if (!outer_slot_refs.empty()) {
         has_explicit_captures = true;  // forces needs_capture_env = true below
+    }
+
+    if (has_default_capture) {
+        for (uint64_t chained : expr->chained_outer_names) {
+            used_variables.insert(std::string(string_symbolizer_->get_string(chained)));
+        }
     }
 
     // Determine if we actually need a capture environment
@@ -8483,23 +8517,30 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             // even though contains() might return false
             // Check environment first; if not there check the outer call-frame
             // (locals with slot_index live there, not in environment_).
-            bool can_capture = environment_->contains(capture.symbol_id);
+            // Enclosing-frame slots (params/locals) shadow env-resident and global names:
+            // a global spelled like the parameter must not be what [name] captures.
+            bool can_capture = false;
             bool capture_from_slot = false;
             script_value* slot_val = nullptr;
-
-            if (!can_capture && capture.symbol_id == this_id) {
-                if (environment_->get_value_ptr(this_id)) can_capture = true;
-            }
-
-            if (!can_capture && !call_stack_.empty()) {
-                // Walk outer_slot_refs to find this symbol's outer slot
-                for (const auto& ref : outer_slot_refs) {
-                    if (ref.symbol_id == capture.symbol_id) {
-                        slot_val = call_stack_.back().get_local(ref.outer_slot);
-                        if (slot_val) { can_capture = true; capture_from_slot = true; }
-                        break;
+            if (!call_stack_.empty()) {
+                if (capture.outer_slot != SIZE_MAX && capture.outer_slot < call_stack_.back().local_count()) {
+                    slot_val = call_stack_.back().get_local(capture.outer_slot);
+                }
+                if (!slot_val) {
+                    for (const auto& ref : outer_slot_refs) {
+                        if (ref.symbol_id == capture.symbol_id) {
+                            slot_val = call_stack_.back().get_local(ref.outer_slot);
+                            break;
+                        }
                     }
                 }
+                if (slot_val) { can_capture = true; capture_from_slot = true; }
+            }
+            if (!can_capture) {
+                can_capture = environment_->contains(capture.symbol_id);
+            }
+            if (!can_capture && capture.symbol_id == this_id) {
+                if (environment_->get_value_ptr(this_id)) can_capture = true;
             }
 
             if (can_capture) {

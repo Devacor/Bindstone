@@ -336,6 +336,7 @@ namespace jai {
             std::string_view name;      // Variable name - points to symbolizer storage (permanent)
             bool by_reference;          // True if this specific variable is captured by reference
             mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
+            size_t outer_slot = SIZE_MAX;  // Enclosing-frame slot the parser resolved the name to
 
             // Constructor for explicit variable captures
             capture(std::string_view n, bool by_ref)
@@ -356,6 +357,12 @@ namespace jai {
         // this plan rather than re-scan (a re-scan would find nothing).
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
+
+        // Chain captures resolved by the parser for NESTED lambdas: enclosing-frame
+        // locals that only a nested lambda uses (this lambda captures the slot), and
+        // names a nested lambda needs this lambda's default capture to carry
+        std::vector<std::pair<uint64_t, size_t>> chained_outer_slots;
+        std::vector<uint64_t> chained_outer_names;
 
         // Shared immutable parameter storage, minted once per node (see function_decl):
         // every closure created from this lambda shares it instead of deep-copying.

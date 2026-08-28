@@ -2495,6 +2495,10 @@ checked_result<expression_ptr> parser::lambda_expression() {
     JAISCRIPT_TRY_ASSIGN(auto capture_result, parse_capture_list());
     lambda->captures = std::move(capture_result.first);
     lambda->default_capture = capture_result.second;
+    for (auto& cap : lambda->captures) {
+        if (cap.symbol_id == UINT64_MAX && symbolizer_) cap.symbol_id = symbolizer_->intern(cap.name);
+        if (cap.symbol_id != UINT64_MAX) cap.outer_slot = lookup_capture_slot(cap.symbol_id);
+    }
     JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after capture list"));
 
     return finish_lambda_after_captures(std::move(lambda));
@@ -2529,7 +2533,7 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
     }
 
     // Enter function scope for slot-based local variable tracking
-    enter_function_scope();
+    enter_function_scope(lambda.get());
 
     // Assign slots to parameters (they get slots 0, 1, 2, ...)
     for (auto& param : lambda->parameters) {

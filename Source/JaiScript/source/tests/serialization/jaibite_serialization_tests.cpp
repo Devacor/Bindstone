@@ -312,6 +312,30 @@ public:
             }
         });
 
+        test("nested_lambda_chain_captures_survive_roundtrip", [this]() {
+            using namespace jaibite_test_detail;
+            const char* src = R"(
+                var stored = null;
+                function stash(var cb) -> void { stored = cb; }
+                function with_probe(var cb) -> void { cb(7); }
+                var run = [=](int outer) -> void {
+                    with_probe([outer](var probe) -> void {
+                        stash([outer, probe]() -> int { return probe * 10 + outer; });
+                    });
+                };
+                function f(int k) -> int { var g = [=]() -> int { var h = [=]() -> int { return k; }; return h(); }; return g(); }
+                run(3);
+                stored() * 100 + f(9)
+            )";
+            auto author = fresh_engine(false, {});
+            auto bytes = author->jaibite(src).save_bytes();
+            for (bool load_vm : { false, true }) {
+                auto host = fresh_engine(load_vm, {});
+                auto loaded = host->jaibite_load_bytes(bytes);
+                check_eq(int64_t(7309), loaded.execute().as_int());
+            }
+        });
+
         test("file_save_load_roundtrip", [this]() {
             using namespace jaibite_test_detail;
             auto path = (std::filesystem::temp_directory_path() / "jaibite_roundtrip_test.jbite").string();

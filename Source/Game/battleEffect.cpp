@@ -105,8 +105,22 @@ BattleEffect::BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameIn
 		});
 	}
 
+	if (state->self()->targetType == TargetType::CREATURE) {
+		if (targetCreature) {
+			lastTargetPosition = targetCreature->owner()->position();
+			targetPositionKnown = true;
+		} else if (state->self()->targetPosition != MV::Point<>()) {
+			lastTargetPosition = state->self()->targetPosition;
+			targetPositionKnown = true;
+		} else if (a_gameInstance.lastKnownCreaturePosition(state->self()->targetCreatureId, lastTargetPosition)) {
+			targetPositionKnown = true;
+		}
+	}
+
 	if (targetCreature) {
 		targetDeathWatcher = targetCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self) {
+			lastTargetPosition = a_self->owner()->position();
+			targetPositionKnown = true;
 			targetCreature.reset();
 			targetDeathWatcher.reset();
 		});
@@ -131,6 +145,9 @@ ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 
 void ServerBattleEffect::initialize() {
 	BattleEffect::initialize();
+	if (state->self()->targetType == TargetType::CREATURE && targetPositionKnown) {
+		state->modify()->targetPosition = lastTargetPosition;
+	}
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 
@@ -162,6 +179,9 @@ void ServerBattleEffect::updateImplementation(double a_delta) {
 		if (state->self()->targetType == TargetType::NONE && state->self()->position != owner()->position()) {
 			state->modify()->position = owner()->position();
 		}
+		if (state->self()->targetType == TargetType::CREATURE && !targetCreature && targetPositionKnown && state->self()->targetPosition != lastTargetPosition) {
+			state->modify()->targetPosition = lastTargetPosition;
+		}
 
 		if (expiring) {
 			animateDeathAndRemove();
@@ -176,8 +196,8 @@ ClientBattleEffect::ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 		a_gameInstance.data().battleEffects().data(a_state->self()->effectTypeId),
 		a_state
 	) {
-	if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
-		activeTargetPosition = targetCreature->owner()->position();
+	if (state->self()->targetType == TargetType::CREATURE && targetPositionKnown) {
+		activeTargetPosition = lastTargetPosition;
 	}
 }
 
@@ -227,6 +247,14 @@ void ClientBattleEffect::updateImplementation(double a_delta) {
 			auto targetTotalTime = state->self()->duration - discardedDuration;
 			if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
 				activeTargetPosition = targetCreature->owner()->position();
+			} else if (state->self()->targetType == TargetType::CREATURE) {
+				if (state->self()->targetPosition != MV::Point<>()) {
+					activeTargetPosition = state->self()->targetPosition;
+				} else if (targetPositionKnown) {
+					activeTargetPosition = lastTargetPosition;
+				} else {
+					activeTargetPosition = owner()->position();
+				}
 			} else if (state->self()->targetType == TargetType::GROUND) {
 				activeTargetPosition = state->self()->targetPosition;
 			}

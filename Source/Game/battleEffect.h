@@ -163,6 +163,10 @@ protected:
 
 	ServerCreature::SharedReceiverType targetDeathWatcher;
 	ServerCreature::SharedReceiverType sourceDeathWatcher;
+
+	// Survives the target: its position at death, or the best snapshot when it was already gone
+	MV::Point<> lastTargetPosition;
+	bool targetPositionKnown = false;
 };
 
 

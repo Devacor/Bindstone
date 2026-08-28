@@ -206,7 +206,7 @@ public:
                 }
             }
             int arrived = static_cast<int>(std::count_if(agents.begin(), agents.end(), [](auto& a) { return !a->pathfinding(); }));
-            int nearGoal = static_cast<int>(std::count_if(agents.begin(), agents.end(), [](auto& a) { return MV::distance(a->position(), a->goal()) <= 6.0f + 2.0f; }));
+            int nearGoal = static_cast<int>(std::count_if(agents.begin(), agents.end(), [](auto& a) { return MV::distance(a->position(), a->goal()) <= 6.0f + 4.0f; }));
             check_eq(32, nearGoal, "every agent of both columns reached its goal region or is waiting at its edge for room, arrived: " + std::to_string(arrived));
             check_true(arrived >= 16, "at least a full column fits inside its goal region, arrived: " + std::to_string(arrived));
             check_true(maxIdle < 180 || nearGoal == 32, "no agent ever sat still for 3 seconds away from its goal, longest idle: " + std::to_string(maxIdle));

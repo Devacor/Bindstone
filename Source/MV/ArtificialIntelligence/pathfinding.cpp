@@ -654,6 +654,9 @@ namespace MV {
 					++currentPathIndex;
 					advanceThroughVisibleNodes();
 				}
+				if (followingField && currentPathIndex + FLOW_EXTEND_AT >= calculatedPath.size()) {
+					followFlowField();
+				}
 				if (!attemptToRecalculate()) { break; }
 			}
 			if (originalPathIndex != currentPathIndex) {
@@ -959,7 +962,9 @@ namespace MV {
 		}
 	}
 
-	std::vector<PathNode> FlowField::descend(const Point<int>& a_from, size_t a_maxSteps) const {
+	// Reads the field with the same no-corner-cutting rule the field was built with: a diagonal
+	// step is only taken when both orthogonal footprints are clear, exactly as movement walks it
+	std::vector<PathNode> FlowField::descend(const std::shared_ptr<Map>& a_map, const Point<int>& a_from, size_t a_maxSteps, const NavigationAgent* a_self) const {
 		std::vector<PathNode> nodes;
 		if (!reachable(a_from)) { return nodes; }
 		static const Point<int> offsets[8] = { { -1, 0 }, { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 } };
@@ -967,16 +972,30 @@ namespace MV {
 		Point<int> here = a_from;
 		nodes.push_back({ here, 1.0f });
 		for (size_t step = 0; step < a_maxSteps; ++step) {
-			float best = distances[index(here)];
-			if (best <= 0.0f) { break; }
-			Point<int> bestCell = here;
-			bool bestCorner = false;
+			float current = distances[index(here)];
+			if (current <= 0.0f) { break; }
+			// The immediate step prefers a footprint free of other agents over a lower distance;
+			// later steps are re-derived before they are walked, so statics alone rank them
+			const bool immediate = step == 0;
+			float bestFree = current, bestAny = current;
+			Point<int> freeCell = here, anyCell = here;
+			bool freeCorner = false, anyCorner = false;
 			for (size_t i = 0; i < count; ++i) {
 				Point<int> next(here.x + offsets[i].x, here.y + offsets[i].y);
 				if (!inField(next)) { continue; }
+				Point<int> across(here.x + offsets[i].x, here.y);
+				Point<int> down(here.x, here.y + offsets[i].y);
+				if (i >= 4 && (!a_map->clearedForSizeStatic(across, footprint) || !a_map->clearedForSizeStatic(down, footprint))) { continue; }
 				float candidate = distances[index(next)];
-				if (candidate < best) { best = candidate; bestCell = next; bestCorner = i >= 4; }
+				if (candidate >= bestAny && candidate >= bestFree) { continue; }
+				if (candidate < bestAny) { bestAny = candidate; anyCell = next; anyCorner = i >= 4; }
+				if (immediate && candidate < bestFree && a_map->occupiedCellsExcept(next, footprint, a_self) == 0 &&
+					(i < 4 || (a_map->occupiedCellsExcept(across, footprint, a_self) == 0 && a_map->occupiedCellsExcept(down, footprint, a_self) == 0))) {
+					bestFree = candidate; freeCell = next; freeCorner = i >= 4;
+				}
 			}
+			Point<int> bestCell = (immediate && freeCell != here) ? freeCell : anyCell;
+			bool bestCorner = (immediate && freeCell != here) ? freeCorner : anyCorner;
 			if (bestCell == here) { break; }
 			here = bestCell;
 			nodes.push_back({ here, bestCorner ? 1.4f : 1.0f });
@@ -1107,6 +1126,16 @@ namespace MV {
 
 			if (nextBlocked) {
 				markPathBlockedAt(static_cast<int>(currentPathIndex + 1));
+				if (map->agentAt(nextPos) != nullptr && negotiatePathAhead()) {
+					blockedAtPathIndex = -1;
+					// Freed: keep walking this tick. Swapped: we stand elsewhere now, so re-plan first.
+					unblockMap();
+					bool clearedNow = map->clearedForSize(nextPos, unitSize);
+					blockMap();
+					if (clearedNow && currentCell() != nextPos) { return true; }
+					dirtyPath = true;
+					return false;
+				}
 				if (needsUrgentRecalculation() && map->remainingBudget() < Map::MIN_SEARCH_NODES) {
 					onBlockedSignal(shared_from_this());
 					return false;

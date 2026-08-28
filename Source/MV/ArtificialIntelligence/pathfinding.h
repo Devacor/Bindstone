@@ -594,7 +594,7 @@ namespace MV {
 	public:
 		FlowField(const std::shared_ptr<Map>& a_map, const Point<int>& a_goal, PointPrecision a_radius, int a_unitSize);
 
-		std::vector<PathNode> descend(const Point<int>& a_from, size_t a_maxSteps) const;
+		std::vector<PathNode> descend(const std::shared_ptr<Map>& a_map, const Point<int>& a_from, size_t a_maxSteps, const NavigationAgent* a_self) const;
 
 		bool reachable(const Point<int>& a_cell) const {
 			return inField(a_cell) && distances[index(a_cell)] != UNREACHABLE;
@@ -956,7 +956,7 @@ namespace MV {
 			if (!useFlowFields || footprintDisabled) { return false; }
 			auto field = map->flowFieldFor(goalCell(), acceptableDistance, unitSize);
 			if (!field || !field->reachable(currentCell())) { return false; }
-			auto nodes = field->descend(currentCell(), FLOW_STEPS);
+			auto nodes = field->descend(map, currentCell(), FLOW_STEPS, this);
 			if (nodes.size() < 2) { return false; }
 			receivers.clear();
 			costs.clear();
@@ -1098,6 +1098,7 @@ namespace MV {
 		static constexpr int MAX_SEARCH_SLICES = 8;
 		static constexpr size_t MAX_LOOKAHEAD = 8;
 		static constexpr size_t FLOW_STEPS = 12;
+		static constexpr size_t FLOW_EXTEND_AT = 4;   // nodes left when the next stretch is derived
 		bool followingField = false;
 		bool useFlowFields = true;
 		bool searchInProgress = false;

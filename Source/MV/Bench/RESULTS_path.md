@@ -175,6 +175,38 @@ radius 6, corridor_swap goal radius 6, plus `solo_big` / `crowd_big` (3×3 footp
 | dynamic_replan | **100%** | **0** | **1175** | 569,298 | 869 | 25.85 | 1.18 | 0.0 |
 | corridor_swap | 84.4% | 3 | >1500 | 1,019,581 | 144 | 0.84 | 1.28 | 1.0 |
 
+## I5 — flow fields (checkpoint committed 2026-08-28)
+
+One shared distance field per (goal cell, radius, unit size) over static obstacles (multi-source
+Dijkstra from the goal region, no-corner-cutting rule), cached (16), invalidated only by static
+block/unblock and base-cost changes, at most one field (re)computed per tick; an agent whose goal has
+a fresh field derives its next 12 nodes by gradient descent (the immediate step prefers a footprint
+free of other agents; diagonals obey the corner rule), extends the path 4 nodes before its end, and
+falls back to A* only while no field exists. Budget for the game's 250×100 map: 128,000 nodes/tick,
+16,000 per search. New columns: `mobile` = share of agent-ticks spent moving; new scenario
+`lane_march` = 250×100 grid, buildings, 3×3 units in waves.
+
+Live game (MV_PATH_DIAG report, 200 s two-client match): stalled creatures 89–184 → **0–2**, ~60 of
+~80 moving at any sample with the rest fighting, attacks per client ~800 → 4,400–6,700, zero wire or
+callback errors. Before this section's fixes the same report showed 325 agents with 184 stalled and
+every search time-sliced and unfinished.
+
+| scenario (4-conn / 8-conn) | arrived | stuck | nodes | mobile |
+|---|---|---|---|---|
+| crowd_lane | 84% / 75% | 0 / 12 | 71 / 43 | 56% / 55% |
+| solo_big (3×3) | 100% / 100% | 0 / 0 | 0 / 0 | 100% / 100% |
+| spawn_contention | 100% / 100% | 0 / 0 | 11k / 4k | 95% / 96% |
+| dynamic_replan | 100% / 100% | 0 / 0 | 323k / 289k | 99% / 100% |
+| corridor_swap | 78% / 88% | 0 / 0 | 255 / 358 | 48% / 44% |
+| crowd_big (3×3 block) | 6% / 6% | 14 / 14 | 0 / 0 | 25% / 25% |
+| lane_march (3×3 waves) | 4% / 8% | 42 / 40 | 0 / 0 | 68% / 67% |
+
+Open (documented, not blocking — the live game is the target and it is smooth): the two synthetic
+3×3-block scenarios regressed once descent preferred a free first step (they were 56% / 60% arrived
+under the earlier descent); the game's spawns are spread by placement and do not form solid blocks.
+Also open: creatures chasing individual targets still use A* (distinct goal cells) — bucket chase
+goals so nearby targets share a field; `FIELDS_PER_TICK` 2 once fields dominate.
+
 ## Final (I7m) — cascade depth 3, `Map::resize` rebuilt from raw, capacity-aware stuck metric
 
 "stuck" now means idle for 180 ticks while more than two cells outside the arrival radius; an agent

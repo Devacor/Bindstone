@@ -793,7 +793,7 @@ namespace jai {
         // callsites; they route here instead. Default sink is std::cerr; the host app
         // installs its own logger. The message includes the script stack trace if captured.
         void set_script_error_handler(std::function<void(const std::string&)> a_handler);
-        void report_script_error(const std::string& a_message);
+        void report_script_error(const std::string& a_message, std::error_code a_code = {});
 
         // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
         // handle method - Dev ruling 2026-07). Always-on, independent of static_checking().
@@ -1030,6 +1030,9 @@ namespace jai {
     // interpreter and vm backends (defined in interpreter.cpp) so path resolution stays
     // single-sourced.
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);
+
+    // typeid(engine) taken where engine is complete; archives compare context requests against it.
+    std::type_index engine_context_type_index() noexcept;
 
 } // namespace jai
 

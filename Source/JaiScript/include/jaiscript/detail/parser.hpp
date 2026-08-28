@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_set>
+#include <algorithm>
 
 namespace jai {
 
@@ -184,12 +185,14 @@ namespace jai {
             // unique per declaration; only the name->slot visibility is scoped.
             std::vector<std::pair<uint64_t, size_t>> shadow_undo;
             std::vector<size_t> block_marks;
+            lambda_expr* owner = nullptr;  // the lambda this scope belongs to (chain-capture target)
         };
         std::vector<function_scope> function_scope_stack_;  // Stack for nested functions/lambdas
 
         // Enter a new function scope (call at start of function/lambda parsing)
-        void enter_function_scope() {
+        void enter_function_scope(lambda_expr* owner = nullptr) {
             function_scope_stack_.emplace_back();
+            function_scope_stack_.back().owner = owner;
         }
 
         // Exit current function scope, returns the total slot count
@@ -253,16 +256,38 @@ namespace jai {
         // through the worker environment instead (captures are provisioned there).
         size_t slot_lookup_boundary_ = 0;
 
-        // Look up a variable's slot index (SIZE_MAX if not found or not in function scope)
-        size_t lookup_slot(uint64_t symbol_id) const {
-            // Search from innermost to outermost visible function scope
+        // A use resolves directly to its own scope's slots or its immediate parent's
+        // (read from that frame when the lambda is created). A deeper local is chained
+        // instead: the lambda created in the declaring frame captures the slot, every
+        // lambda between carries the name through its default capture, and the use
+        // itself resolves by name at runtime (SIZE_MAX).
+        size_t lookup_slot(uint64_t symbol_id) {
+            return resolve_outer_use(symbol_id, function_scope_stack_.size());
+        }
+        // Capture lists are parsed in the enclosing scope, before the lambda's own opens
+        size_t lookup_capture_slot(uint64_t symbol_id) {
+            return resolve_outer_use(symbol_id, function_scope_stack_.size() + 1);
+        }
+        size_t resolve_outer_use(uint64_t symbol_id, size_t use_scope_count) {
             for (size_t i = function_scope_stack_.size(); i-- > slot_lookup_boundary_;) {
                 auto found = function_scope_stack_[i].symbol_to_slot.find(symbol_id);
-                if (found != function_scope_stack_[i].symbol_to_slot.end()) {
-                    return found->second;
+                if (found == function_scope_stack_[i].symbol_to_slot.end()) continue;
+                if (i + 2 >= use_scope_count) return found->second;
+                if (lambda_expr* capturer = function_scope_stack_[i + 1].owner) {
+                    auto& slots = capturer->chained_outer_slots;
+                    if (std::find_if(slots.begin(), slots.end(), [&](const auto& e) { return e.first == symbol_id; }) == slots.end()) {
+                        slots.emplace_back(symbol_id, found->second);
+                    }
                 }
+                for (size_t j = i + 2; j < function_scope_stack_.size(); ++j) {
+                    if (lambda_expr* carrier = function_scope_stack_[j].owner) {
+                        auto& names = carrier->chained_outer_names;
+                        if (std::find(names.begin(), names.end(), symbol_id) == names.end()) names.push_back(symbol_id);
+                    }
+                }
+                return SIZE_MAX;
             }
-            return SIZE_MAX;  // Not found - must be global or closure capture
+            return SIZE_MAX;
         }
 
         // Check if we're currently inside a function scope

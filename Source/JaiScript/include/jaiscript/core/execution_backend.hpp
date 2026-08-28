@@ -129,6 +129,10 @@ public:
     virtual void push_scope() = 0;
     virtual void pop_scope() = 0;
     virtual void define_variable(const std::string& name, const script_value& value) = 0;
+    // Instance-variable scope for execute(script, locals): rooted at the global env so a
+    // reentrant run adopts it instead of bare global (receivers fired mid-script see their args)
+    virtual void push_instance_scope() { push_scope(); }
+    virtual void pop_instance_scope() { pop_scope(); }
     
     // Configuration
     virtual void set_execution_budget(std::chrono::nanoseconds) = 0;

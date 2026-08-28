@@ -53,6 +53,9 @@ public:
     void define_variable(const std::string& name, const script_value& value) override {
         interpreter_->define_variable(name, value);
     }
+
+    void push_instance_scope() override { interpreter_->push_instance_scope(); }
+    void pop_instance_scope() override { interpreter_->pop_instance_scope(); }
     
     // Configuration
     void set_execution_budget(std::chrono::nanoseconds budget) override {

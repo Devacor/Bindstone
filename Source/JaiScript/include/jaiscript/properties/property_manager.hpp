@@ -362,6 +362,17 @@ namespace jai {
 			return find_owned_property(name);
 		}
 
+		// Whole-chain clone through the virtual walkers: a base-typed caller still clones the
+		// most-derived object, and each property applies its own clone (custom lambdas honoured).
+		void clone_reflected_to(property_owner& target) const {
+			visit_reflected_properties([&target](const std::string& name, property_base* prop) {
+				auto* dest = target.find_reflected_property(name);
+				if (dest && dest->value_type_id() == prop->value_type_id()) {
+					prop->clone_to_target(*dest);
+				}
+			});
+		}
+
 		std::type_index property_type_id(const std::string& name) const {
 			auto* p = find_owned_property(name);
 			return p ? p->value_type_id() : std::type_index(typeid(void));

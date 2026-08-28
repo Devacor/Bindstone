@@ -124,6 +124,7 @@ namespace jai::vm {
         struct explicit_capture {
             uint64_t symbol_id;
             bool by_reference;
+            size_t outer_slot = SIZE_MAX;
         };
         std::vector<explicit_capture> captures;
         uint8_t default_capture = 0;                       // lambda_expr::capture_default

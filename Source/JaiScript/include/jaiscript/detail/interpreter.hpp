@@ -195,6 +195,8 @@ namespace jai {
         // Scope management for local variables
         void push_scope();
         void pop_scope();
+        void push_instance_scope();
+        void pop_instance_scope();
         
         // Define a variable in the current scope
         void define_variable(const std::string& name, const script_value& value);
@@ -447,6 +449,8 @@ namespace jai {
         // call-site context of whatever script call is in flight - reference params
         // would bind its variables. A one-pointer shelf replaces the old metadata stack.
         void push_external_call_scope() {
+            // A host-level callback (no script in flight) is its own budgeted entry
+            if (execute_depth_ == 0 && call_stack_.empty()) { arm_execution_deadline(); }
             external_ctx_stack_.push_back(pending_call_ctx_);
             pending_call_ctx_ = nullptr;
         }
@@ -575,6 +579,8 @@ namespace jai {
         
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
+        std::vector<std::shared_ptr<environment>> instance_scope_saved_;
+        std::shared_ptr<environment> pending_instance_env_;
 
         // Current frame's member scope (detail/member_scope.hpp): stamped by
         // call_function's callee-kind branches (and the field-initializer site),

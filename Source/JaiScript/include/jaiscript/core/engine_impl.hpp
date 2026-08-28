@@ -30,7 +30,7 @@ namespace detail {
 					(values.push_back(eng->make_value(args)), ...);
 					auto result = fn.as_function()(values);
 					if (!result) {
-						eng->report_script_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+						eng->report_script_error(eng->format_error(result), result.error());
 						if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
 					}
 					if constexpr (!std::is_void_v<R>) {

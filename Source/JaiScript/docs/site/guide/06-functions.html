@@ -133,6 +133,15 @@ a = 100, sum_all() = 5 (captured before set_a)</code></pre></div>
 auto f = []() { return n; };
 f();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 5</code></pre></div>
+<p><strong>Nested lambdas</strong> see the enclosing function&#x27;s locals through every lambda between them: the lambda created in the declaring frame captures the variable, the ones in between carry it, and the innermost reads it — by value with <code>[=]</code> or an empty capture list, write-through with <code>[&amp;]</code>. Naming it explicitly in an inner capture list is enough; the outer lambda need not mention it in its own body:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_adder(int base) -&gt; var {
+    return [=](int step) -&gt; var {
+        return [=]() -&gt; int { return base + step; };
+    };
+}
+auto plus = make_adder(10)(5);
+print(&quot;plus() = {}&quot;, plus());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">plus() = 15</code></pre></div>
 <h2 id="functions-are-values-closures-outlive-their-frame">Functions are values; closures outlive their frame<a class="hlink" href="#functions-are-values-closures-outlive-their-frame" aria-label="link">&#8203;</a></h2>
 <p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A by-reference capture keeps the captured local alive after the declaring function returns — the classic counter factory works:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }

@@ -2220,7 +2220,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	uint64_t this_id = symbolizer_->get_this_id();
 	for (const auto& cap : expr->captures) {
 		uint64_t id = cap.symbol_id != UINT64_MAX ? cap.symbol_id : symbolizer_->intern(cap.name);
-		proto.captures.push_back({id, cap.by_reference});
+		proto.captures.push_back({id, cap.by_reference, cap.outer_slot});
 		if (id == this_id) proto.captures_this = true;
 	}
 
@@ -2248,6 +2248,9 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 			}
 		};
 		walker.stmt(proto.body);
+		for (const auto& [sym, s] : expr->chained_outer_slots) {
+			if (seen.insert(sym).second) proto.outer_slot_plan.emplace_back(sym, s);
+		}
 	}
 
 	if (expr->default_capture != lambda_expr::capture_default::none) {
@@ -2265,6 +2268,9 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 			}
 		};
 		walker.stmt(proto.body);
+		for (uint64_t sym : expr->chained_outer_names) {
+			if (!param_ids.count(sym) && seen.insert(sym).second) proto.used_variables.push_back(sym);
+		}
 	}
 
 	{

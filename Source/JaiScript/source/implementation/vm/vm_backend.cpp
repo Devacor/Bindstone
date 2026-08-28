@@ -603,6 +603,10 @@ void vm_backend::set_execution_budget(std::chrono::nanoseconds budget) {
 }
 
 void vm_backend::prepare_for_execution() {
+	if (frames_.empty()) {
+		instance_scope_saved_.clear();
+		pending_instance_env_.reset();
+	}
 	sync_debug_hook();   // execute-entry debug sync (attach/detach/breakpoint edits)
 	arm_execution_deadline();
 
@@ -675,6 +679,22 @@ void vm_backend::define_variable(const std::string& name, const script_value& va
 	environment_->define(name, value);
 }
 
+void vm_backend::push_instance_scope() {
+	instance_scope_saved_.push_back(environment_);
+	std::shared_ptr<environment> global;
+	if (engine_) { global = engine_->get_global_environment(); }
+	if (!global) { global = environment_; while (global && global->get_parent()) { global = global->get_parent(); } }
+	environment_ = std::make_shared<environment>(global, symbolizer_);
+	pending_instance_env_ = environment_;
+}
+
+void vm_backend::pop_instance_scope() {
+	pending_instance_env_.reset();
+	if (instance_scope_saved_.empty()) { pop_scope(); return; }
+	environment_ = std::move(instance_scope_saved_.back());
+	instance_scope_saved_.pop_back();
+}
+
 script_value vm_backend::get_variable(const std::string& name) const {
 	auto result = environment_->get(name);
 	if (!result) {
@@ -694,6 +714,7 @@ bool vm_backend::has_variable(const std::string& name) const {
 }
 
 void vm_backend::push_external_call_scope() {
+	if (frames_.empty()) { arm_execution_deadline(); }
 	external_site_stack_.push_back(pending_site_ctx_);
 	pending_site_ctx_ = {};
 }
@@ -7725,23 +7746,30 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		}
 
 		for (const auto& capture : proto.captures) {
-			bool can_capture = environment_->contains(capture.symbol_id);
+			// Enclosing-frame slots (params/locals) shadow env-resident and global names
+			bool can_capture = false;
 			bool capture_from_slot = false;
 			script_value* slot_val = nullptr;
-
+			if (f.locals && !f.top_level) {
+				if (capture.outer_slot != SIZE_MAX && capture.outer_slot < frame_slot_count(f)) {
+					slot_val = frame_slot(f, capture.outer_slot);
+				}
+				if (!slot_val) {
+					for (const auto& [sym, slot] : outer_refs) {
+						if (sym == capture.symbol_id) {
+							slot_val = frame_slot(f, slot);
+							break;
+						}
+					}
+				}
+				if (slot_val) { can_capture = true; capture_from_slot = true; }
+			}
+			if (!can_capture) {
+				can_capture = environment_->contains(capture.symbol_id);
+			}
 			if (!can_capture && capture.symbol_id == this_id_) {
 				auto this_test_result = environment_->get(this_id_);
 				if (this_test_result) can_capture = true;
-			}
-
-			if (!can_capture && f.locals && !f.top_level) {
-				for (const auto& [sym, slot] : outer_refs) {
-					if (sym == capture.symbol_id) {
-						slot_val = frame_slot(f, slot);
-						if (slot_val) { can_capture = true; capture_from_slot = true; }
-						break;
-					}
-				}
 			}
 
 			if (!can_capture) {
@@ -12063,8 +12091,9 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 		bool reentrant;
 		std::shared_ptr<environment> saved_env;
 		explicit reentry_isolation(vm_backend* backend) : self(backend), reentrant(!backend->frames_.empty()) {
-			if (!reentrant) { return; }
+			if (!reentrant) { self->pending_instance_env_.reset(); return; }
 			saved_env = self->environment_;
+			if (self->pending_instance_env_) { self->pending_instance_env_.reset(); return; }
 			if (self->engine_) {
 				if (auto global = self->engine_->get_global_environment()) {
 					self->environment_ = std::move(global);

@@ -1481,8 +1481,9 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 
         // Push scope for instance variables if any
         bool hasInstanceVars = instanceVars && !instanceVars->empty();
+        struct instance_scope_guard { execution_backend* be; ~instance_scope_guard() { if (be) { be->pop_instance_scope(); } } } instanceScope{ hasInstanceVars ? be : nullptr };
         if (hasInstanceVars) {
-            be->push_scope();
+            be->push_instance_scope();
             for (const auto& [name, value] : *instanceVars) {
                 be->define_variable(name, value);
             }
@@ -1494,20 +1495,12 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
         if (be->is_unwinding()) {
             const auto& exception = be->get_current_exception();
 
-            // Pop instance scope before throwing
-            if (hasInstanceVars) {
-                be->pop_scope();
-            }
 
             throw exception;
         }
 
         // No need to sync globals - they're already in the shared environment!
 
-        // Pop instance scope if we pushed one
-        if (hasInstanceVars) {
-            be->pop_scope();
-        }
 
         return result;
 
@@ -2708,8 +2701,13 @@ void engine::set_script_error_handler(std::function<void(const std::string&)> a_
     impl->script_error_handler = std::move(a_handler);
 }
 
-void engine::report_script_error(const std::string& a_message) {
+void engine::report_script_error(const std::string& a_message, std::error_code a_code) {
     std::string message = a_message;
+    if (message.empty()) {
+        message = a_code
+            ? std::string("script error (") + a_code.category().name() + ": " + a_code.message() + ", no message)"
+            : std::string("script error (no message)");
+    }
     std::string trace = format_stack_trace();
     if (!trace.empty()) {
         message += "\n" + trace;
@@ -2719,6 +2717,10 @@ void engine::report_script_error(const std::string& a_message) {
     } else {
         std::cerr << "[jaiscript] " << message << std::endl;
     }
+}
+
+std::type_index engine_context_type_index() noexcept {
+    return std::type_index(typeid(engine));
 }
 
 void engine::set_script_warning_handler(std::function<void(const std::string&)> a_handler) {

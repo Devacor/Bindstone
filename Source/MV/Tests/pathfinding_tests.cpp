@@ -259,7 +259,7 @@ public:
             for (int i = 0; i < 24; ++i) {
                 auto agent = MV::NavigationAgent::make(map, MV::Point<int>(2 + (i % 4) * 3, 8 + (i / 4) * 4), 3);
                 agent->speed(6.0f);
-                agent->goal(MV::Point<int>(110, 20), 8.0f);
+                agent->goal(MV::Point<int>(110, 20), 8.0f, MV::PathMode::flowField);
                 agents.push_back(agent);
             }
             int movingTicks = 0, pathfindingTicks = 0;
@@ -278,6 +278,27 @@ public:
             }
             check_true(map->remainingBudget() > MV::Map::FRAME_NODE_BUDGET - 200, "a shared goal costs almost no search budget per tick: used " + std::to_string(MV::Map::FRAME_NODE_BUDGET - map->remainingBudget()));
             check_true(movingTicks * 10 >= pathfindingTicks * 3, "at least 30% of agent-ticks were spent moving (a packed 4x4 block of 3x3 units unpacks from the front): " + std::to_string(movingTicks) + "/" + std::to_string(pathfindingTicks));
+        });
+
+        test("path_mode_defaults_to_search_and_is_opt_in", [this]() {
+            auto map = MV::Map::make(MV::Size<int>(30, 30));
+            auto agent = MV::NavigationAgent::make(map, MV::Point<int>(1, 1));
+            check_true(agent->pathMode() == MV::PathMode::search, "search by default");
+            agent->goal(MV::Point<int>(25, 25), 2.0f);
+            map->beginTick();
+            agent->update(1.0 / 60.0);
+            check_true(map->remainingBudget() < MV::Map::FRAME_NODE_BUDGET, "a search goal spends budget");
+            agent->goal(MV::Point<int>(25, 25), 2.0f, MV::PathMode::flowField);
+            check_true(agent->pathMode() == MV::PathMode::flowField, "the goal call switched the mode");
+            map->beginTick();
+            agent->update(1.0 / 60.0);
+            map->beginTick();
+            agent->update(1.0 / 60.0);
+            check_eq(MV::Map::FRAME_NODE_BUDGET, map->remainingBudget(), "with a field the same goal spends nothing");
+            map->searchBudget(500);
+            check_eq(int64_t(500), map->searchBudget(), "budget is a runtime tunable");
+            map->beginTick();
+            check_eq(int64_t(500), map->remainingBudget(), "the next tick uses the new budget");
         });
 
         test("agent_basic_creation", [this]() {

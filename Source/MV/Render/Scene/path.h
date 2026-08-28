@@ -51,6 +51,15 @@ namespace MV {
 				map->beginTick();
 			}
 
+			int64_t searchBudget() const { return map->searchBudget(); }
+			std::shared_ptr<PathMap> searchBudget(int64_t a_nodesPerTick) { map->searchBudget(a_nodesPerTick); return std::static_pointer_cast<PathMap>(shared_from_this()); }
+			int64_t searchLimit() const { return map->searchLimit(); }
+			std::shared_ptr<PathMap> searchLimit(int64_t a_nodesPerSearch) { map->searchLimit(a_nodesPerSearch); return std::static_pointer_cast<PathMap>(shared_from_this()); }
+			int fieldsPerTick() const { return map->fieldsPerTick(); }
+			std::shared_ptr<PathMap> fieldsPerTick(int a_fields) { map->fieldsPerTick(a_fields); return std::static_pointer_cast<PathMap>(shared_from_this()); }
+			int64_t maxFlowFields() const { return static_cast<int64_t>(map->maxFlowFields()); }
+			std::shared_ptr<PathMap> maxFlowFields(int64_t a_fields) { map->maxFlowFields(static_cast<size_t>(std::max<int64_t>(1, a_fields))); return std::static_pointer_cast<PathMap>(shared_from_this()); }
+
 			Size<int> gridSize() const {
 				return map->size();
 			}
@@ -251,6 +260,25 @@ namespace MV {
 
 			std::shared_ptr<PathAgent> gridGoal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance) {
 				agent->goal(a_newGoal, a_acceptableDistance);
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			std::shared_ptr<PathAgent> gridGoal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance, PathMode a_mode) {
+				agent->goal(a_newGoal, a_acceptableDistance, a_mode);
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			std::shared_ptr<PathAgent> gridGoal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance, PathMode a_mode) {
+				agent->goal(a_newGoal, a_acceptableDistance, a_mode);
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			PathMode pathMode() const {
+				return agent->pathMode();
+			}
+
+			std::shared_ptr<PathAgent> pathMode(PathMode a_mode) {
+				agent->pathMode(a_mode);
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
 

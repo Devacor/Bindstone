@@ -272,3 +272,31 @@ Bench scenarios now spell their mode: shared-goal ones (`crowd_lane`, `crowd_big
 4-conn) while arrivals/stuck/mobility are unchanged; the flow-field rows are byte-identical to I5
 except `corridor_swap` 4-conn 78% → 75% (one agent; not investigated). Live game: stalled 0 at every
 report, 58–61 of ~80 moving, attacks per client 5.3k / 4.1k, zero script or wire errors.
+
+## I9 — fields pinned by active goals, chase mode, and the well that no field could reach
+
+**Pinning.** An agent following a field holds it (`NavigationAgent::flowField()`, `FlowField::users()`)
+from the tick it first descends until its goal ends: arrival, `stop()`, `position()`, a new goal, a
+mode switch, or destruction all release it. `maxFlowFields` is a soft cap on idle fields: the cache
+trims least-recently-requested *unpinned* fields down to it (a field requested this tick counts as in
+use), and only exceeds it while every field is pinned. `Map::resize` drops every field (geometry
+changed); pinned agents keep their object and re-request. The stall report prints
+`fields N (pinned M)` plus per-field goal/radius/size/users/reachable-cell counts.
+
+**Chase mode.** `TargetPolicy` keeps the mode per target: a location target keeps the mode it was
+given, a creature target is always `search`. Before this, the agent's sticky mode meant every chase
+re-goal minted a new field key (`fields 16` at cap, thrash) — the live cache is now `fields 2`.
+
+**The well was unreachable.** The stall diagnostic showed both well fields with `reachable 0`: the
+well goal (range 0) sits inside the building's blocked cells, and a 3×3 footprint cannot stand on it,
+so the goal disc seeded nothing and every creature silently fell back to A* — the flow field had
+*never* served the well march in any earlier live run (I5's live numbers came from the budget, queue
+and negotiation work). `FlowField::compute` now serves an unstandable goal the way the search does:
+when the goal disc has no standable cell, the nearest ring of standable cells (ties all seeded)
+becomes the goal. Test `goal_inside_a_static_block_seeds_the_nearest_standable_ring`.
+
+Live game, 200 s, MV_PATH_DIAG: both fields `reachable 13994`, 12–17 users each, pinned 2/2 at every
+sample; **search budget 128,000/128,000 with queue 22–47 → 80–1,070 nodes with queue 0**; stalled 0
+at every sample, 33–37 moving of ~56, attacks 4.8k / 3.6k, zero script or wire errors. mv_tests 65/65.
+Bench arrivals/stuck/nodes byte-identical to I8 (bench goals were always standable); its ms columns
+overlapped the live match this round and are not comparable.

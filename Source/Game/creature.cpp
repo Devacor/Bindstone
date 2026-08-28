@@ -231,6 +231,7 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
         if (a_target.get() == targetCreature) { return; }
 
 	clearTarget();
+	pathMode = MV::PathMode::search;
 	if (!stunDuration && selfCreature) {
 		if (MV::distance(selfCreature->agent()->gridPosition(), a_target->agent()->gridPosition()) <= a_range) {
 			if (selfCreature->agent()->pathfinding()) {
@@ -250,7 +251,7 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
 				stopAndFail();
 			});
 			registerPathfindingListeners();
-			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range);
+			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range, pathMode);
 			return;
 		}
 	}
@@ -259,14 +260,15 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
 	}
 }
 
-void TargetPolicy::target(const MV::Point<> &a_location, float a_range, MV::PathMode a_mode, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
-	pathMode = a_mode;
-	target(a_location, a_range, a_succeed, a_fail);
-	pathMode = MV::PathMode::search;
+void TargetPolicy::target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
+	target(a_location, a_range, MV::PathMode::search, a_succeed, a_fail);
 }
 
-void TargetPolicy::target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
+// The mode belongs to the current target: a location keeps the one it was given, a creature is
+// always chased by search (a field per chase cell would thrash the cache)
+void TargetPolicy::target(const MV::Point<> &a_location, float a_range, MV::PathMode a_mode, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
 	clearTarget();
+	pathMode = a_mode;
 	if (!stunDuration && selfCreature) {
 		if (MV::distance(selfCreature->agent()->gridPosition(), a_location) <= a_range) {
 			if (a_succeed) {
@@ -302,7 +304,7 @@ void TargetPolicy::update(double a_dt) {
 		rootDuration = std::max(0.0f, rootDuration - static_cast<float>(a_dt));
 
 		if (selfCreature && targetCreature && !stunDuration && !rootDuration) {
-			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range);
+			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range, pathMode);
 		}
 	}
 }

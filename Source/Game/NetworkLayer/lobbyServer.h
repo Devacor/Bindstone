@@ -38,26 +38,9 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 	}
 
 	// MV_LOBBY_MATCH_ANY=1 (the local stack): pair anyone immediately, ratings ignored
-	double tolerance() {
-		static const bool matchAny = std::getenv("MV_LOBBY_MATCH_ANY") != nullptr;
-		if (matchAny) {
-			return 1.0;
-		}
-		if (time < 5.0) {
-			return .025;
-		} else if(time < 10.0) {
-			return .05;
-		} else if (time < 20.0) {
-			return .075;
-		} else if (time < 40.0) {
-			return .10;
-		} else if (time < 60.0) {
-			return .15;
-		} else if (time < 80.0) {
-			return .25;
-		} else {
-			return 1.0; //any match.
-		}
+	static bool matchAny() {
+		static const bool enabled = std::getenv("MV_LOBBY_MATCH_ANY") != nullptr;
+		return enabled;
 	}
 
 	std::weak_ptr<MV::Connection> lifespan;
@@ -248,10 +231,12 @@ public:
 						std::tie(opponent, currentBest) = opponentFromIndex(i, current);
 
 						// The window belongs to whoever has waited longest: a patient seeker accepts a wider
-						// gap, so a newcomer near them is matched at once instead of serving the whole ladder
-						if (opponent && currentBest <= std::max(current->tolerance(), opponent->tolerance())) {
+						// gap, so a newcomer near them is matched at once
+						auto waited = std::max(current->time, opponent ? opponent->time : 0.0);
+						auto window = opponent ? current->player()->queue(ourId).matchWindow(opponent->player()->queue(ourId), waited) : 0.0;
+						if (opponent && (MatchSeeker::matchAny() || currentBest <= window)) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
-								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "]" << std::endl;
+								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "] gap " << currentBest << " window " << window << " after " << waited << "s" << std::endl;
 								current->matching = true;
 								opponent->matching = true;
 								pairs.emplace_back(current, opponent);
@@ -273,14 +258,14 @@ public:
 	std::tuple<std::shared_ptr<MatchSeeker>, double> opponentFromIndex(size_t i, const std::shared_ptr<MatchSeeker> &current) {
 		std::lock_guard<std::recursive_mutex> guard(lock);
 		std::shared_ptr<MatchSeeker> opponent;
-		double currentBest = 10.0;
+		double currentBest = std::numeric_limits<double>::max();
 		int remainingComparisons = PLAYERS_TO_SEARCH_FOR_MATCH;
 		for (size_t j = i + 1; j < seekers.size() && remainingComparisons > 0; ++j) {
 			if (auto seekerCompare = seekers[j].lock()) {
 				if (auto seekerLifespan = seekerCompare->lifespan.lock()) {
 					if (!seekerCompare->matching) {
 						--remainingComparisons;
-						auto difference = current->player()->queue(ourId).skillDifference(seekerCompare->player()->queue(ourId));
+						auto difference = current->player()->queue(ourId).ratingGap(seekerCompare->player()->queue(ourId));
 						if (difference < currentBest) {
 							currentBest = difference;
 							opponent = seekerCompare;

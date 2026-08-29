@@ -1,4 +1,6 @@
 // Pebble (Earth T1): half a Stonekind; melee only
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -60,6 +62,7 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");

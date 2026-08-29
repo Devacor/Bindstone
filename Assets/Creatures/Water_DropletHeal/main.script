@@ -1,4 +1,6 @@
 // Tear (Water T1): untargetable; clings to an ally as a ward, taking half its damage and halving status durations
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -30,6 +32,7 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 	self.setVar("life", self.getVar("life") - dt);
 	self.setVar("clingCooldown", self.getVar("clingCooldown") - dt);
 	self.setVar("refreshCooldown", self.getVar("refreshCooldown") - dt);

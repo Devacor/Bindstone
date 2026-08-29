@@ -57,6 +57,7 @@ static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolic
 	builder.method("self", &TargetPolicy::self);
 	builder.method("active", &TargetPolicy::active);
 	builder.method("stunned", &TargetPolicy::stunned);
+	builder.method("clear", &TargetPolicy::clear);
 	builder.method("rooted", &TargetPolicy::rooted);
 });
 
@@ -138,8 +139,8 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("moveSpeed", static_cast<void(ServerCreature::*)(double)>(&ServerCreature::moveSpeed));
 	builder.method("stun", &ServerCreature::stun);
 	builder.method("root", &ServerCreature::root);
-	builder.method("knockback", [](ServerCreature& a_self, int64_t a_cells, int64_t a_source) { a_self.knockback(static_cast<int>(a_cells), a_source); });
-	builder.method("blinkTo", &ServerCreature::blinkTo);
+	builder.method("visible", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::visible));
+	builder.method("visible", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::visible));
 	builder.method("taunt", [](ServerCreature& a_self, int64_t a_attacker, double a_seconds) { a_self.taunt(a_attacker, a_seconds); });
 	builder.method("tauntedBy", &ServerCreature::tauntedBy);
 	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
@@ -304,52 +305,18 @@ void ServerCreature::root(double a_seconds) {
 	targeting.root(static_cast<float>(scaledDuration(a_seconds)));
 }
 
-void ServerCreature::knockback(int a_cells, int64_t a_sourceId) {
-	auto source = serverCreature(a_sourceId);
-	if (!source || !pathAgent || a_cells <= 0) { return; }
-	auto from = source->agent()->gridPosition();
-	auto here = pathAgent->gridPosition();
-	auto direction = here - from;
-	auto length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
-	if (length <= 0.0001f) { direction = MV::Point<>(1.0f, 0.0f); length = 1.0f; }
-	direction /= length;
-	auto path = gameInstance.path();
-	for (int cells = a_cells; cells > 0; --cells) {
-		auto candidate = MV::round<int>(here + direction * static_cast<MV::PointPrecision>(cells));
-		if (path->inBounds(candidate) && !path->blocked(candidate)) {
-			pathAgent->gridPosition(candidate);
-			return;
-		}
-	}
-}
-
 void ServerCreature::dot(double a_perSecond, double a_seconds, int64_t a_sourceId) {
 	auto source = serverCreature(a_sourceId);
 	timedEffects.push_back({ -a_perSecond, scaledDuration(a_seconds), a_sourceId, 0.0, source ? source->elements() : std::vector<std::string>{} });
 }
 
-// the nearest free cell around the target, nearest ring first
-void ServerCreature::blinkTo(int64_t a_targetId) {
-	auto target = serverCreature(a_targetId);
-	if (!target || !pathAgent || !target->agent()) { return; }
-	auto center = MV::round<int>(target->agent()->gridPosition());
-	auto path = gameInstance.path();
-	for (int radius = 1; radius <= 3; ++radius) {
-		for (int dx = -radius; dx <= radius; ++dx) {
-			for (int dy = -radius; dy <= radius; ++dy) {
-				if (std::max(std::abs(dx), std::abs(dy)) != radius) { continue; }
-				MV::Point<int> candidate(center.x + dx, center.y + dy);
-				if (path->inBounds(candidate) && !path->blocked(candidate)) {
-					pathAgent->gridPosition(candidate);
-					return;
-				}
-			}
-		}
-	}
-}
-
 // a ward's share scales with the table (water on lightning takes more, on fire less) and the
 // status relief scales the same way
+void ServerCreature::visible(bool a_value) {
+	if (*state->self()->hidden == !a_value) { return; }
+	state->modify()->hidden = !a_value;
+}
+
 void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale) {
 	if (auto host = serverCreature(a_hostId)) {
 		double scale = gameInstance.data().elements().wardScale(elements(), host->elements());
@@ -657,6 +624,7 @@ void ClientCreature::animateDeathAndRemove() {
 
 void ClientCreature::onNetworkSynchronize() {
 	networkDelta.add(MV::Stopwatch::programTime());
+	if (*state->self()->hidden) { owner()->hide(); } else { owner()->show(); }
 	startClientPosition = owner()->position();
 	accumulatedDuration = 0;
 	spine()->track().time(state->self()->animationTime);

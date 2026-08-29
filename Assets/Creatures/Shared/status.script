@@ -1,0 +1,91 @@
+// Shared creature status module (server). Included by every creature script; every creature's update
+// calls statusTick(self, dt) first. State lives in creature vars so any script can read it.
+
+// Flight: the victim leaves the grid (no footprint), is stunned for the flight, eases toward the
+// landing cell, then takes its footprint back (the agent's own placement nudges it if the cell filled).
+void knockback(var& self, var victimId, int cells, double seconds) {
+	var victim = self.game().creature(victimId);
+	if (victim == null || !victim.alive() || cells <= 0) {
+		return;
+	}
+	var grid = self.game().pathMap();
+	var from = self.agent().gridPosition();
+	var here = victim.agent().gridPosition();
+	double dx = here.x - from.x;
+	double dy = here.y - from.y;
+	double length = sqrt(dx * dx + dy * dy);
+	if (length < 0.0001) {
+		dx = 1.0;
+		dy = 0.0;
+		length = 1.0;
+	}
+	dx = dx / length;
+	dy = dy / length;
+	for (int step = cells; step > 0; --step) {
+		Pointi landing = Pointi(round(here.x + dx * step), round(here.y + dy * step));
+		if (grid.inBounds(landing) && !grid.blocked(landing)) {
+			victim.stun(seconds);
+			victim.agent().stop();
+			victim.agent().disableFootprint();
+			victim.setVar("flightFrom", victim.agent().localPosition());
+			victim.setVar("flightTo", grid.localFromGrid(landing));
+			victim.setVar("flightLanding", landing);
+			victim.setVar("flightDuration", seconds);
+			victim.setVar("flightRemaining", seconds);
+			return;
+		}
+	}
+}
+
+bool inFlight(var& creature) {
+	var remaining = creature.getVar("flightRemaining");
+	return remaining != null && remaining > 0.0;
+}
+
+// Ease-out: fast leave, soft landing.
+void statusTick(var& self, double dt) {
+	if (!inFlight(self)) {
+		return;
+	}
+	double remaining = self.getVar("flightRemaining") - dt;
+	double duration = self.getVar("flightDuration");
+	var from = self.getVar("flightFrom");
+	var to = self.getVar("flightTo");
+	if (remaining <= 0.0) {
+		self.setVar("flightRemaining", 0.0);
+		self.agent().gridPosition(self.getVar("flightLanding"));
+		self.agent().enableFootprint();
+		return;
+	}
+	self.setVar("flightRemaining", remaining);
+	double t = 1.0 - remaining / duration;
+	double eased = 1.0 - (1.0 - t) * (1.0 - t);
+	self.agent().localPosition(Point(from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased));
+}
+
+// The closest free cell to a target, nearest ring first.
+bool teleportNear(var& self, var targetId, int maxRadius) {
+	var target = self.game().creature(targetId);
+	if (target == null) {
+		return false;
+	}
+	var grid = self.game().pathMap();
+	var center = target.agent().gridPosition();
+	int cx = round(center.x);
+	int cy = round(center.y);
+	for (int radius = 1; radius <= maxRadius; ++radius) {
+		for (int dx = -radius; dx <= radius; ++dx) {
+			for (int dy = -radius; dy <= radius; ++dy) {
+				if (max(abs(dx), abs(dy)) != radius) {
+					continue;
+				}
+				Pointi candidate = Pointi(cx + dx, cy + dy);
+				if (grid.inBounds(candidate) && !grid.blocked(candidate)) {
+					self.agent().gridPosition(candidate);
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}

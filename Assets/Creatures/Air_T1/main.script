@@ -1,4 +1,6 @@
 // Whisper (Air T1): low health support/cc; wind slices, gust throws enemies back, sail speeds allies
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -69,13 +71,14 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 	self.setVar("gustCooldown", self.getVar("gustCooldown") - dt);
 	if (self.getVar("gustCooldown") <= 0.0) {
 		self.setVar("gustCooldown", 6.0);
 		var enemies = self.enemiesInRange(6);
 		if (!enemies.empty()) {
 			for (int i = 0; i < enemies.size(); ++i) {
-				enemies[i].knockback(2, self.networkId());
+				knockback(self, enemies[i].networkId(), 2, 0.2);
 				enemies[i].slow(0.3, 2.0);
 				enemies[i].damage(2, self.networkId());
 			}

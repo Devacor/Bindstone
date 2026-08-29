@@ -1,4 +1,6 @@
 // Stonekind (Earth T1): high health tank; slow melee, shout taunts and rock-shields, splits into pebbles
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -62,6 +64,7 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 	self.setVar("shoutCooldown", self.getVar("shoutCooldown") - dt);
 	if (self.getVar("shoutCooldown") <= 0.0) {
 		self.setVar("shoutCooldown", 8.0);

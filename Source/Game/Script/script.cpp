@@ -125,6 +125,7 @@ namespace MV {
 			engine->set_backend(jai::backend_type::vm); // must precede the first execute
 		}
 		engine->memory_cap(a_memoryCapBytes);
+		engine->add_include_path("Assets");   // include "Creatures/Shared/status.script" from any script
 #ifdef _DEBUG
 		engine->static_checking(jai::check_mode::warn);
 #endif

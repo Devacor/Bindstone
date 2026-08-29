@@ -17,13 +17,16 @@ self.spawn = [=](var& self) -> void {
 		return false;
 	});
 
+	// the well sits inside its building's blocked cells: arriving means standing at its edge.
+	// Applied when the creature has nothing to fight (and again the moment a chase ends), never per tick.
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
-		// the well sits inside its building's blocked cells: arriving means standing at its edge
+		self.setVar("marching", true);
 		self.targeting().target(self.team().enemyWell(), 6.0, PathMode.flowField, [=](var& targeting) -> void {
 			targeting.self().enemyTeam().damage(1);   // a leak: the well takes a point
 			targeting.self().fall();
 		});
 	});
+	self.setVar("marching", false);
 };
 
 self.update = [=](var& self, double dt) -> void {
@@ -46,7 +49,7 @@ self.update = [=](var& self, double dt) -> void {
 	}
 	// attached: no occupancy, no pathing - ride the host and keep the ailment fresh
 	if (host != 0 && self.getVar("attached")) {
-		self.agent().gridPosition(self.game().creature(host).agent().gridPosition());
+		self.agent().localPosition(self.game().creature(host).agent().localPosition());
 		if (self.getVar("refreshCooldown") <= 0.0) {
 			self.setVar("refreshCooldown", 2.0);
 			self.absorbFor(host, 0.5, 0.5);
@@ -54,14 +57,8 @@ self.update = [=](var& self, double dt) -> void {
 		return;
 	}
 	if (host == 0) {
-		var allies = self.alliesInRange(12);
-		for (int i = 0; i < allies.size(); ++i) {
-			if (allies[i].networkId() != self.networkId()) {
-				host = allies[i].networkId();
-				self.setVar("host", host);
-				break;
-			}
-		}
+		host = self.nearestAllyId(12);
+		self.setVar("host", host);
 	}
 	if (host != 0 && self.getVar("clingCooldown") <= 0.0) {
 		self.setVar("clingCooldown", 1.0);
@@ -79,8 +76,10 @@ self.update = [=](var& self, double dt) -> void {
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {
-			var applyDefaultTarget = self.getVar("applyDefaultTarget");
-			applyDefaultTarget(self);
+			if (!self.getVar("marching")) {
+				var applyDefaultTarget = self.getVar("applyDefaultTarget");
+				applyDefaultTarget(self);
+			}
 		}
 	}
 };

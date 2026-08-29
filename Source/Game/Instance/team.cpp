@@ -43,19 +43,33 @@ void Team::initialize() {
 }
 
 std::vector<std::shared_ptr<ServerCreature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
-        std::vector<std::shared_ptr<ServerCreature>> result;
-        std::unordered_map<ServerCreature*, double> distances;
-        for (auto&& kv : game.creatures) {
-                auto a_creature = std::dynamic_pointer_cast<ServerCreature>(kv.second);
-                if (a_creature && (game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive() && !a_creature->untargetable()) {
-                        auto ourDistance = MV::distance(a_location, a_creature->agent()->gridPosition());
-                        distances[a_creature.get()] = ourDistance;
-                        if (ourDistance <= a_radius) {
-                                MV::insertSorted(result, a_creature, [&](const std::shared_ptr<ServerCreature> &a_lhs, const std::shared_ptr<ServerCreature> &a_rhs) {
-                                        return distances[a_lhs.get()] < distances[a_rhs.get()];
-                                });
-                        }
-                }
-        }
-        return result;
+	std::vector<std::pair<float, std::shared_ptr<ServerCreature>>> found;
+	auto radiusSquared = a_radius * a_radius;
+	for (auto& creature : members) {
+		if (!creature->alive() || creature->untargetable()) { continue; }
+		auto offset = creature->agent()->gridPosition() - a_location;
+		auto distanceSquared = offset.x * offset.x + offset.y * offset.y;
+		if (distanceSquared <= radiusSquared) { found.emplace_back(distanceSquared, creature); }
+	}
+	std::sort(found.begin(), found.end(), [](const auto& a_lhs, const auto& a_rhs) { return a_lhs.first < a_rhs.first; });
+	std::vector<std::shared_ptr<ServerCreature>> result;
+	result.reserve(found.size());
+	for (auto& entry : found) { result.push_back(entry.second); }
+	return result;
+}
+
+std::shared_ptr<ServerCreature> Team::nearestCreature(const MV::Point<> &a_location, float a_radius) {
+	std::shared_ptr<ServerCreature> best;
+	auto bestSquared = a_radius * a_radius;
+	for (auto& creature : members) {
+		if (!creature->alive() || creature->untargetable()) { continue; }
+		auto offset = creature->agent()->gridPosition() - a_location;
+		auto distanceSquared = offset.x * offset.x + offset.y * offset.y;
+		if (distanceSquared <= bestSquared) { bestSquared = distanceSquared; best = creature; }
+	}
+	return best;
+}
+
+void Team::removeMember(int64_t a_netId) {
+	members.erase(std::remove_if(members.begin(), members.end(), [&](const std::shared_ptr<ServerCreature>& a_creature) { return a_creature->netId() == a_netId; }), members.end());
 }

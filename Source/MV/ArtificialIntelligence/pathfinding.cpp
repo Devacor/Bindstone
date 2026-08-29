@@ -882,7 +882,9 @@ namespace MV {
 		}
 		std::cerr << "[path] tick " << tickCount << " agents " << agents.size() << " moving " << moving << " stalled " << stalled << " idle " << idle
 			<< " queue " << searchQueue.size() << " budget used " << nodesUsedThisFrame << "/" << frameNodeBudget
-			<< " fields " << flowFields.size() << " (pinned " << pinnedFlowFields() << ")" << detail;
+			<< " fields " << flowFields.size() << " (pinned " << pinnedFlowFields() << ")"
+			<< " searches " << diagSearches << " skipped " << diagSearchesSkippedUnreachable << " failed " << diagSearchesFailed << " nodes " << diagNodes << detail;
+		diagSearches = diagSearchesSkippedUnreachable = diagSearchesFailed = diagNodes = 0;
 		for (auto& field : flowFields) {
 			std::cerr << "\n    field goal " << field->goal().x << "," << field->goal().y << " r " << field->radius() << " size " << field->unitSize() << " users " << field->users() << " reachable " << field->reachableCells();
 		}
@@ -1110,7 +1112,7 @@ namespace MV {
 	bool NavigationAgent::attemptToRecalculate() {
 		bool mustRecalc = dirtyPath || calculatedPath.empty() ||
 		                  (calculatedPath.size() > 1 && currentPathIndex >= calculatedPath.size());
-		bool urgentRecalc = needsUrgentRecalculation();
+		bool urgentRecalc = needsUrgentRecalculation() && !goalUnreachable;
 
 		if (recalcRetryCountdown > 0 && !urgentRecalc) {
 			--recalcRetryCountdown;
@@ -1154,11 +1156,12 @@ namespace MV {
 					onBlockedSignal(shared_from_this());
 				}
 				dirtyPath = true;
+				++map->diagSearchesFailed;
 				deferRetryAfterFailedSearch();
 				return false;
 			}
 		}
-		clearRetryBackoff();
+		if (!goalUnreachable) { clearRetryBackoff(); }
 
 		if (calculatedPath.size() > currentPathIndex + 1) {
 			auto nextPos = calculatedPath[currentPathIndex + 1].position();

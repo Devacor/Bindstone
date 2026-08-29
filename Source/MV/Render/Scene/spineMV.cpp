@@ -247,7 +247,7 @@ namespace MV{
 				if (pendingDelete) {
 					pendingDelete = false;
 					unloadImplementation();
-				} else {
+				} else if (!owner()->renderer().headless()) {
 					skeleton->updateWorldTransform(spine::Physics_Update);
 				}
 			}

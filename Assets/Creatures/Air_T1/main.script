@@ -20,15 +20,15 @@ self.spawn = [=](var& self) -> void {
 	});
 
 	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
-		var targets = self.enemiesInRange(20);
 		var taunt = self.tauntedBy();
-		if (targets.empty() && taunt == 0) {
+		var target = (taunt != 0) ? taunt : self.nearestEnemyId(20);
+		if (target == 0) {
 			return false;
 		}
-		var target = (taunt != 0) ? taunt : targets[0].networkId();
 		var activeTarget = self.getVar("activeTarget");
 		if (activeTarget != target) {
 			self.setVar("activeTarget", target);
+			self.setVar("marching", false);
 			self.targeting().target(target, 8, [target](var& targeting) -> void {
 				targeting.self().setVar("activeTarget", 0);
 				targeting.self().setVar("attacking", true);
@@ -48,19 +48,24 @@ self.spawn = [=](var& self) -> void {
 					}
 				});
 			}, [=](var& targeting) -> void {
+				// the chase ended (target died or fled): march again on the next update
 				targeting.self().setVar("activeTarget", 0);
+				targeting.self().setVar("marching", false);
 			});
 		}
 		return true;
 	});
 
+	// the well sits inside its building's blocked cells: arriving means standing at its edge.
+	// Applied when the creature has nothing to fight (and again the moment a chase ends), never per tick.
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
-		// the well sits inside its building's blocked cells: arriving means standing at its edge
+		self.setVar("marching", true);
 		self.targeting().target(self.team().enemyWell(), 6.0, PathMode.flowField, [=](var& targeting) -> void {
 			targeting.self().enemyTeam().damage(1);   // a leak: the well takes a point
 			targeting.self().fall();
 		});
 	});
+	self.setVar("marching", false);
 };
 
 self.update = [=](var& self, double dt) -> void {
@@ -90,8 +95,10 @@ self.update = [=](var& self, double dt) -> void {
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {
-			var applyDefaultTarget = self.getVar("applyDefaultTarget");
-			applyDefaultTarget(self);
+			if (!self.getVar("marching")) {
+				var applyDefaultTarget = self.getVar("applyDefaultTarget");
+				applyDefaultTarget(self);
+			}
 		}
 	}
 };

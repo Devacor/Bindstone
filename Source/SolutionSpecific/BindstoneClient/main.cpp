@@ -578,6 +578,7 @@ static int RunArena(const std::string& a_left, const std::string& a_right, doubl
 	jaiEngine->set_script_error_handler([&](const std::string& a_message) { ++scriptErrors; MV::error("Script callback failed: ", a_message); });
 	jaiEngine->add_global("SpawnBudget", jai::script_value(static_cast<int64_t>(a_budget), jaiEngine.get()));
 	auto instance = ArenaGameInstance::make(root, data, arenaMouse, left, right);
+	if (const char* budgetOverride = std::getenv("MV_ARENA_SEARCH_BUDGET")) { instance->path()->searchBudget(std::atoll(budgetOverride)); }
 	instance->scheduleOpeningUpgrades(a_seed, 4.0);
 	const double step = 1.0 / 10.0;
 	while (instance->elapsed < a_seconds && instance->step(step)) {}

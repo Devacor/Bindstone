@@ -1,81 +1,86 @@
 /******************************************************************************
- * Spine Runtimes Software License v2.5
+ * Spine Runtimes License Agreement
+ * Last updated April 5, 2025. Replaces all prior versions.
  *
- * Copyright (c) 2013-2016, Esoteric Software
- * All rights reserved.
+ * Copyright (c) 2013-2025, Esoteric Software LLC
  *
- * You are granted a perpetual, non-exclusive, non-sublicensable, and
- * non-transferable license to use, install, execute, and perform the Spine
- * Runtimes software and derivative works solely for personal or internal
- * use. Without the written permission of Esoteric Software (see Section 2 of
- * the Spine Software License Agreement), you may not (a) modify, translate,
- * adapt, or develop new applications using the Spine Runtimes or otherwise
- * create derivative works or improvements of the Spine Runtimes or (b) remove,
- * delete, alter, or obscure any trademarks or any copyright, trademark, patent,
- * or other intellectual property or proprietary rights notices on or in the
- * Software, including any copy thereof. Redistributions in binary or source
- * form must include this license and terms.
+ * Integration of the Spine Runtimes into software or otherwise creating
+ * derivative works of the Spine Runtimes is permitted under the terms and
+ * conditions of Section 2 of the Spine Editor License Agreement:
+ * http://esotericsoftware.com/spine-editor-license
  *
- * THIS SOFTWARE IS PROVIDED BY ESOTERIC SOFTWARE "AS IS" AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL ESOTERIC SOFTWARE BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES, BUSINESS INTERRUPTION, OR LOSS OF
- * USE, DATA, OR PROFITS) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
- * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Otherwise, it is permitted to integrate the Spine Runtimes into software
+ * or otherwise create derivative works of the Spine Runtimes (collectively,
+ * "Products"), provided that each user of the Products must obtain their own
+ * Spine Editor license and redistribution of the Products in any form must
+ * include this license and copyright notice.
+ *
+ * THE SPINE RUNTIMES ARE PROVIDED BY ESOTERIC SOFTWARE LLC "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL ESOTERIC SOFTWARE LLC BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES,
+ * BUSINESS INTERRUPTION, OR LOSS OF USE, DATA, OR PROFITS) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THE SPINE RUNTIMES, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *****************************************************************************/
 
-#ifndef SPINE_TRANSFORMCONSTRAINT_H_
-#define SPINE_TRANSFORMCONSTRAINT_H_
+#ifndef Spine_TransformConstraint_h
+#define Spine_TransformConstraint_h
 
-#include <spine/dll.h>
+#include <spine/Constraint.h>
 #include <spine/TransformConstraintData.h>
-#include <spine/Bone.h>
+#include <spine/TransformConstraintPose.h>
+#include <spine/Array.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace spine {
+	class Skeleton;
+	class Bone;
+	class BonePose;
 
-struct spSkeleton;
+	// Non-exported base class that inherits from the template
+	class TransformConstraintBase : public ConstraintGeneric<TransformConstraint, TransformConstraintData, TransformConstraintPose> {
+	public:
+		TransformConstraintBase(TransformConstraintData &data)
+			: ConstraintGeneric<TransformConstraint, TransformConstraintData, TransformConstraintPose>(data) {
+		}
+	};
 
-typedef struct spTransformConstraint {
-	spTransformConstraintData* const data;
-	int bonesCount;
-	spBone** const bones;
-	spBone* target;
-	float rotateMix, translateMix, scaleMix, shearMix;
+	/// Adjusts the world transform of the constrained bones to match that of the source bone.
+	///
+	/// See https://esotericsoftware.com/spine-transform-constraints Transform constraints in the Spine User Guide.
+	class SP_API TransformConstraint : public TransformConstraintBase {
+		friend class Skeleton;
+		friend class TransformConstraintTimeline;
 
-#ifdef __cplusplus
-	spTransformConstraint() :
-		data(0),
-		bonesCount(0),
-		bones(0),
-		target(0),
-		rotateMix(0),
-		translateMix(0),
-		scaleMix(0),
-		shearMix(0) {
-	}
-#endif
-} spTransformConstraint;
+	public:
+		RTTI_DECL
 
-SP_API spTransformConstraint* spTransformConstraint_create (spTransformConstraintData* data, const struct spSkeleton* skeleton);
-SP_API void spTransformConstraint_dispose (spTransformConstraint* self);
+		TransformConstraint(TransformConstraintData &data, Skeleton &skeleton);
 
-SP_API void spTransformConstraint_apply (spTransformConstraint* self);
+		virtual TransformConstraint &copy(Skeleton &skeleton);
 
-#ifdef SPINE_SHORT_NAMES
-typedef spTransformConstraint TransformConstraint;
-#define TransformConstraint_create(...) spTransformConstraint_create(__VA_ARGS__)
-#define TransformConstraint_dispose(...) spTransformConstraint_dispose(__VA_ARGS__)
-#define TransformConstraint_apply(...) spTransformConstraint_apply(__VA_ARGS__)
-#endif
+		/// Applies the constraint to the constrained bones.
+		void update(Skeleton &skeleton, Physics physics) override;
 
-#ifdef __cplusplus
+		void sort(Skeleton &skeleton) override;
+
+		bool isSourceActive() override;
+
+		/// The bones that will be modified by this transform constraint.
+		Array<BonePose *> &getBones();
+
+		/// The bone whose world transform will be matched by the constrained bones.
+		Bone &getSource();
+
+		void setSource(Bone &source);
+
+	private:
+		Array<BonePose *> _bones;
+		Bone *_source;
+	};
 }
-#endif
 
-#endif /* SPINE_TRANSFORMCONSTRAINT_H_ */
+#endif /* Spine_TransformConstraint_h */

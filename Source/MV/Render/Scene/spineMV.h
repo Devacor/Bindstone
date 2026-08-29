@@ -1,25 +1,29 @@
-﻿#ifndef _MV_SCENE_SPINE_H_
+#ifndef _MV_SCENE_SPINE_H_
 #define _MV_SCENE_SPINE_H_
 
 #include "node.h"
 #include "drawable.h"
-#include "spine/AnimationState.h"
+#include <spine/AnimationState.h>
+#include <spine/BlendMode.h>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
-struct spSlot;
-struct spSkeleton;
-struct spAnimationState;
-struct spBone;
-struct spAtlas;
+namespace spine {
+	class Skeleton;
+	class SkeletonData;
+	class AnimationStateData;
+	class Atlas;
+	class Bone;
+	class Slot;
+	class TextureRegion;
+}
 
 namespace MV {
+	// Kept for callers from the pre-4.x integration; the runtime now installs its own extension and
+	// texture loader on first use, so there is nothing left to bind up front.
 	void initializeSpineBindings();
 
 	namespace Scene {
-		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
-		void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
-		
 		struct AnimationEventData {
 			AnimationEventData(const std::string &a_name, const std::string & a_stringValue, int a_intValue, float a_floatValue):
 				name(a_name),
@@ -35,15 +39,13 @@ namespace MV {
 		};
 
 		class Spine;
-		class AnimationTrack {
+		class AnimationTrack : public spine::AnimationStateListenerObject {
 			friend Spine;
 			jai::signal_emitter<void(AnimationTrack &)> onDisposeSignal;
 			jai::signal_emitter<void(AnimationTrack &)> onStartSignal;
 			jai::signal_emitter<void(AnimationTrack &)> onEndSignal;
 			jai::signal_emitter<void(AnimationTrack &, int)> onCompleteSignal;
 			jai::signal_emitter<void(AnimationTrack &, const AnimationEventData &)> onEventSignal;
-
-			friend void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		public:
 			jai::signal<void(AnimationTrack &)> onDispose;
 			jai::signal<void(AnimationTrack &)> onStart;
@@ -59,7 +61,7 @@ namespace MV {
 			std::map<std::string, LoopSignal> loopSignals;
 			std::map<std::string, EventSignal> eventSignals;
 
-			AnimationTrack(int a_trackIndex, spAnimationState* a_animationState, spSkeleton* a_skeleton) :
+			AnimationTrack(int a_trackIndex, spine::AnimationState* a_animationState, spine::Skeleton* a_skeleton) :
 				onStart(onStartSignal),
 				onEnd(onEndSignal),
 				onComplete(onCompleteSignal),
@@ -91,21 +93,20 @@ namespace MV {
 
 			AnimationTrack& timeScale(double a_newTime);
 			double timeScale() const;
-		private:
-			//called from spineTrackEntryCallback
-			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
+			// spine::AnimationStateListenerObject: the runtime calls this for entries this track started
+			virtual void callback(spine::AnimationState* a_state, spine::EventType a_type, spine::TrackEntry* a_entry, spine::Event* a_event) override;
+		private:
 			bool destroying = false;
 			int myTrackIndex;
-			spAnimationState *animationState;
-			spSkeleton *skeleton;
-			spTrackEntry *recentTrack = nullptr;
+			spine::AnimationState *animationState;
+			spine::Skeleton *skeleton;
+			spine::TrackEntry *recentTrack = nullptr;
 		};
-		
-		class Spine : public jai::property_owner<Spine, Drawable> {
+
+		class Spine : public jai::property_owner<Spine, Drawable>, public spine::AnimationStateListenerObject {
 			friend jai::access;
 			friend Node;
-			friend void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
 			jai::signal_emitter<void(std::shared_ptr<Spine>, int)> onStartSignal;
 			jai::signal_emitter<void(std::shared_ptr<Spine>, int)> onEndSignal;
@@ -188,6 +189,9 @@ namespace MV {
 			FileBundle bundle() const {
 				return *fileBundle;
 			}
+
+			// spine::AnimationStateListenerObject: every entry on the state reports here
+			virtual void callback(spine::AnimationState* a_state, spine::EventType a_type, spine::TrackEntry* a_entry, spine::Event* a_event) override;
 		protected:
 			virtual void initialize() override;
 
@@ -204,9 +208,6 @@ namespace MV {
 		private:
 			virtual void boundsImplementation(const BoxAABB<> &) override {}
 			virtual BoxAABB<> boundsImplementation() override;
-
-			//called from spineAnimationCallback
-			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
 			virtual bool preDraw();
 			virtual bool postDraw();
@@ -236,26 +237,27 @@ namespace MV {
 
 			std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
-			bool skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
+			bool skeletonRenderStateChangedSinceLastIteration(spine::BlendMode a_previousBlending, spine::BlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
 
-			size_t renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spBlendMode a_blendMode);
+			size_t renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spine::BlendMode a_blendMode);
 
 			// One uniform set per render batch (each batch binds its own texture/blend); reused across
 			// frames, grown to the most batches ever seen. Reset to 0 at the top of each frame's draw.
 			std::vector<Render::BoundUniformSet> deviceBatchSets;
 			size_t deviceBatchCursor = 0;
 
-			FileTextureDefinition * loadSpineSlotIntoPoints(spSlot* slot);
-			FileTextureDefinition *getSpineTextureFromSlot(spSlot* slot) const;
+			FileTextureDefinition * loadSpineSlotIntoPoints(spine::Slot* slot);
+			FileTextureDefinition *getSpineTextureFromSlot(spine::Slot* slot) const;
 
 			JAI_PROPERTY((FileBundle), fileBundle);
 
-			spSkeleton* skeleton = nullptr;
-			spAnimationState* animationState = nullptr;
-			spBone* rootBone = nullptr;
-			spAtlas* atlas = nullptr;
-			float* spineWorldVertices = nullptr;
-			static const int SPINE_MESH_VERTEX_COUNT_MAX = 1024;
+			spine::Atlas* atlas = nullptr;
+			spine::SkeletonData* skeletonData = nullptr;
+			spine::Skeleton* skeleton = nullptr;
+			spine::AnimationStateData* animationStateData = nullptr;
+			spine::AnimationState* animationState = nullptr;
+			spine::Bone* rootBone = nullptr;
+			std::vector<float> spineWorldVertices;
 
 			static const int MAX_UPDATES = 10;
 			static const double TIME_BETWEEN_UPDATES;
@@ -276,5 +278,3 @@ namespace MV {
 }
 
 #endif
-
-

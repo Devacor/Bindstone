@@ -1,117 +1,213 @@
 /******************************************************************************
- * Spine Runtimes Software License v2.5
+ * Spine Runtimes License Agreement
+ * Last updated April 5, 2025. Replaces all prior versions.
  *
- * Copyright (c) 2013-2016, Esoteric Software
- * All rights reserved.
+ * Copyright (c) 2013-2025, Esoteric Software LLC
  *
- * You are granted a perpetual, non-exclusive, non-sublicensable, and
- * non-transferable license to use, install, execute, and perform the Spine
- * Runtimes software and derivative works solely for personal or internal
- * use. Without the written permission of Esoteric Software (see Section 2 of
- * the Spine Software License Agreement), you may not (a) modify, translate,
- * adapt, or develop new applications using the Spine Runtimes or otherwise
- * create derivative works or improvements of the Spine Runtimes or (b) remove,
- * delete, alter, or obscure any trademarks or any copyright, trademark, patent,
- * or other intellectual property or proprietary rights notices on or in the
- * Software, including any copy thereof. Redistributions in binary or source
- * form must include this license and terms.
+ * Integration of the Spine Runtimes into software or otherwise creating
+ * derivative works of the Spine Runtimes is permitted under the terms and
+ * conditions of Section 2 of the Spine Editor License Agreement:
+ * http://esotericsoftware.com/spine-editor-license
  *
- * THIS SOFTWARE IS PROVIDED BY ESOTERIC SOFTWARE "AS IS" AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL ESOTERIC SOFTWARE BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES, BUSINESS INTERRUPTION, OR LOSS OF
- * USE, DATA, OR PROFITS) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
- * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Otherwise, it is permitted to integrate the Spine Runtimes into software
+ * or otherwise create derivative works of the Spine Runtimes (collectively,
+ * "Products"), provided that each user of the Products must obtain their own
+ * Spine Editor license and redistribution of the Products in any form must
+ * include this license and copyright notice.
+ *
+ * THE SPINE RUNTIMES ARE PROVIDED BY ESOTERIC SOFTWARE LLC "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL ESOTERIC SOFTWARE LLC BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES,
+ * BUSINESS INTERRUPTION, OR LOSS OF USE, DATA, OR PROFITS) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THE SPINE RUNTIMES, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *****************************************************************************/
 
-#ifndef SPINE_SKELETONDATA_H_
-#define SPINE_SKELETONDATA_H_
+#ifndef Spine_SkeletonData_h
+#define Spine_SkeletonData_h
 
-#include <spine/dll.h>
-#include <spine/BoneData.h>
-#include <spine/SlotData.h>
-#include <spine/Skin.h>
-#include <spine/EventData.h>
-#include <spine/Animation.h>
-#include <spine/IkConstraintData.h>
-#include <spine/TransformConstraintData.h>
-#include <spine/PathConstraintData.h>
+#include <spine/Array.h>
+#include <spine/SpineString.h>
+#include <spine/ConstraintData.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace spine {
+	class BoneData;
 
-typedef struct spSkeletonData {
-	const char* version;
-	const char* hash;
-	float width, height;
+	class SlotData;
 
-	int bonesCount;
-	spBoneData** bones;
+	class Skin;
 
-	int slotsCount;
-	spSlotData** slots;
+	class EventData;
 
-	int skinsCount;
-	spSkin** skins;
-	spSkin* defaultSkin;
+	class Animation;
 
-	int eventsCount;
-	spEventData** events;
+	class IkConstraintData;
 
-	int animationsCount;
-	spAnimation** animations;
+	class TransformConstraintData;
 
-	int ikConstraintsCount;
-	spIkConstraintData** ikConstraints;
+	class PathConstraintData;
 
-	int transformConstraintsCount;
-	spTransformConstraintData** transformConstraints;
+	class PhysicsConstraintData;
 
-	int pathConstraintsCount;
-	spPathConstraintData** pathConstraints;
-} spSkeletonData;
+	class ConstraintData;
 
-SP_API spSkeletonData* spSkeletonData_create ();
-SP_API void spSkeletonData_dispose (spSkeletonData* self);
+	/// Stores the setup pose and all of the stateless data for a skeleton.
+	///
+	/// See <a href="https://esotericsoftware.com/spine-runtime-architecture#Data-objects">Data objects</a> in the Spine Runtimes
+	/// Guide.
+	class SP_API SkeletonData : public SpineObject {
+		friend class SkeletonBinary;
 
-SP_API spBoneData* spSkeletonData_findBone (const spSkeletonData* self, const char* boneName);
-SP_API int spSkeletonData_findBoneIndex (const spSkeletonData* self, const char* boneName);
+		friend class SkeletonJson;
 
-SP_API spSlotData* spSkeletonData_findSlot (const spSkeletonData* self, const char* slotName);
-SP_API int spSkeletonData_findSlotIndex (const spSkeletonData* self, const char* slotName);
+		friend class Skeleton;
 
-SP_API spSkin* spSkeletonData_findSkin (const spSkeletonData* self, const char* skinName);
+	public:
+		SkeletonData();
 
-SP_API spEventData* spSkeletonData_findEvent (const spSkeletonData* self, const char* eventName);
+		~SkeletonData();
 
-SP_API spAnimation* spSkeletonData_findAnimation (const spSkeletonData* self, const char* animationName);
+		/// Finds a bone by comparing each bone's name.
+		/// It is more efficient to cache the results of this method than to call it multiple times.
+		/// @return May be NULL.
+		BoneData *findBone(const String &boneName);
 
-SP_API spIkConstraintData* spSkeletonData_findIkConstraint (const spSkeletonData* self, const char* constraintName);
+		/// @return May be NULL.
+		SlotData *findSlot(const String &slotName);
 
-SP_API spTransformConstraintData* spSkeletonData_findTransformConstraint (const spSkeletonData* self, const char* constraintName);
+		/// @return May be NULL.
+		Skin *findSkin(const String &skinName);
 
-SP_API spPathConstraintData* spSkeletonData_findPathConstraint (const spSkeletonData* self, const char* constraintName);
+		/// @return May be NULL.
+		EventData *findEvent(const String &eventDataName);
 
-#ifdef SPINE_SHORT_NAMES
-typedef spSkeletonData SkeletonData;
-#define SkeletonData_create(...) spSkeletonData_create(__VA_ARGS__)
-#define SkeletonData_dispose(...) spSkeletonData_dispose(__VA_ARGS__)
-#define SkeletonData_findBone(...) spSkeletonData_findBone(__VA_ARGS__)
-#define SkeletonData_findBoneIndex(...) spSkeletonData_findBoneIndex(__VA_ARGS__)
-#define SkeletonData_findSlot(...) spSkeletonData_findSlot(__VA_ARGS__)
-#define SkeletonData_findSlotIndex(...) spSkeletonData_findSlotIndex(__VA_ARGS__)
-#define SkeletonData_findSkin(...) spSkeletonData_findSkin(__VA_ARGS__)
-#define SkeletonData_findEvent(...) spSkeletonData_findEvent(__VA_ARGS__)
-#define SkeletonData_findAnimation(...) spSkeletonData_findAnimation(__VA_ARGS__)
-#endif
+		/// @return May be NULL.
+		Animation *findAnimation(const String &animationName);
 
-#ifdef __cplusplus
+		/// Collects animations used by slider constraints.
+		Array<Animation *> &findSliderAnimations(Array<Animation *> &animations);
+
+		/// The skeleton's name, which by default is the name of the skeleton data file when possible, or null when a name hasn't been
+		/// set.
+		const String &getName();
+
+		void setName(const String &inValue);
+
+		/// The skeleton's bones, sorted parent first. The root bone is always the first bone.
+		Array<BoneData *> &getBones();
+
+		/// The skeleton's slots in the setup pose draw order.
+		Array<SlotData *> &getSlots();
+
+		/// All skins, including the default skin.
+		Array<Skin *> &getSkins();
+
+		/// The skeleton's default skin.
+		/// By default this skin contains all attachments that were not in a skin in Spine.
+		/// @return May be NULL.
+		Skin *getDefaultSkin();
+
+		void setDefaultSkin(Skin *inValue);
+
+		/// The skeleton's events.
+		Array<EventData *> &getEvents();
+
+		/// The skeleton's animations.
+		Array<Animation *> &getAnimations();
+
+		/// The skeleton's constraints.
+		Array<ConstraintData *> &getConstraints();
+
+		/// Finds a constraint of the specified type by comparing each constraint's name. It is more efficient to cache the results of
+		/// this method than to call it multiple times.
+		/// @return May be NULL.
+		template<class T>
+		T *findConstraint(const String &constraintName) {
+			getConstraints();// Ensure constraints array is populated
+			for (size_t i = 0, n = _constraints.size(); i < n; i++) {
+				ConstraintData *constraint = _constraints[i];
+				if (constraint->getName() == constraintName && constraint->getRTTI().instanceOf(T::rtti)) {
+					return static_cast<T *>(constraint);
+				}
+			}
+			return NULL;
+		}
+
+		/// The X coordinate of the skeleton's axis aligned bounding box in the setup pose.
+		float getX();
+
+		void setX(float inValue);
+
+		/// The Y coordinate of the skeleton's axis aligned bounding box in the setup pose.
+		float getY();
+
+		void setY(float inValue);
+
+		/// The width of the skeleton's axis aligned bounding box in the setup pose.
+		float getWidth();
+
+		void setWidth(float inValue);
+
+		/// The height of the skeleton's axis aligned bounding box in the setup pose.
+		float getHeight();
+
+		void setHeight(float inValue);
+
+		/// Baseline scale factor for applying physics and other effects based on distance to non-scalable properties, such as angle or
+		/// scale. Default is 100.
+		float getReferenceScale();
+
+		void setReferenceScale(float inValue);
+
+		/// The Spine version used to export this data, or NULL.
+		const String &getVersion();
+
+		void setVersion(const String &inValue);
+
+		/// The skeleton data hash. This value will change if any of the skeleton data has changed.
+		const String &getHash();
+
+		void setHash(const String &inValue);
+
+		/// The path to the images folder as defined in Spine, or null if nonessential data was not exported.
+		const String &getImagesPath();
+
+		void setImagesPath(const String &inValue);
+
+		/// The path to the audio folder as defined in Spine, or null if nonessential data was not exported.
+		const String &getAudioPath();
+
+		void setAudioPath(const String &inValue);
+
+		/// The dopesheet FPS in Spine. Available only when nonessential data was exported.
+		float getFps();
+
+		void setFps(float inValue);
+
+	private:
+		String _name;
+		Array<BoneData *> _bones;// Ordered parents first
+		Array<SlotData *> _slots;// Setup pose draw order.
+		Array<Skin *> _skins;
+		Skin *_defaultSkin;
+		Array<EventData *> _events;
+		Array<Animation *> _animations;
+		Array<ConstraintData *> _constraints;
+		float _x, _y, _width, _height;
+		float _referenceScale;
+		String _version;
+		String _hash;
+		Array<char *> _strings;
+
+		// Nonessential.
+		float _fps;
+		String _imagesPath;
+		String _audioPath;
+	};
 }
-#endif
 
-#endif /* SPINE_SKELETONDATA_H_ */
+#endif /* Spine_SkeletonData_h */

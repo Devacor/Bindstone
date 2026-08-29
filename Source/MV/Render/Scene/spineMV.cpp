@@ -1,10 +1,13 @@
 #include "spineMV.h"
-#include "MVAdapters/spineBinder.h" //externally bind spine customization points
 
 #include "sprite.h"
 
 #include <fstream>
 #include <string>
+#include <cstring>
+#include <mutex>
+
+#include <spine/spine.h>
 
 #include "MV/Utility/scopeGuard.hpp"
 
@@ -70,70 +73,72 @@ static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	builder.method("bundle", &MV::Scene::Spine::bundle);
 });
 
-namespace MV{
-	void initializeSpineBindings() {
-		static std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;
-		static std::mutex SHARED_SPINE_TEXTURES_MUTEX;
+namespace {
+	// File reads go through the engine's search paths (user overrides, Assets/ prefix), not fopen
+	class MVSpineExtension : public spine::DefaultSpineExtension {
+	protected:
+		char* _readFile(const spine::String& a_path, int* a_length) override {
+			std::string contents = MV::fileContents(a_path.buffer());
+			if (contents.empty()) {
+				*a_length = 0;
+				return nullptr;
+			}
+			*a_length = static_cast<int>(contents.size());
+			char* data = spine::SpineExtension::alloc<char>(contents.size(), __FILE__, __LINE__);
+			std::memcpy(data, contents.data(), contents.size());
+			return data;
+		}
+	};
 
-		//these implementations are required for spine!
-		Spine_CreateTextureHandler = [&](spAtlasPage* self, const char* path) {
-			std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
-			std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[path];
+	// Atlas pages share one texture per path across every skeleton that references it
+	class MVSpineTextureLoader : public spine::TextureLoader {
+	public:
+		void load(spine::AtlasPage& a_page, const spine::String& a_path) override {
+			std::lock_guard<std::mutex> guard(mutex);
+			auto& texturePair = textures[a_path.buffer()];
 			if (texturePair.second == 0) {
-				texturePair.first = MV::FileTextureDefinition::makeUnmanaged(path).release();
+				texturePair.first = MV::FileTextureDefinition::makeUnmanaged(a_path.buffer()).release();
 				texturePair.first->load();
 			}
 			++texturePair.second;
-			self->width = texturePair.first->size().width;
-			self->height = texturePair.first->size().height;
-			self->rendererObject = texturePair.first;
-		};
+			a_page.width = texturePair.first->size().width;
+			a_page.height = texturePair.first->size().height;
+			a_page.texture = texturePair.first;
+		}
 
-		Spine_DisposeTextureHandler = [&](spAtlasPage* self) {
-			std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
-			auto* texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
-			std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[texture->name()];
+		void unload(void* a_texture) override {
+			std::lock_guard<std::mutex> guard(mutex);
+			auto* texture = static_cast<MV::FileTextureDefinition*>(a_texture);
+			if (!texture) { return; }
+			auto& texturePair = textures[texture->name()];
 			if (--texturePair.second == 0) {
 				SCOPE_EXIT{ delete texturePair.first; };
 				texturePair.first->unload();
 			}
-		};
+		}
 
-		Spine_ReadFileHandler = [&](const char* path, int* length) -> char* {
-			std::string result = MV::fileContents(path);
-			if (result.empty()) {
-				*length = 0;
-				return nullptr;
-			}
-			*length = static_cast<int>(result.size() + 1);
-			char* ptr = new char[result.size() + 1];
-			strcpy(ptr, result.c_str());
+		static MVSpineTextureLoader& instance() {
+			static MVSpineTextureLoader loader;
+			return loader;
+		}
+	private:
+		std::mutex mutex;
+		std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> textures;
+	};
+}
 
-			return ptr;
-		};
+spine::SpineExtension* spine::getDefaultExtension() {
+	return new MVSpineExtension();
+}
+
+namespace MV{
+	void initializeSpineBindings() {
 	}
 
 	namespace Scene {
 
-		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
-			if (a_state && a_state->rendererObject) {
-				static_cast<Spine*>(a_state->rendererObject)->onAnimationStateEvent(a_state, a_type, a_entry, a_event);
-			}
-		}
-
-		void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
-			if (a_state && a_state->rendererObject) {
-				auto *spine = static_cast<Spine*>(a_state->rendererObject);
-				if (spine) {
-					spine->track(a_entry->trackIndex).onAnimationStateEvent(a_state, a_type, a_entry, a_event);
-				}
-			}
-		}
-
-		template <typename T>
-		FileTextureDefinition* getSpineTexture(T* attachment) {
-			spAtlasRegion* atlasRegion = (attachment && attachment->rendererObject) ? static_cast<spAtlasRegion*>(attachment->rendererObject) : nullptr;
-			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? static_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
+		static FileTextureDefinition* textureOf(spine::TextureRegion* a_region) {
+			return a_region ? static_cast<FileTextureDefinition*>(a_region->getRendererObject()) : nullptr;
 		}
 
 		void Spine::initialize() {
@@ -179,39 +184,39 @@ namespace MV{
 		void Spine::loadImplementation(const FileBundle &a_fileBundle, bool a_refreshBounds) {
 			unloadImplementation();
 			if (*a_fileBundle.skeletonFile != "") {
-				atlas = spAtlas_createFromFile(a_fileBundle.atlasFile->c_str(), 0);
-				require<ResourceException>(atlas, "Error reading atlas file:", *a_fileBundle.atlasFile);
-
-				spSkeletonJson* json = spSkeletonJson_create(atlas);
-				json->scale = *a_fileBundle.loadScale;
-				spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, a_fileBundle.skeletonFile->c_str());
-				if (!skeletonData && json->error) {
-					require<ResourceException>(false, json->error);
-				}
-				else if (!skeletonData) {
-					require<ResourceException>(false, "Error reading skeleton data file: ", *a_fileBundle.skeletonFile);
+				atlas = new spine::Atlas(spine::String(a_fileBundle.atlasFile->c_str()), &MVSpineTextureLoader::instance());
+				if (atlas->getPages().size() == 0) {
+					delete atlas;
+					atlas = nullptr;
+					require<ResourceException>(false, "Error reading atlas file:", *a_fileBundle.atlasFile);
 				}
 
-				//TODO <low>: maybe cache instead of disposing to avoid file reads.
-				spSkeletonJson_dispose(json);
+				spine::SkeletonJson json(*atlas);
+				json.setScale(*a_fileBundle.loadScale);
+				skeletonData = json.readSkeletonDataFile(spine::String(a_fileBundle.skeletonFile->c_str()));
+				if (!skeletonData) {
+					std::string error = json.getError().buffer() ? json.getError().buffer() : "";
+					delete atlas;
+					atlas = nullptr;
+					require<ResourceException>(false, "Error reading skeleton data file: ", *a_fileBundle.skeletonFile, error.empty() ? "" : " - ", error);
+				}
 
-				skeleton = spSkeleton_create(skeletonData);
+				skeleton = new spine::Skeleton(*skeletonData);
+				require<ResourceException>(skeleton->getBones().size() > 0 && skeleton->getBones()[0], *a_fileBundle.skeletonFile, " has no bones!");
+				rootBone = skeleton->getBones()[0];
 
-				require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], *a_fileBundle.skeletonFile, " has no bones!");
-				rootBone = skeleton->bones[0];
+				animationStateData = new spine::AnimationStateData(*skeletonData);
+				animationState = new spine::AnimationState(*animationStateData);
+				animationState->setListener(static_cast<spine::AnimationStateListenerObject*>(this));
 
-				animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
-				animationState->rendererObject = this;
-				animationState->listener = spineAnimationCallback;
-
-				spBone_setYDown(true);
-				spineWorldVertices = new float[SPINE_MESH_VERTEX_COUNT_MAX]();
+				spine::Bone::setYDown(true);
 				updateImplementation(0.0f);
 
-				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-					spSlot* slot = skeleton->drawOrder[i];
-					if (!slot->attachment) continue;
-					FileTextureDefinition *texture = loadSpineSlotIntoPoints(slot);
+				auto& drawOrder = skeleton->getDrawOrder().getAppliedPose();
+				for (size_t i = 0, n = drawOrder.size(); i < n; ++i) {
+					if (drawOrder[i]->getAppliedPose().getAttachment()) {
+						loadSpineSlotIntoPoints(drawOrder[i]);
+					}
 				}
 
 				fileBundle = a_fileBundle;
@@ -233,17 +238,17 @@ namespace MV{
 			if (loaded()) {
 				auto liveUntilThisFunctionDies = shared_from_this();
 				inUpdate = true;
-				spSkeleton_update(skeleton, static_cast<float>(a_delta));
+				skeleton->update(static_cast<float>(a_delta));
 				if (animationState) {
-					spAnimationState_update(animationState, static_cast<float>(a_delta));
-					spAnimationState_apply(animationState, skeleton);
+					animationState->update(static_cast<float>(a_delta));
+					animationState->apply(*skeleton);
 				}
 				inUpdate = false;
 				if (pendingDelete) {
 					pendingDelete = false;
 					unloadImplementation();
 				} else {
-					spSkeleton_updateWorldTransform(skeleton);
+					skeleton->updateWorldTransform(spine::Physics_Update);
 				}
 			}
 		}
@@ -255,28 +260,19 @@ namespace MV{
 				points->clear();
 				vertexIndices->clear();
 				fileBundle = FileBundle();
-				if (spineWorldVertices) {
-					FREE(spineWorldVertices);
-				}
-				if (atlas) {
-					spAtlas_dispose(atlas);
-				}
-				if (animationState) {
-					if (animationState->data) {
-						spAnimationStateData_dispose(animationState->data);
-					}
-					spAnimationState_dispose(animationState);
-				}
-				if (skeleton) {
-					if (skeleton->data) {
-						spSkeletonData_dispose(skeleton->data);
-					}
-					spSkeleton_dispose(skeleton);
-				}
+				spineWorldVertices.clear();
+				delete animationState;
+				delete animationStateData;
+				delete skeleton;
+				delete skeletonData;
+				delete atlas;
 
 				animationState = nullptr;
+				animationStateData = nullptr;
 				skeleton = nullptr;
+				skeletonData = nullptr;
 				atlas = nullptr;
+				rootBone = nullptr;
 
 				refreshBounds();
 			} else if (loaded() && inUpdate) {
@@ -290,10 +286,10 @@ namespace MV{
 					points->clear();
 					vertexIndices->clear();
 
-					for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-						spSlot* slot = skeleton->drawOrder[i];
-						if (slot->attachment) {
-							loadSpineSlotIntoPoints(slot);
+					auto& drawOrder = skeleton->getDrawOrder().getAppliedPose();
+					for (size_t i = 0, n = drawOrder.size(); i < n; ++i) {
+						if (drawOrder[i]->getAppliedPose().getAttachment()) {
+							loadSpineSlotIntoPoints(drawOrder[i]);
 						}
 					}
 				}
@@ -306,10 +302,11 @@ namespace MV{
 
 		MV::Point<> Spine::slotPosition(const std::string &a_slotId) const {
 			if (!owner()->renderer().headless() && loaded() && !a_slotId.empty()) {
-				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-					spSlot* slot = skeleton->drawOrder[i];
-					if (slot->data->name == a_slotId) {
-						return { slot->bone->worldX, slot->bone->worldY, 0.0 };
+				auto& slots = skeleton->getSlots();
+				for (size_t i = 0, n = slots.size(); i < n; ++i) {
+					if (a_slotId == slots[i]->getData().getName().buffer()) {
+						auto& bone = slots[i]->getBone().getAppliedPose();
+						return { bone.getWorldX(), bone.getWorldY(), 0.0 };
 					}
 				}
 			}
@@ -348,8 +345,8 @@ namespace MV{
 		}
 
 		std::shared_ptr<Spine> Spine::crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration) {
-			if (animationState) {
-				spAnimationStateData_setMixByName(animationState->data, a_fromAnimation.c_str(), a_toAnimation.c_str(), static_cast<float>(a_duration));
+			if (animationStateData) {
+				animationStateData->setMix(spine::String(a_fromAnimation.c_str()), spine::String(a_toAnimation.c_str()), static_cast<float>(a_duration));
 			}
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
@@ -383,31 +380,33 @@ namespace MV{
 
 				points->clear();
 				vertexIndices->clear();
-				
+
 				FileTextureDefinition *previousTexture = nullptr;
-				spBlendMode previousBlending = SP_BLEND_MODE_NORMAL;
+				spine::BlendMode previousBlending = spine::BlendMode_Normal;
 				size_t lastRenderedIndex = 0;
 				std::vector<std::string> renderedChildren;
 				bool firstSlotTexture = true;
-				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-					spSlot* slot = skeleton->drawOrder[i];
-					if (slot->attachment) {
+				auto& drawOrder = skeleton->getDrawOrder().getAppliedPose();
+				for (size_t i = 0, n = drawOrder.size(); i < n; ++i) {
+					spine::Slot* slot = drawOrder[i];
+					if (slot->getAppliedPose().getAttachment()) {
 						FileTextureDefinition *texture = getSpineTextureFromSlot(slot);
+						spine::BlendMode blending = slot->getData().getBlendMode();
 						if (firstSlotTexture) {
 							firstSlotTexture = false;
 							previousTexture = texture;
-							previousBlending = slot->data->blendMode;
+							previousBlending = blending;
 						}
 
-						if (skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)) {
+						if (skeletonRenderStateChangedSinceLastIteration(previousBlending, blending, previousTexture, texture)) {
 							lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture : nullptr, previousBlending);
 						}
 
 						loadSpineSlotIntoPoints(slot);
 						previousTexture = texture;
-						previousBlending = slot->data->blendMode;
+						previousBlending = blending;
 					}
-					auto nodesToRender = slotsToNodes->find(slot->data->name);
+					auto nodesToRender = slotsToNodes->find(slot->getData().getName().buffer());
 					if (nodesToRender != slotsToNodes->end()) {
 						bool interrupted = false;
 						for (auto&& nodeToRender : nodesToRender->second) {
@@ -417,10 +416,11 @@ namespace MV{
 									interrupted = true;
 									lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture : nullptr, previousBlending);
 								}
+								auto& bone = slot->getBone().getAppliedPose();
 								node->silence()->
-									position({ slot->bone->worldX, slot->bone->worldY })->
-									rotation({ 0.0f, spBone_getWorldRotationY(slot->bone), spBone_getWorldRotationX(slot->bone) })->
-									scale({ spBone_getWorldScaleX(slot->bone), spBone_getWorldScaleY(slot->bone) });
+									position({ bone.getWorldX(), bone.getWorldY() })->
+									rotation({ 0.0f, bone.getWorldRotationY(), bone.getWorldRotationX() })->
+									scale({ bone.getWorldScaleX(), bone.getWorldScaleY() });
 								node->draw();
 								renderedChildren.push_back(node->id());
 							}
@@ -444,16 +444,16 @@ namespace MV{
 
 		// Spine uses the premultiply shader, so additive maps to premultiplied One/One (BLEND_ADD), not the
 		// legacy non-premultiplied SrcAlpha/One; normal/multiply/screen map straight across.
-		static BlendMode spineBlendToBlendMode(spBlendMode a_mode) {
+		static BlendMode spineBlendToBlendMode(spine::BlendMode a_mode) {
 			switch (a_mode) {
-				case SP_BLEND_MODE_ADDITIVE: return BLEND_ADD;
-				case SP_BLEND_MODE_MULTIPLY: return BLEND_MULTIPLY;
-				case SP_BLEND_MODE_SCREEN:   return BLEND_SCREEN;
-				default:                     return BLEND_DEFAULT;
+				case spine::BlendMode_Additive: return BLEND_ADD;
+				case spine::BlendMode_Multiply: return BLEND_MULTIPLY;
+				case spine::BlendMode_Screen:   return BLEND_SCREEN;
+				default:                        return BLEND_DEFAULT;
 			}
 		}
 
-		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spBlendMode a_blendMode) {
+		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spine::BlendMode a_blendMode) {
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 			auto bufferSizeToRender = (points->size()) * structSize;
 			if (bufferSizeToRender <= 0) { return a_lastRenderedIndex; }
@@ -511,75 +511,89 @@ namespace MV{
 			return a_clone;
 		}
 
-		bool Spine::skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture) {
+		bool Spine::skeletonRenderStateChangedSinceLastIteration(spine::BlendMode a_previousBlending, spine::BlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture) {
 			return !points->empty() &&
 				(a_previousBlending != a_currentBlending) ||
 				(a_previousTexture != a_texture);
 		}
 
-		FileTextureDefinition * Spine::getSpineTextureFromSlot(spSlot* slot) const {
-			if (slot->attachment->type == SP_ATTACHMENT_REGION) {
-				spRegionAttachment* attachment = reinterpret_cast<spRegionAttachment*>(slot->attachment);
-				return getSpineTexture(attachment);
-			} else if (slot->attachment->type == SP_ATTACHMENT_MESH) {
-				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
-				return getSpineTexture(attachment);
+		FileTextureDefinition * Spine::getSpineTextureFromSlot(spine::Slot* slot) const {
+			auto& pose = slot->getAppliedPose();
+			spine::Attachment* attachment = pose.getAttachment();
+			if (!attachment) { return nullptr; }
+			if (attachment->getRTTI().isExactly(spine::RegionAttachment::rtti)) {
+				auto* region = static_cast<spine::RegionAttachment*>(attachment);
+				auto& sequence = region->getSequence();
+				return textureOf(sequence.getRegion(sequence.resolveIndex(pose)));
+			} else if (attachment->getRTTI().isExactly(spine::MeshAttachment::rtti)) {
+				auto* mesh = static_cast<spine::MeshAttachment*>(attachment);
+				auto& sequence = mesh->getSequence();
+				return textureOf(sequence.getRegion(sequence.resolveIndex(pose)));
 			}
 			return nullptr;
 		}
-		
-		FileTextureDefinition * Spine::loadSpineSlotIntoPoints(spSlot* slot) {
-			if(slot->attachment->type == SP_ATTACHMENT_REGION){
-				spRegionAttachment* attachment = reinterpret_cast<spRegionAttachment*>(slot->attachment);
-				Color attachmentColor(skeleton->color.r * slot->color.r * attachment->color.r, skeleton->color.g * slot->color.g * attachment->color.g, skeleton->color.b * slot->color.b * attachment->color.b, skeleton->color.a * slot->color.a * attachment->color.a);
-				spRegionAttachment_computeWorldVertices(attachment, slot->bone, spineWorldVertices, 0, 2);
 
-				std::vector<std::pair<GLint, GLint>> spineVertexIndices{
-					{0, 1},
-					{2, 3},
-					{4, 5},
-					{6, 7},
-				};
+		FileTextureDefinition * Spine::loadSpineSlotIntoPoints(spine::Slot* slot) {
+			auto& pose = slot->getAppliedPose();
+			spine::Attachment* attachment = pose.getAttachment();
+			if (!attachment) { return nullptr; }
+			auto tint = [&](const spine::Color& a_attachmentColor) {
+				const auto& skeletonColor = skeleton->getColor();
+				const auto& slotColor = pose.getColor();
+				return Color(skeletonColor.r * slotColor.r * a_attachmentColor.r, skeletonColor.g * slotColor.g * a_attachmentColor.g, skeletonColor.b * slotColor.b * a_attachmentColor.b, skeletonColor.a * slotColor.a * a_attachmentColor.a);
+			};
+			if (attachment->getRTTI().isExactly(spine::RegionAttachment::rtti)) {
+				auto* region = static_cast<spine::RegionAttachment*>(attachment);
+				auto& sequence = region->getSequence();
+				int sequenceIndex = sequence.resolveIndex(pose);
+				auto& uvs = sequence.getUVs(sequenceIndex);
+				Color attachmentColor = tint(region->getColor());
+				if (spineWorldVertices.size() < 8) { spineWorldVertices.resize(8); }
+				region->computeWorldVertices(*slot, region->getOffsets(pose).buffer(), spineWorldVertices.data(), 0, 2);
 
 				MV::Scene::appendQuadVertexIndices(*vertexIndices, static_cast<GLuint>(points->size()));
-				for(auto &indexPair : spineVertexIndices){
-					Point<> testPosition(spineWorldVertices[indexPair.first], spineWorldVertices[indexPair.second]);
+				for (size_t v = 0; v < 8; v += 2) {
 					points->push_back(DrawPoint(
-						testPosition,
+						Point<>(spineWorldVertices[v], spineWorldVertices[v + 1]),
 						attachmentColor,
-						TexturePoint(attachment->uvs[indexPair.first], attachment->uvs[indexPair.second])
+						TexturePoint(uvs[v], uvs[v + 1])
 						));
 				}
 
-				return getSpineTexture(attachment);
-			} else if(slot->attachment->type == SP_ATTACHMENT_MESH){
-				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
-				Color attachmentColor(skeleton->color.r * slot->color.r * attachment->color.r, skeleton->color.g * slot->color.g * attachment->color.g, skeleton->color.b * slot->color.b * attachment->color.b, skeleton->color.a * slot->color.a * attachment->color.a);
-				require<ResourceException>(attachment->super.verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, "VerticesCount exceeded for spine mesh.");
-				spVertexAttachment_computeWorldVertices(SUPER(attachment), slot, 0, attachment->super.worldVerticesLength, spineWorldVertices, 0, 2);
+				return textureOf(sequence.getRegion(sequenceIndex));
+			} else if (attachment->getRTTI().isExactly(spine::MeshAttachment::rtti)) {
+				auto* mesh = static_cast<spine::MeshAttachment*>(attachment);
+				auto& sequence = mesh->getSequence();
+				int sequenceIndex = sequence.resolveIndex(pose);
+				auto& uvs = sequence.getUVs(sequenceIndex);
+				Color attachmentColor = tint(mesh->getColor());
+				size_t worldVerticesLength = mesh->getWorldVerticesLength();
+				if (spineWorldVertices.size() < worldVerticesLength) { spineWorldVertices.resize(worldVerticesLength); }
+				mesh->computeWorldVertices(*skeleton, *slot, 0, worldVerticesLength, spineWorldVertices.data(), 0, 2);
 
-				for(int i = 0; i < attachment->trianglesCount; ++i) {
-					auto index = attachment->triangles[i] << 1;
+				auto& triangles = mesh->getTriangles();
+				for (size_t i = 0, n = triangles.size(); i < n; ++i) {
+					auto index = static_cast<size_t>(triangles[i]) << 1;
 					points->push_back(DrawPoint(
 						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
 						attachmentColor,
-						TexturePoint(attachment->uvs[index], attachment->uvs[index + 1])
+						TexturePoint(uvs[index], uvs[index + 1])
 						));
 					vertexIndices->push_back(static_cast<GLuint>(points->size() - 1));
 				}
 
-				return getSpineTexture(attachment);
+				return textureOf(sequence.getRegion(sequenceIndex));
 			}
 			return nullptr;
 		}
 
 		std::shared_ptr<Spine> Spine::timeScale(double a_timeScale){
-			animationState->timeScale = static_cast<float>(a_timeScale);
+			animationState->setTimeScale(static_cast<float>(a_timeScale));
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
 		double Spine::timeScale() const {
-			return static_cast<double>(animationState->timeScale);
+			return static_cast<double>(animationState->getTimeScale());
 		}
 
 		const double Spine::TIME_BETWEEN_UPDATES = 1.0 / 60.0;
@@ -593,32 +607,42 @@ namespace MV{
 			*loadScale = a_loadScale;
 		}
 
-		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);
-		void Spine::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
-			track(a_entry->trackIndex).recentTrack = a_entry;
-			SCOPE_EXIT{ 
-				track(a_entry->trackIndex).recentTrack = nullptr; 
+		static AnimationEventData eventData(spine::Event* a_event) {
+			const char* name = a_event ? a_event->getData().getName().buffer() : nullptr;
+			const char* text = a_event ? a_event->getString().buffer() : nullptr;
+			return AnimationEventData(name ? name : "NULL", text ? text : "", a_event ? a_event->getInt() : 0, a_event ? a_event->getFloat() : 0.0f);
+		}
+
+		// Whole loops completed so far; the pre-4.x integration reported a rotation-timeline count here
+		static int completedLoops(spine::TrackEntry* a_entry) {
+			auto duration = a_entry->getAnimation().getDuration();
+			return duration > 0.0f ? static_cast<int>(a_entry->getTrackTime() / duration) : 0;
+		}
+
+		void Spine::callback(spine::AnimationState* /*a_state*/, spine::EventType a_type, spine::TrackEntry* a_entry, spine::Event* a_event) {
+			int trackIndex = a_entry->getTrackIndex();
+			track(trackIndex).recentTrack = a_entry;
+			SCOPE_EXIT{
+				track(trackIndex).recentTrack = nullptr;
 			};
-			if (a_type == SP_ANIMATION_DISPOSE) {
-				onDisposeSignal(this, a_entry->trackIndex);
+			if (a_type == spine::EventType_Dispose) {
+				onDisposeSignal(this, trackIndex);
 			} else {
 				if (destroying) {
 					return;
 				}
 				auto self = std::static_pointer_cast<Spine>(shared_from_this());
-				if (a_type == SP_ANIMATION_START) {
-					onStartSignal(self, a_entry->trackIndex);
-				} else if (a_type == SP_ANIMATION_END) {
-					onEndSignal(self, a_entry->trackIndex);
-				} else if (a_type == SP_ANIMATION_COMPLETE) {
-					onCompleteSignal(self, a_entry->trackIndex, a_entry->timelinesRotationCount);
-					if (!a_entry->loop) {
-						track(a_entry->trackIndex).stop();
+				if (a_type == spine::EventType_Start) {
+					onStartSignal(self, trackIndex);
+				} else if (a_type == spine::EventType_End) {
+					onEndSignal(self, trackIndex);
+				} else if (a_type == spine::EventType_Complete) {
+					onCompleteSignal(self, trackIndex, completedLoops(a_entry));
+					if (!a_entry->getLoop()) {
+						track(trackIndex).stop();
 					}
-				} else if (a_type == SP_ANIMATION_INTERRUPT) {
-					//onCompleteSignal(this, a_entry->trackIndex, -1);
-				} else if (a_type == SP_ANIMATION_EVENT) {
-					onEventSignal(self, a_entry->trackIndex, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
+				} else if (a_type == spine::EventType_Event) {
+					onEventSignal(self, trackIndex, eventData(a_event));
 				}
 			}
 		}
@@ -631,32 +655,31 @@ namespace MV{
 			return !shouldDraw;
 		}
 
-		void AnimationTrack::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
-			if(a_entry->trackIndex == myTrackIndex){
+		void AnimationTrack::callback(spine::AnimationState* /*a_state*/, spine::EventType a_type, spine::TrackEntry* a_entry, spine::Event* a_event) {
+			if(a_entry->getTrackIndex() == myTrackIndex){
 				recentTrack = a_entry;
-				SCOPE_EXIT{ 
-					recentTrack = nullptr; 
+				SCOPE_EXIT{
+					recentTrack = nullptr;
 				};
-				if (a_type == SP_ANIMATION_DISPOSE) {
+				if (a_type == spine::EventType_Dispose) {
 					onDisposeSignal(*this);
 				} else {
 					if (destroying) {
 						return;
 					}
-					if (a_type == SP_ANIMATION_START) {
+					if (a_type == spine::EventType_Start) {
 						onStartSignal(*this);
-					} else if (a_type == SP_ANIMATION_END) {
+					} else if (a_type == spine::EventType_End) {
 						onEndSignal(*this);
-					} else if (a_type == SP_ANIMATION_COMPLETE) {
-						onCompleteSignal(*this, a_entry->timelinesRotationCount);
-						if (!a_entry->loop) {
+					} else if (a_type == spine::EventType_Complete) {
+						onCompleteSignal(*this, completedLoops(a_entry));
+						if (!a_entry->getLoop()) {
 							stop();
 						}
-					} else if (a_type == SP_ANIMATION_INTERRUPT) {
-						//onCompleteSignal(*this, -1);
-					} else if (a_type == SP_ANIMATION_EVENT) {
-						std::cout << "EVENT: " << a_entry->animation->name << ":" << ((a_event->data && a_event->data->name) ? a_event->data->name : "NULL") << "\n";
-						onEventSignal(*this, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
+					} else if (a_type == spine::EventType_Event) {
+						auto data = eventData(a_event);
+						std::cout << "EVENT: " << a_entry->getAnimation().getName().buffer() << ":" << data.name << "\n";
+						onEventSignal(*this, data);
 					}
 				}
 			}
@@ -664,13 +687,9 @@ namespace MV{
 
 		AnimationTrack& AnimationTrack::animate(const std::string &a_animationName, bool a_loop){
 			require<ResourceException>(skeleton, "Spine asset not loaded, cannot call animate.");
-			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
+			spine::Animation* animation = skeleton->getData().findAnimation(spine::String(a_animationName.c_str()));
 			if(animation){
-				auto* entry = spAnimationState_setAnimation(animationState, myTrackIndex, animation, a_loop);
-				if(entry && !entry->rendererObject){
-					entry->rendererObject = this;
-					entry->listener = spineTrackEntryCallback;
-				}
+				animationState->setAnimation(static_cast<size_t>(myTrackIndex), *animation, a_loop).setListener(static_cast<spine::AnimationStateListenerObject*>(this));
 			} else{
 				std::cerr << "Failed to find animation: " << a_animationName << std::endl;
 			}
@@ -683,13 +702,9 @@ namespace MV{
 
 		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop){
 			require<ResourceException>(skeleton, "Spine asset not loaded, cannot call queueAnimation.");
-			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
+			spine::Animation* animation = skeleton->getData().findAnimation(spine::String(a_animationName.c_str()));
 			if(animation){
-				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, static_cast<float>(a_delay));
-				if(entry && !entry->rendererObject){
-					entry->rendererObject = this;
-					entry->listener = spineTrackEntryCallback;
-				}
+				animationState->addAnimation(static_cast<size_t>(myTrackIndex), *animation, a_loop, static_cast<float>(a_delay)).setListener(static_cast<spine::AnimationStateListenerObject*>(this));
 			} else{
 				std::cerr << "Failed to find animation: " << a_animationName << std::endl;
 			}
@@ -698,76 +713,76 @@ namespace MV{
 
 		AnimationTrack& AnimationTrack::stop(){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call stop.");
-			spAnimationState_clearTrack(animationState, myTrackIndex);
+			animationState->clearTrack(static_cast<size_t>(myTrackIndex));
 			return *this;
 		}
 
 		AnimationTrack& AnimationTrack::time(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call time.");
-			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			auto *foundTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
 			if (foundTrack) {
-				foundTrack->trackTime = static_cast<float>(a_newTime);
+				foundTrack->setTrackTime(static_cast<float>(a_newTime));
 			}
 			return *this;
 		}
 		double AnimationTrack::time() const{
-			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return foundTrack ? static_cast<double>(foundTrack->trackTime) : 0.0;
+			auto *foundTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return foundTrack ? static_cast<double>(foundTrack->getTrackTime()) : 0.0;
 		}
 
 		AnimationTrack& AnimationTrack::crossfade(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
-			auto *trackState = spAnimationState_getCurrent(animationState, myTrackIndex);
+			auto *trackState = animationState->getTrack(static_cast<size_t>(myTrackIndex));
 			if (trackState) {
-				trackState->mixDuration = static_cast<float>(a_newTime);
+				trackState->setMixDuration(static_cast<float>(a_newTime));
 			}
 			return *this;
 		}
 		double AnimationTrack::crossfade() const{
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
-			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return foundTrack ? static_cast<double>(foundTrack->mixDuration) : 0.0;
+			auto *foundTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return foundTrack ? static_cast<double>(foundTrack->getMixDuration()) : 0.0;
 		}
 
 		AnimationTrack& AnimationTrack::timeScale(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
-			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			auto *foundTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
 			if (foundTrack) {
-				foundTrack->timeScale = static_cast<float>(a_newTime);
+				foundTrack->setTimeScale(static_cast<float>(a_newTime));
 			}
 			return *this;
 		}
 		double AnimationTrack::timeScale() const{
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
-			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return foundTrack ? static_cast<double>(foundTrack->timeScale) : 1.0;
+			auto *foundTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return foundTrack ? static_cast<double>(foundTrack->getTimeScale()) : 1.0;
 		}
 
 		std::string AnimationTrack::name() const {
 			if (recentTrack) {
-				return std::string(recentTrack->animation->name);
+				return std::string(recentTrack->getAnimation().getName().buffer());
 			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
-			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return (currentTrack && currentTrack->animation && currentTrack->animation->name) ? currentTrack->animation->name : "NULL";
+			auto *currentTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return (currentTrack && currentTrack->getAnimation().getName().buffer()) ? currentTrack->getAnimation().getName().buffer() : "NULL";
 		}
 
 		double AnimationTrack::duration() const {
 			if (recentTrack) {
-				return recentTrack->animation->duration;
+				return recentTrack->getAnimation().getDuration();
 			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call duration.");
-			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return (currentTrack && currentTrack->animation) ? currentTrack->animation->duration : 0.0f;
+			auto *currentTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return currentTrack ? currentTrack->getAnimation().getDuration() : 0.0f;
 		}
 
 		bool AnimationTrack::looping() const {
 			if (recentTrack) {
-				return recentTrack->loop;
+				return recentTrack->getLoop();
 			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
-			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return currentTrack && currentTrack->loop;
+			auto *currentTrack = animationState->getTrack(static_cast<size_t>(myTrackIndex));
+			return currentTrack && currentTrack->getLoop();
 		}
 
 	}

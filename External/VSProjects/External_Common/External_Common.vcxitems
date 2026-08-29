@@ -14,6 +14,7 @@
     <ProjectCapability Include="SourceItemsFromImports" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\src\*.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Collision\b2BroadPhase.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Collision\b2CollideCircle.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Collision\b2CollideEdge.cpp" />
@@ -60,48 +61,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Dynamics\Joints\b2WeldJoint.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Dynamics\Joints\b2WheelJoint.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Box2D\Rope\b2Rope.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\MVAdapters\spineBinder.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Animation.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\AnimationState.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\AnimationStateData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Array.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Atlas.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\AtlasAttachmentLoader.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Attachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\AttachmentLoader.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Bone.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\BoneData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\BoundingBoxAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\ClippingAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Color.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Event.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\EventData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\extension.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\IkConstraint.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\IkConstraintData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Json.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\MeshAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\PathAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\PathConstraint.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\PathConstraintData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\PointAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\RegionAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Skeleton.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SkeletonBinary.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SkeletonBounds.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SkeletonClipping.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SkeletonData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SkeletonJson.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Skin.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Slot.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\SlotData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\TransformConstraint.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\TransformConstraintData.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\Triangulator.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\VertexAttachment.c" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\spine\VertexEffect.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\MVAdapters\spineBinder.h" />
   </ItemGroup>
 </Project>

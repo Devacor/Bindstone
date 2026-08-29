@@ -1,87 +1,92 @@
 /******************************************************************************
- * Spine Runtimes Software License v2.5
+ * Spine Runtimes License Agreement
+ * Last updated April 5, 2025. Replaces all prior versions.
  *
- * Copyright (c) 2013-2016, Esoteric Software
- * All rights reserved.
+ * Copyright (c) 2013-2025, Esoteric Software LLC
  *
- * You are granted a perpetual, non-exclusive, non-sublicensable, and
- * non-transferable license to use, install, execute, and perform the Spine
- * Runtimes software and derivative works solely for personal or internal
- * use. Without the written permission of Esoteric Software (see Section 2 of
- * the Spine Software License Agreement), you may not (a) modify, translate,
- * adapt, or develop new applications using the Spine Runtimes or otherwise
- * create derivative works or improvements of the Spine Runtimes or (b) remove,
- * delete, alter, or obscure any trademarks or any copyright, trademark, patent,
- * or other intellectual property or proprietary rights notices on or in the
- * Software, including any copy thereof. Redistributions in binary or source
- * form must include this license and terms.
+ * Integration of the Spine Runtimes into software or otherwise creating
+ * derivative works of the Spine Runtimes is permitted under the terms and
+ * conditions of Section 2 of the Spine Editor License Agreement:
+ * http://esotericsoftware.com/spine-editor-license
  *
- * THIS SOFTWARE IS PROVIDED BY ESOTERIC SOFTWARE "AS IS" AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL ESOTERIC SOFTWARE BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES, BUSINESS INTERRUPTION, OR LOSS OF
- * USE, DATA, OR PROFITS) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
- * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Otherwise, it is permitted to integrate the Spine Runtimes into software
+ * or otherwise create derivative works of the Spine Runtimes (collectively,
+ * "Products"), provided that each user of the Products must obtain their own
+ * Spine Editor license and redistribution of the Products in any form must
+ * include this license and copyright notice.
+ *
+ * THE SPINE RUNTIMES ARE PROVIDED BY ESOTERIC SOFTWARE LLC "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL ESOTERIC SOFTWARE LLC BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES,
+ * BUSINESS INTERRUPTION, OR LOSS OF USE, DATA, OR PROFITS) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THE SPINE RUNTIMES, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *****************************************************************************/
 
-#ifndef SPINE_IKCONSTRAINT_H_
-#define SPINE_IKCONSTRAINT_H_
+#ifndef Spine_IkConstraint_h
+#define Spine_IkConstraint_h
 
-#include <spine/dll.h>
+#include <spine/Constraint.h>
+#include <spine/ConstraintData.h>
 #include <spine/IkConstraintData.h>
-#include <spine/Bone.h>
+#include <spine/IkConstraintPose.h>
+#include <spine/Array.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace spine {
+	class Skeleton;
+	class Bone;
+	class BonePose;
 
-struct spSkeleton;
+	// Non-exported base class that inherits from the template
+	class IkConstraintBase : public ConstraintGeneric<IkConstraint, IkConstraintData, IkConstraintPose> {
+	public:
+		IkConstraintBase(IkConstraintData &data) : ConstraintGeneric<IkConstraint, IkConstraintData, IkConstraintPose>(data) {
+		}
+	};
 
-typedef struct spIkConstraint {
-	spIkConstraintData* const data;
+	class SP_API IkConstraint : public IkConstraintBase {
+		friend class Skeleton;
 
-	int bonesCount;
-	spBone** bones;
+		friend class IkConstraintTimeline;
 
-	spBone* target;
-	int bendDirection;
-	float mix;
+		RTTI_DECL
 
-#ifdef __cplusplus
-	spIkConstraint() :
-		data(0),
-		bonesCount(0),
-		bones(0),
-		target(0),
-		bendDirection(0),
-		mix(0) {
-	}
-#endif
-} spIkConstraint;
+	public:
+		IkConstraint(IkConstraintData &data, Skeleton &skeleton);
 
-SP_API spIkConstraint* spIkConstraint_create (spIkConstraintData* data, const struct spSkeleton* skeleton);
-SP_API void spIkConstraint_dispose (spIkConstraint* self);
+		virtual IkConstraint &copy(Skeleton &skeleton);
 
-SP_API void spIkConstraint_apply (spIkConstraint* self);
+		virtual void update(Skeleton &skeleton, Physics physics) override;
 
-SP_API void spIkConstraint_apply1 (spBone* bone, float targetX, float targetY, float alpha);
-SP_API void spIkConstraint_apply2 (spBone* parent, spBone* child, float targetX, float targetY, int bendDirection, float alpha);
+		virtual void sort(Skeleton &skeleton) override;
 
-#ifdef SPINE_SHORT_NAMES
-typedef spIkConstraint IkConstraint;
-#define IkConstraint_create(...) spIkConstraint_create(__VA_ARGS__)
-#define IkConstraint_dispose(...) spIkConstraint_dispose(__VA_ARGS__)
-#define IkConstraint_apply(...) spIkConstraint_apply(__VA_ARGS__)
-#define IkConstraint_apply1(...) spIkConstraint_apply1(__VA_ARGS__)
-#define IkConstraint_apply2(...) spIkConstraint_apply2(__VA_ARGS__)
-#endif
+		virtual bool isSourceActive() override;
 
-#ifdef __cplusplus
+		Array<BonePose *> &getBones();
+
+		Bone &getTarget();
+
+		void setTarget(Bone &inValue);
+
+		/// Adjusts the local rotation of the bone so the world position of the tip is as close to the target position as
+		/// possible. The target is specified in the world coordinate system.
+		static void apply(Skeleton &skeleton, BonePose &bone, float targetX, float targetY, bool compress, bool stretch, ScaleYMode scaleYMode,
+						  float mix);
+
+		/// Adjusts the parent and child bone rotations so the tip of the child is as close to the target position as
+		/// possible. The target is specified in the world coordinate system.
+		/// @param child A direct descendant of the parent bone.
+		static void apply(Skeleton &skeleton, BonePose &parent, BonePose &child, float targetX, float targetY, int bendDirection, bool stretch,
+						  ScaleYMode scaleYMode, float softness, float mix);
+
+	private:
+		Array<BonePose *> _bones;
+		Bone *_target;
+	};
 }
-#endif
 
-#endif /* SPINE_IKCONSTRAINT_H_ */
+#endif /* Spine_IkConstraint_h */

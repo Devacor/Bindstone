@@ -1,12 +1,7 @@
 building.png
-size: 512,512
-format: RGBA8888
-filter: Linear,Linear
-repeat: none
+size:488,500
+filter:Linear,Linear
+pma:true
 Assets/gateway
-  rotate: false
-  xy: 0, 0
-  size: 512, 512
-  orig: 512, 512
-  offset: 0, 0
-  index: -1
+bounds:2,2,484,496
+offsets:22,2,512,512

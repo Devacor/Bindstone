@@ -19,7 +19,7 @@ self.spawn = [=](var& self) -> void {
 			targeting.self().setVar("chompCount", chomp + 1);
 			if (chomp % 3 == 0) {
 				var attacker = targeting.self();
-				knockback(attacker, target, 10, 0.35);
+				knockback(attacker, target, 10, 0.35, 2.0);
 				targeting.self().visible(false);
 				targeting.self().untargetable(true);
 				targeting.self().agent().stop();

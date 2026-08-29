@@ -3,7 +3,8 @@
 
 // Flight: the victim leaves the grid (no footprint), is stunned for the flight, eases toward the
 // landing cell, then takes its footprint back (the agent's own placement nudges it if the cell filled).
-void knockback(var& self, var victimId, int cells, double seconds) {
+// landingStun: a further stun applied the moment the victim lands (0 for none)
+void knockback(var& self, var victimId, int cells, double seconds, double landingStun) {
 	var victim = self.game().creature(victimId);
 	if (victim == null || !victim.alive() || cells <= 0) {
 		return;
@@ -32,6 +33,7 @@ void knockback(var& self, var victimId, int cells, double seconds) {
 			victim.setVar("flightLanding", landing);
 			victim.setVar("flightDuration", seconds);
 			victim.setVar("flightRemaining", seconds);
+			victim.setVar("flightLandingStun", landingStun);
 			return;
 		}
 	}
@@ -55,6 +57,10 @@ void statusTick(var& self, double dt) {
 		self.setVar("flightRemaining", 0.0);
 		self.agent().gridPosition(self.getVar("flightLanding"));
 		self.agent().enableFootprint();
+		double landingStun = self.getVar("flightLandingStun");
+		if (landingStun > 0.0) {
+			self.stun(landingStun);
+		}
 		return;
 	}
 	self.setVar("flightRemaining", remaining);

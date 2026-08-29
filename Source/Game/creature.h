@@ -160,6 +160,7 @@ public:
 
 	void root(float a_duration);
 
+	void clear() { clearTarget(); }
 	bool stunned() const {
 		return stunDuration > 0.0f;
 	}
@@ -219,6 +220,7 @@ struct CreatureNetworkState {
 	MV::DeltaVariable<MV::Point<MV::PointPrecision>> position;
 
 	MV::DeltaVariable<std::string> animationName;
+	MV::DeltaVariable<bool> hidden = false;
 
 	bool animationLoops = false;
 	double animationTime = 0.0;
@@ -238,6 +240,7 @@ struct CreatureNetworkState {
 		variables = a_other->variables;
 		health = a_other->health;
 		position = a_other->position;
+		hidden = a_other->hidden;
 		bool newAnimationBasedOnTime = a_other->animationTime < animationTime;
 		animationTime = a_other->animationTime;
 		if (animationName != a_other->animationName || animationLoops != a_other->animationLoops || newAnimationBasedOnTime) {
@@ -279,11 +282,13 @@ struct CreatureNetworkState {
 			archive.serialize("animationLoops", animationLoops);
 			const_cast<MV::DeltaVariable<int32_t>&>(buildingSlot).serialize(archive, "slot", true);
 			const_cast<MV::DeltaVariable<MV::Point<MV::PointPrecision>>&>(position).serialize(archive, "position", true);
+			const_cast<MV::DeltaVariable<bool>&>(hidden).serialize(archive, "hidden", true);
 			const_cast<MV::DeltaVariable<std::map<std::string, MV::DynamicVariable>>&>(variables).serialize(archive, "variables", true);
 		} else {
 			creatureTypeId.serialize(archive, "creatureTypeId");
 			health.serialize(archive, "health");
 			animationName.serialize(archive, "animationName");
+			hidden.serialize(archive, "hidden");
 			archive.serialize("animationTime", animationTime);
 			archive.serialize("animationLoops", animationLoops);
 			buildingSlot.serialize(archive, "slot");
@@ -434,8 +439,8 @@ public:
 	double moveSpeed() const { return baseMoveSpeed; }
 	void stun(double a_seconds);
 	void root(double a_seconds);
-	void knockback(int a_cells, int64_t a_sourceId);
-	void blinkTo(int64_t a_targetId);
+	void visible(bool a_value);
+	bool visible() const { return !*state->self()->hidden; }
 	void taunt(int64_t a_attackerId, double a_seconds) { tauntId = a_attackerId; tauntRemaining = scaledDuration(a_seconds); }
 	int64_t tauntedBy() const { return tauntRemaining > 0.0 ? tauntId : 0; }
 	void untargetable(bool a_value) { untargetableFlag = a_value; }

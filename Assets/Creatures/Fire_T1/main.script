@@ -1,4 +1,6 @@
 // Flicker (Fire T1): low health offense; ember shots, flame jet ignites, explodes on death
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -68,6 +70,7 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 	self.setVar("jetCooldown", self.getVar("jetCooldown") - dt);
 	if (self.getVar("jetCooldown") <= 0.0) {
 		self.setVar("jetCooldown", 6.0);

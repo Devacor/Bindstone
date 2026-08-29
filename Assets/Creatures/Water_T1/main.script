@@ -1,4 +1,6 @@
 // Tearel (Water T1): untargetable support; splits into a suffocating Tare and a sheltering Tear at first contact
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -25,6 +27,7 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
 	if (self.nearestEnemyId(8) != 0) {
 		self.spawnCreature("Water_DropletHurt");
 		self.spawnCreature("Water_DropletHeal");

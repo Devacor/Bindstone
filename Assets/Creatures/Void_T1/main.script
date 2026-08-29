@@ -1,9 +1,12 @@
-// Voidling (Void T1): low health burst; the first chomp on a target (and every third after) portals it ten cells back, stuns it, and the Voidling blinks after it
+// Voidling (Void T1): low health burst; the first chomp on a target (and every third after) hurls it ten cells back - stunned for the flight - while the Voidling phases out, then reappears beside it where it lands
+include "Creatures/Shared/status.script";
+
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.setVar("chompTarget", 0);
 	self.setVar("chompCount", 0);
+	self.setVar("phasing", 0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
@@ -15,9 +18,13 @@ self.spawn = [=](var& self) -> void {
 			var chomp = targeting.self().getVar("chompCount");
 			targeting.self().setVar("chompCount", chomp + 1);
 			if (chomp % 3 == 0) {
-				targeting.self().game().creature(target).knockback(10, me);
-				targeting.self().game().creature(target).stun(0.4);
-				targeting.self().blinkTo(target);
+				var attacker = targeting.self();
+				knockback(attacker, target, 10, 0.35);
+				targeting.self().visible(false);
+				targeting.self().untargetable(true);
+				targeting.self().agent().stop();
+				targeting.clear();
+				targeting.self().setVar("phasing", target);
 			}
 			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(8, me); }
 		}
@@ -73,6 +80,19 @@ self.spawn = [=](var& self) -> void {
 };
 
 self.update = [=](var& self, double dt) -> void {
+	statusTick(self, dt);
+	if (self.getVar("phasing") != 0) {
+		var phased = self.game().creature(self.getVar("phasing"));
+		if (phased == null || !inFlight(phased)) {
+			if (phased != null) {
+				teleportNear(self, self.getVar("phasing"), 3);
+			}
+			self.visible(true);
+			self.untargetable(false);
+			self.setVar("phasing", 0);
+		}
+		return;
+	}
 
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");

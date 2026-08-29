@@ -1,12 +1,21 @@
 self.spawn = [=](var& self) -> void {
 	self.setVar("nextSpawn", 5.0);
+	self.setVar("spawnedCount", 0);
+	// SpawnBudget (engine global, -1 in the game) caps spawns per building for bounded balance runs
+	self.setVar("spawnUnit", [=](var& self, var unitId) -> void {
+		if (SpawnBudget < 0 || self.getVar("spawnedCount") < SpawnBudget) {
+			self.setVar("spawnedCount", self.getVar("spawnedCount") + 1);
+			self.spawnCreature(unitId);
+		}
+	});
 	self.setVar("T0", [=](var& self, double dt) -> void {});
 
 	self.setVar("T1", [=](var& self, double dt) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);
-			self.spawnCreature("Decay_T1");
+			var spawnUnit = self.getVar("spawnUnit");
+			spawnUnit(self, "Decay_T1");
 		}
 	});
 
@@ -14,7 +23,8 @@ self.spawn = [=](var& self) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);
-			self.spawnCreature("Decay_T1");
+			var spawnUnit = self.getVar("spawnUnit");
+			spawnUnit(self, "Decay_T1");
 		}
 	});
 
@@ -22,7 +32,8 @@ self.spawn = [=](var& self) -> void {
 		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
 		if (self.getVar("nextSpawn") <= 0) {
 			self.setVar("nextSpawn", 5.0);
-			self.spawnCreature("Decay_T1");
+			var spawnUnit = self.getVar("spawnUnit");
+			spawnUnit(self, "Decay_T1");
 		}
 	});
 };

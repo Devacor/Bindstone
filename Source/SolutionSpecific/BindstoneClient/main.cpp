@@ -1,4 +1,5 @@
 #include "Game/gameEditor.h"
+#include "Game/Instance/arenaInstance.h"
 #include "Game/NetworkLayer/synchronizeAction.h"
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Utility/services.hpp"
@@ -536,6 +537,64 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
+
+// Headless balance sample: Bindstone.exe -arena life,decay void,earth [seconds=150] [seed=1] [budget=8]
+// budget = spawns per building (-1 unlimited): bounded waves let the stronger side actually leak.
+// Loadouts alternate the two elements across the eight slots; prints one JSON line with the leaks
+// each well took (a leak = a creature reaching the enemy well), the winner and the spawn counts.
+static int RunArena(const std::string& a_left, const std::string& a_right, double a_seconds, uint32_t a_seed, int a_budget) {
+	MV::scriptDebugEnabled(false);
+	Managers managers({ "", "" });
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	static MV::TapDevice arenaMouse;
+	managers.services.connect(&arenaMouse);
+	managers.renderer.makeHeadless();
+	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
+		std::cout << "[arena] renderer init failed" << std::endl;
+		return 1;
+	}
+	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::initializeSpineBindings();
+	GameData data(managers, true);
+	auto root = MV::Scene::Node::make(managers.renderer);
+	auto makePlayer = [](int64_t a_id, const std::string& a_handle, const std::string& a_elements) {
+		auto player = std::make_shared<InGamePlayer>();
+		player->id = a_id;
+		player->handle = a_handle;
+		std::vector<std::string> elements;
+		std::stringstream parts(a_elements);
+		std::string element;
+		while (std::getline(parts, element, ',')) { if (!element.empty()) { elements.push_back(element); } }
+		for (int slot = 0; slot < 8; ++slot) {
+			player->loadout.buildings.push_back(elements[slot % elements.size()]);
+			player->loadout.skins.push_back("");
+		}
+		return player;
+	};
+	auto left = makePlayer(1, "left", a_left);
+	auto right = makePlayer(2, "right", a_right);
+	int scriptErrors = 0;
+	jaiEngine->set_script_error_handler([&](const std::string& a_message) { ++scriptErrors; MV::error("Script callback failed: ", a_message); });
+	jaiEngine->add_global("SpawnBudget", jai::script_value(static_cast<int64_t>(a_budget), jaiEngine.get()));
+	auto instance = ArenaGameInstance::make(root, data, arenaMouse, left, right);
+	instance->scheduleOpeningUpgrades(a_seed, 4.0);
+	const double step = 1.0 / 10.0;
+	while (instance->elapsed < a_seconds && instance->step(step)) {}
+	auto spawnList = [&](int a_side) {
+		std::string result;
+		for (auto& kv : instance->spawned[a_side]) { result += (result.empty() ? "" : ",") + ("\"" + kv.first + "\":" + std::to_string(kv.second)); }
+		return "{" + result + "}";
+	};
+	std::cout << "{\"arena\":1,\"left\":\"" << a_left << "\",\"right\":\"" << a_right << "\",\"seed\":" << a_seed
+		<< ",\"seconds\":" << instance->elapsed
+		<< ",\"leaksOnLeft\":" << instance->leaksAgainst(TeamSide::LEFT) << ",\"leaksOnRight\":" << instance->leaksAgainst(TeamSide::RIGHT)
+		<< ",\"winner\":\"" << (instance->winner == TeamSide::LEFT ? "left" : instance->winner == TeamSide::RIGHT ? "right" : "none") << "\""
+		<< ",\"spawnedLeft\":" << spawnList(0) << ",\"spawnedRight\":" << spawnList(1)
+		<< ",\"budget\":" << a_budget << ",\"scriptErrors\":" << scriptErrors << "}" << std::endl;
+	return 0;
+}
+
 static int RunAssetVerification() {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
@@ -838,6 +897,12 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-loadbenchgl") == 0) {
 			RunSceneLoadBenchmark(false);
 			return 0;
+		}
+		if (strcmp(argv[i], "-arena") == 0 && i + 2 < argc) {
+			double seconds = i + 3 < argc ? std::atof(argv[i + 3]) : 150.0;
+			uint32_t seed = i + 4 < argc ? static_cast<uint32_t>(std::atoi(argv[i + 4])) : 1u;
+			int budget = i + 5 < argc ? std::atoi(argv[i + 5]) : 8;
+			return RunArena(argv[i + 1], argv[i + 2], seconds > 0.0 ? seconds : 150.0, seed, budget);
 		}
 		if (strcmp(argv[i], "-verifyassets") == 0) {
 			return RunAssetVerification();

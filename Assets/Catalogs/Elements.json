@@ -1,0 +1,49 @@
+{
+    "damage": [
+        { "attacker": "water", "defender": "fire", "multiplier": 1.5 },
+        { "attacker": "water", "defender": "earth", "multiplier": 1.25 },
+        { "attacker": "water", "defender": "lightning", "multiplier": 0.8 },
+
+        { "attacker": "fire", "defender": "air", "multiplier": 1.25 },
+        { "attacker": "fire", "defender": "life", "multiplier": 1.25 },
+        { "attacker": "fire", "defender": "water", "multiplier": 0.5 },
+        { "attacker": "fire", "defender": "earth", "multiplier": 0.8 },
+
+        { "attacker": "earth", "defender": "lightning", "multiplier": 2.0 },
+        { "attacker": "earth", "defender": "fire", "multiplier": 1.25 },
+        { "attacker": "earth", "defender": "air", "multiplier": 0.8 },
+        { "attacker": "earth", "defender": "water", "multiplier": 0.8 },
+
+        { "attacker": "lightning", "defender": "water", "multiplier": 1.25 },
+        { "attacker": "lightning", "defender": "air", "multiplier": 1.25 },
+        { "attacker": "lightning", "defender": "earth", "multiplier": 0.5 },
+        { "attacker": "lightning", "defender": "void", "multiplier": 0.8 },
+
+        { "attacker": "air", "defender": "earth", "multiplier": 1.25 },
+        { "attacker": "air", "defender": "fire", "multiplier": 0.8 },
+        { "attacker": "air", "defender": "lightning", "multiplier": 0.8 },
+
+        { "attacker": "life", "defender": "void", "multiplier": 1.25 },
+        { "attacker": "life", "defender": "decay", "multiplier": 0.8 },
+        { "attacker": "life", "defender": "fire", "multiplier": 0.8 },
+
+        { "attacker": "decay", "defender": "life", "multiplier": 1.25 },
+        { "attacker": "decay", "defender": "void", "multiplier": 0.8 },
+
+        { "attacker": "void", "defender": "decay", "multiplier": 1.25 },
+        { "attacker": "void", "defender": "lightning", "multiplier": 1.25 },
+        { "attacker": "void", "defender": "life", "multiplier": 0.8 }
+    ],
+    "synergy": [
+        { "attacker": "lightning", "affecting": "water", "multiplier": 1.5 },
+        { "attacker": "lightning", "affecting": "air", "multiplier": 1.25 },
+        { "attacker": "fire", "affecting": "decay", "multiplier": 1.25 },
+        { "attacker": "water", "affecting": "fire", "multiplier": 1.25 },
+        { "attacker": "earth", "affecting": "water", "multiplier": 1.25 }
+    ],
+    "ward": [
+        { "ward": "water", "host": "lightning", "scale": 1.5 },
+        { "ward": "water", "host": "earth", "scale": 1.25 },
+        { "ward": "water", "host": "fire", "scale": 0.6 }
+    ]
+}

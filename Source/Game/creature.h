@@ -14,6 +14,7 @@
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/Instance/team.h"
 #include "Game/standardScriptMethods.h"
+#include "Game/elements.h"
 
 #include "MV/Network/dynamicVariable.h"
 #include "MV/Network/networkObject.h"
@@ -41,6 +42,10 @@ struct CreatureData {
 	float strength = 0.0f;
 	float ability = 0.0f;
 
+	// every type the unit carries; multipliers multiply across them (an earth+metal unit takes
+	// water x earth and water x metal from a water hit)
+	std::vector<std::string> elements;
+
 	bool isServer = false;
 
 	template<class Archive>
@@ -48,7 +53,7 @@ struct CreatureData {
 		archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
 			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed),
 			JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
-			JAI_NVP(strength), JAI_NVP(ability));
+			JAI_NVP(strength), JAI_NVP(ability), JAI_NVP(elements));
 	}
 
 	StandardScriptMethods<Creature>& script(MV::Script&a_script) const {
@@ -336,6 +341,9 @@ public:
 		return spineAnimator;
 	}
 
+	std::vector<std::string> elements() const { return statTemplate.elements.empty() ? std::vector<std::string>{ ElementTable::elementOf(statTemplate.id) } : statTemplate.elements; }
+	std::string element() const { return elements().front(); }
+
 	static void jai_auto_bind(jai::dynamic_binder<Creature>& builder);
 
 protected:
@@ -407,15 +415,16 @@ public:
 		return pathAgent;
 	}
 
-	// Combat status shared by every creature script. Damage routes through the shield, then the
-	// absorber (an ally taking a share), then health; timed effects tick in update; movement is
-	// moveSpeed x multiplier; stun/root durations are scaled while an absorber protects this unit.
+	// Combat status shared by every creature script. Damage is scaled by the element table (attacker
+	// x defender, then any synergy with an element already on this unit), then routes through the
+	// shield, the absorber (an ally taking a share), and health; timed effects tick in update; movement
+	// is moveSpeed x multiplier; stun/root durations are scaled while an absorber protects this unit.
 	int damage(int a_amount, int64_t a_sourceId);
 	void heal(int a_amount) { changeHealth(std::max(0, a_amount)); }
 	void shield(int a_amount) { shieldPoints = std::max(shieldPoints, a_amount); }
 	int shieldAmount() const { return shieldPoints; }
-	void dot(double a_perSecond, double a_seconds, int64_t a_sourceId) { timedEffects.push_back({ -a_perSecond, scaledDuration(a_seconds), a_sourceId, 0.0 }); }
-	void hot(double a_perSecond, double a_seconds) { timedEffects.push_back({ a_perSecond, a_seconds, 0, 0.0 }); }
+	void dot(double a_perSecond, double a_seconds, int64_t a_sourceId);
+	void hot(double a_perSecond, double a_seconds) { timedEffects.push_back({ a_perSecond, a_seconds, 0, 0.0, {} }); }
 	void slow(double a_fraction, double a_seconds) { apply(slowEffect, a_fraction, scaledDuration(a_seconds)); }
 	void haste(double a_fraction, double a_seconds) { apply(hasteEffect, a_fraction, a_seconds); }
 	void attackHaste(double a_fraction, double a_seconds) { apply(attackHasteEffect, a_fraction, a_seconds); }
@@ -426,6 +435,7 @@ public:
 	void stun(double a_seconds);
 	void root(double a_seconds);
 	void knockback(int a_cells, int64_t a_sourceId);
+	void blinkTo(int64_t a_targetId);
 	void taunt(int64_t a_attackerId, double a_seconds) { tauntId = a_attackerId; tauntRemaining = scaledDuration(a_seconds); }
 	int64_t tauntedBy() const { return tauntRemaining > 0.0 ? tauntId : 0; }
 	void untargetable(bool a_value) { untargetableFlag = a_value; }
@@ -470,12 +480,14 @@ private:
 
 	virtual void updateImplementation(double a_delta) override;
 
-	struct TimedEffect { double perSecond; double remaining; int64_t source; double carry; };
+	struct TimedEffect { double perSecond; double remaining; int64_t source; double carry; std::vector<std::string> elements; };
 	struct TimedFraction { double fraction = 0.0; double remaining = 0.0; };
 	static void apply(TimedFraction& a_effect, double a_fraction, double a_seconds) {
 		if (a_fraction >= a_effect.fraction) { a_effect.fraction = a_fraction; }
 		a_effect.remaining = std::max(a_effect.remaining, a_seconds);
 	}
+	int damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId);
+	double elementMultiplier(const std::vector<std::string>& a_attackerElements) const;
 	double scaledDuration(double a_seconds) const;
 	std::shared_ptr<ServerCreature> serverCreature(int64_t a_id) const;
 	void updateStatus(double a_dt);

@@ -32,6 +32,10 @@ public:
 		return *(battleEffectCatalog.get());
 	}
 
+	ElementTable& elements() {
+		return *(elementTable.get());
+	}
+
 	Constants& constants() {
 		return metadataConstants;
 	}
@@ -43,6 +47,7 @@ private:
 	std::unique_ptr<Catalog<BuildingData>> buildingCatalog;
 	std::unique_ptr<Catalog<CreatureData>> creatureCatalog;
 	std::unique_ptr<Catalog<BattleEffectData>> battleEffectCatalog;
+	std::unique_ptr<ElementTable> elementTable;
 	Constants metadataConstants;
 	Managers& allManagers;
 };

@@ -11,7 +11,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "life"
+            ]
         },
         {
             "id": "Decay_T1",
@@ -24,7 +27,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "decay"
+            ]
         },
         {
             "id": "Void_T1",
@@ -37,7 +43,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "void"
+            ]
         },
         {
             "id": "Earth_T1",
@@ -50,7 +59,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "earth"
+            ]
         },
         {
             "id": "Earth_Pebble",
@@ -63,7 +75,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "earth"
+            ]
         },
         {
             "id": "Fire_T1",
@@ -76,7 +91,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "fire"
+            ]
         },
         {
             "id": "Water_T1",
@@ -89,7 +107,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "water"
+            ]
         },
         {
             "id": "Water_DropletHeal",
@@ -102,7 +123,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "water"
+            ]
         },
         {
             "id": "Water_DropletHurt",
@@ -115,7 +139,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "water"
+            ]
         },
         {
             "id": "Air_T1",
@@ -128,7 +155,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "air"
+            ]
         },
         {
             "id": "Lightning_T1",
@@ -141,7 +171,10 @@
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,
-            "ability": 100.0
+            "ability": 100.0,
+            "elements": [
+                "lightning"
+            ]
         }
     ]
 }

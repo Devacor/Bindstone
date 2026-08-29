@@ -42,4 +42,5 @@ GameData::GameData(Managers& a_managers, bool a_isServer) :
 	buildingCatalog = std::make_unique<Catalog<BuildingData>>("Buildings"s, a_isServer);
 	creatureCatalog = std::make_unique<Catalog<CreatureData>>("Creatures"s, a_isServer);
 	battleEffectCatalog = std::make_unique<Catalog<BattleEffectData>>("BattleEffects"s, a_isServer);
+	elementTable = std::make_unique<ElementTable>();
 }

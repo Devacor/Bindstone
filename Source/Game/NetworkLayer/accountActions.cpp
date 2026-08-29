@@ -119,7 +119,7 @@ void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, c
 
 std::string CreatePlayer::makeSaveString() {
 	IntermediateDbPlayer newPlayer;
-	newPlayer.loadouts["Default"].buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
+	newPlayer.loadouts["Default"].buildings = { "life", "decay", "void", "earth", "fire", "water", "air", "lightning" };
 	newPlayer.loadouts["Default"].skins = { "", "", "", "", "", "", "", "" };
 	newPlayer.selectedLoadout = "Default";
 

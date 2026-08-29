@@ -1,42 +1,57 @@
+// Whisper (Air T1): low health support/cc; wind slices, gust throws enemies back, sail speeds allies
 self.spawn = [=](var& self) -> void {
+	self.setVar("attacking", false);
+	self.setVar("activeTarget", 0);
+	self.setVar("gustCooldown", 3.0);
+	self.setVar("sailCooldown", 0.0);
+
+	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
+		var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
+		newMissile.duration = 1.25;
+		newMissile.targetType = TargetType_CREATURE;
+		newMissile.targetCreatureId = target;
+		var source = targeting.self().networkId();
+		auto effect = spawnOnNetwork(newMissile);
+		effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
+			if (battleEffect.targetCreature() != null && battleEffect.targetCreature().alive()) {
+				battleEffect.targetCreature().damage(2, source);
+			}
+		});
+	});
+
 	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
 		var targets = self.enemiesInRange(20);
-		if (!targets.empty()) {
-			var target = targets[0].networkId();
-			var activeTarget = self.getVar("activeTarget");
-			if (activeTarget != target) {
-				self.setVar("activeTarget", target);
-				self.targeting().target(target, 10, [target](var& targeting) -> void {
-					targeting.self().setVar("activeTarget", 0);
-					targeting.self().setVar("attacking", true);
-					auto spine = targeting.self().spine();
-					spine.animate("attack", false);
-					spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
-						if (eventData.name == "launch") {
-							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
-							newMissile.duration = 1.25;
-							newMissile.targetType = TargetType_CREATURE;
-							newMissile.targetCreatureId = target;
-							auto effect = spawnOnNetwork(newMissile);
-							effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
-								if (battleEffect.targetCreature() != null) {
-									battleEffect.targetCreature().changeHealth(-5);
-								}
-							});
-						}
-					});
-					spine.onEnd.connect("unlock", [targeting](var& spine, int index) -> void {
-						if (spine.track(index).name() == "attack") {
-							targeting.self().setVar("attacking", false);
-						}
-					});
-				}, [=](var& targeting) -> void {
-					targeting.self().setVar("activeTarget", 0);
-				});
-			}
-			return true;
+		var taunt = self.tauntedBy();
+		if (targets.empty() && taunt == 0) {
+			return false;
 		}
-		return false;
+		var target = (taunt != 0) ? taunt : targets[0].networkId();
+		var activeTarget = self.getVar("activeTarget");
+		if (activeTarget != target) {
+			self.setVar("activeTarget", target);
+			self.targeting().target(target, 8, [target](var& targeting) -> void {
+				targeting.self().setVar("activeTarget", 0);
+				targeting.self().setVar("attacking", true);
+				auto spine = targeting.self().spine();
+				spine.timeScale(targeting.self().attackSpeedMultiplier());
+				spine.animate("attack", false);
+				spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
+					if (eventData.name == "launch") {
+						var attackTarget = targeting.self().getVar("attackTarget");
+						attackTarget(targeting, target);
+					}
+				});
+				spine.onEnd.connect("unlock", [targeting](var& spine, int index) -> void {
+					if (spine.track(index).name() == "attack") {
+						targeting.self().setVar("attacking", false);
+						spine.timeScale(1.0);
+					}
+				});
+			}, [=](var& targeting) -> void {
+				targeting.self().setVar("activeTarget", 0);
+			});
+		}
+		return true;
 	});
 
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
@@ -44,13 +59,32 @@ self.spawn = [=](var& self) -> void {
 			targeting.self().fall();
 		});
 	});
-
-	self.setVar("attacking", false);
-	self.setVar("activeTarget", 0);
-	self.agent().gridSpeed(10);
 };
 
 self.update = [=](var& self, double dt) -> void {
+	self.setVar("gustCooldown", self.getVar("gustCooldown") - dt);
+	if (self.getVar("gustCooldown") <= 0.0) {
+		self.setVar("gustCooldown", 6.0);
+		var enemies = self.enemiesInRange(6);
+		if (!enemies.empty()) {
+			for (int i = 0; i < enemies.size(); ++i) {
+				enemies[i].knockback(2, self.networkId());
+				enemies[i].slow(0.3, 2.0);
+				enemies[i].damage(2, self.networkId());
+			}
+		} else {
+			self.setVar("gustCooldown", 0.5);
+		}
+	}
+	self.setVar("sailCooldown", self.getVar("sailCooldown") - dt);
+	if (self.getVar("sailCooldown") <= 0.0) {
+		self.setVar("sailCooldown", 1.0);
+		var allies = self.alliesInRange(5);
+		for (int i = 0; i < allies.size(); ++i) {
+			allies[i].haste(0.15, 1.2);
+			allies[i].attackHaste(0.10, 1.2);
+		}
+	}
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {

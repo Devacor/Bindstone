@@ -1,41 +1,17 @@
+// Tare (Water T1): untargetable; clings to an enemy and suffocates it
 self.spawn = [=](var& self) -> void {
+	self.setVar("attacking", false);
+	self.setVar("activeTarget", 0);
+	self.untargetable(true);
+	self.setVar("host", 0);
+	self.setVar("life", 12.0);
+	self.setVar("clingCooldown", 0.0);
+
+	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
+		// no basic attack
+	});
+
 	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
-		var targets = self.enemiesInRange(20);
-		if (!targets.empty()) {
-			var target = targets[0].networkId();
-			var activeTarget = self.getVar("activeTarget");
-			if (activeTarget != target) {
-				self.setVar("activeTarget", target);
-				self.targeting().target(target, 10, [target](var& targeting) -> void {
-					targeting.self().setVar("activeTarget", 0);
-					targeting.self().setVar("attacking", true);
-					auto spine = targeting.self().spine();
-					spine.animate("attack", false);
-					spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
-						if (eventData.name == "launch") {
-							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
-							newMissile.duration = 1.25;
-							newMissile.targetType = TargetType_CREATURE;
-							newMissile.targetCreatureId = target;
-							auto effect = spawnOnNetwork(newMissile);
-							effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
-								if (battleEffect.targetCreature() != null) {
-									battleEffect.targetCreature().changeHealth(-5);
-								}
-							});
-						}
-					});
-					spine.onEnd.connect("unlock", [targeting](var& spine, int index) -> void {
-						if (spine.track(index).name() == "attack") {
-							targeting.self().setVar("attacking", false);
-						}
-					});
-				}, [=](var& targeting) -> void {
-					targeting.self().setVar("activeTarget", 0);
-				});
-			}
-			return true;
-		}
 		return false;
 	});
 
@@ -44,13 +20,36 @@ self.spawn = [=](var& self) -> void {
 			targeting.self().fall();
 		});
 	});
-
-	self.setVar("attacking", false);
-	self.setVar("activeTarget", 0);
-	self.agent().gridSpeed(10);
 };
 
 self.update = [=](var& self, double dt) -> void {
+	self.setVar("life", self.getVar("life") - dt);
+	self.setVar("clingCooldown", self.getVar("clingCooldown") - dt);
+	var host = self.getVar("host");
+	if (host != 0 && self.game().creature(host) == null) {
+		host = 0;
+		self.setVar("host", 0);
+	}
+	if (self.getVar("life") <= 0.0) {
+		self.fall();
+		return;
+	}
+	if (host == 0) {
+		var enemies = self.enemiesInRange(12);
+		if (!enemies.empty()) {
+			host = enemies[0].networkId();
+			self.setVar("host", host);
+		}
+	}
+	if (host != 0 && self.getVar("clingCooldown") <= 0.0) {
+		self.setVar("clingCooldown", 1.0);
+		self.targeting().target(host, 0.5, [host](var& targeting) -> void {
+			if (targeting.self().game().creature(host) != null && targeting.self().game().creature(host).alive()) {
+				targeting.self().game().creature(host).dot(2.0, 2.0, targeting.self().networkId());
+			}
+		}, [=](var& targeting) -> void {});
+		return;
+	}
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {

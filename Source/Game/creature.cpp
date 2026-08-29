@@ -1,6 +1,9 @@
 #include "creature.h"
 #include <cmath>
 #include <algorithm>
+#include <set>
+#include <cstdlib>
+#include <iostream>
 #include "building.h"
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
@@ -84,6 +87,8 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 	builder.method("spine", &Creature::spine);
 	builder.method("alive", &Creature::alive);
 	builder.method("networkId", &Creature::netId);
+	builder.method("element", &Creature::element);
+	builder.method("elements", &Creature::elements);
 	builder.method("changeHealth", &Creature::changeHealth);
 	builder.method("assetPath", &Creature::assetPath);
 	builder.method("player", &Creature::player);
@@ -134,6 +139,7 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("stun", &ServerCreature::stun);
 	builder.method("root", &ServerCreature::root);
 	builder.method("knockback", [](ServerCreature& a_self, int64_t a_cells, int64_t a_source) { a_self.knockback(static_cast<int>(a_cells), a_source); });
+	builder.method("blinkTo", &ServerCreature::blinkTo);
 	builder.method("taunt", [](ServerCreature& a_self, int64_t a_attacker, double a_seconds) { a_self.taunt(a_attacker, a_seconds); });
 	builder.method("tauntedBy", &ServerCreature::tauntedBy);
 	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
@@ -235,8 +241,41 @@ double ServerCreature::scaledDuration(double a_seconds) const {
 }
 
 int ServerCreature::damage(int a_amount, int64_t a_sourceId) {
+	auto source = serverCreature(a_sourceId);
+	return damageScaled(a_amount, source ? source->elements() : std::vector<std::string>{}, a_sourceId);
+}
+
+// every attacker type x every defender type from the table, then every synergy with an element
+// already working on this unit (an active dot, the ward on it); a hit that scales below one point
+// still lands one
+double ServerCreature::elementMultiplier(const std::vector<std::string>& a_attackerElements) const {
+	if (a_attackerElements.empty()) { return 1.0; }
+	auto& table = gameInstance.data().elements();
+	double multiplier = table.damageMultiplier(a_attackerElements, elements());
+	std::vector<std::string> affecting;
+	auto affect = [&](const std::vector<std::string>& a_elements) {
+		for (auto& affectingElement : a_elements) {
+			if (std::find(affecting.begin(), affecting.end(), affectingElement) == affecting.end()) { affecting.push_back(affectingElement); }
+		}
+	};
+	for (auto& effect : timedEffects) {
+		if (effect.perSecond < 0.0) { affect(effect.elements); }
+	}
+	if (auto absorber = (absorberId != 0) ? serverCreature(absorberId) : nullptr) { affect(absorber->elements()); }
+	multiplier *= table.synergyMultiplier(a_attackerElements, affecting);
+	static const bool diag = std::getenv("MV_DAMAGE_DIAG") != nullptr;
+	if (diag) {
+		static std::set<std::string> seen;
+		auto join = [](const std::vector<std::string>& a_list) { std::string result; for (auto& item : a_list) { result += (result.empty() ? "" : "+") + item; } return result; };
+		auto line = join(a_attackerElements) + " -> " + join(elements()) + (affecting.empty() ? "" : " [" + join(affecting) + "]");
+		if (seen.insert(line).second) { std::cout << "[damage] " << line << " x" << multiplier << std::endl; }
+	}
+	return multiplier;
+}
+
+int ServerCreature::damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId) {
 	if (!alive() || a_amount <= 0) { return 0; }
-	int remaining = a_amount;
+	int remaining = std::max(1, static_cast<int>(std::lround(a_amount * elementMultiplier(a_attackerElements))));
 	int fromShield = std::min(shieldPoints, remaining);
 	shieldPoints -= fromShield;
 	remaining -= fromShield;
@@ -284,11 +323,39 @@ void ServerCreature::knockback(int a_cells, int64_t a_sourceId) {
 	}
 }
 
+void ServerCreature::dot(double a_perSecond, double a_seconds, int64_t a_sourceId) {
+	auto source = serverCreature(a_sourceId);
+	timedEffects.push_back({ -a_perSecond, scaledDuration(a_seconds), a_sourceId, 0.0, source ? source->elements() : std::vector<std::string>{} });
+}
+
+// the nearest free cell around the target, nearest ring first
+void ServerCreature::blinkTo(int64_t a_targetId) {
+	auto target = serverCreature(a_targetId);
+	if (!target || !pathAgent || !target->agent()) { return; }
+	auto center = MV::round<int>(target->agent()->gridPosition());
+	auto path = gameInstance.path();
+	for (int radius = 1; radius <= 3; ++radius) {
+		for (int dx = -radius; dx <= radius; ++dx) {
+			for (int dy = -radius; dy <= radius; ++dy) {
+				if (std::max(std::abs(dx), std::abs(dy)) != radius) { continue; }
+				MV::Point<int> candidate(center.x + dx, center.y + dy);
+				if (path->inBounds(candidate) && !path->blocked(candidate)) {
+					pathAgent->gridPosition(candidate);
+					return;
+				}
+			}
+		}
+	}
+}
+
+// a ward's share scales with the table (water on lightning takes more, on fire less) and the
+// status relief scales the same way
 void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale) {
 	if (auto host = serverCreature(a_hostId)) {
+		double scale = gameInstance.data().elements().wardScale(elements(), host->elements());
 		host->absorberId = netId();
-		host->absorbFraction = std::clamp(a_fraction, 0.0, 1.0);
-		host->absorbStatusScale = std::clamp(a_statusScale, 0.0, 1.0);
+		host->absorbFraction = std::clamp(a_fraction * scale, 0.0, 0.9);
+		host->absorbStatusScale = std::clamp(scale > 0.0 ? a_statusScale / scale : 1.0, 0.05, 1.0);
 	}
 }
 
@@ -303,7 +370,7 @@ void ServerCreature::updateStatus(double a_dt) {
 		int whole = static_cast<int>(effect->carry);
 		if (whole != 0) {
 			effect->carry -= whole;
-			if (whole < 0) { damage(-whole, effect->source); } else { heal(whole); }
+			if (whole < 0) { damageScaled(-whole, effect->elements, effect->source); } else { heal(whole); }
 		}
 		effect->remaining -= a_dt;
 		effect = effect->remaining <= 0.0 ? timedEffects.erase(effect) : effect + 1;

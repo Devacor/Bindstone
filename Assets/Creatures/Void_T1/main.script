@@ -1,13 +1,24 @@
-// Voidling (Void T1): low health burst; void chomp portals the victim five cells back and stuns
+// Voidling (Void T1): low health burst; the first chomp on a target (and every third after) portals it ten cells back, stuns it, and the Voidling blinks after it
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
+	self.setVar("chompTarget", 0);
+	self.setVar("chompCount", 0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			targeting.self().game().creature(target).knockback(5, me);
-			targeting.self().game().creature(target).stun(0.4);
+			if (targeting.self().getVar("chompTarget") != target) {
+				targeting.self().setVar("chompTarget", target);
+				targeting.self().setVar("chompCount", 0);
+			}
+			var chomp = targeting.self().getVar("chompCount");
+			targeting.self().setVar("chompCount", chomp + 1);
+			if (chomp % 3 == 0) {
+				targeting.self().game().creature(target).knockback(10, me);
+				targeting.self().game().creature(target).stun(0.4);
+				targeting.self().blinkTo(target);
+			}
 			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(8, me); }
 		}
 	});

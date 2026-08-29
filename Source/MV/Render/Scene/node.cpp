@@ -256,9 +256,14 @@ namespace MV {
 
 			ar.template set_user_context<MV::Services>(&a_services);
 			std::shared_ptr<Node> result;
-			ar(result);  // load_complete() fires on root via post_load depth tracking. File
-			             // textures stream in via SharedTextures (async decode on the pool +
-			             // main-thread GL upload); the scene loader stays out of it now.
+			try {
+				ar(result);  // load_complete() fires on root via post_load depth tracking. File
+				             // textures stream in via SharedTextures (async decode on the pool +
+				             // main-thread GL upload); the scene loader stays out of it now.
+			} catch (const std::exception& e) {
+				MV::error("Load error [", a_filename, "]: ", e.what());
+				throw;
+			}
 			const auto tWalk1 = std::chrono::steady_clock::now();
 
 			if (!a_newNodeId.empty()) {

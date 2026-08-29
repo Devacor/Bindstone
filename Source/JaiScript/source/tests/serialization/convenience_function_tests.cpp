@@ -974,6 +974,29 @@ public:
             check_eq(loaded->value, 321, "value preserved through convenience round-trip");
         });
 
+        test("dangling_shared_ptr_id_is_a_load_error_not_null", [this]() {
+            auto eng = make_engine();
+            // A payload-less $id that nothing in the archive defined: previously loaded as null
+            // and crashed the first consumer that dereferenced it.
+            int outcome = 0;
+            try {
+                auto loaded = from_json<std::shared_ptr<sp_simple_data>>(*eng, "{\"value0\": {\"$id\": 7}}");
+                outcome = loaded ? 3 : 0;
+            } catch (const serialization_error& e) {
+                std::string what = e.what();
+                outcome = what.find("Dangling") != std::string::npos ? 1 : 2;
+                check(outcome == 1, "the error names the dangling id, got: " + what);
+            } catch (...) {
+                outcome = 4;
+            }
+            check_eq(1, outcome, "a dangling $id throws serialization_error (0=null, 2=wrong text, 3=object, 4=other exception)");
+            auto ptr = std::make_shared<sp_simple_data>();
+            ptr->value = 5;
+            auto pair = std::make_pair(ptr, ptr);
+            auto roundTrip = from_json<std::pair<std::shared_ptr<sp_simple_data>, std::shared_ptr<sp_simple_data>>>(*eng, to_json(*eng, pair));
+            check(roundTrip.first != nullptr && roundTrip.first == roundTrip.second, "a genuine back-reference still resolves to the same object");
+        });
+
         // These guard the parse_number/parse_string/parse_json hardening:
         // malformed input must raise jai::serialization_error (NOT a raw
         // std::out_of_range / std::invalid_argument, which derive from a sibling

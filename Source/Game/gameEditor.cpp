@@ -324,7 +324,7 @@ int GameEditor::runDriver(const std::string& a_scriptPath, bool a_live) {
 			else if (step.op == "waitfor") {
 				auto node = step.args.empty() ? nullptr : findNode(step.args[0]);
 				auto box = node ? hitBox(node) : MV::BoxAABB<int>();
-				bool up = node && node->visible() && node->active() && box.width() > 0 && box.height() > 0;
+				bool up = node && node->visible() && box.width() > 0 && box.height() > 0;   // scene nodes can be visible yet inactive
 				// a page that just appeared is not clickable on its first frames (its buttons hook the
 				// mouse on their first update), so a node counts as up after a dozen settled frames
 				if (up && step.remaining <= -12) { std::cout << "[drive] " << step.args[0] << " is up" << std::endl; }

@@ -404,6 +404,32 @@ public:
 		return pathAgent;
 	}
 
+	// Combat status shared by every creature script. Damage routes through the shield, then the
+	// absorber (an ally taking a share), then health; timed effects tick in update; movement is
+	// moveSpeed x multiplier; stun/root durations are scaled while an absorber protects this unit.
+	int damage(int a_amount, int64_t a_sourceId);
+	void heal(int a_amount) { changeHealth(std::max(0, a_amount)); }
+	void shield(int a_amount) { shieldPoints = std::max(shieldPoints, a_amount); }
+	int shieldAmount() const { return shieldPoints; }
+	void dot(double a_perSecond, double a_seconds, int64_t a_sourceId) { timedEffects.push_back({ -a_perSecond, scaledDuration(a_seconds), a_sourceId, 0.0 }); }
+	void hot(double a_perSecond, double a_seconds) { timedEffects.push_back({ a_perSecond, a_seconds, 0, 0.0 }); }
+	void slow(double a_fraction, double a_seconds) { apply(slowEffect, a_fraction, scaledDuration(a_seconds)); }
+	void haste(double a_fraction, double a_seconds) { apply(hasteEffect, a_fraction, a_seconds); }
+	void attackHaste(double a_fraction, double a_seconds) { apply(attackHasteEffect, a_fraction, a_seconds); }
+	double moveSpeedMultiplier() const { return std::max(0.05, (1.0 - slowEffect.fraction) * (1.0 + hasteEffect.fraction)); }
+	double attackSpeedMultiplier() const { return std::max(0.1, 1.0 + attackHasteEffect.fraction); }
+	void moveSpeed(double a_base) { baseMoveSpeed = a_base; }
+	double moveSpeed() const { return baseMoveSpeed; }
+	void stun(double a_seconds);
+	void root(double a_seconds);
+	void knockback(int a_cells, int64_t a_sourceId);
+	void taunt(int64_t a_attackerId, double a_seconds) { tauntId = a_attackerId; tauntRemaining = scaledDuration(a_seconds); }
+	int64_t tauntedBy() const { return tauntRemaining > 0.0 ? tauntId : 0; }
+	void untargetable(bool a_value) { untargetableFlag = a_value; }
+	bool untargetable() const { return untargetableFlag; }
+	void absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale);
+	void spawnCreature(const std::string& a_creatureId);
+
 	static void jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder);
 
 protected:
@@ -441,9 +467,33 @@ private:
 
 	virtual void updateImplementation(double a_delta) override;
 
+	struct TimedEffect { double perSecond; double remaining; int64_t source; double carry; };
+	struct TimedFraction { double fraction = 0.0; double remaining = 0.0; };
+	static void apply(TimedFraction& a_effect, double a_fraction, double a_seconds) {
+		if (a_fraction >= a_effect.fraction) { a_effect.fraction = a_fraction; }
+		a_effect.remaining = std::max(a_effect.remaining, a_seconds);
+	}
+	double scaledDuration(double a_seconds) const;
+	std::shared_ptr<ServerCreature> serverCreature(int64_t a_id) const;
+	void updateStatus(double a_dt);
+
 	std::shared_ptr<MV::Scene::PathAgent> pathAgent;
 
 	TargetPolicy targeting;
+
+	std::vector<TimedEffect> timedEffects;
+	TimedFraction slowEffect;
+	TimedFraction hasteEffect;
+	TimedFraction attackHasteEffect;
+	int shieldPoints = 0;
+	int64_t tauntId = 0;
+	double tauntRemaining = 0.0;
+	bool untargetableFlag = false;
+	int64_t absorberId = 0;
+	double absorbFraction = 0.0;
+	double absorbStatusScale = 1.0;
+	double baseMoveSpeed = 0.0;
+	double appliedMoveSpeed = -1.0;
 };
 
 class ClientCreature : public Creature {

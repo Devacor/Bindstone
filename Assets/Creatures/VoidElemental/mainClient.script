@@ -1,2 +1,0 @@
-self.spawn = [=](var& self) -> void {};
-self.update = [=](var& self, double dt) -> void {};

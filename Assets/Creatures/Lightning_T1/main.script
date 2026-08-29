@@ -17,7 +17,7 @@ self.spawn = [=](var& self) -> void {
 					others[i].damage(jumps == 1 ? 4 : 2, me);
 				}
 			}
-			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(6, me); }
+			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(24, me); }
 		}
 	});
 
@@ -37,7 +37,7 @@ self.spawn = [=](var& self) -> void {
 				auto spine = targeting.self().spine();
 				spine.timeScale(targeting.self().attackSpeedMultiplier());
 				spine.animate("attack", false);
-				if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).stun(0.5); }
+				if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).stun(2.0); }
 				spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
 					if (eventData.name == "launch") {
 						var attackTarget = targeting.self().getVar("attackTarget");

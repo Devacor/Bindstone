@@ -109,8 +109,12 @@ public:
         void registerCreature(std::shared_ptr<Creature> a_registerCreature) {
                 if (a_registerCreature->alive()) {
                         creatures[a_registerCreature->netId()] = a_registerCreature;
+                        if (auto serverCreature = std::dynamic_pointer_cast<ServerCreature>(a_registerCreature)) {
+                                teamForPlayer(serverCreature->player()).addMember(serverCreature);
+                        }
                         a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
                                 lastKnownCreaturePositions[a_creature->netId()] = a_creature->owner()->position();
+                                teamForPlayer(a_creature->player()).removeMember(a_creature->netId());
                                 creatures.erase(a_creature->netId());
                         });
                 }

@@ -180,6 +180,9 @@ private:
 
 	float range = 0.0f;
 	MV::PathMode pathMode = MV::PathMode::search;
+	// the cell the current chase path leads to; a new path is only bought when the target leaves it
+	MV::Point<int> chaseCell;
+	bool chasing = false;
 	bool arrived = false;
 	std::function<void(TargetPolicy &)> succeed;
 	std::function<void(TargetPolicy &)> fail;

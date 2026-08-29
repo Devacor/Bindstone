@@ -98,6 +98,15 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder)
 	builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 	});
+	// ids cross into script without touching the creature objects (no copies, no handles)
+	builder.method("nearestEnemyId", [](ServerCreature& a_self, double a_range) -> int64_t {
+		auto found = a_self.gameInstance.teamAgainstPlayer(a_self.player()).nearestCreature(a_self.agent()->gridPosition(), static_cast<float>(a_range));
+		return found ? found->netId() : 0;
+	});
+	builder.method("nearestAllyId", [](ServerCreature& a_self, double a_range) -> int64_t {
+		auto found = a_self.gameInstance.teamForPlayer(a_self.player()).nearestCreature(a_self.agent()->gridPosition(), static_cast<float>(a_range));
+		return (found && found.get() != &a_self) ? found->netId() : 0;
+	});
 	builder.method("alliesInRange", [](ServerCreature& a_self, double a_range) {
 		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
 	});
@@ -375,7 +384,9 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
 				stopAndFail();
 			});
 			registerPathfindingListeners();
-			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range, pathMode);
+			chaseCell = MV::round<int>(targetCreature->agent()->gridPosition());
+			chasing = true;
+			selfCreature->agent()->gridGoal(chaseCell, range, pathMode);
 			return;
 		}
 	}
@@ -428,7 +439,15 @@ void TargetPolicy::update(double a_dt) {
 		rootDuration = std::max(0.0f, rootDuration - static_cast<float>(a_dt));
 
 		if (selfCreature && targetCreature && !stunDuration && !rootDuration) {
-			selfCreature->agent()->gridGoal(targetCreature->agent()->gridPosition(), range, pathMode);
+			// re-path only once the target has left the acceptance disc of the goal we already hold:
+			// a melee chaser tolerates ~a cell of drift, a ranged one its whole range
+			auto cell = MV::round<int>(targetCreature->agent()->gridPosition());
+			auto drift = MV::distance(cell, chaseCell);
+			if (!chasing || drift > std::max(1.0f, range * 0.75f)) {
+				chasing = true;
+				chaseCell = cell;
+				selfCreature->agent()->gridGoal(cell, range, pathMode);
+			}
 		}
 	}
 }
@@ -450,6 +469,9 @@ void TargetPolicy::root(float a_duration) {
 }
 
 void TargetPolicy::clearTarget() {
+	chasing = false;
+	chasing = false;
+	chasing = false;
 	arriveReceiver.reset();
 	stopReceiver.reset();
 	blockedReceiver.reset();

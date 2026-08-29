@@ -34,6 +34,11 @@ public:
 	MV::Scale scale() const { return ourSide == TeamSide::LEFT ? MV::Scale(1, 1) : MV::Scale(-1, 1); }
 
 	std::vector<std::shared_ptr<ServerCreature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
+	// nearest live, targetable member within a_radius, or nullptr
+	std::shared_ptr<ServerCreature> nearestCreature(const MV::Point<> &a_location, float a_radius);
+	void addMember(const std::shared_ptr<ServerCreature> &a_creature) { members.push_back(a_creature); }
+	void removeMember(int64_t a_netId);
+	size_t memberCount() const { return members.size(); }
 
 	TeamSide side() const { return ourSide; }
 
@@ -49,6 +54,7 @@ private:
 
 	MV::Point<> ourWellPosition;
 	MV::Point<> enemyWellPosition;
+	std::vector<std::shared_ptr<ServerCreature>> members;
 };
 
 #endif

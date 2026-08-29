@@ -12,17 +12,20 @@ self.spawn = [=](var& self) -> void {
 		return false;
 	});
 
+	// the well sits inside its building's blocked cells: arriving means standing at its edge.
+	// Applied when the creature has nothing to fight (and again the moment a chase ends), never per tick.
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
-		// the well sits inside its building's blocked cells: arriving means standing at its edge
+		self.setVar("marching", true);
 		self.targeting().target(self.team().enemyWell(), 6.0, PathMode.flowField, [=](var& targeting) -> void {
 			targeting.self().enemyTeam().damage(1);   // a leak: the well takes a point
 			targeting.self().fall();
 		});
 	});
+	self.setVar("marching", false);
 };
 
 self.update = [=](var& self, double dt) -> void {
-	if (!self.enemiesInRange(8).empty()) {
+	if (self.nearestEnemyId(8) != 0) {
 		self.spawnCreature("Water_DropletHurt");
 		self.spawnCreature("Water_DropletHeal");
 		self.fall();
@@ -31,8 +34,10 @@ self.update = [=](var& self, double dt) -> void {
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {
-			var applyDefaultTarget = self.getVar("applyDefaultTarget");
-			applyDefaultTarget(self);
+			if (!self.getVar("marching")) {
+				var applyDefaultTarget = self.getVar("applyDefaultTarget");
+				applyDefaultTarget(self);
+			}
 		}
 	}
 };

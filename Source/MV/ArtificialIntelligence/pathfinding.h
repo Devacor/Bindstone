@@ -5,6 +5,7 @@
 #include <string>
 #include <regex>
 #include <vector>
+#include <unordered_set>
 #include <array>
 #include <list>
 #include <deque>
@@ -256,7 +257,9 @@ namespace MV {
 		// Sized so a full-map path completes in one search on the game's 250x100 grid: at ~160 ns/node
 		// even a fully spent budget is ~5 ms of server tick; typical ticks spend a fraction of it
 		static constexpr int64_t FRAME_NODE_BUDGET = 128000;
-		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 16000;
+		// per-search node cap: chases live within aggro range, marches ride flow fields, so a search
+		// that needs more than this is proving a wall of units unreachable - which the budget should not pay for
+		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 4000;
 
 		// Runtime tunables (defaults above): nodes per tick shared by every agent, nodes one search
 		// may spend before it yields its slice, fields (re)computed per tick, fields kept cached
@@ -323,6 +326,15 @@ namespace MV {
 		static constexpr size_t MAX_FLOW_FIELDS = 16;
 		static constexpr int FIELDS_PER_TICK = 1;
 		int64_t frameNodeBudget = FRAME_NODE_BUDGET;
+		// diagnostics, reset by every stall report
+		// scratch for NavigationAgent::goalReachableFrom: one stamp per cell, no allocation per fill
+		std::vector<uint32_t> fillStamps;
+		uint32_t fillGeneration = 0;
+		std::vector<Point<int>> fillFrontier;
+		mutable int64_t diagSearches = 0;
+		mutable int64_t diagSearchesSkippedUnreachable = 0;
+		mutable int64_t diagSearchesFailed = 0;
+		mutable int64_t diagNodes = 0;
 		int64_t searchLimitPerRequest = DEFAULT_SEARCH_LIMIT;
 		int fieldsPerTickAllowance = FIELDS_PER_TICK;
 		size_t flowFieldCapacity = MAX_FLOW_FIELDS;
@@ -371,6 +383,8 @@ namespace MV {
 		bool hasBudget() const {
 			return nodesUsedThisFrame < frameNodeBudget;
 		}
+
+		int64_t nodesUsed() const { return nodesUsedThisFrame; }
 
 		int64_t remainingBudget() const {
 			return std::max(int64_t(0), frameNodeBudget - nodesUsedThisFrame);
@@ -840,7 +854,7 @@ namespace MV {
 				ourGoal = potentialNewGoal;
 				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
 				releaseField();
-				markDirty();
+				markDirty(!wasMoving);
 				if (!pathfinding()) {
 					onArriveSignal(shared_from_this());
 				} else if (!wasMoving && pathfinding()) {
@@ -969,22 +983,70 @@ namespace MV {
 		}
 
 
-		void markDirty() {
+		void markDirty(bool a_retryNow = true) {
 			costs.clear();
 			receivers.clear();
 			dirtyPath = true;
-			recalcRetryCountdown = 0;
+			if (a_retryNow) { recalcRetryCountdown = 0; }
 		}
 
 		// A failed search backs off exponentially so a crowd of blocked agents cannot drain the
 		// frame budget every frame; any cell freeing within a few squares retries at once.
+		// Exact, cheap unreachability test. A search ends only on a standable cell within the
+		// acceptable distance of the goal, so flood outward from those cells with the search's own
+		// passability (4-connected: the no-corner-cutting rule makes 8-connectivity equivalent). A
+		// fill that closes without touching the start proves no path; a fill that hits the cap says
+		// nothing and the search runs. Soft searches treat other agents as cost, so static only.
+		bool goalReachableFrom(const Point<int>& a_start, const Point<int>& a_goal) {
+			static constexpr size_t FILL_CAP = 256;
+			auto width = static_cast<size_t>(std::max(0, map->size().width));
+			auto height = static_cast<size_t>(std::max(0, map->size().height));
+			if (map->fillStamps.size() != width * height) { map->fillStamps.assign(width * height, 0); map->fillGeneration = 0; }
+			if (++map->fillGeneration == 0) { std::fill(map->fillStamps.begin(), map->fillStamps.end(), 0); map->fillGeneration = 1; }
+			auto generation = map->fillGeneration;
+			auto& stamps = map->fillStamps;
+			auto& frontier = map->fillFrontier;
+			frontier.clear();
+			auto standable = [&](const Point<int>& cell) { return map->inBounds(cell) && (softSearch ? map->clearedForSizeStatic(cell, unitSize) : map->clearedForSize(cell, unitSize)); };
+			auto visit = [&](const Point<int>& cell) {
+				auto& stamp = stamps[static_cast<size_t>(cell.y) * width + static_cast<size_t>(cell.x)];
+				if (stamp == generation) { return false; }
+				stamp = generation;
+				return true;
+			};
+			int reach = std::max(1, static_cast<int>(std::ceil(acceptableDistance)));
+			for (int x = a_goal.x - reach; x <= a_goal.x + reach; ++x) {
+				for (int y = a_goal.y - reach; y <= a_goal.y + reach; ++y) {
+					Point<int> cell(x, y);
+					auto cellDistance = static_cast<PointPrecision>(distance(cell, a_goal));
+					if (cell != a_goal && !(cellDistance < acceptableDistance || equals(cellDistance, acceptableDistance))) { continue; }
+					if (!standable(cell)) { continue; }
+					if (cell == a_start) { return true; }
+					if (visit(cell)) { frontier.push_back(cell); }
+				}
+			}
+			if (frontier.empty()) { return false; }
+			static const Point<int> offsets[4] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
+			for (size_t i = 0; i < frontier.size(); ++i) {
+				if (frontier.size() > FILL_CAP) { return true; }
+				for (auto& offset : offsets) {
+					Point<int> next(frontier[i].x + offset.x, frontier[i].y + offset.y);
+					if (!standable(next)) { continue; }
+					if (next == a_start) { return true; }
+					if (visit(next)) { frontier.push_back(next); }
+				}
+			}
+			return false;
+		}
+
 		void deferRetryAfterFailedSearch() {
 			recalcBackoff = std::min(std::max(recalcBackoff * 2, 1), MAX_RECALC_BACKOFF_FRAMES);
 			recalcRetryCountdown = recalcBackoff;
 			if (!nearbyUnblockReceiver) {
 				nearbyUnblockReceiver = map->onUnblock.connect([this](std::shared_ptr<Map>, const Point<int> &a_position) {
 					auto here = currentCell();
-					if (!activeUpdate && std::max(std::abs(a_position.x - here.x), std::abs(a_position.y - here.y)) <= NEARBY_UNBLOCK_RADIUS) {
+					// a proven-unreachable goal opens far from here, if at all: the countdown is the retry, not local churn
+					if (!activeUpdate && !goalUnreachable && std::max(std::abs(a_position.x - here.x), std::abs(a_position.y - here.y)) <= NEARBY_UNBLOCK_RADIUS) {
 						recalcRetryCountdown = 0;
 					}
 				});
@@ -1068,15 +1130,26 @@ namespace MV {
 			auto goal = goalCell();
 			bool resumable = ourPath && searchInProgress && ourPath->start() == start && ourPath->goal() == goal && ourPath->soft() == softSearch;
 			if (!resumable) {
+				// a goal proven unreachable (a target hemmed in by its own side) still gets a closest-approach
+				// path, but the search only needs to walk up to the wall, not exhaust the limit proving it
+				goalUnreachable = !goalReachableFrom(start, goal);
+				if (goalUnreachable) { ++map->diagSearchesSkippedUnreachable; }
+				++map->diagSearches;
 				ourPath = std::make_shared<Path>(map, start, goal, acceptableDistance, unitSize, -1);
 				ourPath->softBlocking(softSearch, this);
 				searchSlices = 0;
+				searchNodesSpent = 0;
+				searchNodeCap = goalUnreachable ? std::min<int64_t>(CLOSEST_APPROACH_NODES, map->searchLimit()) : map->searchLimit();
 			}
-			bool complete = ourPath->step(searchLimit);
+			// slices exist so a search survives budget pressure; the per-search limit is a total, not per slice
+			bool complete = ourPath->step(std::max<int64_t>(1, std::min(searchLimit, searchNodeCap - searchNodesSpent)));
+			auto spent = ourPath->stepNodes();
+			searchNodesSpent += spent;
+			map->diagNodes += spent;
 			++searchSlices;
 			// Continue across ticks only while nobody else is waiting for budget; under contention a
 			// partial path now beats a complete one several ticks later
-			searchInProgress = !complete && searchSlices < MAX_SEARCH_SLICES && map->searchQueueEmpty();
+			searchInProgress = !complete && searchSlices < MAX_SEARCH_SLICES && searchNodesSpent < searchNodeCap && map->searchQueueEmpty();
 			calculatedPath = searchInProgress ? std::vector<PathNode>() : ourPath->result();
 			blockMap();
 
@@ -1086,6 +1159,8 @@ namespace MV {
 			if (!searchInProgress) {
 				blockedAtPathIndex = -1;
 				blockedSignalFired = false;
+				// a closest-approach result is walked on the backoff clock: another search could only return the same
+				if (goalUnreachable) { deferRetryAfterFailedSearch(); }
 			}
 		}
 
@@ -1177,6 +1252,7 @@ namespace MV {
 
 		static constexpr int RECALC_URGENCY_THRESHOLD = 3;
 		static constexpr int MAX_SEARCH_SLICES = 8;
+		static constexpr int64_t CLOSEST_APPROACH_NODES = 512;
 		static constexpr size_t MAX_LOOKAHEAD = 8;
 		static constexpr size_t FLOW_STEPS = 12;
 		static constexpr size_t FLOW_EXTEND_AT = 4;   // nodes left when the next stretch is derived
@@ -1194,6 +1270,9 @@ namespace MV {
 		}
 		bool searchInProgress = false;
 		int searchSlices = 0;
+		int64_t searchNodesSpent = 0;
+		int64_t searchNodeCap = 0;
+		bool goalUnreachable = false;
 
 		// Every cell the segment from the agent's actual position to a node centre crosses is clear
 		// for this unit (the agent walks exactly that segment, not centre to centre)

@@ -32,13 +32,13 @@ struct ServerPlayer {
 
 		static constexpr double DEFAULT_RATING = 1000.0;
 		// Matchmaking window, in rating points: what a pair may be apart and still be matched. It
-		// opens with the wait (exponentially, MATCH_WINDOW_SECONDS to ~63% of the way), by half the
-		// pair's combined volatility (a fresh account's rating is noise, a calibrated one is not), and
-		// by a share of the pair's distance from the default (the population thins out there).
+		// opens with the wait (exponentially, MATCH_WINDOW_SECONDS to ~63% of the way) plus the pair's
+		// combined volatility - the K each rating moves by per game, so a gap either player could
+		// cover in one result is noise, and a calibrated pair (low K) is held tight.
 		static constexpr double MATCH_WINDOW_START = 25.0;
 		static constexpr double MATCH_WINDOW_FULL = 400.0;
 		static constexpr double MATCH_WINDOW_SECONDS = 30.0;
-		static constexpr double MATCH_WINDOW_PER_POINT_FROM_DEFAULT = 0.25;
+		static constexpr double MATCH_WINDOW_PER_VOLATILITY = 1.0;
 
 		double rating = DEFAULT_RATING;
 		double volatility = 40;
@@ -64,9 +64,8 @@ struct ServerPlayer {
 
 		double matchWindow(const Rating& a_enemy, double a_secondsWaited) const {
 			auto waited = MATCH_WINDOW_START + (MATCH_WINDOW_FULL - MATCH_WINDOW_START) * (1.0 - std::exp(-std::max(0.0, a_secondsWaited) / MATCH_WINDOW_SECONDS));
-			auto noise = (volatility + a_enemy.volatility) / 2.0;
-			auto sparsity = MATCH_WINDOW_PER_POINT_FROM_DEFAULT * std::abs((rating + a_enemy.rating) / 2.0 - DEFAULT_RATING);
-			return waited + noise + sparsity;
+			auto noise = MATCH_WINDOW_PER_VOLATILITY * (volatility + a_enemy.volatility);
+			return waited + noise;
 		}
 
 		bool matches(const Rating& a_enemy, double a_secondsWaited) const {

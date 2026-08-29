@@ -1,4 +1,4 @@
-// Sparker (Lightning T1): low health offensive cc; leap shock stuns and chains twice, zaps everyone on death
+// Sparker (Lightning T1): low health offensive cc; channels a stun on its target while it winds up, the shock chains twice, zaps everyone on death
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
@@ -6,7 +6,6 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			targeting.self().game().creature(target).stun(0.4);
 			var others = targeting.self().enemiesInRange(4);
 			var jumps = 0;
 			for (int i = 0; i < others.size() && jumps < 2; ++i) {
@@ -36,6 +35,7 @@ self.spawn = [=](var& self) -> void {
 				auto spine = targeting.self().spine();
 				spine.timeScale(targeting.self().attackSpeedMultiplier());
 				spine.animate("attack", false);
+				if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).stun(0.5); }
 				spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
 					if (eventData.name == "launch") {
 						var attackTarget = targeting.self().getVar("attackTarget");

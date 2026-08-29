@@ -13,7 +13,7 @@ self.spawn = [=](var& self) -> void {
 		auto effect = spawnOnNetwork(newMissile);
 		effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
 			if (battleEffect.targetCreature() != null && battleEffect.targetCreature().alive()) {
-				battleEffect.targetCreature().damage(5, source);
+				battleEffect.targetCreature().damage(4, source);
 			}
 		});
 	});

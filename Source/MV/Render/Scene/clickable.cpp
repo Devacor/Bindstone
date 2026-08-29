@@ -1,4 +1,6 @@
 #include "clickable.h"
+#include <cstdlib>
+#include <iostream>
 #include "clipped.h"
 #include "stencil.h"
 
@@ -130,10 +132,18 @@ namespace MV {
 			shouldDraw = false;
 		}
 
+		// MV_CLICK_DIAG=1: trace every press/release decision (which clickable saw it, in bounds or not)
+		static bool clickDiag() {
+			static const bool enabled = std::getenv("MV_CLICK_DIAG") != nullptr;
+			return enabled;
+		}
+
 		void Clickable::initialize() {
 			Sprite::initialize();
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](TapDevice& a_mouse) {
-				if (mouseInBounds(a_mouse)) {
+				bool inBounds = mouseInBounds(a_mouse);
+				if (clickDiag() && ownerIsAlive() && owner()->visible()) { std::cerr << "[click] down " << owner()->id() << " at " << a_mouse.position().x << "," << a_mouse.position().y << (inBounds ? " IN" : " out") << std::endl; }
+				if (inBounds) {
 					a_mouse.queueExclusiveAction({ eatTouches, clickPriority(), [&]() {
 						acceptDownClick();
 					}, []() {}, owner()->id() });
@@ -160,6 +170,7 @@ namespace MV {
 		void Clickable::acceptUpClick(bool a_ignoreBounds) {
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			bool inBounds = a_ignoreBounds || mouseInBounds(ourMouse);
+			if (clickDiag() && (inPressEvent() || inBounds)) { std::cerr << "[click] up " << (ownerIsAlive() ? owner()->id() : std::string("?")) << (inBounds ? " IN" : " out") << (inPressEvent() ? " pressed" : " not-pressed") << std::endl; }
 			try {
 				if (inPressEvent()) {
 					onMouseMoveHandle = nullptr;
@@ -182,6 +193,7 @@ namespace MV {
 
 		void Clickable::acceptDownClick() {
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+			if (clickDiag()) { std::cerr << "[click] pressed " << (ownerIsAlive() ? owner()->id() : std::string("?")) << std::endl; }
 			isInPressEvent = true;
 			onPressSignal(protectFromDismissal);
 

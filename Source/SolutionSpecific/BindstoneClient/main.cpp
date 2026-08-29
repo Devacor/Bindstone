@@ -536,7 +536,7 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
-static void RunAssetVerification() {
+static int RunAssetVerification() {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
@@ -545,7 +545,7 @@ static void RunAssetVerification() {
 	managers.renderer.makeHeadless();
 	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
 		std::cout << "[verify] renderer init failed\n";
-		return;
+		return 1;
 	}
 	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
@@ -704,6 +704,7 @@ static void RunAssetVerification() {
 	verifyInterfaceScripts(*jaiEngine, managers, passed, failed);
 
 	std::cout << "\n[verify] " << passed << " passed, " << failed << " failed" << std::endl;
+	return failed == 0 ? 0 : 1;
 }
 
 // CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
@@ -841,8 +842,7 @@ int main(int argc, char *argv[]) {
 			return 0;
 		}
 		if (strcmp(argv[i], "-verifyassets") == 0) {
-			RunAssetVerification();
-			return 0;
+			return RunAssetVerification();
 		}
 		if (strcmp(argv[i], "-wirebuttons") == 0) {
 			RunButtonWiring();
@@ -875,6 +875,10 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-drive") == 0 && i + 1 < argc) {
 			GameEditor menu(name, pass, autoStart);
 			return menu.runDriver(argv[i + 1]);
+		}
+		if (strcmp(argv[i], "-drivelive") == 0 && i + 1 < argc) {
+			GameEditor menu(name, pass, autoStart);
+			return menu.runDriver(argv[i + 1], true);
 		}
 		if (strcmp(argv[i], "-loginshot") == 0) {
 			int frames = 120;

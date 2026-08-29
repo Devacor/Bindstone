@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <optional>
+#include <functional>
 
 
 void GameEditor::resumeTitleMusic() {
@@ -191,16 +192,29 @@ int GameEditor::runGameFrames(int a_frameLimit, const std::string& a_capturePath
 // Verbs (one per line, # comments):
 //   wait S | move X Y | move node ID | down | up | click X Y | click node ID | drag X1 Y1 X2 Y2 [STEPS]
 //   scroll AMOUNT [X Y] | type TEXT | key NAME (SDL key name: Return, Escape, Backspace, Tab...)
-//   shot FILE.bmp | dump ID | print TEXT | quit
+//   shot FILE.bmp | dump ID | tree [ID] [DEPTH] | waitfor ID [SECONDS=15] | waitgone ID [SECONDS=15] | print TEXT | quit
 // Mouse position/buttons are injected into the game's TapDevice; wheel and keys are real SDL events.
-int GameEditor::runDriver(const std::string& a_scriptPath) {
+// Live mode tails the file: append lines while the game runs and they execute as they arrive.
+int GameEditor::runDriver(const std::string& a_scriptPath, bool a_live) {
 	struct Step { std::string op; std::vector<std::string> args; int remaining = 0; };
 	std::vector<Step> steps;
-	{
-		std::ifstream in(a_scriptPath);
-		if (!in) { std::cerr << "[drive] cannot open " << a_scriptPath << std::endl; return 2; }
+	std::streamoff consumed = 0;
+	auto readNewLines = [&]() {
+		std::ifstream in(a_scriptPath, std::ios::binary);
+		if (!in) { return false; }
+		in.seekg(0, std::ios::end);
+		auto size = static_cast<std::streamoff>(in.tellg());
+		if (size <= consumed) { return false; }
+		in.seekg(consumed);
+		std::string pending(static_cast<size_t>(size - consumed), '\0');
+		in.read(pending.data(), size - consumed);
+		auto lastNewline = pending.find_last_of('\n');
+		if (lastNewline == std::string::npos) { return false; }   // a partial line is still being written
+		pending.resize(lastNewline + 1);
+		consumed += static_cast<std::streamoff>(pending.size());
+		std::istringstream lines(pending);
 		std::string line;
-		while (std::getline(in, line)) {
+		while (std::getline(lines, line)) {
 			if (!line.empty() && line.back() == '\r') { line.pop_back(); }
 			auto hash = line.find('#');
 			if (hash == 0) { continue; }
@@ -226,7 +240,13 @@ int GameEditor::runDriver(const std::string& a_scriptPath) {
 				steps.push_back(step);
 			}
 		}
+		return true;
+	};
+	{
+		std::ifstream probe(a_scriptPath);
+		if (!probe) { std::cerr << "[drive] cannot open " << a_scriptPath << std::endl; return 2; }
 	}
+	readNewLines();
 
 	auto findNode = [&](const std::string& a_id) -> std::shared_ptr<MV::Scene::Node> {
 		auto node = game.gui().root()->get(a_id, false);
@@ -260,10 +280,22 @@ int GameEditor::runDriver(const std::string& a_scriptPath) {
 		SDL_PushEvent(&event);
 	};
 
+	std::function<void(const std::shared_ptr<MV::Scene::Node>&, int, int)> printTree = [&](const std::shared_ptr<MV::Scene::Node>& a_node, int a_depth, int a_maxDepth) {
+		auto hit = hitBox(a_node);
+		bool clickable = a_node->component<MV::Scene::Clickable>(false, false) != nullptr;
+		std::cout << "[drive] " << std::string(static_cast<size_t>(a_depth) * 2, ' ') << (a_node->id().empty() ? "(unnamed)" : a_node->id())
+			<< (clickable ? " [clickable]" : "") << (a_node->visible() ? "" : " [hidden]")
+			<< " (" << hit.minPoint.x << "," << hit.minPoint.y << ")-(" << hit.maxPoint.x << "," << hit.maxPoint.y << ")" << std::endl;
+		if (a_depth < a_maxDepth) {
+			for (auto& child : *a_node) { printTree(child, a_depth + 1, a_maxDepth); }
+		}
+	};
+
 	auto& mouse = game.mouse();
 	MV::Point<int> cursor(managers.renderer.window().drawableSize().width / 2, managers.renderer.window().drawableSize().height / 2);
 	bool left = false;
 	double waitRemaining = 0.0;
+	double pollRemaining = 0.0;
 	size_t next = 0;
 	std::string capture;
 	bool quit = false;
@@ -288,6 +320,30 @@ int GameEditor::runDriver(const std::string& a_scriptPath) {
 					else { cursor = *to; }
 				}
 				waitRemaining = 1.0 / 60.0;
+			}
+			else if (step.op == "waitfor") {
+				auto node = step.args.empty() ? nullptr : findNode(step.args[0]);
+				auto box = node ? hitBox(node) : MV::BoxAABB<int>();
+				bool up = node && node->visible() && node->active() && box.width() > 0 && box.height() > 0;
+				// a page that just appeared is not clickable on its first frames (its buttons hook the
+				// mouse on their first update), so a node counts as up after a dozen settled frames
+				if (up && step.remaining <= -12) { std::cout << "[drive] " << step.args[0] << " is up" << std::endl; }
+				else if (up) { step.remaining = std::min(step.remaining, 0) - 1; advance = false; waitRemaining = 1.0 / 60.0; }
+				else {
+					if (step.remaining == 0) { step.remaining = static_cast<int>(std::atof(step.args.size() > 1 ? step.args[1].c_str() : "15") * 60.0) + 1; }
+					if (--step.remaining > 0) { advance = false; waitRemaining = 1.0 / 60.0; }
+					else { std::cout << "[drive] waitfor " << (step.args.empty() ? "" : step.args[0]) << " timed out" << std::endl; }
+				}
+			}
+			else if (step.op == "waitgone") {
+				auto node = step.args.empty() ? nullptr : findNode(step.args[0]);
+				bool gone = !node || !node->visible();
+				if (gone) { std::cout << "[drive] " << (step.args.empty() ? "" : step.args[0]) << " is gone" << std::endl; }
+				else {
+					if (step.remaining == 0) { step.remaining = static_cast<int>(std::atof(step.args.size() > 1 ? step.args[1].c_str() : "15") * 60.0) + 1; }
+					if (--step.remaining > 0) { advance = false; waitRemaining = 1.0 / 60.0; }
+					else { std::cout << "[drive] waitgone " << step.args[0] << " timed out" << std::endl; }
+				}
 			}
 			else if (step.op == "down") { left = true; waitRemaining = 1.0 / 60.0; }
 			else if (step.op == "up") { left = false; waitRemaining = 1.0 / 60.0; }
@@ -324,10 +380,19 @@ int GameEditor::runDriver(const std::string& a_scriptPath) {
 					std::cout << "[drive] " << step.args[0] << " visible " << node->visible() << " screen (" << bounds.minPoint.x << "," << bounds.minPoint.y << ")-(" << bounds.maxPoint.x << "," << bounds.maxPoint.y << ") hit (" << hit.minPoint.x << "," << hit.minPoint.y << ")-(" << hit.maxPoint.x << "," << hit.maxPoint.y << ") children " << node->size() << " active " << node->active() << std::endl;
 				}
 			}
+			else if (step.op == "tree") {
+				std::shared_ptr<MV::Scene::Node> root = step.args.empty() ? game.gui().root() : findNode(step.args[0]);
+				int depth = step.args.size() > 1 ? std::atoi(step.args[1].c_str()) : 4;
+				if (root) { printTree(root, 0, depth); } else { std::cout << "[drive] tree: no node " << step.args[0] << std::endl; }
+			}
 			else if (step.op == "print") { std::cout << "[drive] " << (step.args.empty() ? "" : step.args[0]) << std::endl; }
 			else if (step.op == "quit") { quit = true; }
 			else { std::cout << "[drive] unknown verb " << step.op << std::endl; }
 			if (advance) { ++next; }
+		}
+		if (a_live && next >= steps.size()) {
+			pollRemaining -= dt;
+			if (pollRemaining <= 0.0) { pollRemaining = 0.25; readNewLines(); }
 		}
 		mouse.simulate(cursor, left);
 		if (!game.update(dt)) { break; }

@@ -1,5 +1,5 @@
 # Login is automatic with -n/-p; click Play like a person, then zoom and pan in the match.
-wait 6
+waitfor Play 20
 dump Play
 shot drive_main.bmp
 click node Play

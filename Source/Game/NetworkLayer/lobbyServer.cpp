@@ -109,6 +109,7 @@ void LobbyGameConnectionState::matchMade(std::shared_ptr<MatchSeeker> a_leftPlay
 	leftPlayer = a_leftPlayer;
 	rightPlayer = a_rightPlayer;
 	queueType = a_rightPlayer->queue.id();
+	rated = !(local() && leftPlayer->local() && rightPlayer->local());
 
 	leftPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
 	rightPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
@@ -128,11 +129,13 @@ void LobbyGameConnectionState::recordResult(TeamSide a_winner) {
 	if (!leftPlayerData || !rightPlayerData) {
 		return;
 	}
-	auto leftResult = (a_winner == TeamSide::LEFT) ? ServerPlayer::Rating::WIN : (a_winner == TeamSide::RIGHT) ? ServerPlayer::Rating::LOSS : ServerPlayer::Rating::DRAW;
-	leftPlayerData->queue(queueType).adjust(rightPlayerData->queue(queueType), leftResult);
-	ourServer.savePlayer(leftPlayerData);
-	ourServer.savePlayer(rightPlayerData);
-	std::cout << "Match result [" << queueType << "] winner: " << sideToString(a_winner) <<
+	if (rated) {
+		auto leftResult = (a_winner == TeamSide::LEFT) ? ServerPlayer::Rating::WIN : (a_winner == TeamSide::RIGHT) ? ServerPlayer::Rating::LOSS : ServerPlayer::Rating::DRAW;
+		leftPlayerData->queue(queueType).adjust(rightPlayerData->queue(queueType), leftResult);
+		ourServer.savePlayer(leftPlayerData);
+		ourServer.savePlayer(rightPlayerData);
+	}
+	std::cout << "Match result [" << queueType << (rated ? "" : ", local, unrated") << "] winner: " << sideToString(a_winner) <<
 		" | " << leftPlayerData->client->handle << " (" << leftPlayerData->queue(queueType).rating << ")" <<
 		" vs " << rightPlayerData->client->handle << " (" << rightPlayerData->queue(queueType).rating << ")" << std::endl;
 }

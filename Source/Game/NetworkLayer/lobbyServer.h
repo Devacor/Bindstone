@@ -37,10 +37,10 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 		return ourPlayer;
 	}
 
-	// MV_LOBBY_MATCH_ANY=1 (the local stack): pair anyone immediately, ratings ignored
-	static bool matchAny() {
-		static const bool enabled = std::getenv("MV_LOBBY_MATCH_ANY") != nullptr;
-		return enabled;
+	// Connected from this machine: a locally hosted stack pairs at once and plays unrated
+	bool local() const {
+		auto connection = lifespan.lock();
+		return connection && connection->loopback();
 	}
 
 	std::weak_ptr<MV::Connection> lifespan;
@@ -147,6 +147,11 @@ public:
 		return ourUrl;
 	}
 
+	// The game server advertised itself on this machine
+	bool local() const {
+		return ourUrl.find("localhost") != std::string::npos || ourUrl.find("127.0.0.1") != std::string::npos || ourUrl.find("[::1]") != std::string::npos;
+	}
+
 	uint16_t port() const {
 		return ourPort;
 	}
@@ -175,6 +180,7 @@ private:
 
 	std::shared_ptr<MatchSeeker> leftPlayer;
 	std::shared_ptr<MatchSeeker> rightPlayer;
+	bool rated = true;   // false for a match hosted on and played from this machine
 
 	void notifyGameServerOfPlayers();
 
@@ -234,9 +240,10 @@ public:
 						// gap, so a newcomer near them is matched at once
 						auto waited = std::max(current->time, opponent ? opponent->time : 0.0);
 						auto window = opponent ? current->player()->queue(ourId).matchWindow(opponent->player()->queue(ourId), waited) : 0.0;
-						if (opponent && (MatchSeeker::matchAny() || currentBest <= window)) {
+						bool bothLocal = opponent && current->local() && opponent->local();
+						if (opponent && (bothLocal || currentBest <= window)) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
-								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "] gap " << currentBest << " window " << window << " after " << waited << "s" << std::endl;
+								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "] gap " << currentBest << " window " << window << " after " << waited << "s" << (bothLocal ? " (local)" : "") << std::endl;
 								current->matching = true;
 								opponent->matching = true;
 								pairs.emplace_back(current, opponent);

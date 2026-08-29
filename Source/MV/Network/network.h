@@ -235,6 +235,13 @@ namespace MV {
 		bool disconnected() const {
 			return ourState->disconnected();
 		}
+		// The peer is this machine (a locally hosted stack), as seen by the socket itself
+		bool loopback() const {
+			asio::error_code error;
+			auto endpoint = socket->remote_endpoint(error);
+			return !error && endpoint.address().is_loopback();
+		}
+
 	private:
 		std::recursive_mutex lock;
 

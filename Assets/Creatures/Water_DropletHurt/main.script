@@ -7,7 +7,7 @@ self.spawn = [=](var& self) -> void {
 	self.untargetable(true);
 	self.setVar("host", 0);
 	self.setVar("attached", false);
-	self.setVar("life", 12.0);
+	self.setVar("life", 18.0);
 	self.setVar("clingCooldown", 0.0);
 	self.setVar("refreshCooldown", 0.0);
 
@@ -55,7 +55,7 @@ self.update = [=](var& self, double dt) -> void {
 		self.agent().localPosition(self.game().creature(host).agent().localPosition());
 		if (self.getVar("refreshCooldown") <= 0.0) {
 			self.setVar("refreshCooldown", 2.0);
-			self.game().creature(host).dot(2.0, 2.0, self.networkId());
+			self.game().creature(host).dot(3.0, 2.0, self.networkId());
 		}
 		return;
 	}
@@ -71,7 +71,7 @@ self.update = [=](var& self, double dt) -> void {
 				targeting.self().agent().disableFootprint();
 				targeting.self().setVar("attached", true);
 				targeting.self().setVar("refreshCooldown", 2.0);
-				targeting.self().game().creature(host).dot(2.0, 2.0, targeting.self().networkId());
+				targeting.self().game().creature(host).dot(3.0, 2.0, targeting.self().networkId());
 			}
 		}, [=](var& targeting) -> void {});
 		return;

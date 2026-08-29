@@ -1127,9 +1127,16 @@ public:
             if (self()->has_deserialized_shared(id)) {
                 value = self()->template get_deserialized_shared<elem_type>(id);
             } else {
-                // First (data-bearing) encounter of this id, or a $id-only record with no
-                // payload (-> null). read_shared_payload handles polymorphic / load_and_construct
-                // / default construction and registers the object eagerly under id.
+                // A payload-less {"$id": N} is a back-reference by construction (the writer
+                // inlines every forward reference), so one that names nothing loaded so far is
+                // a dangling reference: a corrupt or hand-edited file. Loading it as null used
+                // to surface later as a null dereference.
+                if (id != 0 && !self()->has_property("$val") && !self()->has_property("$type")) {
+                    throw serialization_error("Dangling shared_ptr reference: {\"$id\": " + std::to_string(id) + "} names an object this archive never defined (" + std::string(typeid(elem_type).name()) + ")");
+                }
+                // First (data-bearing) encounter of this id. read_shared_payload handles
+                // polymorphic / load_and_construct / default construction and registers the
+                // object eagerly under id.
                 value = self()->template read_shared_payload<elem_type>(id);
             }
             self()->end_object();

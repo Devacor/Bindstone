@@ -1,60 +1,27 @@
 life.png
-size: 1024,1024
-format: RGBA8888
-filter: Linear,Linear
-repeat: none
-Assets/Leaves1
-  rotate: false
-  xy: 691, 725
-  size: 125, 281
-  orig: 125, 281
-  offset: 0, 0
-  index: -1
-Assets/Leaves2
-  rotate: true
-  xy: 691, 524
-  size: 73, 267
-  orig: 73, 267
-  offset: 0, 0
-  index: -1
-Assets/Leaves3
-  rotate: true
-  xy: 691, 599
-  size: 124, 297
-  orig: 124, 297
-  offset: 0, 0
-  index: -1
-Assets/ground
-  rotate: false
-  xy: 2, 499
-  size: 687, 507
-  orig: 687, 507
-  offset: 0, 0
-  index: -1
-Assets/trunk
-  rotate: true
-  xy: 2, 2
-  size: 495, 635
-  orig: 495, 635
-  offset: 0, 0
-  index: -1
-Assets/trunkback
-  rotate: false
-  xy: 639, 40
-  size: 187, 457
-  orig: 187, 457
-  offset: 0, 0
-  index: -1
-
-life2.png
-size: 1024,1024
-format: RGBA8888
-filter: Linear,Linear
-repeat: none
+size:1944,625
+filter:Linear,Linear
+pma:true
 Assets/BackgroundLeaves
-  rotate: false
-  xy: 2, 2
-  size: 613, 619
-  orig: 613, 619
-  offset: 0, 0
-  index: -1
+bounds:2,10,613,609
+offsets:0,10,613,619
+rotate:90
+Assets/Leaves1
+bounds:912,2,125,281
+rotate:90
+Assets/Leaves2
+bounds:1195,54,73,267
+rotate:90
+Assets/Leaves3
+bounds:613,3,124,297
+rotate:90
+Assets/ground
+bounds:1464,38,585,478
+offsets:66,29,687,507
+rotate:90
+Assets/trunk
+bounds:613,129,494,635
+offsets:0,0,495,635
+rotate:90
+Assets/trunkback
+bounds:1250,166,187,457

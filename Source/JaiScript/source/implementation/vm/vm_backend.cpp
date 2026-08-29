@@ -1,4 +1,5 @@
 #include <jaiscript/vm/vm_backend.hpp>
+#include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_class.hpp>
@@ -8235,6 +8236,9 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	}
 
 	if (!objectValue.is_object()) {
+		if (objectValue.is_null()) {
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+		}
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
@@ -9769,6 +9773,8 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 		class_def->clear_instance_method_overloads();
 		class_def->clear_static_method_overloads();
 	}
+
+	class_def->nocopy(decl->nocopy);
 
 	std::unordered_map<uint64_t, script_value> new_field_defaults;
 	std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)

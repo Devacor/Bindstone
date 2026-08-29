@@ -370,6 +370,45 @@ public:
             check_eq(result.as<bool>(), true);
         });
 
+        test("null_member_call_names_receiver", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            std::string message;
+            try { eng->execute("auto obj = null; obj.frob();"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("Member 'frob' accessed on null") != std::string::npos);
+            check(message.find("'obj' is null") != std::string::npos);
+            message.clear();
+            try { eng->execute("auto maker = []() -> var { return null; }; maker().frob();"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("'maker(...)' returned null") != std::string::npos);
+            message.clear();
+            try { eng->execute("class Box { var inner = null; } auto box = Box(); box.inner.frob();"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("'inner' is null") != std::string::npos);
+        });
+
+        test("nocopy_class_refuses_by_value_copies", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto viaRef = eng->execute(R"(
+                nocopy class Ledger { int total = 1; }
+                auto ledger = Ledger();
+                auto& same = ledger;
+                same.total = 2;
+                ledger.total == 2;
+            )");
+            check_eq(viaRef.as<bool>(), true);
+            check_throws([&]() { eng->execute("auto copy = ledger;"); });
+            check_throws([&]() { eng->execute("void take(Ledger l) {} take(ledger);"); });
+            auto viaParam = eng->execute(R"(
+                void poke(Ledger& l) { l.total = 3; }
+                poke(ledger);
+                ledger.total == 3;
+            )");
+            check_eq(viaParam.as<bool>(), true);
+            std::string message;
+            try { eng->execute("auto again = ledger;"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Ledger'") != std::string::npos);
+        });
+
         test("destructuring_basic", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

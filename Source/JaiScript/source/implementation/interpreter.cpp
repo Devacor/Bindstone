@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -7869,9 +7870,10 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return {};
     }
 
-    // Check if it's an object (only objects have members/methods)
     if (!objectValue.is_object()) {
-        // Cannot access member on non-object type
+        if (objectValue.is_null()) {
+            return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+        }
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
@@ -10691,6 +10693,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         class_def->clear_static_method_overloads();
     }
     
+    class_def->nocopy(decl->nocopy);
+
     // Collect new field defaults and methods (using uint64_t IDs for performance)
     std::unordered_map<uint64_t, script_value> new_field_defaults;
     std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)

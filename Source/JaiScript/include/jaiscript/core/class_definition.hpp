@@ -1223,6 +1223,10 @@ public:
         return copy_function_ != nullptr;
     }
 
+    // 'nocopy class': instances refuse by-value copies, like a deleted C++ copy constructor
+    void nocopy(bool value) { nocopy_ = value; }
+    bool nocopy() const { return nocopy_; }
+
     std::shared_ptr<void> copy_object(const void* src) const {
         if (!copy_function_) {
             throw runtime_error("No copy constructor available for class " + name_);
@@ -1585,6 +1589,7 @@ private:
     std::function<script_value(script_value&, engine*)> unwrap_function_;
 
     copy_function copy_function_;
+    bool nocopy_ = false;
 
     std::unordered_map<uint64_t, method_metadata> method_metadata_;
 
@@ -2090,6 +2095,9 @@ inline uint64_t class_instance::get_cpp_object_field_id() const {
 }
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
+    if (class_def_ && class_def_->nocopy()) {
+        throw runtime_error("Cannot copy an instance of nocopy class '" + class_name_ + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
+    }
     auto new_instance = std::make_shared<class_instance>(class_name_, engine_);
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();

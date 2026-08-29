@@ -2121,6 +2121,12 @@ checked_result<declaration_ptr> parser::declaration() {
             "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
     }
 
+    if (match(token_type::nocopy_keyword)) {
+        JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'"));
+        JAISCRIPT_TRY_ASSIGN(auto result, class_declaration(true));
+        match(token_type::semicolon);
+        return result;
+    }
     if (match(token_type::class_keyword)) {
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration());
         match(token_type::semicolon);  // Consume optional semicolon after class
@@ -2968,7 +2974,7 @@ checked_result<statement_ptr> parser::try_statement() {
 }
 
 // declaration parsing implementations
-checked_result<declaration_ptr> parser::class_declaration() {
+checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
 
     std::vector<std::string_view> base_classes;
@@ -2988,6 +2994,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
     auto [class_name_id, class_name_view] = symbolizer_->intern_with_view(className.lexeme);
     auto classDecl = std::make_shared<class_decl>(className.location, class_name_view, class_name_id);
     classDecl->base_classes = std::move(base_classes);
+    classDecl->nocopy = nocopy;
 
     // Parse class members
     class_decl::member_visibility visibility = class_decl::Public;
@@ -3581,8 +3588,10 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         // Parse any declaration (class, function, variable)
         declaration_ptr member_decl = nullptr;
 
-        if (match(token_type::class_keyword)) {
-            auto class_result = class_declaration();
+        bool nested_nocopy = match(token_type::nocopy_keyword);
+        if (nested_nocopy || match(token_type::class_keyword)) {
+            if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'")); }
+            auto class_result = class_declaration(nested_nocopy);
             if (!class_result) {
                 synchronize();
                 continue;

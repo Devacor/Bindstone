@@ -321,7 +321,7 @@ void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_sta
 	if (auto host = serverCreature(a_hostId)) {
 		double scale = gameInstance.data().elements().wardScale(elements(), host->elements());
 		host->absorberId = netId();
-		host->absorbFraction = std::clamp(a_fraction * scale, 0.0, 0.9);
+		host->absorbFraction = std::clamp(a_fraction * scale, 0.0, 1.0);
 		host->absorbStatusScale = std::clamp(scale > 0.0 ? a_statusScale / scale : 1.0, 0.05, 1.0);
 	}
 }
@@ -591,6 +591,7 @@ void ClientCreature::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
+	buildHealthBar();
 
 	statTemplate.script(gameInstance.script()).spawn(self);
 
@@ -622,9 +623,40 @@ void ClientCreature::animateDeathAndRemove() {
 	});
 }
 
+// League-style bar: dark frame, team-coloured fill, a divider every 10 hp
+void ClientCreature::buildHealthBar() {
+	static constexpr float WIDTH = 56.0f, HEIGHT = 7.0f, ABOVE_HEAD = -96.0f;
+	bool friendly = player() && player()->id == gameInstance.localPlayerId();
+	if (std::getenv("MV_HPBAR_DIAG")) { std::cout << "[hpbar] " << statTemplate.id << " player=" << (player() ? player()->id : -2) << " local=" << gameInstance.localPlayerId() << " friendly=" << friendly << std::endl; }
+	healthBar = owner()->make("HealthBar");
+	healthBar->serializable(false);
+	healthBar->position(MV::point(-WIDTH / 2.0f, ABOVE_HEAD));
+	healthBar->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(-1.5f, -1.5f), MV::size(WIDTH + 3.0f, HEIGHT + 3.0f)))->color(MV::Color(0.05f, 0.07f, 0.09f, 0.95f));
+	healthFill = healthBar->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(WIDTH, HEIGHT)))->color(friendly ? MV::Color(0.18f, 0.80f, 0.44f, 1.0f) : MV::Color(0.88f, 0.27f, 0.23f, 1.0f));
+	for (int hp = 10; hp < statTemplate.health; hp += 10) {
+		float x = WIDTH * static_cast<float>(hp) / static_cast<float>(statTemplate.health);
+		healthBar->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB<>(MV::point(x, 0.0f), MV::size(1.0f, HEIGHT)))->color(MV::Color(0.05f, 0.07f, 0.09f, 0.75f));
+	}
+	refreshHealthBar();
+}
+
+void ClientCreature::refreshHealthBar() {
+	if (!healthFill || !healthBar) { return; }
+	int health = *state->self()->health;
+	if (health <= 0 || *state->self()->hidden) { healthBar->hide(); return; }
+	healthBar->show();
+	// sit just above the animated skeleton, whatever its height; fall back to a fixed lift until it has bounds
+	auto skeleton = spineAnimator ? spineAnimator->bounds() : MV::BoxAABB<>();
+	float top = skeleton.size().height > 1.0f ? skeleton.minPoint.y - 14.0f : -60.0f;
+	healthBar->position(MV::point(-28.0f, top));
+	float fraction = statTemplate.health > 0 ? std::clamp(static_cast<float>(health) / static_cast<float>(statTemplate.health), 0.0f, 1.0f) : 0.0f;
+	healthFill->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::size(std::max(0.5f, 56.0f * fraction), 7.0f)));
+}
+
 void ClientCreature::onNetworkSynchronize() {
 	networkDelta.add(MV::Stopwatch::programTime());
 	if (*state->self()->hidden) { owner()->hide(); } else { owner()->show(); }
+	refreshHealthBar();
 	startClientPosition = owner()->position();
 	accumulatedDuration = 0;
 	spine()->track().time(state->self()->animationTime);

@@ -1,9 +1,10 @@
 // Shared creature status module (server). Included by every creature script; every creature's update
-// calls statusTick(self, dt) first. State lives in creature vars so any script can read it.
+// calls statusTick(self, dt) first. State lives in creature vars so any script can read it, and every
+// ailment outlives whoever applied it.
 
 // Flight: the victim leaves the grid (no footprint), is stunned for the flight, eases toward the
 // landing cell, then takes its footprint back (the agent's own placement nudges it if the cell filled).
-// landingStun: a further stun applied the moment the victim lands (0 for none)
+// landingStun: a further stun applied the moment the victim lands (0 for none).
 void knockback(var& self, var victimId, int cells, double seconds, double landingStun) {
 	var victim = self.game().creature(victimId);
 	if (victim == null || !victim.alive() || cells <= 0) {
@@ -44,58 +45,6 @@ bool inFlight(var& creature) {
 	return remaining != null && remaining > 0.0;
 }
 
-// Rot: a stacking damage-over-time whose payout ramps exponentially toward the end of its window.
-// Cumulative damage at elapsed e of duration T is total * (exp(k e / T) - 1) / (exp(k) - 1); each new
-// bite adds its total and keeps the clock running, so a sustained attacker keeps the victim in the
-// steep tail.
-void rot(var& self, var victimId, int total, double seconds) {
-	var victim = self.game().creature(victimId);
-	if (victim == null || !victim.alive() || total <= 0) {
-		return;
-	}
-	var active = victim.getVar("rotRemaining");
-	if (active == null || active <= 0.0) {
-		victim.setVar("rotElapsed", 0.0);
-		victim.setVar("rotDealt", 0);
-		victim.setVar("rotTotal", 0);
-	}
-	victim.setVar("rotTotal", victim.getVar("rotTotal") + total);
-	victim.setVar("rotDuration", seconds);
-	victim.setVar("rotRemaining", seconds);
-	victim.setVar("rotSource", self.networkId());
-}
-
-void rotTick(var& self, double dt) {
-	var remaining = self.getVar("rotRemaining");
-	if (remaining == null || remaining <= 0.0) {
-		return;
-	}
-	double k = 3.0;
-	double duration = self.getVar("rotDuration");
-	double elapsed = self.getVar("rotElapsed") + dt;
-	remaining = remaining - dt;
-	int total = self.getVar("rotTotal");
-	int dealt = self.getVar("rotDealt");
-	double progress = (remaining <= 0.0) ? 1.0 : min(1.0, elapsed / duration);
-	int expected = (remaining <= 0.0) ? total : floor(total * (exp(k * progress) - 1.0) / (exp(k) - 1.0));
-	int due = expected - dealt;
-	if (due > 0) {
-		self.damage(due, self.getVar("rotSource"));
-		dealt = dealt + due;
-	}
-	self.setVar("rotElapsed", elapsed);
-	self.setVar("rotDealt", dealt);
-	self.setVar("rotRemaining", remaining <= 0.0 ? 0.0 : remaining);
-}
-
-void statusTick(var& self, double dt) {
-	rotTick(self, dt);
-	if (!self.alive()) {
-		return;
-	}
-	flightTick(self, dt);
-}
-
 // Ease-out: fast leave, soft landing.
 void flightTick(var& self, double dt) {
 	if (!inFlight(self)) {
@@ -119,6 +68,63 @@ void flightTick(var& self, double dt) {
 	double t = 1.0 - remaining / duration;
 	double eased = 1.0 - (1.0 - t) * (1.0 - t);
 	self.agent().localPosition(Point(from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased));
+}
+
+// Poison: every application is its own stack of 1-hp ticks on a shared third-of-a-second clock, the
+// first tick landing at once; a stack lives `seconds`. Three stacks = 3 hp per tick.
+void poison(var& self, var victimId, double seconds) {
+	var victim = self.game().creature(victimId);
+	if (victim == null || !victim.alive()) {
+		return;
+	}
+	var stacks = victim.getVar("poisonStacks");
+	if (stacks == null) {
+		stacks = [];
+		victim.setVar("poisonTimer", 0.0);
+	}
+	stacks.push(seconds);
+	victim.setVar("poisonStacks", stacks);
+	victim.setVar("poisonSource", self.networkId());
+	victim.damage(1, self.networkId());
+}
+
+int poisonStacks(var& creature) {
+	var stacks = creature.getVar("poisonStacks");
+	return stacks == null ? 0 : stacks.size();
+}
+
+void poisonTick(var& self, double dt) {
+	var stacks = self.getVar("poisonStacks");
+	if (stacks == null || stacks.size() == 0) {
+		return;
+	}
+	double interval = 1.0 / 3.0;
+	double timer = self.getVar("poisonTimer") + dt;
+	int ticks = 0;
+	while (timer >= interval) {
+		timer = timer - interval;
+		ticks = ticks + 1;
+	}
+	var live = [];
+	for (int i = 0; i < stacks.size(); ++i) {
+		double left = stacks[i] - dt;
+		if (left > 0.0) {
+			live.push(left);
+		}
+	}
+	self.setVar("poisonStacks", live);
+	self.setVar("poisonTimer", timer);
+	if (ticks > 0 && live.size() > 0) {
+		self.damage(ticks * live.size(), self.getVar("poisonSource"));
+	}
+}
+
+void statusTick(var& self, double dt) {
+	poisonTick(self, dt);
+	if (!self.alive()) {
+		return;
+	}
+	flightTick(self, dt);
 }
 
 // The closest free cell to a target, nearest ring first.

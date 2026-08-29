@@ -308,6 +308,10 @@ void ClientGameInstance::performUpgrade(int a_slot, int a_upgrade) {
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
 }
 
+int64_t ClientGameInstance::localPlayerId() const {
+	return game.player() ? game.player()->id : -1;
+}
+
 bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const {
 	return a_player == game.player();
 }

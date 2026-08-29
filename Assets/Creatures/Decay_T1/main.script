@@ -1,18 +1,13 @@
-// Siphion (Decay T1): medium health offense; melee that slows and rots - the rot pays out on an exponential ramp, most of it at the end, and every bite stacks
+// Siphion (Decay T1): medium health offense; bites on a 0.75 s clock, every bite a fresh poison stack (1 hp per third of a second for 5 s) that stacks and outlives the Siphion, plus a slow
 include "Creatures/Shared/status.script";
 
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
+	self.setVar("biteCooldown", 0.75);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
-		var me = targeting.self().networkId();
-		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			var attacker = targeting.self();
-			rot(attacker, target, 12, 5.0);
-			targeting.self().game().creature(target).slow(0.2, 3.0);
-			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(3, me); }
-		}
+		// no basic attack
 	});
 
 	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
@@ -66,7 +61,15 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-
+	self.setVar("biteCooldown", self.getVar("biteCooldown") - dt);
+	if (self.getVar("biteCooldown") <= 0.0) {
+		self.setVar("biteCooldown", 0.75);
+		var prey = self.nearestEnemyId(2.0);
+		if (prey != 0) {
+			poison(self, prey, 5.0);
+			self.game().creature(prey).slow(0.2, 3.0);
+		}
+	}
 	if (!self.getVar("attacking")) {
 		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
 		if (!tryToFindAndAttackTarget(self, dt)) {

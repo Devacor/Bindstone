@@ -564,8 +564,13 @@ private:
 
 	void onNetworkSynchronize();
 	void onAnimationChanged();
-	
+
 	virtual void updateImplementation(double a_delta) override;
+
+	void buildHealthBar();
+	void refreshHealthBar();
+	std::shared_ptr<MV::Scene::Node> healthBar;
+	std::shared_ptr<MV::Scene::Drawable> healthFill;
 
 	MV::Point<> startClientPosition;
 	double accumulatedDuration = 0.0f;

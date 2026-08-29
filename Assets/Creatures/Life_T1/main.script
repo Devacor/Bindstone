@@ -31,7 +31,7 @@ self.spawn = [=](var& self) -> void {
 		if (activeTarget != target) {
 			self.setVar("activeTarget", target);
 			self.setVar("marching", false);
-			self.targeting().target(target, 8, [target](var& targeting) -> void {
+			self.targeting().target(target, 4, [target](var& targeting) -> void {
 				targeting.self().setVar("activeTarget", 0);
 				targeting.self().setVar("attacking", true);
 				auto spine = targeting.self().spine();
@@ -77,7 +77,7 @@ self.update = [=](var& self, double dt) -> void {
 		self.setVar("shieldCooldown", 8.0);
 		if (self.nearestEnemyId(10) == 0) {
 			self.shield(6);
-			var allies = self.alliesInRange(6);
+			var allies = self.alliesInRange(8);
 			for (int i = 0; i < allies.size(); ++i) {
 				if (allies[i].networkId() != self.networkId() && allies[i].shieldAmount() == 0) {
 					allies[i].shield(4);
@@ -98,7 +98,7 @@ self.update = [=](var& self, double dt) -> void {
 };
 
 self.death = [=](var& self) -> void {
-	var allies = self.alliesInRange(5);
+	var allies = self.alliesInRange(8);
 	for (int i = 0; i < allies.size(); ++i) {
 		allies[i].hot(2.0, 5.0);
 	}

@@ -78,7 +78,7 @@ self.update = [=](var& self, double dt) -> void {
 		var enemies = self.enemiesInRange(6);
 		if (!enemies.empty()) {
 			for (int i = 0; i < enemies.size(); ++i) {
-				knockback(self, enemies[i].networkId(), 2, 0.2);
+				knockback(self, enemies[i].networkId(), 2, 0.2, 0.0);
 				enemies[i].slow(0.3, 2.0);
 				enemies[i].damage(2, self.networkId());
 			}

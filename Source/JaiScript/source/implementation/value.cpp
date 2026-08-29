@@ -615,9 +615,9 @@ script_value script_value::clone() const {
 
                 if (!copied) {
                     throw runtime_error(
-                        "Cannot deep copy C++ object of type '" + obj_holder->type_name +
-                        "'. Register a copy constructor with dynamic_binder<T>::copy_constructor() "
-                        "or use shared_ptr<" + obj_holder->type_name + "> for reference semantics.");
+                        "Cannot copy C++ object of type '" + obj_holder->type_name +
+                        "': the type is not copy-constructible. Hold it by reference (auto&/var&) "
+                        "or share it (shared_ptr<" + obj_holder->type_name + ">).");
                 }
             }
             break;

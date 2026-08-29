@@ -67,7 +67,7 @@ namespace jai {
         
         // declaration parsing
         checked_result<declaration_ptr> declaration();
-        checked_result<declaration_ptr> class_declaration();
+        checked_result<declaration_ptr> class_declaration(bool nocopy = false);
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
         checked_result<declaration_ptr> variable_declaration();

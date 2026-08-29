@@ -50,6 +50,7 @@ namespace jai {
         no_parent_class = 56,
         constructor_failed = 57,
         evaluation_failed = 58,
+        member_access_on_null = 59,
 
         // Class errors (71-80)
         class_not_found = 71,

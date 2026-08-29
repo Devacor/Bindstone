@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 6;
+    inline constexpr uint32_t k_jaibite_version = 7;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -462,6 +462,7 @@ namespace jai::detail {
                     auto* d = static_cast<const class_decl*>(n);
                     str(d->name);
                     symbol(d->name_id, UINT64_MAX);
+                    u8(d->nocopy ? 1 : 0);
                     varint(d->base_classes.size());
                     for (const auto& b : d->base_classes) str(b);
                     varint(d->members.size());
@@ -1114,6 +1115,7 @@ namespace jai::detail {
                     std::string_view name = view();
                     uint64_t nid = symbol(UINT64_MAX);
                     auto d = std::make_shared<class_decl>(loc, name, nid);
+                    d->nocopy = u8() != 0;
                     uint64_t nb = varint();
                     check_count(nb);
                     d->base_classes.reserve(size_t(nb));

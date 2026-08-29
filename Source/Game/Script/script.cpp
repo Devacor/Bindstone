@@ -173,7 +173,7 @@ namespace MV {
 #endif
 		bool success = true;
 		try {
-			engine_->execute(a_scriptContents);
+			engine_->execute_file_source(a_scriptIdentifier, a_scriptContents);
 		} catch (const std::exception& e) {
 			MV::error("Script [", a_scriptIdentifier, "] failed: ", e.what());
 			success = false;
@@ -194,7 +194,7 @@ namespace MV {
 		logCheckDiagnostics(*engine_, a_scriptIdentifier, a_scriptContents);
 #endif
 		try {
-			auto result = engine_->execute(a_scriptContents);
+			auto result = engine_->execute_file_source(a_scriptIdentifier, a_scriptContents);
 			return result.is_bool() ? result.as_bool() : a_default;
 		} catch (const std::exception& e) {
 			MV::error("Script [", a_scriptIdentifier, "] failed: ", e.what());

@@ -14,6 +14,8 @@ for %%E in (LobbyServer GameServer Bindstone) do (
 call "%ROOT%Tools\LocalServer\setup_local_db.bat"
 if errorlevel 1 exit /b 1
 
+REM Two local accounts drift apart in rating after a match; the lobby would then hold the second Play for up to 40 s.
+set MV_LOBBY_MATCH_ANY=1
 start "LobbyServer (%CONFIG%)" /D "%ROOT%" "%BIN%\LobbyServer.exe"
 timeout /t 2 /nobreak >nul
 start "GameServer (%CONFIG%)" /D "%ROOT%" "%BIN%\GameServer.exe"

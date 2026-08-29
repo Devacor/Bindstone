@@ -37,7 +37,12 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 		return ourPlayer;
 	}
 
+	// MV_LOBBY_MATCH_ANY=1 (the local stack): pair anyone immediately, ratings ignored
 	double tolerance() {
+		static const bool matchAny = std::getenv("MV_LOBBY_MATCH_ANY") != nullptr;
+		if (matchAny) {
+			return 1.0;
+		}
 		if (time < 5.0) {
 			return .025;
 		} else if(time < 10.0) {
@@ -242,7 +247,9 @@ public:
 						double currentBest; std::shared_ptr<MatchSeeker> opponent;
 						std::tie(opponent, currentBest) = opponentFromIndex(i, current);
 
-						if (opponent && (currentBest <= current->tolerance()) && (currentBest <= opponent->tolerance())) {
+						// The window belongs to whoever has waited longest: a patient seeker accepts a wider
+						// gap, so a newcomer near them is matched at once instead of serving the whole ladder
+						if (opponent && currentBest <= std::max(current->tolerance(), opponent->tolerance())) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
 								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "]" << std::endl;
 								current->matching = true;

@@ -1,4 +1,5 @@
 #include "parallax.h"
+#include <cmath>
 
 #include "MV/Utility/log.h"
 
@@ -18,6 +19,8 @@ static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax
 
 	builder.method("worldZoomOffset", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::worldZoomOffset));
 	builder.method("worldZoomOffset", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::worldZoomOffset));
+	builder.method("zoomRatio", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::zoomRatio));
+	builder.method("zoomRatio", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::zoomRatio));
 
 	builder.method("enabled", static_cast<bool(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::enabled));
 	builder.method("enabled", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(bool)>(&MV::Scene::Parallax::enabled));
@@ -79,6 +82,12 @@ namespace MV {
 			if (needsUpdate && isEnabled && owner()) {
 				if (auto ownerParent = owner()->parent()) {
 					needsUpdate = false;
+					bool zooms = ourZoomRatio->x != 1.0f || ourZoomRatio->y != 1.0f;
+					if (zooms) {
+						if (!authoredScaleKnown) { authoredScale = owner()->scale(); authoredScaleKnown = true; }
+						auto parentScale = ownerParent->worldScale();
+						owner()->scale(Scale(authoredScale.x * std::pow(parentScale.x, ourZoomRatio->x - 1.0f), authoredScale.y * std::pow(parentScale.y, ourZoomRatio->y - 1.0f), authoredScale.z));
+					}
 					auto ourPositionOffset = owner()->position(*ourLocalOffset)->worldPosition();
 					auto parentPosition = ownerParent->worldPosition() + *ourZoomOffset;
 					owner()->worldPosition((parentPosition * -1.0f) + (parentPosition * ourTranslateRatio.get()) + ourPositionOffset);

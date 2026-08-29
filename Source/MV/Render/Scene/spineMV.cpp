@@ -677,9 +677,7 @@ namespace MV{
 							stop();
 						}
 					} else if (a_type == spine::EventType_Event) {
-						auto data = eventData(a_event);
-						std::cout << "EVENT: " << a_entry->getAnimation().getName().buffer() << ":" << data.name << "\n";
-						onEventSignal(*this, data);
+						onEventSignal(*this, eventData(a_event));
 					}
 				}
 			}

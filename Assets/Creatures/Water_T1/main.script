@@ -13,7 +13,9 @@ self.spawn = [=](var& self) -> void {
 	});
 
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
-		self.targeting().target(self.team().enemyWell(), PathMode.flowField, [=](var& targeting) -> void {
+		// the well sits inside its building's blocked cells: arriving means standing at its edge
+		self.targeting().target(self.team().enemyWell(), 6.0, PathMode.flowField, [=](var& targeting) -> void {
+			targeting.self().enemyTeam().damage(1);   // a leak: the well takes a point
 			targeting.self().fall();
 		});
 	});

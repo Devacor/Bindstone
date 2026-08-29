@@ -128,13 +128,15 @@ namespace MV {
 #ifdef _DEBUG
 		engine->static_checking(jai::check_mode::warn);
 #endif
-		engine->set_script_error_handler([](const std::string& a_message) {
-			MV::error("Script callback failed: ", a_message);
+		engine->set_script_error_handler([raw = engine.get()](const std::string& a_message) {
+			auto trace = raw->format_stack_trace();
+			MV::error("Script callback failed: ", a_message, trace.empty() ? "" : "\n", trace);
 		});
 		jai::stdlib::register_all(*engine);
 		jai::bind_registrar<MV::Services>(*engine, a_services);
 		engine->add_global("InEditMode", jai::script_value(editMode(), engine.get()));
 		engine->add_global("PathMode", engine->make_object(std::make_shared<PathModeValues>()));
+		engine->add_global("SpawnBudget", jai::script_value(static_cast<int64_t>(-1), engine.get()));   // buildings spawn without limit; the arena caps it
 		if (editMode()) {
 			MV::info("Script engine: edit mode (InEditMode=true, gameplay script hot-reload on)");
 		}

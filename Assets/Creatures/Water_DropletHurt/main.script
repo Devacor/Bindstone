@@ -1,11 +1,13 @@
-// Tare (Water T1): untargetable; clings to an enemy and suffocates it
+// Tare (Water T1): untargetable; clings to an enemy as an ailment and suffocates it, a mob again if the host dies
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.untargetable(true);
 	self.setVar("host", 0);
+	self.setVar("attached", false);
 	self.setVar("life", 12.0);
 	self.setVar("clingCooldown", 0.0);
+	self.setVar("refreshCooldown", 0.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		// no basic attack
@@ -16,7 +18,9 @@ self.spawn = [=](var& self) -> void {
 	});
 
 	self.setVar("applyDefaultTarget", [=](var& self) -> void {
-		self.targeting().target(self.team().enemyWell(), PathMode.flowField, [=](var& targeting) -> void {
+		// the well sits inside its building's blocked cells: arriving means standing at its edge
+		self.targeting().target(self.team().enemyWell(), 6.0, PathMode.flowField, [=](var& targeting) -> void {
+			targeting.self().enemyTeam().damage(1);   // a leak: the well takes a point
 			targeting.self().fall();
 		});
 	});
@@ -25,13 +29,28 @@ self.spawn = [=](var& self) -> void {
 self.update = [=](var& self, double dt) -> void {
 	self.setVar("life", self.getVar("life") - dt);
 	self.setVar("clingCooldown", self.getVar("clingCooldown") - dt);
+	self.setVar("refreshCooldown", self.getVar("refreshCooldown") - dt);
 	var host = self.getVar("host");
+	// the host is gone: let go and be a mob again (footprint back on the map, free to seek)
 	if (host != 0 && self.game().creature(host) == null) {
+		if (self.getVar("attached")) {
+			self.agent().enableFootprint();
+			self.setVar("attached", false);
+		}
 		host = 0;
 		self.setVar("host", 0);
 	}
 	if (self.getVar("life") <= 0.0) {
 		self.fall();
+		return;
+	}
+	// attached: no occupancy, no pathing - ride the host and keep the ailment fresh
+	if (host != 0 && self.getVar("attached")) {
+		self.agent().gridPosition(self.game().creature(host).agent().gridPosition());
+		if (self.getVar("refreshCooldown") <= 0.0) {
+			self.setVar("refreshCooldown", 2.0);
+			self.game().creature(host).dot(2.0, 2.0, self.networkId());
+		}
 		return;
 	}
 	if (host == 0) {
@@ -45,6 +64,10 @@ self.update = [=](var& self, double dt) -> void {
 		self.setVar("clingCooldown", 1.0);
 		self.targeting().target(host, 0.5, [host](var& targeting) -> void {
 			if (targeting.self().game().creature(host) != null && targeting.self().game().creature(host).alive()) {
+				targeting.self().agent().stop();
+				targeting.self().agent().disableFootprint();
+				targeting.self().setVar("attached", true);
+				targeting.self().setVar("refreshCooldown", 2.0);
 				targeting.self().game().creature(host).dot(2.0, 2.0, targeting.self().networkId());
 			}
 		}, [=](var& targeting) -> void {});

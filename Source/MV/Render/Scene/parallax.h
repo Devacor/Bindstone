@@ -39,6 +39,17 @@ namespace MV {
 			Point<> worldZoomOffset() const {
 				return ourZoomOffset;
 			}
+			// Share of the parent's zoom this layer takes, in log space: the layer's world scale is
+			// parentScale^zoomRatio, so 1 zooms with the parent (default), 0 never changes size,
+			// 0.5 halves every doubling. Pair with translateRatio for a layer at depth.
+			std::shared_ptr<Parallax> zoomRatio(const Point<>& a_zoomRatio) {
+				ourZoomRatio = a_zoomRatio;
+				needsUpdate = true;
+				return std::static_pointer_cast<Parallax>(shared_from_this());
+			}
+			Point<> zoomRatio() const {
+				return ourZoomRatio;
+			}
 
 			bool enabled() const {
 				return isEnabled;
@@ -107,6 +118,9 @@ namespace MV {
 			JAI_NAMED_PROPERTY((Point<>), "translateRatio", ourTranslateRatio);
 			JAI_NAMED_PROPERTY((Point<>), "localOffset", ourLocalOffset);
 			JAI_NAMED_PROPERTY((Point<>), "zoomOffset", ourZoomOffset);
+			JAI_NAMED_PROPERTY((Point<>), "zoomRatio", ourZoomRatio, (Point<>(1.0f, 1.0f, 1.0f)));
+			Scale authoredScale;   // the node's own scale before zoom is applied on top of it
+			bool authoredScaleKnown = false;
 			JAI_DELETED_PROPERTY((int32_t), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;

@@ -6,7 +6,7 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			targeting.self().game().creature(target).damage(2, me);
+			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(2, me); }
 		}
 	});
 

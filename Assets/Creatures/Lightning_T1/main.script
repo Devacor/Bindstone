@@ -6,17 +6,17 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			targeting.self().game().creature(target).damage(6, me);
 			targeting.self().game().creature(target).stun(0.4);
 			var others = targeting.self().enemiesInRange(4);
 			var jumps = 0;
 			for (int i = 0; i < others.size() && jumps < 2; ++i) {
 				if (others[i].networkId() != target) {
 					jumps = jumps + 1;
-					others[i].damage(jumps == 1 ? 4 : 2, me);
 					others[i].stun(0.3);
+					others[i].damage(jumps == 1 ? 4 : 2, me);
 				}
 			}
+			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(6, me); }
 		}
 	});
 
@@ -85,7 +85,7 @@ self.update = [=](var& self, double dt) -> void {
 self.death = [=](var& self) -> void {
 	var enemies = self.enemiesInRange(4);
 	for (int i = 0; i < enemies.size(); ++i) {
-		enemies[i].damage(5, self.networkId());
 		enemies[i].stun(2.0);
+		enemies[i].damage(5, self.networkId());
 	}
 };

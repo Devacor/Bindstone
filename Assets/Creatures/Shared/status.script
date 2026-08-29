@@ -44,8 +44,60 @@ bool inFlight(var& creature) {
 	return remaining != null && remaining > 0.0;
 }
 
-// Ease-out: fast leave, soft landing.
+// Rot: a stacking damage-over-time whose payout ramps exponentially toward the end of its window.
+// Cumulative damage at elapsed e of duration T is total * (exp(k e / T) - 1) / (exp(k) - 1); each new
+// bite adds its total and keeps the clock running, so a sustained attacker keeps the victim in the
+// steep tail.
+void rot(var& self, var victimId, int total, double seconds) {
+	var victim = self.game().creature(victimId);
+	if (victim == null || !victim.alive() || total <= 0) {
+		return;
+	}
+	var active = victim.getVar("rotRemaining");
+	if (active == null || active <= 0.0) {
+		victim.setVar("rotElapsed", 0.0);
+		victim.setVar("rotDealt", 0);
+		victim.setVar("rotTotal", 0);
+	}
+	victim.setVar("rotTotal", victim.getVar("rotTotal") + total);
+	victim.setVar("rotDuration", seconds);
+	victim.setVar("rotRemaining", seconds);
+	victim.setVar("rotSource", self.networkId());
+}
+
+void rotTick(var& self, double dt) {
+	var remaining = self.getVar("rotRemaining");
+	if (remaining == null || remaining <= 0.0) {
+		return;
+	}
+	double k = 3.0;
+	double duration = self.getVar("rotDuration");
+	double elapsed = self.getVar("rotElapsed") + dt;
+	remaining = remaining - dt;
+	int total = self.getVar("rotTotal");
+	int dealt = self.getVar("rotDealt");
+	double progress = (remaining <= 0.0) ? 1.0 : min(1.0, elapsed / duration);
+	int expected = (remaining <= 0.0) ? total : floor(total * (exp(k * progress) - 1.0) / (exp(k) - 1.0));
+	int due = expected - dealt;
+	if (due > 0) {
+		self.damage(due, self.getVar("rotSource"));
+		dealt = dealt + due;
+	}
+	self.setVar("rotElapsed", elapsed);
+	self.setVar("rotDealt", dealt);
+	self.setVar("rotRemaining", remaining <= 0.0 ? 0.0 : remaining);
+}
+
 void statusTick(var& self, double dt) {
+	rotTick(self, dt);
+	if (!self.alive()) {
+		return;
+	}
+	flightTick(self, dt);
+}
+
+// Ease-out: fast leave, soft landing.
+void flightTick(var& self, double dt) {
 	if (!inFlight(self)) {
 		return;
 	}

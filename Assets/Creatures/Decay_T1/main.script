@@ -1,4 +1,4 @@
-// Siphion (Decay T1): medium health offense; melee that rots and slows
+// Siphion (Decay T1): medium health offense; melee that slows and rots - the rot pays out on an exponential ramp, most of it at the end, and every bite stacks
 include "Creatures/Shared/status.script";
 
 self.spawn = [=](var& self) -> void {
@@ -8,7 +8,8 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			targeting.self().game().creature(target).dot(2.0, 4.0, me);
+			var attacker = targeting.self();
+			rot(attacker, target, 12, 5.0);
 			targeting.self().game().creature(target).slow(0.2, 3.0);
 			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(3, me); }
 		}

@@ -14,10 +14,10 @@ self.spawn = [=](var& self) -> void {
 				if (others[i].networkId() != target) {
 					jumps = jumps + 1;
 					others[i].stun(0.3);
-					others[i].damage(jumps == 1 ? 4 : 2, me);
+					others[i].damage(jumps == 1 ? 2 : 1, me);
 				}
 			}
-			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(24, me); }
+			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(14, me); }
 		}
 	});
 
@@ -89,6 +89,6 @@ self.death = [=](var& self) -> void {
 	var enemies = self.enemiesInRange(4);
 	for (int i = 0; i < enemies.size(); ++i) {
 		enemies[i].stun(2.0);
-		enemies[i].damage(5, self.networkId());
+		enemies[i].damage(3, self.networkId());
 	}
 };

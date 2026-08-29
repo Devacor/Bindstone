@@ -1,0 +1,2 @@
+spine-cpp 4.3 (github.com/esotericsoftware/spine-runtimes, branch 4.3, sparse checkout of spine-cpp)
+Headers live here as <spine/*.h>; sources in src/ are compiled by External_Common.vcxitems.

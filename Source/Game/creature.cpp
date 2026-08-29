@@ -1,4 +1,6 @@
 #include "creature.h"
+#include <cmath>
+#include <algorithm>
 #include "building.h"
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
@@ -106,6 +108,29 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.base_class<Creature>();
 	builder.method("agent", &ServerCreature::agent);
 	builder.method("fall", &ServerCreature::fall);
+
+	builder.method("damage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.damage(static_cast<int>(a_amount), a_source)); });
+	builder.method("heal", [](ServerCreature& a_self, int64_t a_amount) { a_self.heal(static_cast<int>(a_amount)); });
+	builder.method("shield", [](ServerCreature& a_self, int64_t a_amount) { a_self.shield(static_cast<int>(a_amount)); });
+	builder.method("shieldAmount", [](ServerCreature& a_self) { return static_cast<int64_t>(a_self.shieldAmount()); });
+	builder.method("dot", [](ServerCreature& a_self, double a_perSecond, double a_seconds, int64_t a_source) { a_self.dot(a_perSecond, a_seconds, a_source); });
+	builder.method("hot", [](ServerCreature& a_self, double a_perSecond, double a_seconds) { a_self.hot(a_perSecond, a_seconds); });
+	builder.method("slow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.slow(a_fraction, a_seconds); });
+	builder.method("haste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.haste(a_fraction, a_seconds); });
+	builder.method("attackHaste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.attackHaste(a_fraction, a_seconds); });
+	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
+	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
+	builder.method("moveSpeed", static_cast<double(ServerCreature::*)() const>(&ServerCreature::moveSpeed));
+	builder.method("moveSpeed", static_cast<void(ServerCreature::*)(double)>(&ServerCreature::moveSpeed));
+	builder.method("stun", &ServerCreature::stun);
+	builder.method("root", &ServerCreature::root);
+	builder.method("knockback", [](ServerCreature& a_self, int64_t a_cells, int64_t a_source) { a_self.knockback(static_cast<int>(a_cells), a_source); });
+	builder.method("taunt", [](ServerCreature& a_self, int64_t a_attacker, double a_seconds) { a_self.taunt(a_attacker, a_seconds); });
+	builder.method("tauntedBy", &ServerCreature::tauntedBy);
+	builder.method("untargetable", static_cast<bool(ServerCreature::*)() const>(&ServerCreature::untargetable));
+	builder.method("untargetable", static_cast<void(ServerCreature::*)(bool)>(&ServerCreature::untargetable));
+	builder.method("absorbFor", [](ServerCreature& a_self, int64_t a_host, double a_fraction, double a_statusScale) { a_self.absorbFor(a_host, a_fraction, a_statusScale); });
+	builder.method("spawnCreature", &ServerCreature::spawnCreature);
 });
 
 static jai::registrar<ClientCreature, MV::Services> _hookClientCreature("ClientCreature",
@@ -154,6 +179,8 @@ void ServerCreature::initialize() {
 	
 	pathAgent = owner()->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())), 3)->
 		gridSpeed(statTemplate.moveSpeed);
+	baseMoveSpeed = statTemplate.moveSpeed;
+	appliedMoveSpeed = statTemplate.moveSpeed;
 
 	pathAgent->onStart.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
 		onStartSignal(std::static_pointer_cast<ServerCreature>(shared_from_this()));
@@ -189,9 +216,106 @@ void ServerCreature::animateDeathAndRemove() {
 	});
 }
 
+std::shared_ptr<ServerCreature> ServerCreature::serverCreature(int64_t a_id) const {
+	auto found = std::dynamic_pointer_cast<ServerCreature>(gameInstance.creature(a_id));
+	return (found && found->alive()) ? found : nullptr;
+}
+
+double ServerCreature::scaledDuration(double a_seconds) const {
+	return (absorberId != 0 && serverCreature(absorberId)) ? a_seconds * absorbStatusScale : a_seconds;
+}
+
+int ServerCreature::damage(int a_amount, int64_t a_sourceId) {
+	if (!alive() || a_amount <= 0) { return 0; }
+	int remaining = a_amount;
+	int fromShield = std::min(shieldPoints, remaining);
+	shieldPoints -= fromShield;
+	remaining -= fromShield;
+	if (remaining > 0 && absorberId != 0) {
+		if (auto absorber = serverCreature(absorberId)) {
+			int redirected = static_cast<int>(remaining * absorbFraction);
+			if (redirected > 0) {
+				absorber->changeHealth(-redirected);
+				remaining -= redirected;
+			}
+		} else {
+			absorberId = 0;
+		}
+	}
+	if (remaining > 0) {
+		changeHealth(-remaining);
+	}
+	return remaining;
+}
+
+void ServerCreature::stun(double a_seconds) {
+	targeting.stun(static_cast<float>(scaledDuration(a_seconds)));
+}
+
+void ServerCreature::root(double a_seconds) {
+	targeting.root(static_cast<float>(scaledDuration(a_seconds)));
+}
+
+void ServerCreature::knockback(int a_cells, int64_t a_sourceId) {
+	auto source = serverCreature(a_sourceId);
+	if (!source || !pathAgent || a_cells <= 0) { return; }
+	auto from = source->agent()->gridPosition();
+	auto here = pathAgent->gridPosition();
+	auto direction = here - from;
+	auto length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+	if (length <= 0.0001f) { direction = MV::Point<>(1.0f, 0.0f); length = 1.0f; }
+	direction /= length;
+	auto path = gameInstance.path();
+	for (int cells = a_cells; cells > 0; --cells) {
+		auto candidate = MV::round<int>(here + direction * static_cast<MV::PointPrecision>(cells));
+		if (path->inBounds(candidate) && !path->blocked(candidate)) {
+			pathAgent->gridPosition(candidate);
+			return;
+		}
+	}
+}
+
+void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale) {
+	if (auto host = serverCreature(a_hostId)) {
+		host->absorberId = netId();
+		host->absorbFraction = std::clamp(a_fraction, 0.0, 1.0);
+		host->absorbStatusScale = std::clamp(a_statusScale, 0.0, 1.0);
+	}
+}
+
+void ServerCreature::spawnCreature(const std::string& a_creatureId) {
+	gameInstance.spawnCreatureAt(buildingSlot(), a_creatureId, owner()->worldPosition());
+}
+
+void ServerCreature::updateStatus(double a_dt) {
+	for (auto effect = timedEffects.begin(); effect != timedEffects.end();) {
+		double step = std::min(a_dt, effect->remaining);
+		effect->carry += effect->perSecond * step;
+		int whole = static_cast<int>(effect->carry);
+		if (whole != 0) {
+			effect->carry -= whole;
+			if (whole < 0) { damage(-whole, effect->source); } else { heal(whole); }
+		}
+		effect->remaining -= a_dt;
+		effect = effect->remaining <= 0.0 ? timedEffects.erase(effect) : effect + 1;
+	}
+	for (auto* effect : { &slowEffect, &hasteEffect, &attackHasteEffect }) {
+		if (effect->remaining > 0.0 && (effect->remaining -= a_dt) <= 0.0) { effect->fraction = 0.0; effect->remaining = 0.0; }
+	}
+	if (tauntRemaining > 0.0 && ((tauntRemaining -= a_dt) <= 0.0 || !serverCreature(tauntId))) { tauntRemaining = 0.0; tauntId = 0; }
+	if (absorberId != 0 && !serverCreature(absorberId)) { absorberId = 0; }
+	double speed = baseMoveSpeed * moveSpeedMultiplier();
+	if (pathAgent && speed != appliedMoveSpeed) {
+		pathAgent->gridSpeed(static_cast<MV::PointPrecision>(speed));
+		appliedMoveSpeed = speed;
+	}
+}
+
 void ServerCreature::updateImplementation(double a_delta) {
 	if (alive()) {
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+		updateStatus(a_delta);
+		if (!alive()) { return; }
 		statTemplate.script(gameInstance.script()).update(self, a_delta);
 		targeting.update(a_delta);
 

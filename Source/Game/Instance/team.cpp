@@ -47,7 +47,7 @@ std::vector<std::shared_ptr<ServerCreature>> Team::creaturesInRange(const MV::Po
         std::unordered_map<ServerCreature*, double> distances;
         for (auto&& kv : game.creatures) {
                 auto a_creature = std::dynamic_pointer_cast<ServerCreature>(kv.second);
-                if (a_creature && (game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive()) {
+                if (a_creature && (game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive() && !a_creature->untargetable()) {
                         auto ourDistance = MV::distance(a_location, a_creature->agent()->gridPosition());
                         distances[a_creature.get()] = ourDistance;
                         if (ourDistance <= a_radius) {

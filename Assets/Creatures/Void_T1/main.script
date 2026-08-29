@@ -18,9 +18,34 @@ self.spawn = [=](var& self) -> void {
 			var chomp = targeting.self().getVar("chompCount");
 			targeting.self().setVar("chompCount", chomp + 1);
 			var bite = (chomp % 3 == 0) ? 24 : 8;
+			// the bite is a frontal sweep: everything in the arc toward the target takes it too
+			var mePos = targeting.self().agent().gridPosition();
+			var victimPos = targeting.self().game().creature(target).agent().gridPosition();
+			double fx = victimPos.x - mePos.x;
+			double fy = victimPos.y - mePos.y;
+			double fl = sqrt(fx * fx + fy * fy);
+			if (fl < 0.001) {
+				fx = 1.0;
+				fy = 0.0;
+				fl = 1.0;
+			}
+			fx = fx / fl;
+			fy = fy / fl;
+			var others = targeting.self().enemiesInRange(2.5);
+			for (int i = 0; i < others.size(); ++i) {
+				if (others[i].networkId() != target) {
+					var p = others[i].agent().gridPosition();
+					double dx = p.x - mePos.x;
+					double dy = p.y - mePos.y;
+					double dl = sqrt(dx * dx + dy * dy);
+					if (dl > 0.001 && (dx * fx + dy * fy) / dl > 0.3) {
+						others[i].damage(bite, me);
+					}
+				}
+			}
 			if (chomp % 3 == 0) {
 				var attacker = targeting.self();
-				knockback(attacker, target, 10, 0.35, 2.0);
+				knockback(attacker, target, 10, 0.35, 1.75);
 				targeting.self().visible(false);
 				targeting.self().untargetable(true);
 				targeting.self().agent().stop();
@@ -87,12 +112,27 @@ self.update = [=](var& self, double dt) -> void {
 		if (phased == null || !inFlight(phased)) {
 			if (phased != null) {
 				teleportNear(self, self.getVar("phasing"), 3);
+				// for two seconds after the blink every point the Voidling would take lands on its victim instead
+				phased.absorbFor(self.networkId(), 1.0, 1.0);
+				self.setVar("redirectTarget", self.getVar("phasing"));
+				self.setVar("redirectRemaining", 2.0);
 			}
 			self.visible(true);
 			self.untargetable(false);
 			self.setVar("phasing", 0);
 		}
 		return;
+	}
+	var redirect = self.getVar("redirectRemaining");
+	if (redirect != null && redirect > 0.0) {
+		redirect = redirect - dt;
+		self.setVar("redirectRemaining", redirect);
+		if (redirect <= 0.0) {
+			var shieldbearer = self.game().creature(self.getVar("redirectTarget"));
+			if (shieldbearer != null) {
+				shieldbearer.absorbFor(self.networkId(), 0.0, 1.0);
+			}
+		}
 	}
 
 	if (!self.getVar("attacking")) {

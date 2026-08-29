@@ -91,6 +91,8 @@ public:
 	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale, bool interruptable = false);
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &) const = 0;
+	// the player behind this process (a client); servers have none
+	virtual int64_t localPlayerId() const { return -1; }
 
 	Team& teamForSide(TeamSide a_side) {
 		return a_side == LEFT ? *left : *right;
@@ -225,6 +227,7 @@ public:
 	void performUpgrade(int a_slot, int a_upgrade) override;
 
 	bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
+	int64_t localPlayerId() const override;
 
 private:
 	Game &game;

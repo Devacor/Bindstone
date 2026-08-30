@@ -17,7 +17,7 @@ self.spawn = [=](var& self) -> void {
 			}
 			var chomp = targeting.self().getVar("chompCount");
 			targeting.self().setVar("chompCount", chomp + 1);
-			var bite = (chomp % 3 == 0) ? 24 : 8;
+			var bite = (chomp % 3 == 0) ? 29 : 10;
 			// the bite is a frontal sweep: everything in the arc toward the target takes it too
 			var mePos = targeting.self().agent().gridPosition();
 			var victimPos = targeting.self().game().creature(target).agent().gridPosition();

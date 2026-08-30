@@ -186,6 +186,23 @@
             "elements": [
                 "lightning"
             ]
+        },
+        {
+            "id": "Water_Drip",
+            "name": "Drip",
+            "description": "The smallest piece of a Tearel: a stubborn little droplet that marches and bites.",
+            "moveSpeed": 13.0,
+            "actionSpeed": 0.25,
+            "castSpeed": 1.0,
+            "attackInterval": 0.5,
+            "health": 15,
+            "defense": 0.0,
+            "will": 0.0,
+            "strength": 100.0,
+            "ability": 100.0,
+            "elements": [
+                "water"
+            ]
         }
     ]
 }

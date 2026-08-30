@@ -5,7 +5,6 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.setVar("shoutCooldown", 3.0);
-	self.attackSlow(0.4, 100000.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();

@@ -112,10 +112,10 @@ self.update = [=](var& self, double dt) -> void {
 		if (phased == null || !inFlight(phased)) {
 			if (phased != null) {
 				teleportNear(self, self.getVar("phasing"), 3);
-				// for two seconds after the blink every point the Voidling would take lands on its victim instead
+				// for three seconds after the blink every point the Voidling would take lands on its victim instead
 				phased.absorbFor(self.networkId(), 1.0, 1.0);
 				self.setVar("redirectTarget", self.getVar("phasing"));
-				self.setVar("redirectRemaining", 2.0);
+				self.setVar("redirectRemaining", 3.0);
 			}
 			self.visible(true);
 			self.untargetable(false);

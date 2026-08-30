@@ -133,8 +133,12 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("slow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.slow(a_fraction, a_seconds); });
 	builder.method("haste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.haste(a_fraction, a_seconds); });
 	builder.method("attackHaste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.attackHaste(a_fraction, a_seconds); });
+	builder.method("attackSlow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.attackSlow(a_fraction, a_seconds); });
+	builder.method("abilityHaste", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.abilityHaste(a_fraction, a_seconds); });
+	builder.method("abilitySlow", [](ServerCreature& a_self, double a_fraction, double a_seconds) { a_self.abilitySlow(a_fraction, a_seconds); });
 	builder.method("moveSpeedMultiplier", &ServerCreature::moveSpeedMultiplier);
 	builder.method("attackSpeedMultiplier", &ServerCreature::attackSpeedMultiplier);
+	builder.method("abilitySpeedMultiplier", &ServerCreature::abilitySpeedMultiplier);
 	builder.method("moveSpeed", static_cast<double(ServerCreature::*)() const>(&ServerCreature::moveSpeed));
 	builder.method("moveSpeed", static_cast<void(ServerCreature::*)(double)>(&ServerCreature::moveSpeed));
 	builder.method("stun", &ServerCreature::stun);
@@ -342,7 +346,7 @@ void ServerCreature::updateStatus(double a_dt) {
 		effect->remaining -= a_dt;
 		effect = effect->remaining <= 0.0 ? timedEffects.erase(effect) : effect + 1;
 	}
-	for (auto* effect : { &slowEffect, &hasteEffect, &attackHasteEffect }) {
+	for (auto* effect : { &slowEffect, &hasteEffect, &attackHasteEffect, &attackSlowEffect, &abilityHasteEffect, &abilitySlowEffect }) {
 		if (effect->remaining > 0.0 && (effect->remaining -= a_dt) <= 0.0) { effect->fraction = 0.0; effect->remaining = 0.0; }
 	}
 	if (tauntRemaining > 0.0 && ((tauntRemaining -= a_dt) <= 0.0 || !serverCreature(tauntId))) { tauntRemaining = 0.0; tauntId = 0; }

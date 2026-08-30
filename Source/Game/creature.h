@@ -432,9 +432,14 @@ public:
 	void hot(double a_perSecond, double a_seconds) { timedEffects.push_back({ a_perSecond, a_seconds, 0, 0.0, {} }); }
 	void slow(double a_fraction, double a_seconds) { apply(slowEffect, a_fraction, scaledDuration(a_seconds)); }
 	void haste(double a_fraction, double a_seconds) { apply(hasteEffect, a_fraction, a_seconds); }
+	// slows and hastes are separate positive fractions (the stronger of each kind wins) and multiply
 	void attackHaste(double a_fraction, double a_seconds) { apply(attackHasteEffect, a_fraction, a_seconds); }
+	void attackSlow(double a_fraction, double a_seconds) { apply(attackSlowEffect, a_fraction, scaledDuration(a_seconds)); }
+	void abilityHaste(double a_fraction, double a_seconds) { apply(abilityHasteEffect, a_fraction, a_seconds); }
+	void abilitySlow(double a_fraction, double a_seconds) { apply(abilitySlowEffect, a_fraction, scaledDuration(a_seconds)); }
 	double moveSpeedMultiplier() const { return std::max(0.05, (1.0 - slowEffect.fraction) * (1.0 + hasteEffect.fraction)); }
-	double attackSpeedMultiplier() const { return std::max(0.1, 1.0 + attackHasteEffect.fraction); }
+	double attackSpeedMultiplier() const { return std::max(0.1, (1.0 - attackSlowEffect.fraction) * (1.0 + attackHasteEffect.fraction)); }
+	double abilitySpeedMultiplier() const { return std::max(0.1, (1.0 - abilitySlowEffect.fraction) * (1.0 + abilityHasteEffect.fraction)); }
 	void moveSpeed(double a_base) { baseMoveSpeed = a_base; }
 	double moveSpeed() const { return baseMoveSpeed; }
 	void stun(double a_seconds);
@@ -505,6 +510,9 @@ private:
 	TimedFraction slowEffect;
 	TimedFraction hasteEffect;
 	TimedFraction attackHasteEffect;
+	TimedFraction attackSlowEffect;
+	TimedFraction abilityHasteEffect;
+	TimedFraction abilitySlowEffect;
 	int shieldPoints = 0;
 	int64_t tauntId = 0;
 	double tauntRemaining = 0.0;

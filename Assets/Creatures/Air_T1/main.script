@@ -16,7 +16,7 @@ self.spawn = [=](var& self) -> void {
 		auto effect = spawnOnNetwork(newMissile);
 		effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
 			if (battleEffect.targetCreature() != null && battleEffect.targetCreature().alive()) {
-				battleEffect.targetCreature().damage(2, source);
+				battleEffect.targetCreature().damage(4, source);
 			}
 		});
 	});
@@ -72,7 +72,7 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-	self.setVar("gustCooldown", self.getVar("gustCooldown") - dt);
+	self.setVar("gustCooldown", self.getVar("gustCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("gustCooldown") <= 0.0) {
 		self.setVar("gustCooldown", 6.0);
 		var enemies = self.enemiesInRange(6);
@@ -86,7 +86,7 @@ self.update = [=](var& self, double dt) -> void {
 			self.setVar("gustCooldown", 0.5);
 		}
 	}
-	self.setVar("sailCooldown", self.getVar("sailCooldown") - dt);
+	self.setVar("sailCooldown", self.getVar("sailCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("sailCooldown") <= 0.0) {
 		self.setVar("sailCooldown", 1.0);
 		var allies = self.alliesInRange(5);

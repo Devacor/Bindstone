@@ -39,9 +39,13 @@ self.spawn = [=](var& self) -> void {
 					double dy = p.y - mePos.y;
 					double dl = sqrt(dx * dx + dy * dy);
 					if (dl > 0.001 && (dx * fx + dy * fy) / dl > 0.3) {
+						others[i].stun(0.25);
 						others[i].damage(bite, me);
 					}
 				}
+			}
+			if (chomp % 3 != 0) {
+				targeting.self().game().creature(target).stun(0.25);
 			}
 			if (chomp % 3 == 0) {
 				var attacker = targeting.self();

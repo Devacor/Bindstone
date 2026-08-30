@@ -375,12 +375,15 @@ class ServerCreature : public Creature {
 private:
 
 	jai::signal_emitter<CallbackSignature> onArriveSignal;
+	jai::signal_emitter<void(std::shared_ptr<Creature>, int, int64_t)> onDamagedSignal;
 	jai::signal_emitter<CallbackSignature> onBlockedSignal;
 	jai::signal_emitter<CallbackSignature> onStopSignal;
 	jai::signal_emitter<CallbackSignature> onStartSignal;
 
 public:
 	jai::signal<CallbackSignature> onArrive;
+	// a direct hit landed (weapon, missile, sweep, burst): (self, points taken, attacker id); ticks never fire it
+	jai::signal<void(std::shared_ptr<Creature>, int, int64_t)> onDamaged;
 	jai::signal<CallbackSignature> onBlocked;
 	jai::signal<CallbackSignature> onStop;
 	jai::signal<CallbackSignature> onStart;
@@ -426,6 +429,7 @@ public:
 	// shield, the absorber (an ally taking a share), and health; timed effects tick in update; movement
 	// is moveSpeed x multiplier; stun/root durations are scaled while an absorber protects this unit.
 	int damage(int a_amount, int64_t a_sourceId);
+	int tickDamage(int a_amount, int64_t a_sourceId);
 	void heal(int a_amount) { changeHealth(std::max(0, a_amount)); }
 	void shield(int a_amount) { shieldPoints = std::max(shieldPoints, a_amount); }
 	int shieldAmount() const { return shieldPoints; }
@@ -505,7 +509,7 @@ private:
 		if (a_fraction >= a_effect.fraction) { a_effect.fraction = a_fraction; }
 		a_effect.remaining = std::max(a_effect.remaining, a_seconds);
 	}
-	int damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId);
+	int damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId, bool a_reactive);
 	double elementMultiplier(const std::vector<std::string>& a_attackerElements) const;
 	double scaledDuration(double a_seconds) const;
 	std::shared_ptr<ServerCreature> serverCreature(int64_t a_id) const;

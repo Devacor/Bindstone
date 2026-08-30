@@ -8,7 +8,8 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
-			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(2, me); }
+			var striker = targeting.self();
+			strike(striker, target, 2);
 		}
 	});
 

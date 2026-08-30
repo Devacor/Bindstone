@@ -158,6 +158,28 @@ void statusTick(var& self, double dt) {
 	flightTick(self, dt);
 }
 
+// A basic attack. The attacker's own hit lands first; a Tear riding the attacker (infusedBy) adds a
+// second, water-typed hit of half the amount sourced from the Tear, so water's multipliers apply to it.
+void strike(var& attacker, var victimId, int amount) {
+	var victim = attacker.game().creature(victimId);
+	if (victim == null || !victim.alive() || amount <= 0) {
+		return;
+	}
+	victim.damage(amount, attacker.networkId());
+	var infusion = attacker.getVar("infusedBy");
+	if (infusion == null || infusion == 0) {
+		return;
+	}
+	var tear = attacker.game().creature(infusion);
+	if (tear == null || !tear.alive()) {
+		attacker.setVar("infusedBy", 0);
+		return;
+	}
+	if (attacker.game().creature(victimId) != null) {
+		attacker.game().creature(victimId).damage((amount + 1) / 2, infusion);
+	}
+}
+
 // The enemy with the longest reach in sight (the backline); ties go to the nearer one. 0 when nothing is in range.
 int pickBackline(var& self, double range) {
 	var enemies = self.enemiesInRange(range);

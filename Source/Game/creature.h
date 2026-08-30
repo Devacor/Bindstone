@@ -35,7 +35,7 @@ struct CreatureData {
 	float moveSpeed = 0.0f;
 	float actionSpeed = 0.0f;
 	float castSpeed = 0.0f;
-	float attackSpeed = 1.0f;   // base attack animation rate; statuses multiply on top
+	float attackInterval = 0.0f;   // seconds between attacks (0 = the attack animation's own length); statuses multiply on top
 
 	int health = 0;
 	float defense = 0.0f;
@@ -52,7 +52,7 @@ struct CreatureData {
 	template<class Archive>
 	void serialize(Archive& archive) {
 		archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
-			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed), JAI_NVP(attackSpeed),
+			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed), JAI_NVP(attackInterval),
 			JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
 			JAI_NVP(strength), JAI_NVP(ability), JAI_NVP(elements));
 	}
@@ -439,7 +439,15 @@ public:
 	void abilityHaste(double a_fraction, double a_seconds) { apply(abilityHasteEffect, a_fraction, a_seconds); }
 	void abilitySlow(double a_fraction, double a_seconds) { apply(abilitySlowEffect, a_fraction, scaledDuration(a_seconds)); }
 	double moveSpeedMultiplier() const { return std::max(0.05, (1.0 - slowEffect.fraction) * (1.0 + hasteEffect.fraction)); }
-	double attackSpeedMultiplier() const { return std::max(0.1, statTemplate.attackSpeed * (1.0 - attackSlowEffect.fraction) * (1.0 + attackHasteEffect.fraction)); }
+	// the attack animation is scaled so one attack takes attackInterval seconds, then statuses multiply
+	double attackSpeedMultiplier() const {
+		double base = 1.0;
+		if (statTemplate.attackInterval > 0.0f && spineAnimator) {
+			double animationSeconds = spineAnimator->animationDuration("attack");
+			if (animationSeconds > 0.0) { base = animationSeconds / statTemplate.attackInterval; }
+		}
+		return std::max(0.1, base * (1.0 - attackSlowEffect.fraction) * (1.0 + attackHasteEffect.fraction));
+	}
 	double abilitySpeedMultiplier() const { return std::max(0.1, (1.0 - abilitySlowEffect.fraction) * (1.0 + abilityHasteEffect.fraction)); }
 	void moveSpeed(double a_base) { baseMoveSpeed = a_base; }
 	double moveSpeed() const { return baseMoveSpeed; }

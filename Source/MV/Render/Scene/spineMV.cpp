@@ -330,6 +330,11 @@ namespace MV{
 			}
 		}
 
+		double Spine::animationDuration(const std::string &a_animationName) const {
+			auto animation = skeletonData ? skeletonData->findAnimation(a_animationName.c_str()) : nullptr;
+			return animation ? animation->getDuration() : 0.0;
+		}
+
 		std::shared_ptr<Spine> Spine::animate(const std::string &a_animationName, bool a_loop) {
 			track(defaultTrack).animate(a_animationName, a_loop);
 			return std::static_pointer_cast<Spine>(shared_from_this());

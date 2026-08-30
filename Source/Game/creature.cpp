@@ -20,7 +20,7 @@ static jai::registrar<CreatureData, MV::Services> _hookCreatureData("CreatureDat
 	builder.property("moveSpeed", &CreatureData::moveSpeed);
 	builder.property("actionSpeed", &CreatureData::actionSpeed);
 	builder.property("castSpeed", &CreatureData::castSpeed);
-	builder.property("attackSpeed", &CreatureData::attackSpeed);
+	builder.property("attackInterval", &CreatureData::attackInterval);
 	builder.property("health", &CreatureData::health);
 	builder.property("defense", &CreatureData::defense);
 	builder.property("will", &CreatureData::will);

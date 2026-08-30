@@ -179,6 +179,7 @@ namespace MV {
 			}
 
 			std::shared_ptr<Spine> animate(const std::string &a_animationName, bool a_loop = true);
+			double animationDuration(const std::string &a_animationName) const;
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop = true);
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, bool a_loop = true);
 

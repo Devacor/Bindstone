@@ -146,12 +146,15 @@ self.update = [=](var& self, double dt) -> void {
 	if (blink > 0.0) {
 		self.setVar("blinkCooldown", blink - dt);
 	} else if (!self.getVar("attacking")) {
-		var prey = pickBackline(self, 20);
+		var prey = pickBackline(self, 12);
 		if (prey != 0) {
 			var me = self.agent().gridPosition();
 			var p = self.game().creature(prey).agent().gridPosition();
+			var well = self.team().enemyWell();
 			double d2 = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
-			if (d2 > 16.0 && teleportNear(self, prey, 2)) {
+			double wellD2 = (p.x - well.x) * (p.x - well.x) + (p.y - well.y) * (p.y - well.y);
+			// never land inside the well's arrival radius: a blink is a strike, not a leak
+			if (d2 > 16.0 && wellD2 > 81.0 && teleportNear(self, prey, 2)) {
 				self.setVar("blinkCooldown", 8.0);
 				self.setVar("activeTarget", 0);
 				self.targeting().clear();

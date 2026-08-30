@@ -4,7 +4,7 @@ include "Creatures/Shared/status.script";
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
-	self.setVar("biteCooldown", 0.75);
+	self.setVar("biteCooldown", self.stats().attackInterval);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		// no basic attack
@@ -63,7 +63,7 @@ self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
 	self.setVar("biteCooldown", self.getVar("biteCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("biteCooldown") <= 0.0) {
-		self.setVar("biteCooldown", 0.75);
+		self.setVar("biteCooldown", self.stats().attackInterval);
 		var prey = self.nearestEnemyId(2.0);
 		if (prey != 0) {
 			self.game().creature(prey).slow(0.5, 3.0);

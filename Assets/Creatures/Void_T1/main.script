@@ -31,6 +31,7 @@ self.spawn = [=](var& self) -> void {
 			}
 			fx = fx / fl;
 			fy = fy / fl;
+			var sweeper = targeting.self();
 			var others = targeting.self().enemiesInRange(2.5);
 			for (int i = 0; i < others.size(); ++i) {
 				if (others[i].networkId() != target) {
@@ -40,7 +41,7 @@ self.spawn = [=](var& self) -> void {
 					double dl = sqrt(dx * dx + dy * dy);
 					if (dl > 0.001 && (dx * fx + dy * fy) / dl > 0.3) {
 						others[i].stun(0.25);
-						others[i].damage(bite, me);
+						strike(sweeper, others[i].networkId(), bite);
 					}
 				}
 			}
@@ -56,7 +57,8 @@ self.spawn = [=](var& self) -> void {
 				targeting.clear();
 				targeting.self().setVar("phasing", target);
 			}
-			if (targeting.self().game().creature(target) != null) { targeting.self().game().creature(target).damage(bite, me); }
+			var striker = targeting.self();
+			strike(striker, target, bite);
 		}
 	});
 

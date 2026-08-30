@@ -15,7 +15,9 @@ self.spawn = [=](var& self) -> void {
 		auto effect = spawnOnNetwork(newMissile);
 		effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
 			if (battleEffect.targetCreature() != null && battleEffect.targetCreature().alive()) {
-				battleEffect.targetCreature().damage(4, source);
+				var victim = battleEffect.targetCreature();
+				var shooter = victim.game().creature(source);
+				if (shooter != null) { strike(shooter, victim.networkId(), 4); } else { victim.damage(4, source); }
 			}
 		});
 	});

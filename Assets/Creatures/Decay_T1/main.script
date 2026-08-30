@@ -5,10 +5,10 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.setVar("biteCooldown", self.stats().attackInterval);
-	// thorns: whoever lands a hit on a Siphion takes a short stack from it - six points over two seconds
+	// thorns: whoever lands a hit on a Siphion takes a short stack from it - three points over a second, refreshed by every hit
 	self.onDamaged.connect("thorns", [=](var& victim, int amount, int source) -> void {
 		if (source != 0 && source != victim.networkId()) {
-			poison(victim, source, 1.9);
+			poison(victim, source, 0.9);
 		}
 	});
 

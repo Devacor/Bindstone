@@ -36,6 +36,7 @@ struct CreatureData {
 	float actionSpeed = 0.0f;
 	float castSpeed = 0.0f;
 	float attackInterval = 0.0f;   // seconds between attacks (0 = the attack animation's own length); statuses multiply on top
+	float attackRange = 0.0f;   // cells; 0 = no attack
 
 	int health = 0;
 	float defense = 0.0f;
@@ -52,7 +53,7 @@ struct CreatureData {
 	template<class Archive>
 	void serialize(Archive& archive) {
 		archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
-			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed), JAI_NVP(attackInterval),
+			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed), JAI_NVP(attackInterval), JAI_NVP(attackRange),
 			JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
 			JAI_NVP(strength), JAI_NVP(ability), JAI_NVP(elements));
 	}

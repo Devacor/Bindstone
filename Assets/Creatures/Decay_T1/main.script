@@ -26,7 +26,7 @@ self.spawn = [=](var& self) -> void {
 		if (activeTarget != target) {
 			self.setVar("activeTarget", target);
 			self.setVar("marching", false);
-			self.targeting().target(target, 2, [target](var& targeting) -> void {
+			self.targeting().target(target, self.stats().attackRange, [target](var& targeting) -> void {
 				targeting.self().setVar("activeTarget", 0);
 				targeting.self().setVar("attacking", true);
 				auto spine = targeting.self().spine();

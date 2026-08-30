@@ -71,7 +71,7 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-	self.setVar("jetCooldown", self.getVar("jetCooldown") - dt);
+	self.setVar("jetCooldown", self.getVar("jetCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("jetCooldown") <= 0.0) {
 		self.setVar("jetCooldown", 6.0);
 		var enemies = self.enemiesInRange(3);

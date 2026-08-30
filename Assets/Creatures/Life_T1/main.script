@@ -4,7 +4,7 @@ include "Creatures/Shared/status.script";
 self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
-	self.setVar("shieldCooldown", 8.0);
+	self.setVar("shieldCooldown", 6.0);
 	self.shield(6);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
@@ -72,9 +72,9 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-	self.setVar("shieldCooldown", self.getVar("shieldCooldown") - dt);
+	self.setVar("shieldCooldown", self.getVar("shieldCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("shieldCooldown") <= 0.0) {
-		self.setVar("shieldCooldown", 8.0);
+		self.setVar("shieldCooldown", 6.0);
 		if (self.nearestEnemyId(10) == 0) {
 			self.shield(6);
 			var allies = self.alliesInRange(8);

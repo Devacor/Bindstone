@@ -5,7 +5,7 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.setVar("shoutCooldown", 3.0);
-	self.attackHaste(-0.4, 100000.0);
+	self.attackSlow(0.4, 100000.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
@@ -65,7 +65,7 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-	self.setVar("shoutCooldown", self.getVar("shoutCooldown") - dt);
+	self.setVar("shoutCooldown", self.getVar("shoutCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("shoutCooldown") <= 0.0) {
 		self.setVar("shoutCooldown", 8.0);
 		var enemies = self.enemiesInRange(6);

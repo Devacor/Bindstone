@@ -15,7 +15,7 @@ self.spawn = [=](var& self) -> void {
 
 	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
 		var taunt = self.tauntedBy();
-		var target = (taunt != 0) ? taunt : self.nearestEnemyId(20);
+		var target = (taunt != 0) ? taunt : self.nearestEnemyId(2);
 		if (target == 0) {
 			return false;
 		}

@@ -7,6 +7,7 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("chompTarget", 0);
 	self.setVar("chompCount", 0);
 	self.setVar("phasing", 0);
+	self.setVar("blinkCooldown", 0.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
@@ -137,6 +138,23 @@ self.update = [=](var& self, double dt) -> void {
 			var shieldbearer = self.game().creature(self.getVar("redirectTarget"));
 			if (shieldbearer != null) {
 				shieldbearer.absorbFor(self.networkId(), 0.0, 1.0);
+			}
+		}
+	}
+	// gap-closer: the moment a fight starts, blink onto the backline instead of walking through the front
+	var blink = self.getVar("blinkCooldown");
+	if (blink > 0.0) {
+		self.setVar("blinkCooldown", blink - dt);
+	} else if (!self.getVar("attacking")) {
+		var prey = pickBackline(self, 20);
+		if (prey != 0) {
+			var me = self.agent().gridPosition();
+			var p = self.game().creature(prey).agent().gridPosition();
+			double d2 = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
+			if (d2 > 16.0 && teleportNear(self, prey, 2)) {
+				self.setVar("blinkCooldown", 8.0);
+				self.setVar("activeTarget", 0);
+				self.targeting().clear();
 			}
 		}
 	}

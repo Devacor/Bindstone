@@ -99,6 +99,6 @@ self.update = [=](var& self, double dt) -> void {
 self.death = [=](var& self) -> void {
 	var enemies = self.enemiesInRange(3);
 	for (int i = 0; i < enemies.size(); ++i) {
-		enemies[i].damage(10, self.networkId());
+		enemies[i].damage(12, self.networkId());
 	}
 };

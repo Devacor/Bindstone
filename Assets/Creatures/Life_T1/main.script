@@ -102,6 +102,6 @@ self.update = [=](var& self, double dt) -> void {
 self.death = [=](var& self) -> void {
 	var allies = self.alliesInRange(8);
 	for (int i = 0; i < allies.size(); ++i) {
-		allies[i].hot(2.0, 5.0);
+		allies[i].hot(3.0, 5.0);
 	}
 };

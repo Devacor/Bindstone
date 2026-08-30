@@ -60,7 +60,7 @@ self.update = [=](var& self, double dt) -> void {
 		return;
 	}
 	if (host == 0) {
-		host = self.nearestAllyId(12);
+		host = pickWardHost(self, 12);
 		self.setVar("host", host);
 	}
 	if (host != 0 && self.getVar("clingCooldown") <= 0.0) {

@@ -10,11 +10,42 @@ void knockback(var& self, var victimId, int cells, double seconds, double landin
 	if (victim == null || !victim.alive() || cells <= 0) {
 		return;
 	}
-	var grid = self.game().pathMap();
 	var from = self.agent().gridPosition();
 	var here = victim.agent().gridPosition();
-	double dx = here.x - from.x;
-	double dy = here.y - from.y;
+	flingAlong(self, victim, here.x - from.x, here.y - from.y, cells, seconds, landingStun);
+}
+
+// Isolation: the victim flies away from its own allies (the centroid of those within 8), so it lands alone;
+// with no allies near, away from the thrower.
+void isolateThrow(var& self, var victimId, int cells, double seconds, double landingStun) {
+	var victim = self.game().creature(victimId);
+	if (victim == null || !victim.alive() || cells <= 0) {
+		return;
+	}
+	var here = victim.agent().gridPosition();
+	var allies = victim.alliesInRange(8.0);
+	double cx = 0.0;
+	double cy = 0.0;
+	int count = 0;
+	for (int i = 0; i < allies.size(); ++i) {
+		if (allies[i].networkId() != victimId) {
+			var p = allies[i].agent().gridPosition();
+			cx = cx + p.x;
+			cy = cy + p.y;
+			count = count + 1;
+		}
+	}
+	if (count == 0) {
+		var from = self.agent().gridPosition();
+		flingAlong(self, victim, here.x - from.x, here.y - from.y, cells, seconds, landingStun);
+		return;
+	}
+	flingAlong(self, victim, here.x - cx / count, here.y - cy / count, cells, seconds, landingStun);
+}
+
+void flingAlong(var& self, var& victim, double dx, double dy, int cells, double seconds, double landingStun) {
+	var grid = self.game().pathMap();
+	var here = victim.agent().gridPosition();
 	double length = sqrt(dx * dx + dy * dy);
 	if (length < 0.0001) {
 		dx = 1.0;
@@ -125,6 +156,46 @@ void statusTick(var& self, double dt) {
 		return;
 	}
 	flightTick(self, dt);
+}
+
+// The enemy with the longest reach in sight (the backline); ties go to the nearer one. 0 when nothing is in range.
+int pickBackline(var& self, double range) {
+	var enemies = self.enemiesInRange(range);
+	var me = self.agent().gridPosition();
+	int best = 0;
+	double bestRange = -1.0;
+	double bestDistance = 1.0e9;
+	for (int i = 0; i < enemies.size(); ++i) {
+		var p = enemies[i].agent().gridPosition();
+		double distance = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
+		double reach = enemies[i].stats().attackRange;
+		if (reach > bestRange || (reach == bestRange && distance < bestDistance)) {
+			best = enemies[i].networkId();
+			bestRange = reach;
+			bestDistance = distance;
+		}
+	}
+	return best;
+}
+
+// The nearest ally worth warding: a real fighter, never a Drip or another support body.
+int pickWardHost(var& self, double range) {
+	var allies = self.alliesInRange(range);
+	var me = self.agent().gridPosition();
+	int best = 0;
+	double bestDistance = 1.0e9;
+	for (int i = 0; i < allies.size(); ++i) {
+		if (allies[i].networkId() == self.networkId() || allies[i].stats().attackRange <= 0.0 || allies[i].stats().id == "Water_Drip") {
+			continue;
+		}
+		var p = allies[i].agent().gridPosition();
+		double distance = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
+		if (distance < bestDistance) {
+			best = allies[i].networkId();
+			bestDistance = distance;
+		}
+	}
+	return best;
 }
 
 // The closest free cell to a target, nearest ring first.

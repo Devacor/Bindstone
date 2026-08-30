@@ -6,8 +6,13 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("activeTarget", 0);
 	self.setVar("gustCooldown", 3.0);
 	self.setVar("sailCooldown", 0.0);
+	self.setVar("shots", 0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
+		// every third slice carries an extra gust
+		var shots = targeting.self().getVar("shots") + 1;
+		targeting.self().setVar("shots", shots);
+		var shotDamage = (shots % 3 == 0) ? 6 : 3;
 		var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
 		newMissile.duration = 1.25;
 		newMissile.targetType = TargetType_CREATURE;
@@ -16,7 +21,7 @@ self.spawn = [=](var& self) -> void {
 		auto effect = spawnOnNetwork(newMissile);
 		effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
 			if (battleEffect.targetCreature() != null && battleEffect.targetCreature().alive()) {
-				battleEffect.targetCreature().damage(4, source);
+				battleEffect.targetCreature().damage(shotDamage, source);
 			}
 		});
 	});

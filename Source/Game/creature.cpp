@@ -86,6 +86,7 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 	auto& eng = builder.bound_engine();
 	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
 	jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(eng, "SignalCreatureHealth");
+	jai::bind_signal_type<void(std::shared_ptr<Creature>, int, int64_t)>(eng, "SignalCreatureDamaged");
 	builder.method("spine", &Creature::spine);
 	builder.method("alive", &Creature::alive);
 	builder.method("networkId", &Creature::netId);
@@ -98,6 +99,7 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 
 void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder) {
 	builder.property("onArrive", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onArrive; }, nullptr);
+	builder.property("onDamaged", [](ServerCreature& a_self) -> jai::signal<void(std::shared_ptr<Creature>, int, int64_t)>& { return a_self.onDamaged; }, nullptr);
 	builder.property("onBlocked", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onBlocked; }, nullptr);
 	builder.property("onStop", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStop; }, nullptr);
 	builder.property("onStart", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStart; }, nullptr);
@@ -126,6 +128,7 @@ static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerC
 	builder.method("fall", &ServerCreature::fall);
 
 	builder.method("damage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.damage(static_cast<int>(a_amount), a_source)); });
+	builder.method("tickDamage", [](ServerCreature& a_self, int64_t a_amount, int64_t a_source) { return static_cast<int64_t>(a_self.tickDamage(static_cast<int>(a_amount), a_source)); });
 	builder.method("heal", [](ServerCreature& a_self, int64_t a_amount) { a_self.heal(static_cast<int>(a_amount)); });
 	builder.method("shield", [](ServerCreature& a_self, int64_t a_amount) { a_self.shield(static_cast<int>(a_amount)); });
 	builder.method("shieldAmount", [](ServerCreature& a_self) { return static_cast<int64_t>(a_self.shieldAmount()); });
@@ -186,6 +189,7 @@ ServerCreature::ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 ServerCreature::ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance) :
 	Creature(a_owner, a_gameInstance, a_gameInstance.building(a_buildingSlot)->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<CreatureNetworkState>(a_statTemplate, a_buildingSlot))),
 	onArrive(onArriveSignal),
+	onDamaged(onDamagedSignal),
 	onBlocked(onBlockedSignal),
 	onStop(onStopSignal),
 	onStart(onStartSignal),
@@ -248,7 +252,13 @@ double ServerCreature::scaledDuration(double a_seconds) const {
 
 int ServerCreature::damage(int a_amount, int64_t a_sourceId) {
 	auto source = serverCreature(a_sourceId);
-	return damageScaled(a_amount, source ? source->elements() : std::vector<std::string>{}, a_sourceId);
+	return damageScaled(a_amount, source ? source->elements() : std::vector<std::string>{}, a_sourceId, true);
+}
+
+// periodic damage (poison, burn): scaled like a hit but never counts as one for reactions
+int ServerCreature::tickDamage(int a_amount, int64_t a_sourceId) {
+	auto source = serverCreature(a_sourceId);
+	return damageScaled(a_amount, source ? source->elements() : std::vector<std::string>{}, a_sourceId, false);
 }
 
 // every attacker type x every defender type from the table, then every synergy with an element
@@ -279,7 +289,7 @@ double ServerCreature::elementMultiplier(const std::vector<std::string>& a_attac
 	return multiplier;
 }
 
-int ServerCreature::damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId) {
+int ServerCreature::damageScaled(int a_amount, const std::vector<std::string>& a_attackerElements, int64_t a_sourceId, bool a_reactive) {
 	if (!alive() || a_amount <= 0) { return 0; }
 	int remaining = std::max(1, static_cast<int>(std::lround(a_amount * elementMultiplier(a_attackerElements))));
 	int fromShield = std::min(shieldPoints, remaining);
@@ -298,6 +308,9 @@ int ServerCreature::damageScaled(int a_amount, const std::vector<std::string>& a
 	}
 	if (remaining > 0) {
 		changeHealth(-remaining);
+	}
+	if (a_reactive && remaining > 0) {
+		onDamagedSignal(std::static_pointer_cast<Creature>(shared_from_this()), remaining, a_sourceId);
 	}
 	return remaining;
 }
@@ -346,7 +359,7 @@ void ServerCreature::updateStatus(double a_dt) {
 		int whole = static_cast<int>(effect->carry);
 		if (whole != 0) {
 			effect->carry -= whole;
-			if (whole < 0) { damageScaled(-whole, effect->elements, effect->source); } else { heal(whole); }
+			if (whole < 0) { damageScaled(-whole, effect->elements, effect->source, false); } else { heal(whole); }
 		}
 		effect->remaining -= a_dt;
 		effect = effect->remaining <= 0.0 ? timedEffects.erase(effect) : effect + 1;

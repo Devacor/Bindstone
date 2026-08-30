@@ -85,7 +85,7 @@ void poison(var& self, var victimId, double seconds) {
 	stacks.push(seconds);
 	victim.setVar("poisonStacks", stacks);
 	victim.setVar("poisonSource", self.networkId());
-	victim.damage(1, self.networkId());
+	victim.tickDamage(1, self.networkId());
 }
 
 int poisonStacks(var& creature) {
@@ -115,7 +115,7 @@ void poisonTick(var& self, double dt) {
 	self.setVar("poisonStacks", live);
 	self.setVar("poisonTimer", timer);
 	if (ticks > 0 && live.size() > 0) {
-		self.damage(ticks * live.size(), self.getVar("poisonSource"));
+		self.tickDamage(ticks * live.size(), self.getVar("poisonSource"));
 	}
 }
 

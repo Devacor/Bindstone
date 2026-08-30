@@ -20,6 +20,7 @@ static jai::registrar<CreatureData, MV::Services> _hookCreatureData("CreatureDat
 	builder.property("moveSpeed", &CreatureData::moveSpeed);
 	builder.property("actionSpeed", &CreatureData::actionSpeed);
 	builder.property("castSpeed", &CreatureData::castSpeed);
+	builder.property("attackSpeed", &CreatureData::attackSpeed);
 	builder.property("health", &CreatureData::health);
 	builder.property("defense", &CreatureData::defense);
 	builder.property("will", &CreatureData::will);
@@ -323,6 +324,10 @@ void ServerCreature::visible(bool a_value) {
 
 void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale) {
 	if (auto host = serverCreature(a_hostId)) {
+		if (a_fraction <= 0.0) {
+			if (host->absorberId == netId()) { host->absorberId = 0; host->absorbFraction = 0.0; host->absorbStatusScale = 1.0; }
+			return;
+		}
 		double scale = gameInstance.data().elements().wardScale(elements(), host->elements());
 		host->absorberId = netId();
 		host->absorbFraction = std::clamp(a_fraction * scale, 0.0, 1.0);

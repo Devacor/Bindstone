@@ -8,7 +8,6 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("chompCount", 0);
 	self.setVar("phasing", 0);
 	self.setVar("blinkCooldown", 0.0);
-	self.setVar("returnIn", 0.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
@@ -120,6 +119,8 @@ self.update = [=](var& self, double dt) -> void {
 		if (phased == null || !inFlight(phased)) {
 			if (phased != null) {
 				teleportNear(self, self.getVar("phasing"), 3);
+				// every forward phase costs a quarter of its life, straight from health
+				self.changeHealth(-round(self.stats().health * 0.25));
 				// for three seconds after the blink every point the Voidling would take lands on its victim instead
 				phased.absorbFor(self.networkId(), 1.0, 1.0);
 				self.setVar("redirectTarget", self.getVar("phasing"));
@@ -140,31 +141,13 @@ self.update = [=](var& self, double dt) -> void {
 			if (shieldbearer != null) {
 				shieldbearer.absorbFor(self.networkId(), 0.0, 1.0);
 			}
-			// the strike is over: phase back to where the hunt started
-			if (self.getVar("returnIn") > 0.0) {
-				self.setVar("returnIn", 0.0);
-				teleportToCell(self, self.getVar("returnCell"), 3);
-				self.setVar("activeTarget", 0);
-				self.targeting().clear();
-			}
-		}
-	}
-	// hit and run: a blink that never turned into a strike still comes home
-	var returnIn = self.getVar("returnIn");
-	if (returnIn > 0.0) {
-		returnIn = returnIn - dt;
-		self.setVar("returnIn", returnIn);
-		if (returnIn <= 0.0 && self.getVar("phasing") == 0) {
-			teleportToCell(self, self.getVar("returnCell"), 3);
-			self.setVar("activeTarget", 0);
-			self.targeting().clear();
 		}
 	}
 	// gap-closer: the moment a fight starts, blink onto the backline instead of walking through the front
 	var blink = self.getVar("blinkCooldown");
 	if (blink > 0.0) {
 		self.setVar("blinkCooldown", blink - dt);
-	} else if (!self.getVar("attacking") && self.getVar("returnIn") <= 0.0) {
+	} else if (!self.getVar("attacking")) {
 		var prey = pickBackline(self, 12);
 		if (prey != 0) {
 			var me = self.agent().gridPosition();
@@ -173,15 +156,12 @@ self.update = [=](var& self, double dt) -> void {
 			double d2 = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
 			double wellD2 = (p.x - well.x) * (p.x - well.x) + (p.y - well.y) * (p.y - well.y);
 			// never land inside the well's arrival radius: a blink is a strike, not a leak
-			if (d2 > 16.0 && wellD2 > 81.0) {
-				var origin = Pointi(round(me.x), round(me.y));
-				if (teleportNear(self, prey, 2)) {
-					self.setVar("returnCell", origin);
-					self.setVar("returnIn", 6.0);
-					self.setVar("blinkCooldown", 8.0);
-					self.setVar("activeTarget", 0);
-					self.targeting().clear();
-				}
+			if (d2 > 16.0 && wellD2 > 81.0 && teleportNear(self, prey, 2)) {
+				// every forward phase costs a quarter of its life, straight from health
+				self.changeHealth(-round(self.stats().health * 0.25));
+				self.setVar("blinkCooldown", 8.0);
+				self.setVar("activeTarget", 0);
+				self.targeting().clear();
 			}
 		}
 	}

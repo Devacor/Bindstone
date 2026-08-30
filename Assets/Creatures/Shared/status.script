@@ -226,10 +226,19 @@ bool teleportNear(var& self, var targetId, int maxRadius) {
 	if (target == null) {
 		return false;
 	}
-	var grid = self.game().pathMap();
 	var center = target.agent().gridPosition();
-	int cx = round(center.x);
-	int cy = round(center.y);
+	return teleportToCell(self, Pointi(round(center.x), round(center.y)), maxRadius);
+}
+
+// The closest free cell to a grid cell (the cell itself first), nearest ring after.
+bool teleportToCell(var& self, var cell, int maxRadius) {
+	var grid = self.game().pathMap();
+	int cx = cell.x;
+	int cy = cell.y;
+	if (grid.inBounds(cell) && !grid.blocked(cell)) {
+		self.agent().gridPosition(cell);
+		return true;
+	}
 	for (int radius = 1; radius <= maxRadius; ++radius) {
 		for (int dx = -radius; dx <= radius; ++dx) {
 			for (int dy = -radius; dy <= radius; ++dy) {

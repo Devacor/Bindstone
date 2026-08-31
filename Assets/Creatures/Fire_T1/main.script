@@ -76,10 +76,10 @@ self.update = [=](var& self, double dt) -> void {
 	self.setVar("jetCooldown", self.getVar("jetCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("jetCooldown") <= 0.0) {
 		self.setVar("jetCooldown", 6.0);
-		var enemies = self.enemiesInRange(3);
+		var enemies = self.enemiesInRange(4);
 		if (!enemies.empty()) {
 			for (int i = 0; i < enemies.size(); ++i) {
-				enemies[i].dot(3.0, 3.0, self.networkId());
+				enemies[i].dot(5.0, 3.0, self.networkId());
 			}
 		} else {
 			self.setVar("jetCooldown", 0.5);
@@ -97,8 +97,8 @@ self.update = [=](var& self, double dt) -> void {
 };
 
 self.death = [=](var& self) -> void {
-	var enemies = self.enemiesInRange(3);
+	var enemies = self.enemiesInRange(8);
 	for (int i = 0; i < enemies.size(); ++i) {
-		enemies[i].damage(12, self.networkId());
+		enemies[i].dot(5.0, 3.0, self.networkId());
 	}
 };

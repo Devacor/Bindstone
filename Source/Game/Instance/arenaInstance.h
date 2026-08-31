@@ -48,11 +48,12 @@ public:
 		spawnCreatureAt(a_buildingSlot, a_creatureId, building(a_buildingSlot)->spawnPositionWorld());
 	}
 
-	virtual void spawnCreatureAt(int a_buildingSlot, const std::string& a_creatureId, const MV::Point<> &a_worldPosition) override {
+	virtual int64_t spawnCreatureAt(int a_buildingSlot, const std::string& a_creatureId, const MV::Point<> &a_worldPosition) override {
 		auto creatureNode = gameObjectContainer()->make(MV::guid(a_creatureId));
 		creatureNode->worldPosition(a_worldPosition);
-		creatureNode->attach<ServerCreature>(a_creatureId, building(a_buildingSlot)->slotIndex(), *this);
+		auto spawnedId = creatureNode->attach<ServerCreature>(a_creatureId, building(a_buildingSlot)->slotIndex(), *this)->netId();
 		++spawned[a_buildingSlot < 8 ? 0 : 1][a_creatureId];
+		return spawnedId;
 	}
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &) const override {

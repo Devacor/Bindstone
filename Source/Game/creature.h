@@ -351,6 +351,8 @@ public:
 	std::vector<std::string> elements() const { return statTemplate.elements.empty() ? std::vector<std::string>{ ElementTable::elementOf(statTemplate.id) } : statTemplate.elements; }
 	std::string element() const { return elements().front(); }
 
+	int health() const { return *state->self()->health; }
+
 	static void jai_auto_bind(jai::dynamic_binder<Creature>& builder);
 
 protected:
@@ -465,7 +467,7 @@ public:
 	void untargetable(bool a_value) { untargetableFlag = a_value; }
 	bool untargetable() const { return untargetableFlag; }
 	void absorbFor(int64_t a_hostId, double a_fraction, double a_statusScale);
-	void spawnCreature(const std::string& a_creatureId);
+	int64_t spawnCreature(const std::string& a_creatureId);
 
 	static void jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder);
 

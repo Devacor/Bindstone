@@ -7,7 +7,7 @@ self.spawn = [=](var& self) -> void {
 	self.untargetable(true);
 	self.setVar("host", 0);
 	self.setVar("attached", false);
-	self.setVar("life", 18.0);
+	self.setVar("life", 24.0);
 	self.setVar("clingCooldown", 0.0);
 	self.setVar("refreshCooldown", 0.0);
 
@@ -45,6 +45,11 @@ self.update = [=](var& self, double dt) -> void {
 		}
 		host = 0;
 		self.setVar("host", 0);
+		// the ride-along lost its rider: call the Tearel back together
+		var parent = self.getVar("parentTearel");
+		if (parent != null && parent != 0 && self.game().creature(parent) != null) {
+			self.game().creature(parent).setVar("recombine", true);
+		}
 	}
 	if (self.getVar("life") <= 0.0) {
 		self.fall();

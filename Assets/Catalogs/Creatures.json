@@ -207,7 +207,7 @@
             "castSpeed": 1.0,
             "attackInterval": 0.5,
             "attackRange": 2.0,
-            "health": 15,
+            "health": 20,
             "defense": 0.0,
             "will": 0.0,
             "strength": 100.0,

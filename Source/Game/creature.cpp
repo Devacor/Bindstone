@@ -91,6 +91,7 @@ static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> 
 	builder.method("spine", &Creature::spine);
 	builder.method("alive", &Creature::alive);
 	builder.method("networkId", &Creature::netId);
+	builder.method("health", &Creature::health);
 	builder.method("element", &Creature::element);
 	builder.method("elements", &Creature::elements);
 	builder.method("changeHealth", &Creature::changeHealth);
@@ -349,8 +350,8 @@ void ServerCreature::absorbFor(int64_t a_hostId, double a_fraction, double a_sta
 	}
 }
 
-void ServerCreature::spawnCreature(const std::string& a_creatureId) {
-	gameInstance.spawnCreatureAt(buildingSlot(), a_creatureId, owner()->worldPosition());
+int64_t ServerCreature::spawnCreature(const std::string& a_creatureId) {
+	return gameInstance.spawnCreatureAt(buildingSlot(), a_creatureId, owner()->worldPosition());
 }
 
 void ServerCreature::updateStatus(double a_dt) {

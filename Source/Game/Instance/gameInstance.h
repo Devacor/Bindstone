@@ -105,7 +105,9 @@ public:
 	virtual void spawnCreature(int /*a_buildingSlot*/, const std::string &/*a_creatureId*/) {
 	}
 
-	virtual void spawnCreatureAt(int /*a_buildingSlot*/, const std::string &/*a_creatureId*/, const MV::Point<> &/*a_worldPosition*/) {
+	// returns the new creature's net id (0 when nothing spawned)
+	virtual int64_t spawnCreatureAt(int /*a_buildingSlot*/, const std::string &/*a_creatureId*/, const MV::Point<> &/*a_worldPosition*/) {
+		return 0;
 	}
 
         void registerCreature(std::shared_ptr<Creature> a_registerCreature) {
@@ -254,10 +256,10 @@ public:
 		spawnCreatureAt(a_buildingSlot, a_creatureId, building(a_buildingSlot)->spawnPositionWorld());
 	}
 
-	virtual void spawnCreatureAt(int a_buildingSlot, const std::string& a_creatureId, const MV::Point<> &a_worldPosition) override {
+	virtual int64_t spawnCreatureAt(int a_buildingSlot, const std::string& a_creatureId, const MV::Point<> &a_worldPosition) override {
 		auto creatureNode = gameObjectContainer()->make(MV::guid(a_creatureId));
 		creatureNode->worldPosition(a_worldPosition);
-		creatureNode->attach<ServerCreature>(a_creatureId, building(a_buildingSlot)->slotIndex(), *this);
+		return creatureNode->attach<ServerCreature>(a_creatureId, building(a_buildingSlot)->slotIndex(), *this)->netId();
 	}
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &/*a_player*/) const override {

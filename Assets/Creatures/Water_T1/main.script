@@ -5,6 +5,12 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.untargetable(true);
+	self.setVar("tareId", 0);
+	self.setVar("tearId", 0);
+	self.setVar("dripId", 0);
+	self.setVar("windowRemaining", 0.0);
+	self.setVar("recombine", false);
+	self.setVar("recombineIn", 0.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		// no basic attack
@@ -28,11 +34,51 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
-	if (self.nearestEnemyId(8) != 0) {
-		self.spawnCreature("Water_DropletHurt");
-		self.spawnCreature("Water_DropletHeal");
-		self.spawnCreature("Water_Drip");
-		self.fall();
+	if (self.getVar("tareId") == 0) {
+		var wait = self.getVar("recombineIn");
+		if (wait > 0.0) {
+			self.setVar("recombineIn", wait - dt);
+		} else if (self.nearestEnemyId(8) != 0) {
+			int tare = self.spawnCreature("Water_DropletHurt");
+			int tear = self.spawnCreature("Water_DropletHeal");
+			int drip = self.spawnCreature("Water_Drip");
+			self.game().creature(tare).setVar("parentTearel", self.networkId());
+			self.game().creature(tear).setVar("parentTearel", self.networkId());
+			self.game().creature(drip).setVar("parentTearel", self.networkId());
+			self.setVar("tareId", tare);
+			self.setVar("tearId", tear);
+			self.setVar("dripId", drip);
+			self.setVar("windowRemaining", 18.0);
+			self.setVar("recombine", false);
+			self.visible(false);
+			self.agent().stop();
+			self.agent().disableFootprint();
+		}
+	} else {
+		self.setVar("windowRemaining", self.getVar("windowRemaining") - dt);
+		var tare = self.game().creature(self.getVar("tareId"));
+		var tear = self.game().creature(self.getVar("tearId"));
+		var drip = self.game().creature(self.getVar("dripId"));
+		if (tare == null && tear == null && drip == null) {
+			// everything it was is gone
+			self.fall();
+		} else if (self.getVar("windowRemaining") <= 0.0 || self.getVar("recombine")) {
+			// re-form from whatever survives: their vitality plus a little more
+			double vitality = 0.0;
+			if (tare != null) { vitality = vitality + 1.0 * tare.health() / tare.stats().health; tare.fall(); }
+			if (tear != null) { vitality = vitality + 1.0 * tear.health() / tear.stats().health; tear.fall(); }
+			if (drip != null) { vitality = vitality + 1.0 * drip.health() / drip.stats().health; drip.fall(); }
+			int reformed = round(vitality / 3.0 * self.stats().health) + 10;
+			if (reformed > self.stats().health) { reformed = self.stats().health; }
+			self.changeHealth(reformed - self.health());
+			self.setVar("tareId", 0);
+			self.setVar("tearId", 0);
+			self.setVar("dripId", 0);
+			self.setVar("recombine", false);
+			self.setVar("recombineIn", 6.0);
+			self.visible(true);
+			self.agent().enableFootprint();
+		}
 		return;
 	}
 	if (!self.getVar("attacking")) {

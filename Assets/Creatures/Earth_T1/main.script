@@ -9,8 +9,11 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
 		if (targeting.self().game().creature(target) != null && targeting.self().game().creature(target).alive()) {
+			// the slam grows with the crowd the shout pulled in: five per enemy pressing it
+			var crowd = targeting.self().enemiesInRange(2.5);
+			var slam = 5 * max(1, crowd.size());
 			var striker = targeting.self();
-			strike(striker, target, 3);
+			strike(striker, target, slam);
 		}
 	});
 

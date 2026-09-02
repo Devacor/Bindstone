@@ -1502,6 +1502,17 @@ public:
             check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
         };
 
+        test("typed_decl_initializer_exception_wins", [check_quad_error]() {
+            // fuzz seed 22684 (2026-09-02): the interpreter's typed declaration enforced the
+            // declared type on the null a raising member read leaves behind, reporting
+            // 'Type mismatch in assignment' where the vm reports the member exception
+            check_quad_error("class K { int a = 1; } auto k = K(); int y = k.missing", "int decl from a missing member raises the member text");
+            check_quad_error("class K { int a = 1; } auto k = K(); double d = (k.missing == 1) ? 1.0 : 2.0", "double decl from a missing-member comparison raises the member text");
+            check_quad_error("class K { int a = 1; } auto k = K(); string s = k.missing", "string decl from a missing member raises the member text");
+            check_quad_error("class K { int a = 1; } auto k = K(); shared_ptr<K> p = k.missing", "shared_ptr decl from a missing member raises the member text");
+            check_quad_error("class K { int a = 1; } auto k = K(); weak_ptr<K> w = k.missing", "weak_ptr decl from a missing member raises the member text");
+        });
+
         test("typed_storage_reads_and_stores", [check_quad, check_quad_error]() {
             check_quad("array<int> a = [1,2,3]; to_string(a[0]) + \",\" + to_string(a[2])", "1,3", "reads");
             check_quad("array<int> a = [1,2,3]; a[1] = 9; to_string(a[1])", "9", "store");

@@ -5961,6 +5961,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
+            if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
             // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
             // shape); declarations consume the VALUE - normalize like assignment does
@@ -6051,6 +6052,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
+            if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
             // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
             // shape); `shared_ptr<T> t = arr[i]` must see the element, not 'reference'
@@ -6167,6 +6169,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // For other expressions, evaluate them and check if they return a reference
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value result = pop_value();
+            if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
             
             // If the result is a reference, alias it (share the holder)
             if (result.is_reference()) {
@@ -6216,6 +6219,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         if (decl->initializer) {
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             value = std::move(pop_value());
+            if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
             // Decl fast path (construction-stamped flags): a scalar payload whose
             // storage index already matches the declared type stores straight into the

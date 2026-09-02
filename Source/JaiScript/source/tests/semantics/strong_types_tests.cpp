@@ -1577,7 +1577,36 @@ public:
             check_quad("map<string,int> m = {}; m[5] = 1; to_string(m.size()) + \",\" + to_string(m.contains(5)) + \",\" + type_of(m.keys()[0])", "1,true,int", "EDGE (pre-existing, both backends): a direct store does not enforce the declared key type");
             check_quad_error("map<string,int> m = {}; m[\"k\"] = \"str\"", "value type enforced on store");
             check_quad_error("map<string,int> m = {\"a\": \"s\"}", "value type enforced on declaration");
-            check_quad_error("map<string,int> m = {\"n\": 1}; m[\"n\"]++", "EDGE (pre-existing, both backends): increment of a map entry is rejected while compound assignment works");
+            check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
+        });
+
+        test("increment_targets_battery", [check_quad, check_quad_error]() {
+            // Dev ruling 2026-09-02: ++/-- work on every lvalue, not only identifiers. Non-
+            // identifier targets desugar at parse time to `+= 1` / `-= 1` (the compound
+            // machinery both backends share); postfix yields the exact old value
+            check_quad("array<int> a = [1, 2]; a[0]++; to_string(a[0])", "2", "postfix ++ on a typed element");
+            check_quad("array<int> a = [1, 2]; ++a[1]; to_string(a[1])", "3", "prefix ++ on a typed element");
+            check_quad("array<int> a = [5]; a[0]--; to_string(a[0])", "4", "postfix -- on a typed element");
+            check_quad("var a = [1.5]; a[0]++; to_string(a[0])", "2.500000", "++ on a float element");
+            check_quad("var a = [7]; a[0]++; to_string(a[0])", "8", "++ on a dynamic element");
+            check_quad("array<int> a = [5]; auto x = a[0]++; to_string(x) + \",\" + to_string(a[0])", "5,6", "postfix in expression position yields the old value");
+            check_quad("array<int> a = [5]; auto y = ++a[0]; to_string(y) + \",\" + to_string(a[0])", "6,6", "prefix in expression position yields the new value");
+            check_quad("array<float> f = [9007199254740994.0]; auto o = f[0]++; to_string(o == 9007199254740994.0) + \",\" + to_string(f[0] == 9007199254740995.0 || f[0] == 9007199254740996.0)", "true,true", "postfix old value is exact for large floats");
+            check_quad("class K { int a = 1; } auto k = K(); k.a++; to_string(k.a)", "2", "postfix ++ on a member");
+            check_quad("class K { int a = 1; } auto k = K(); ++k.a; to_string(k.a)", "2", "prefix ++ on a member");
+            check_quad("class K { int a = 1; } auto k = K(); auto o = k.a++; to_string(o) + \",\" + to_string(k.a)", "1,2", "postfix member yields the old value");
+            check_quad("class K { int a = 1; void bump() { this.a++; } } auto k = K(); k.bump(); to_string(k.a)", "2", "explicit this member");
+            check_quad("class K { int a = 1; void bump() { a++; } } auto k = K(); k.bump(); to_string(k.a)", "2", "implicit this member (unchanged path)");
+            check_quad("var m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "map entry");
+            check_quad("map<string,int> m = {\"n\": 1}; auto o = m[\"n\"]++; to_string(o) + \",\" + to_string(m[\"n\"])", "1,2", "map entry postfix yields the old value");
+            check_quad("var a = [[1]]; a[0][0]++; to_string(a[0][0])", "2", "nested element");
+            check_quad("class K { array<int> v = [1]; } auto k = K(); k.v[0]++; to_string(k.v[0])", "2", "member-index element");
+            check_quad("int n = 5; auto x = n++; auto y = ++n; to_string(x) + \",\" + to_string(y) + \",\" + to_string(n)", "5,7,7", "identifiers keep their path");
+            check_quad("array<int> a = [1, 2, 3]; for (int i = 0; i < 3; i++) { a[i]++; } to_string(a[0] + a[1] + a[2])", "9", "loop over elements");
+            check_quad_error("var a = [\"s\"]; a[0]++", "++ on a string element raises the same text on both backends");
+            check_quad_error("var m = {}; m[\"missing\"]++", "++ on a missing map entry raises the same text on both backends");
+            check_quad_error("5++", "++ on a literal raises the same text on both backends");
+            check_quad_error("array<int> a = [9223372036854775807]; a[0]++", "++ overflow on a typed element follows the overflow policy (checked build raises)");
         });
 
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {

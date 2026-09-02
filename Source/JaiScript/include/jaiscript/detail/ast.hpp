@@ -271,6 +271,12 @@ namespace jai {
         // parser.cpp): both backends may skip store-time type enforcement. Consumers
         // re-guard on the runtime type tags, so a stale/wrong stamp only costs the skip.
         bool typed_store_provable = false;
+        // Postfix ++/-- on a non-identifier target desugars to this node with `+= 1`;
+        // the expression result is then the OLD value (the parser sets this)
+        bool postfix_old_result = false;
+        // Set on every ++/-- desugar (prefix and postfix): the target must be numeric, exactly
+        // like the identifier path's gate (a string element must not concatenate "1")
+        bool incdec_desugar = false;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };

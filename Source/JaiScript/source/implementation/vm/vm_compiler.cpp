@@ -2004,6 +2004,8 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			case token_type::percent_equal: kind = compound_percent; break;
 			default: kind = compound_plus; break;
 			}
+			if (expr->postfix_old_result) kind |= compound_flag_old_result;
+			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			emit(opcode::op_index_compound_fused, kind, shape);
 		}
 		return;
@@ -2038,6 +2040,8 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			case token_type::percent_equal: kind = compound_percent; break;
 			default: kind = compound_plus; break;
 			}
+			if (expr->postfix_old_result) kind |= compound_flag_old_result;
+			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			emit(opcode::op_member_compound, add_node(member), 0, kind);
 		}
 		return;

@@ -4661,27 +4661,28 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 	const script_value* lp;
 	const script_value* rp;
 
+	// Identifier operands try the nullable fast head first (the exact subset of
+	// fused_ident_value's ladder that exec_fused_cmp_jump already trusts: slot cell,
+	// member-scope field cell, or armed env cell); a null answer runs the full ladder,
+	// so every error and side effect keeps its place. Catch-var shadows bypass the head.
+	const bool ident_fast_head = current_catch_var_id_ == 0;
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else if (p.left.is_subscript()) {
-		const script_value* resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return op_status::failed;
-		lp = resolved;
-	} else {
-		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return op_status::failed;
-		lp = resolved;
+		lp = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
+		if (!lp) return op_status::failed;
+	} else if (!(ident_fast_head && (lp = fused_cmp_operand(f, p.left, f.ip * 3)) != nullptr)) {
+		lp = fused_ident_value(f, p.left, lscratch, f.ip * 3);
+		if (!lp) return op_status::failed;
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
 	} else if (p.right.is_subscript()) {
-		auto resolved = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return op_status::failed;
-		rp = resolved;
-	} else {
-		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return op_status::failed;
-		rp = resolved;
+		rp = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
+		if (!rp) return op_status::failed;
+	} else if (!(ident_fast_head && (rp = fused_cmp_operand(f, p.right, f.ip * 3 + 1)) != nullptr)) {
+		rp = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
+		if (!rp) return op_status::failed;
 	}
 
 	// Fast path: mirrors binary_fast_shape without materializing operand loads.

@@ -872,15 +872,29 @@ public:
         test("untyped_array_allows_anything", [this]() {
             auto eng = make_engine();
 
-            // Untyped arrays should accept any element
+            // var is the dynamic form: it accepts any element
             auto result = eng->execute(R"(
-                auto nums = [1, 2, 3];
+                var nums = [1, 2, 3];
                 nums.push("hello");
                 nums.push(true);
                 nums.size()
             )");
 
             check_eq(result.as<int>(), 5, "untyped array allows mixed types");
+        });
+
+        test("auto_uniform_literal_infers_element_type", [this]() {
+            // Dev ruling 2026-09-02: a uniform primitive literal infers its element type and
+            // takes that representation; auto is infer-then-enforce for arrays too
+            auto eng = make_engine();
+            check_eq((int64_t)4, eng->execute("auto nums = [1, 2, 3]; nums.push(4.7); nums[3]").as_int(), "auto int literal locks to int (float converts)");
+            check_throws([&]() { eng->execute("auto nums = [1, 2, 3]; nums.push(\"hello\")"); });
+            check_throws([&]() { eng->execute("auto names = [\"a\", \"b\"]; names.push(1)"); });
+            check_throws([&]() { eng->execute("array<auto> f = [1.5, 2.5]; f.push(\"x\")"); });
+            check_eq((int64_t)2, eng->execute("auto e = []; e.push(\"x\"); e.push(1); e.size()").as_int(), "empty literal stays dynamic");
+            check_eq((int64_t)3, eng->execute("array<var> v = [1, 2, 3]; v.push(\"s\"); v.size() - 1").as_int(), "array<var> stays dynamic");
+            auto buf = eng->execute("auto b = [1, 2, 3]; b");
+            check(buf.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "auto int literal holds an i64 buffer");
         });
 
         test("typed_array_subscript_rejects_wrong_type", [this]() {

@@ -150,6 +150,51 @@ namespace jai::detail {
 		return actual_element.clone_element();
 	}
 
+	// Uniform-literal inference (Dev ruling 2026-09-02): `auto a = [1, 2, 3]` and
+	// `array<auto> a = [...]` infer their element type from a homogeneous primitive
+	// literal and take that type's representation (array<int>/array<float> = raw buffer,
+	// array<string>/bool/char = the locked tag). Empty, nested, object, or bound-primitive
+	// literals answer null and stay dynamic. Callers have already validated homogeneity.
+	inline type_info_ptr infer_uniform_array_type(const script_value& array_value, engine* eng) {
+		if (!eng || array_value.raw_storage_index() != script_value::TYPEID_ARRAY) {
+			return nullptr;
+		}
+		const script_array* node = array_value.unchecked_array_node();
+		if (node->is_typed()) {
+			return type_info_ptr{eng->get_type_info_array(
+				node->kind() == script_array::kind_t::i64 ? eng->get_type_info_int() : eng->get_type_info_float())};
+		}
+		const auto& elems = node->values();
+		if (elems.empty()) {
+			return nullptr;
+		}
+		const size_t first = elems[0].deref().raw_storage_index();
+		switch (first) {
+			case script_value::TYPEID_INT:
+			case script_value::TYPEID_FLOAT:
+			case script_value::TYPEID_STRING:
+			case script_value::TYPEID_BOOL:
+			case script_value::TYPEID_CHAR:
+				break;
+			default:
+				return nullptr;
+		}
+		for (const script_value& e : elems) {
+			if (e.deref().raw_storage_index() != first) {
+				return nullptr;
+			}
+		}
+		type_info* element = nullptr;
+		switch (first) {
+			case script_value::TYPEID_INT: element = eng->get_type_info_int(); break;
+			case script_value::TYPEID_FLOAT: element = eng->get_type_info_float(); break;
+			case script_value::TYPEID_STRING: element = eng->get_type_info_string(); break;
+			case script_value::TYPEID_BOOL: element = eng->get_type_info_bool(); break;
+			default: element = eng->get_type_info_char(); break;
+		}
+		return type_info_ptr{eng->get_type_info_array(element)};
+	}
+
 	// The one message both backends raise at a failed boundary (byte-identical errors).
 	inline constexpr const char* container_boundary_mismatch_text = "Cannot store '{0}' in '{1}'";
 

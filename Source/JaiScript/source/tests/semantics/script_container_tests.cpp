@@ -414,9 +414,9 @@ public:
             check_eq((int64_t)3, eng->execute("var c = [1, \"x\", 2.5]; count_vals(c)").as_int());
             // an array<int> is a raw buffer: the dynamic view is a type mismatch, not a copy
             check_throws([&]() { eng->execute("array<int> a = [1, 2, 3]; count_vals(a)"); });
-            // literals without a spelled element type stay dynamic today (array<auto>
-            // inference from a uniform literal is ruled but not yet implemented)
-            check_eq((int64_t)3, eng->execute("auto d = [1, 2, 3]; count_vals(d)").as_int());
+            // a uniform auto literal infers array<int> (raw buffer): same rule
+            check_throws([&]() { eng->execute("auto d = [1, 2, 3]; count_vals(d)"); });
+            check_throws([&]() { eng->execute("auto e = [1, \"two\"]; e"); });   // mixed literal: rejected at the decl
         });
 
         test("bound_array_element_type_must_fit_typed_buffer", [this]() {

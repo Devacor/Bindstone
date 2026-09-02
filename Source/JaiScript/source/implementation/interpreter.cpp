@@ -5917,6 +5917,9 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         }
     };
 
+    // The type the declaration binds to: explicit, or inferred from a uniform literal
+    type_info_ptr effective_decl_type = decl->type;
+
     // Check if this is a reference variable declaration
     bool is_reference = false;
     if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
@@ -6300,6 +6303,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 
                 if (requires_homogeneity) {
                     JAISCRIPT_TRY(validate_container_homogeneous(value, ""));
+                    // A uniform primitive literal infers the element type and takes its
+                    // representation (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+                    if (value.is_array()) {
+                        if (type_info_ptr inferred = detail::infer_uniform_array_type(value, engine_)) {
+                            effective_decl_type = inferred;
+                        }
+                    }
                 }
             }
         }
@@ -6309,12 +6319,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // - Explicit type (int, float, var, etc.): Use declared type (locks the variable)
         // - auto with initializer: Infer type from value (locks to inferred type)
         // - auto without initializer: Keep nullptr (first assignment will lock type)
-        if (decl->type) {
-            // Explicit type declaration (int x, float y, var z, etc.)
+        if (effective_decl_type) {
+            // Explicit type declaration (int x, float y, var z, etc.), or the element
+            // type a uniform literal inferred for auto / array<auto>
             // Typed declarations convert their initializer exactly like assignment does
             // (int d = 4.7 truncates instead of storing a mistagged float payload)
             if (decl->initializer) {
-                auto enforced = enforce_type_compatibility(std::move(value), decl->type, decl->name);
+                auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name);
                 if (!enforced) {
                     return enforced.error_value();
                 }
@@ -6324,10 +6335,10 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // keeps a shared_ptr-tagged initializer's marker — `var p = new P()` IS
             // `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the reference-semantics
             // tag must survive the decl instead of flattening to 'any'
-            if (decl->type->base_type != script_value_type::jai_any_type ||
+            if (effective_decl_type->base_type != script_value_type::jai_any_type ||
                 !value.get_type_info() ||
                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
-                value.set_type_info(decl->type);
+                value.set_type_info(effective_decl_type);
             } else if (engine_ && value.get_type_info()->element_type() &&
                        !value.get_type_info()->dynamic_pointee) {
                 // var-held handle: '=' with a handle rhs REBINDS unchecked (Dev ruling

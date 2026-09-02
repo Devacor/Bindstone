@@ -584,7 +584,7 @@ namespace stdlib {
                 throw runtime_error("to_binary expects exactly 1 argument, got " + std::to_string(args.size()));
             }
 
-            serialization::binary_archive_writer writer;
+            serialization::binary_archive_writer writer(eng);
             writer.write_value(args[0]);
 
             const auto& data = writer.data();
@@ -627,7 +627,7 @@ namespace stdlib {
                 throw runtime_error("to_base64 expects exactly 1 argument, got " + std::to_string(args.size()));
             }
 
-            serialization::binary_archive_writer writer;
+            serialization::binary_archive_writer writer(eng);
             writer.write_value(args[0]);
 
             const auto& data = writer.data();

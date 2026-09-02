@@ -26,8 +26,12 @@
 #include "fuzz_generator.hpp"
 #include "fuzz_harness.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -239,6 +243,15 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.child) {
+		// Wall-clock watchdog: a program that never reaches a budget check (or a hang
+		// in native code) must not stall the campaign - the child exits with the HANG
+		// code and the parent reports the seed.
+		const double hang_ms = std::max(10000.0, opt.timeout_ms * 40.0);
+		std::thread([hang_ms]() {
+			std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(hang_ms)));
+			std::fflush(stdout);
+			std::_Exit(23);
+		}).detach();
 		verdict v = run_seed(opt, opt.seed, false);
 		switch (v) {
 			case verdict::agree: return 0;
@@ -252,8 +265,8 @@ int main(int argc, char** argv) {
 	uint64_t begin = opt.seed_given ? opt.seed : opt.seed_start;
 	uint64_t end = opt.seed_given ? opt.seed + 1 : opt.seed_start + opt.iterations;
 
-	uint64_t agree = 0, new_div = 0, suppressed_div = 0, budget = 0, crashes = 0, parse_valid = 0;
-	std::vector<uint64_t> new_div_seeds, crash_seeds, suppressed_seeds;
+	uint64_t agree = 0, new_div = 0, suppressed_div = 0, budget = 0, crashes = 0, hangs = 0, parse_valid = 0;
+	std::vector<uint64_t> new_div_seeds, crash_seeds, suppressed_seeds, hang_seeds;
 
 	for (uint64_t seed = begin; seed < end; ++seed) {
 		{
@@ -280,6 +293,13 @@ int main(int argc, char** argv) {
 				case 20: ++new_div; new_div_seeds.push_back(seed); break;
 				case 21: ++budget; break;
 				case 22: ++suppressed_div; suppressed_seeds.push_back(seed); break;
+				case 23:
+					++hangs;
+					hang_seeds.push_back(seed);
+					std::cout << "\n=== HANG seed " << seed << " (child killed by its watchdog) ===\n";
+					std::cout << "reproduce: jaiscript_fuzz --child --seed " << seed
+					          << " --max-depth " << opt.max_depth << "\n";
+					break;
 				default:
 					++crashes;
 					crash_seeds.push_back(seed);
@@ -323,6 +343,11 @@ int main(int argc, char** argv) {
 		std::cout << "  seeds:";
 		for (auto s : crash_seeds) std::cout << " " << s;
 	}
+	std::cout << "\nhangs:          " << hangs;
+	if (!hang_seeds.empty()) {
+		std::cout << "  seeds:";
+		for (auto s : hang_seeds) std::cout << " " << s;
+	}
 	std::cout << "\n";
-	return (new_div > 0 || crashes > 0) ? 1 : 0;
+	return (new_div > 0 || crashes > 0 || hangs > 0) ? 1 : 0;
 }

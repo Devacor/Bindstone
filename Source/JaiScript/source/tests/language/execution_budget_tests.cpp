@@ -30,6 +30,29 @@ public:
 			check_throws([&]() { e->execute("for (int i = 0; i < 2; i += 0) { }"); });
 		});
 
+		// fuzz seed 33294 (2026-09-02): the fast counting loop's fall-through continuation
+		// (taken when the counter's storage kind changes mid-loop - here a one-time
+		// reference binding boxes it) had no back-edge limit check, so the loop ran
+		// unbudgeted forever on the interpreter (the vm checks every back-edge)
+		test("budget_stops_fast_path_for_after_counter_is_boxed", [this]() {
+			auto e = make_engine();
+			e->execution_budget(0.05);
+			check_throws([&]() {
+				e->execute("function bump(int& x) { x += 1; } "
+				           "for (int i = 0; i < 4; i++) { if (i != 0) { i = i - 1; } else { bump(i); i = 0; } }");
+			});
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
+		test("budget_stops_fast_path_for_after_counter_is_captured", [this]() {
+			auto e = make_engine();
+			e->execution_budget(0.05);
+			check_throws([&]() {
+				e->execute("for (int i = 0; i < 4; i++) { if (i == 0) { auto f = [&]() { i = 0; }; f(); } i = i - 1; }");
+			});
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
 		test("zero_budget_disables_the_limit", [this]() {
 			auto e = make_engine();
 			e->execution_budget(0.0);

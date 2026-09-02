@@ -2246,6 +2246,40 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     auto new_instance = std::make_shared<class_instance>(class_name_, engine_);
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();
+    if (class_def_ && !overflow_fields_) {
+        // Slot-to-slot copy with the definition attached up front: the general path
+        // below routes every field through the overflow map and rehomes it (one map
+        // node + one cell per field); flat instances copy their cells directly. Cells
+        // clone through references exactly as set_field(id, value.clone()) did; the
+        // C++ object field keeps its copy_object + script-layer hook route.
+        new_instance->class_def_ = class_def_;
+        new_instance->flat_fields_.resize(flat_fields_.size());
+        for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
+            const auto& cell = flat_fields_[slot];
+            if (!cell || cell->raw_storage_index() == script_value::TYPEID_INVALID) { continue; }
+            const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
+            if (id == cpp_obj_id && !cell->is_null()) {
+                if (class_def_->has_copy_function()) {
+                    auto cpp_obj = extract_cpp_object_impl(*cell);
+                    if (cpp_obj) {
+                        auto new_cpp_obj = class_def_->copy_object(cpp_obj.get());
+                        if (!new_cpp_obj) {
+                            throw runtime_error("Failed to copy C++ object of type '" + class_name_ +
+                                "'. The registered copy function returned null.");
+                        }
+                        new_instance->set_field(cpp_obj_id,
+                            script_value::make_cpp_object(class_name_, class_def_->get_type_id(), new_cpp_obj, cell->get_engine()));
+                        continue;
+                    }
+                }
+                new_instance->set_field(id, cell->clone());
+                continue;
+            }
+            new_instance->flat_fields_[slot] = std::make_unique<script_value>(cell->clone());
+        }
+        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
+        return new_instance;
+    }
     for_each_field([&](uint64_t id, const script_value& value) {
         if (id == cpp_obj_id && !value.is_null()) {
             if (class_def_ && class_def_->has_copy_function()) {

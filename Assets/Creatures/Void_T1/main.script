@@ -147,7 +147,7 @@ self.update = [=](var& self, double dt) -> void {
 	var blink = self.getVar("blinkCooldown");
 	if (blink > 0.0) {
 		self.setVar("blinkCooldown", blink - dt);
-	} else if (!self.getVar("attacking")) {
+	} else if (!self.getVar("attacking") && self.tauntedBy() == 0) {
 		var prey = pickBackline(self, 12);
 		if (prey != 0) {
 			var me = self.agent().gridPosition();

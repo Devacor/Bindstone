@@ -2405,22 +2405,38 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: return ints_.size();
             case kind_t::f64: return floats_.size();
+            case kind_t::b8:
+            case kind_t::c8: return bytes_.size();
             default: return values_.size();
         }
     }
-    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); }
+    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); bytes_.clear(); }
     inline void script_array::reserve(size_t n) {
         switch (kind_) {
             case kind_t::i64: ints_.reserve(n); break;
             case kind_t::f64: floats_.reserve(n); break;
+            case kind_t::b8:
+            case kind_t::c8: bytes_.reserve(n); break;
             default: values_.reserve(n); break;
         }
+    }
+    inline void script_array::assign_buffer(const script_array& other) {
+        switch (other.kind_) {
+            case kind_t::i64: ints_ = other.ints_; break;
+            case kind_t::f64: floats_ = other.floats_; break;
+            case kind_t::b8:
+            case kind_t::c8: bytes_ = other.bytes_; break;
+            default: values_ = other.values_; break;
+        }
+        kind_ = other.kind_;
     }
 
     inline script_value script_array::get(size_t i, engine* eng) const {
         switch (kind_) {
             case kind_t::i64: return script_value(ints_[i], eng);
             case kind_t::f64: return script_value(floats_[i], eng);
+            case kind_t::b8: return script_value(static_cast<script_bool>(bytes_[i] != 0), eng);
+            case kind_t::c8: return script_value(static_cast<script_char>(bytes_[i]), eng);
             default: return values_[i];
         }
     }
@@ -2434,6 +2450,12 @@ namespace jai {
             case kind_t::f64:
                 floats_[i] = v.raw_storage_index() == script_value::TYPEID_INT
                     ? static_cast<script_float>(v.unchecked_as_int()) : v.unchecked_as_float();
+                break;
+            case kind_t::b8:
+                bytes_[i] = v.unchecked_as_bool() ? 1 : 0;   // pre-converted: exactly a bool
+                break;
+            case kind_t::c8:
+                bytes_[i] = static_cast<uint8_t>(v.unchecked_as_char());   // pre-converted: exactly a char
                 break;
             default:
                 values_[i] = std::move(v);
@@ -2451,6 +2473,12 @@ namespace jai {
                 floats_.push_back(pre_converted.raw_storage_index() == script_value::TYPEID_INT
                     ? static_cast<script_float>(pre_converted.unchecked_as_int()) : pre_converted.unchecked_as_float());
                 break;
+            case kind_t::b8:
+                bytes_.push_back(pre_converted.unchecked_as_bool() ? 1 : 0);
+                break;
+            case kind_t::c8:
+                bytes_.push_back(static_cast<uint8_t>(pre_converted.unchecked_as_char()));
+                break;
             default:
                 values_.push_back(std::move(pre_converted));
                 break;
@@ -2461,6 +2489,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: return ints_.capacity();
             case kind_t::f64: return floats_.capacity();
+            case kind_t::b8:
+            case kind_t::c8: return bytes_.capacity();
             default: return values_.capacity();
         }
     }
@@ -2469,6 +2499,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: if (n < ints_.size()) { ints_.resize(n); } break;
             case kind_t::f64: if (n < floats_.size()) { floats_.resize(n); } break;
+            case kind_t::b8:
+            case kind_t::c8: if (n < bytes_.size()) { bytes_.resize(n); } break;
             default: if (n < values_.size()) { values_.erase(values_.begin() + static_cast<std::ptrdiff_t>(n), values_.end()); } break;
         }
     }
@@ -2477,6 +2509,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: ints_.pop_back(); break;
             case kind_t::f64: floats_.pop_back(); break;
+            case kind_t::b8:
+            case kind_t::c8: bytes_.pop_back(); break;
             default: values_.pop_back(); break;
         }
     }
@@ -2485,6 +2519,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: ints_.erase(ints_.begin() + i); break;
             case kind_t::f64: floats_.erase(floats_.begin() + i); break;
+            case kind_t::b8:
+            case kind_t::c8: bytes_.erase(bytes_.begin() + i); break;
             default: values_.erase(values_.begin() + i); break;
         }
     }
@@ -2493,6 +2529,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: std::reverse(ints_.begin(), ints_.end()); break;
             case kind_t::f64: std::reverse(floats_.begin(), floats_.end()); break;
+            case kind_t::b8:
+            case kind_t::c8: std::reverse(bytes_.begin(), bytes_.end()); break;
             default: std::reverse(values_.begin(), values_.end()); break;
         }
     }
@@ -2502,6 +2540,8 @@ namespace jai {
         switch (kind_) {
             case kind_t::i64: for (script_int n : ints_) { f(script_value(n, eng)); } break;
             case kind_t::f64: for (script_float d : floats_) { f(script_value(d, eng)); } break;
+            case kind_t::b8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_bool>(b != 0), eng)); } break;
+            case kind_t::c8: for (uint8_t c : bytes_) { f(script_value(static_cast<script_char>(c), eng)); } break;
             default: for (const script_value& v : values_) { f(v); } break;
         }
     }
@@ -2527,6 +2567,18 @@ namespace jai {
                 for (script_float f : floats_) { values_.emplace_back(f, eng); }
                 floats_.clear();
                 floats_.shrink_to_fit();
+                break;
+            case kind_t::b8:
+                values_.reserve(bytes_.size());
+                for (uint8_t b : bytes_) { values_.emplace_back(static_cast<script_bool>(b != 0), eng); }
+                bytes_.clear();
+                bytes_.shrink_to_fit();
+                break;
+            case kind_t::c8:
+                values_.reserve(bytes_.size());
+                for (uint8_t c : bytes_) { values_.emplace_back(static_cast<script_char>(c), eng); }
+                bytes_.clear();
+                bytes_.shrink_to_fit();
                 break;
             default:
                 break;

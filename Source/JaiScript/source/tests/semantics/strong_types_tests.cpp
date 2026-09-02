@@ -1502,13 +1502,22 @@ public:
             check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
         };
 
-        test("typed_storage_reads_and_stores", [check_quad]() {
+        test("typed_storage_reads_and_stores", [check_quad, check_quad_error]() {
             check_quad("array<int> a = [1,2,3]; to_string(a[0]) + \",\" + to_string(a[2])", "1,3", "reads");
             check_quad("array<int> a = [1,2,3]; a[1] = 9; to_string(a[1])", "9", "store");
             check_quad("array<int> a = [1]; a[0] = 2.7; type_of(a[0]) + \":\" + to_string(a[0])", "int:2", "store converts");
             check_quad("array<float> a = [1.5]; a[0] = 2; type_of(a[0]) + \":\" + to_string(a[0])", "float:2.000000", "float store widens");
             check_quad("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "compound converts");
             check_quad("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "compound modulo");
+            // byte kinds (bool/char buffers): reads, stores, push, sort, reverse, copies, json
+            check_quad("array<bool> f = [true, false, true]; f[1] = true; to_string(f[0]) + to_string(f[1]) + to_string(f.size())", "truetrue3", "bool buffer store/read");
+            check_quad("array<bool> f = []; f.push(false); f.push(true); f.sort(); to_string(f[0]) + to_string(f[1])", "falsetrue", "bool buffer push/sort");
+            check_quad("array<char> c = ['q', 'a', 'z']; c.sort(); c.reverse(); to_string(c[0]) + to_string(c[2])", "za", "char buffer sort/reverse");
+            check_quad("array<char> c = ['a', 'b']; array<char> d = c; d[0] = 'x'; to_string(c[0]) + to_string(d[0])", "ax", "char buffer copy is a copy");
+            check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
+            check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
+            check_quad_error("array<bool> f = [true]; f.push(1)", "bool buffer rejects int");
+            check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
         });
 
         test("typed_storage_errors_match_plain", [check_quad_error]() {
@@ -1597,6 +1606,12 @@ public:
             check(v.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "array<int> holds an i64 buffer");
             auto f = e->execute("array<float> b = [1.5]; b");
             check(f.unchecked_array_node()->kind() == jai::script_array::kind_t::f64, "array<float> holds an f64 buffer");
+            auto b = e->execute("array<bool> flags = [true, false, true]; flags");
+            check(b.unchecked_array_node()->kind() == jai::script_array::kind_t::b8, "array<bool> holds a byte buffer");
+            auto c = e->execute("array<char> cs = ['a', 'z']; cs");
+            check(c.unchecked_array_node()->kind() == jai::script_array::kind_t::c8, "array<char> holds a byte buffer");
+            auto ab = e->execute("auto inferred = [true, false]; inferred");
+            check(ab.unchecked_array_node()->kind() == jai::script_array::kind_t::b8, "auto bool literal infers the b8 buffer");
             auto d = e->execute("array<int> c = [1]; var laundered = c; laundered");
             check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes the node");
         });

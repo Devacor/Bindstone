@@ -65,10 +65,10 @@ self.update = [=](var& self, double dt) -> void {
 		} else if (self.getVar("windowRemaining") <= 0.0 || self.getVar("recombine")) {
 			// re-form from whatever survives: their vitality plus a little more
 			double vitality = 0.0;
-			if (tare != null) { vitality = vitality + 1.0 * tare.health() / tare.stats().health; tare.fall(); }
-			if (tear != null) { vitality = vitality + 1.0 * tear.health() / tear.stats().health; tear.fall(); }
-			if (drip != null) { vitality = vitality + 1.0 * drip.health() / drip.stats().health; drip.fall(); }
-			int reformed = round(vitality / 3.0 * self.stats().health) + 10;
+			if (tare != null) { vitality = vitality + 1.0 * tare.health() / tare.maxHealth(); tare.fall(); }
+			if (tear != null) { vitality = vitality + 1.0 * tear.health() / tear.maxHealth(); tear.fall(); }
+			if (drip != null) { vitality = vitality + 1.0 * drip.health() / drip.maxHealth(); drip.fall(); }
+			int reformed = round(vitality / 3.0 * self.maxHealth()) + 10;
 			if (reformed > self.stats().health) { reformed = self.stats().health; }
 			self.changeHealth(reformed - self.health());
 			self.setVar("tareId", 0);

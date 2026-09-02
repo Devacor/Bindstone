@@ -69,7 +69,9 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 	builder.property("onDeath", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onDeath; }, nullptr);
 	builder.property("onFall", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onFall; }, nullptr);
 	builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
-	builder.method("stats", [](Creature& a_self) { return a_self.statTemplate; });
+	builder.method("stats", [](Creature& a_self) -> const CreatureData& { return a_self.statTemplate; });
+	builder.method("attackRange", [](Creature& a_self) -> double { return a_self.statTemplate.attackRange; });
+	builder.method("maxHealth", [](Creature& a_self) -> int64_t { return a_self.statTemplate.health; });
 	builder.method("team", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamForPlayer(a_self.player()); });
 	builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
 	builder.method("setVar", [](Creature& a_self, jai::script_value a_key, jai::script_value a_value) {

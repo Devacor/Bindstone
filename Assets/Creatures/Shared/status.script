@@ -190,7 +190,7 @@ int pickBackline(var& self, double range) {
 	for (int i = 0; i < enemies.size(); ++i) {
 		var p = enemies[i].agent().gridPosition();
 		double distance = (p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y);
-		double reach = enemies[i].stats().attackRange;
+		double reach = enemies[i].attackRange();
 		if (reach > bestRange || (reach == bestRange && distance < bestDistance)) {
 			best = enemies[i].networkId();
 			bestRange = reach;
@@ -209,7 +209,7 @@ int pickWardHost(var& self, double range) {
 	double bestDistance = 1.0e9;
 	bool bestTanking = false;
 	for (int i = 0; i < allies.size(); ++i) {
-		if (allies[i].networkId() == self.networkId() || allies[i].stats().attackRange <= 0.0 || allies[i].stats().id == "Water_Drip") {
+		if (allies[i].networkId() == self.networkId() || allies[i].attackRange() <= 0.0 || allies[i].stats().id == "Water_Drip") {
 			continue;
 		}
 		var tanking = allies[i].getVar("tankingFor");

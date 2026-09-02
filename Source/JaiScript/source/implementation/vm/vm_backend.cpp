@@ -11776,13 +11776,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		// Rebound every iteration: frame switches write fp and `continue`
 		frame& f = *fp;
 		const auto& code = f.code->code;
-		if (f.ip >= code.size()) {
-			if (call_records_top_ == records_base) {
-				return {};
-			}
-			VM_TRY_OP_SHARED(fall_off_script_frame(fp));
-			continue;
-		}
+		// Every chunk compiler ends its code with op_halt and no jump target passes it,
+		// so the halt case IS the end-of-chunk exit (Debug asserts the invariant)
+		assert(f.ip < code.size());
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
 		const vm_instruction& ins = code[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
@@ -11924,6 +11920,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					switch_to_ = nullptr;
 					continue;
 				}
+				// Native/opaque callee already landed its result: a statement-position
+				// call drops it here with the pop dispatch (unwinding keeps the pushed
+				// null for the loop-bottom handler)
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_call:
 				VM_TRY_OP(exec_call(f, ins));
@@ -11934,6 +11934,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					switch_to_ = nullptr;
 					continue;
 				}
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_func_decl: VM_TRY_OP(exec_func_decl(f, ins)); break;
 			case opcode::op_closure: VM_TRY_OP(exec_closure(f, ins)); break;
@@ -11963,18 +11964,32 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP_SHARED(exec_index_fused_decl(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
+			// The member trio (GET_MEMBER 477k / CALL_METHOD 983k per 200 GLOOM ticks)
+			// dispatch directly too; statement-position stores and calls drop their
+			// dead result together with the pop that follows
+			case opcode::op_get_member:
+				VM_TRY_OP_SHARED(exec_get_member(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_set_member:
+				VM_TRY_OP_SHARED(exec_set_member(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
+				break;
+			case opcode::op_call_method:
+				VM_TRY_OP_SHARED(exec_call_method(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
+				break;
 
 			// One grouped dispatch: a VM_TRY_OP temp per case would bloat run()'s
 			// Debug frame, which sits on the JAI_MAX_CALL_DEPTH recursion path
 			case opcode::op_this:
 			case opcode::op_super:
 			case opcode::op_from_this:
-			case opcode::op_get_member:
 			case opcode::op_get_static:
-			case opcode::op_set_member:
 			case opcode::op_set_static:
 			case opcode::op_member_compound:
-			case opcode::op_call_method:
 			case opcode::op_new:
 			case opcode::op_class_decl:
 			case opcode::op_namespace_decl:
@@ -12996,8 +13011,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 		pop_script_frame_core(rec);
 		JAI_CALL_RET_SECTION(1);
 		fp = rec.caller;
-		stack_.push_back(std::move(result));
-		++fp->ip;
+		land_call_result(*fp, std::move(result));
 		JAI_CALL_RET_SECTION(2);
 		return {};
 	}
@@ -13018,8 +13032,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 	pop_script_frame_core(rec);
 	JAI_CALL_RET_SECTION(1);
 	fp = rec.caller;
-	stack_.push_back(std::move(conv.value()));
-	++fp->ip;
+	land_call_result(*fp, std::move(conv.value()));
 	JAI_CALL_RET_SECTION(2);
 #undef JAI_CALL_RET_SECTION
 	return {};
@@ -13133,8 +13146,7 @@ op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	}
 	pop_script_frame_core(rec);
 	fp = rec.caller;
-	stack_.push_back(std::move(result));
-	++fp->ip;
+	land_call_result(*fp, std::move(result));
 	return {};
 }
 

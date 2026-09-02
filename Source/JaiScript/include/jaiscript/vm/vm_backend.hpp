@@ -434,6 +434,18 @@ namespace jai::vm {
         // these. Window-backed frames address stack_[window_base + slot]; legacy frames
         // (fibers) forward to call_frame. Callers keep their own slot-validity/top_level
         // guards — these assume a live locals home.
+        // Statement-position results: a call/store op immediately followed by op_pop
+        // discards its value, so the landing drops the value and skips the pop dispatch
+        // together (the compiler still emits the pop; every landing route honors it)
+        bool next_op_discards_result(const frame& f) const noexcept {
+            const auto& code = f.code->code;
+            return f.ip + 1 < code.size() && code[f.ip + 1].op == opcode::op_pop;
+        }
+        void land_call_result(frame& caller, script_value&& v) {
+            if (next_op_discards_result(caller)) { caller.ip += 2; return; }
+            stack_.push_back(std::move(v));
+            ++caller.ip;
+        }
         script_value* frame_slot(frame& f, size_t slot) noexcept {
             if (f.window_backed) {
                 return slot < f.window_live ? &stack_[f.window_base + slot] : nullptr;

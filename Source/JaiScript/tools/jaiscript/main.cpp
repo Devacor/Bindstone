@@ -122,6 +122,7 @@ struct options {
 	int debug_port = 0;                    // 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
+	bool typed_arrays = false;             // engine::typed_array_storage (raw int/float buffers)
 	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
 };
 
@@ -144,6 +145,7 @@ void print_usage() {
 		"                        the embedded-engine default of 1.0s is deliberately lifted here)\n"
 		"  --time                print wall time for each run\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"
+		"  --typed-arrays        array<int>/array<float> on raw buffers (engine::typed_array_storage)\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
@@ -194,6 +196,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
+		else if (a == "--typed-arrays") { opt.typed_arrays = true; }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
 		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
 		else if (a.rfind("--debug-port", 0) == 0) { opt.debug_port = static_cast<int>(std::stol(value_of("--debug-port"))); }
@@ -985,6 +988,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
 	eng->execution_budget(opt.budget);
+	eng->typed_array_storage(opt.typed_arrays);
 	if (engine_out) {
 		eng->set_output_stream(std::shared_ptr<std::ostream>(engine_out, [](std::ostream*) {}));
 	}

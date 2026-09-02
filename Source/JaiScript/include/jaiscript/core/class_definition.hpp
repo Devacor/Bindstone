@@ -223,6 +223,10 @@ private:
     class_definition* class_def_ = nullptr;
     engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
+    // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
+    // swap-removes in O(1) instead of scanning and locking the whole list
+    size_t registry_slot_ = SIZE_MAX;
+    friend class class_definition;
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
     mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;
@@ -1535,6 +1539,7 @@ public:
             std::remove_if(instances_.begin(), instances_.end(),
                 [](const std::weak_ptr<class_instance>& w) { return w.expired(); }),
             instances_.end());
+        reindex_instances();
 
         method_metadata_.clear();
 
@@ -1577,18 +1582,31 @@ public:
     }
 
     void register_instance(std::weak_ptr<class_instance> instance) {
-        instances_.push_back(instance);
+        if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
+        instances_.push_back(std::move(instance));
     }
 
+    // O(1) swap-remove by the instance's remembered index. Called from ~class_instance:
+    // the caller's own entry is already expired; the entry swapped into its place belongs
+    // to a live instance (destruction is sequential and members die after the body), so
+    // its index can be re-pointed. Never-registered instances (set_class_definition) skip.
     void unregister_instance(class_instance* instance) {
-        instances_.erase(
-            std::remove_if(instances_.begin(), instances_.end(),
-                [instance](const std::weak_ptr<class_instance>& w) {
-                    auto locked = w.lock();
-                    return !locked || locked.get() == instance;
-                }),
-            instances_.end()
-        );
+        const size_t i = instance->registry_slot_;
+        instance->registry_slot_ = SIZE_MAX;
+        if (i >= instances_.size()) { return; }
+        const size_t last = instances_.size() - 1;
+        if (i != last) {
+            instances_[i] = std::move(instances_[last]);
+            if (auto moved = instances_[i].lock()) { moved->registry_slot_ = i; }
+        }
+        instances_.pop_back();
+    }
+
+    // After a compaction the surviving entries' indexes must be reassigned
+    void reindex_instances() {
+        for (size_t k = 0; k < instances_.size(); ++k) {
+            if (auto live = instances_[k].lock()) { live->registry_slot_ = k; }
+        }
     }
 
 private:

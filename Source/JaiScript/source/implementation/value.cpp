@@ -30,6 +30,8 @@ script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr)
     }
 }
 
+script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng) : type_info_(tag), engine_(eng), storage_(std::move(handle)) {}
+
 script_value::script_value(strong_ptr<script_string> shared, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::move(shared)) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
@@ -250,6 +252,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
             case script_value_type::jai_bool_type: node_kind = script_array::kind_t::b8; break;
             case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
             case script_value_type::jai_string_type: node_kind = script_array::kind_t::str; break;
+            case script_value_type::jai_object_type: node_kind = script_array::kind_t::obj; break;
             default: break;
         }
     }
@@ -434,6 +437,7 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
             case script_array::kind_t::f64: referent_tag = eng->get_type_info_float(); break;
             case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
             case script_array::kind_t::c8: referent_tag = eng->get_type_info_char(); break;
+            case script_array::kind_t::obj: referent_tag = container->objs()[index].tag; break;
             default: referent_tag = eng->get_type_info_string(); break;
         }
     } else {
@@ -568,6 +572,19 @@ script_value script_value::clone() const {
     switch (current_type()) {
         case script_value_type::jai_array_type: {
             const auto& other_node = *storage_.get<strong_ptr<script_array>>();
+            if (other_node.kind() == script_array::kind_t::obj) {
+                // object slots keep value semantics: every element deep-clones (shared_ptr
+                // elements share, as clone_element already decides), the tag rides along
+                const size_t n = other_node.size();
+                engine_->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
+                auto new_node = make_strong<script_array>(script_array::kind_t::obj);
+                new_node->reserve(n);
+                for (size_t i = 0; i < n; ++i) {
+                    new_node->push(other_node.get(i, engine_).clone_element());
+                }
+                result.storage_ = new_node;
+                break;
+            }
             if (other_node.is_typed()) {
                 // kind-preserving deep copy = one buffer copy (8B/element)
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
@@ -738,6 +755,18 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         case TYPEID_ARRAY: {
             const auto& handle = storage_.get<strong_ptr<script_array>>();
             if (!handle) { break; }
+            if (handle->kind() == script_array::kind_t::obj) {
+                const size_t n = handle->size();
+                engine_->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
+                auto fresh = make_strong<script_array>(script_array::kind_t::obj);
+                fresh->reserve(n);
+                for (size_t i = 0; i < n; ++i) {
+                    fresh->push(handle->get(i, engine_).parallel_detached_copy(collected_types, collected_nodes));
+                }
+                if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+                result.storage_ = fresh;
+                break;
+            }
             if (handle->is_typed()) {
                 // all-primitive by construction: detach = one buffer copy
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));

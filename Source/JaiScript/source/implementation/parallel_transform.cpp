@@ -1366,7 +1366,8 @@ namespace {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_ARRAY: {
 			if (const script_array* node = v.unchecked_array_node(); node->is_typed()) {
-				return node->kind() != script_array::kind_t::str;   // numeric/byte payloads only; handles never borrow raw
+				return node->kind() != script_array::kind_t::str &&
+				       node->kind() != script_array::kind_t::obj;   // numeric/byte payloads only; handles never borrow raw
 			}
 			for (const auto& elem : v.unchecked_as_array()) {
 				switch (elem.raw_storage_index()) {

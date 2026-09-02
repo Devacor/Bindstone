@@ -1002,6 +1002,37 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Array copy by value: array<K> 200 objects (x20)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BObj { int a = 1; BObj() {} BObj(int v) { a = v; } }
+                    array<BObj> osrc = [];
+                    for (auto i = 0; i < 200; ++i) { osrc.push(BObj(i)); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { array<BObj> c = osrc; acc += c.size(); }
+                    if (acc != 4000) { throw "object array copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Object array element field reads: array<K> (x1000)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BField { int a = 1; BField() {} BField(int v) { a = v; } }
+                    array<BField> fsrc = [BField(1), BField(2), BField(3), BField(4)];
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 1000; ++i) { acc += fsrc[i & 3].a; }
+                    if (acc != 2500) { throw "object field read mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Array copy by value: 200 strings (x20)", [this]() {
             if (!bite) {
                 test_engine->execute(R"(

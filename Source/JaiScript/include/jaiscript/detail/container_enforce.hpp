@@ -158,6 +158,7 @@ namespace jai::detail {
 			case script_value_type::jai_bool_type: return script_array::kind_t::b8;
 			case script_value_type::jai_char_type: return script_array::kind_t::c8;
 			case script_value_type::jai_string_type: return script_array::kind_t::str;
+			case script_value_type::jai_object_type: return script_array::kind_t::obj;
 			default: return script_array::kind_t::hetero;
 		}
 	}
@@ -168,8 +169,16 @@ namespace jai::detail {
 			case script_array::kind_t::b8: return script_value_type::jai_bool_type;
 			case script_array::kind_t::c8: return script_value_type::jai_char_type;
 			case script_array::kind_t::str: return script_value_type::jai_string_type;
+			case script_array::kind_t::obj: return script_value_type::jai_object_type;
 			default: return script_value_type::jai_any_type;
 		}
+	}
+	// An object buffer is homogeneous by EXACT class (the element rule today); the class
+	// lives in the array value's tag, not in the kind
+	inline bool same_object_class(const type_info_ptr& array_tag, const type_info_ptr& element_type) {
+		type_info_ptr src_elem = array_tag ? array_tag->element_type() : nullptr;
+		return src_elem && element_type && src_elem->base_type == script_value_type::jai_object_type &&
+		       src_elem->type_name == element_type->type_name;
 	}
 	inline type_info* typed_kind_element_type(script_array::kind_t kind, engine* eng) {
 		switch (kind) {
@@ -192,6 +201,7 @@ namespace jai::detail {
 		}
 		const script_array* node = array_value.unchecked_array_node();
 		if (node->is_typed()) {
+			if (node->kind() == script_array::kind_t::obj) { return array_value.get_type_info(); }   // the tag names the class
 			return type_info_ptr{eng->get_type_info_array(typed_kind_element_type(node->kind(), eng))};
 		}
 		const auto& elems = node->values();
@@ -259,7 +269,9 @@ namespace jai::detail {
 			const script_array::kind_t expected_kind = kind_for_element_base(target_elem_base);
 
 			// Proof by kind: a same-kind typed node cannot hold a mismatched element
-			if (src->is_typed() && src->kind() == expected_kind) {
+			// (object buffers also need the same class: the kind alone says "objects")
+			if (src->is_typed() && src->kind() == expected_kind &&
+			    (expected_kind != script_array::kind_t::obj || same_object_class(value.get_type_info(), element_type))) {
 				value.set_type_info(target_type);
 				out.value = std::move(value);
 				return out;
@@ -267,7 +279,7 @@ namespace jai::detail {
 
 			bool needs_conversion = src->is_typed() || src->kind() != expected_kind;
 			const size_t count = src->size();
-			if (src->is_typed()) {
+			if (src->is_typed() && src->kind() != script_array::kind_t::obj) {
 				// typed source elements are one primitive by construction: int/float cross-
 				// convert into numeric targets, everything else is a mismatch
 				const script_value_type src_elem = typed_kind_element_base(src->kind());
@@ -279,7 +291,12 @@ namespace jai::detail {
 					return out;
 				}
 			} else {
-				for (const auto& element : src->values()) {
+				// hetero elements by reference, object slots boxed: the same per-element check
+				for (size_t i = 0; i < count; ++i) {
+					script_value boxed(std::monostate{}, eng);
+					const script_value* elem = nullptr;
+					if (src->is_typed()) { boxed = src->get(i, eng); elem = &boxed; } else { elem = &src->values()[i]; }
+					const script_value& element = *elem;
 					const script_value& actual = element.is_reference() ? element.deref() : element;
 					if (!container_element_compatible(actual, element_type)) {
 						out.offending = container_value_type_name(actual);
@@ -302,7 +319,10 @@ namespace jai::detail {
 			auto& dest = *rebuilt.get_array_storage();
 			dest.reserve(count);
 			for (size_t i = 0; i < count; ++i) {
-				dest.push(convert_container_element(eng, src->get(i, eng), element_type));
+				// representation change only: object handles copy as-is (ownership - clone or
+				// share - is decided by the assignment or binding site, exactly as before)
+				dest.push(expected_kind == script_array::kind_t::obj ? src->get(i, eng)
+				                                                       : convert_container_element(eng, src->get(i, eng), element_type));
 			}
 			rebuilt.set_type_info(target_type);
 			out.value = std::move(rebuilt);

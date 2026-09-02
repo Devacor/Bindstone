@@ -138,8 +138,10 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
 ## 8. Typed array representation follows the declared type (2026-09-02)
 
 - `array<int>` / `array<float>` / `array<bool>` / `array<char>` / `array<string>` are raw
-  buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str); `array<var>` (and a
-  literal with no spelled or inferable element type) is the ONLY `script_value`-vector form.
+  buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str) and `array<UserType>`
+  is a buffer of `obj_slot{handle, tag}` (kind obj, exact-class homogeneous, the slot tag
+  reproduces the boxed value on read); `array<var>` (and a literal with no spelled or
+  inferable element type) is the ONLY `script_value`-vector form.
   A uniform `auto` literal infers its element type. There is no flag and no Debug/Release
   difference; converting between forms is an explicit assignment, nothing demotes silently.
 - The tag is the node kind: `as_array()` / `checked_as_array()` are the `array<var>` view and

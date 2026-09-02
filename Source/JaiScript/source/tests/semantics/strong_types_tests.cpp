@@ -1502,6 +1502,44 @@ public:
             check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
         };
 
+        test("object_buffer_behaviour", [check_quad, check_quad_error]() {
+            // array<UserType> is an object slot buffer (kind obj); every row below is the
+            // exact pre-change output of both backends (representation change only)
+            const std::string K = "class K { int a = 1; K() {} K(int v) { a = v; } string f() { return \"k\" + to_string(a); } } ";
+            auto q = [&](const char* tail) { return K + tail; };
+            check_quad(q("array<K> ks = [K(1), K(2)]; to_string(ks[0].a) + \",\" + to_string(ks[1].a)").c_str(), "1,2", "reads");
+            check_quad(q("array<K> ks = [K(1), K(2)]; ks[1].a = 9; to_string(ks[1].a)").c_str(), "9", "field write through the element");
+            check_quad(q("array<K> ks = [K(1), K(2)]; ks[0] = K(5); to_string(ks[0].a)").c_str(), "5", "element store");
+            check_quad(q("array<K> ks = [K(1), K(2)]; ks.push(K(3)); to_string(ks.size()) + \":\" + to_string(ks[2].a)").c_str(), "3:3", "push");
+            check_quad(q("array<K> ks = [K(1), K(2)]; auto c = ks; c[0].a = 42; to_string(ks[0].a) + \",\" + to_string(c[0].a)").c_str(), "1,42", "copy is a deep copy");
+            check_quad(q("array<K> ks = [K(1), K(2)]; int s = 0; for (auto k : ks) { s += k.a; } to_string(s)").c_str(), "3", "range-for by value reads");
+            check_quad(q("array<K> ks = [K(1), K(2)]; for (auto k : ks) { k.a = 77; } to_string(ks[0].a + ks[1].a)").c_str(), "3", "range-for by value mutates copies");
+            check_quad(q("array<K> ks = [K(1), K(2)]; for (auto& k : ks) { k.a = k.a * 10; } to_string(ks[0].a + ks[1].a)").c_str(), "30", "range-for by reference writes through");
+            check_quad(q("array<K> ks = [K(1), K(2)]; ks.reverse(); to_string(ks[0].a)").c_str(), "2", "reverse");
+            check_quad(q("array<K> ks = [K(1), K(2)]; ks[1].f()").c_str(), "k2", "method call on an element");
+            check_quad(q("array<K> ks = [K(1)]; type_of(ks) + \"|\" + type_of(ks[0])").c_str(), "array|object", "type_of");
+            check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"_type_\":\"K\",\"a\":1},{\"_type_\":\"K\",\"a\":2}]", "json");
+            check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c)").c_str(), "false,false", "equality is identity");
+            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|object", "a shared_ptr element shares its instance");
+            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "7,7", "copying an array with a shared element clones it");
+            check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(ks.filter([](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
+            check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
+            check_quad(q("array<K> ks = [K(1)]; var v = ks; v.push(5); to_string(v.size()) + \":\" + type_of(v)").c_str(), "2:array", "var laundering demotes (then anything goes)");
+            check_quad(q("var v = [K(1), K(2)]; array<K> ks = v; v[0].a = 50; to_string(ks[0].a) + \",\" + to_string(ks.size())").c_str(), "1,2", "array<K> from a dynamic array copies");
+            check_quad(q("function total(array<K> xs) -> int { int s = 0; for (auto x : xs) { s += x.a; } xs[0].a = 100; return s; } array<K> ks = [K(1), K(2)]; to_string(total(ks)) + \",\" + to_string(ks[0].a)").c_str(), "3,1", "by-value parameter");
+            check_quad(q("function bump(array<K>& xs) { xs[0].a = 100; xs.push(K(9)); } array<K> ks = [K(1)]; bump(ks); to_string(ks[0].a) + \",\" + to_string(ks.size())").c_str(), "100,2", "by-reference parameter");
+            check_quad(q("function mk() -> array<K> { array<K> r = [K(3), K(4)]; return r; } auto got = mk(); to_string(got[1].a) + \"|\" + type_of(got)").c_str(), "4|array", "returned array");
+            check_quad(q("array<array<K>> grid = [[K(1)], [K(2), K(3)]]; to_string(grid[1][1].a)").c_str(), "3", "nested arrays stay dynamic outside");
+            check_quad(q("array<K> ks = []; ks.push(K(2)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:2", "empty then push");
+            check_quad(q("coroutine int walk(array<K> xs) { for (auto x : xs) { yield x.a; } return 0; } array<K> ks = [K(5), K(6)]; auto h = walk(ks); to_string(h.resume()) + \",\" + to_string(h.resume())").c_str(), "5,6", "coroutine over an object buffer");
+            check_quad(q("array<K> ks = [K(1), K(2)]; int acc = 0; for (int i = 0; i < 1000; i++) { acc += ks[i & 1].a; } to_string(acc)").c_str(), "1500", "hot element field reads");
+            check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks.push(J())").c_str(), "another class does not push");
+            check_quad_error(q("array<K> ks = [K()]; ks.push(5)").c_str(), "an int does not push");
+            check_quad_error(q("class J { int b = 0; } array<K> x = [J()]").c_str(), "another class does not declare");
+            check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks[0] = J()").c_str(), "another class does not store");
+            check_quad_error(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds").c_str(), "array<Derived> does not convert to array<Base> (exact-class rule)");
+        });
+
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {
             // fuzz seed 22684 (2026-09-02): the interpreter's typed declaration enforced the
             // declared type on the null a raising member read leaves behind, reporting
@@ -1650,6 +1688,16 @@ public:
             check(as.unchecked_array_node()->kind() == jai::script_array::kind_t::str, "auto string literal infers the handle buffer");
             auto d = e->execute("array<int> c = [1]; var laundered = c; laundered");
             check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes the node");
+            auto o = e->execute("class K { int a = 1; } array<K> ks = [K(), K()]; ks");
+            check(o.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "array<K> holds an object slot buffer");
+            auto oe = e->execute("class K2 { int a = 1; } array<K2> none = []; none");
+            check(oe.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "an empty array<K> is an object slot buffer");
+            auto ol = e->execute("class K3 { int a = 1; } array<K3> k3 = [K3()]; var laundered3 = k3; laundered3");
+            check(ol.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes an object buffer");
+            auto oa = e->execute("class K4 { int a = 1; } auto inferred4 = [K4(), K4()]; inferred4");
+            check(oa.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "an auto object literal stays dynamic");
+            auto os = e->execute("class K5 { int a = 1; } shared_ptr<K5> sp = K5(); array<K5> ks5 = [sp]; ks5");
+            check(os.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "a shared_ptr-tagged element lives in the object buffer");
         });
 
         // type_of on a shared-pointer-semantic instance must match a value instance: both "object".

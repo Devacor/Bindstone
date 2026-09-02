@@ -460,6 +460,21 @@ namespace jai::fuzz {
 		}
 
 		std::string typed_array_decl(const std::string& name) {
+			if (!classes_.empty() && rng_.chance(25)) {
+				// class-typed buffer (kind obj): same class for every element - the exact-class
+				// rule makes any other class (or a subclass) an error-parity draw later
+				const class_info& ci = classes_[rng_.below(static_cast<uint32_t>(classes_.size()))];
+				int n = static_cast<int>(rng_.range(0, 4));
+				std::string out = "array<" + ci.name + "> " + name + " = [";
+				for (int i = 0; i < n; ++i) {
+					if (i) out += ", ";
+					int arity = ci.ctor_arities.empty() ? 0 : ci.ctor_arities[rng_.below(static_cast<uint32_t>(ci.ctor_arities.size()))];
+					out += ci.name + "(";
+					for (int a = 0; a < arity; ++a) { if (a) out += ", "; out += int_literal(); }
+					out += ")";
+				}
+				return out + "];";
+			}
 			const uint32_t pick = rng_.below(10);
 			const char* elem_type = pick < 4 ? "int" : pick < 6 ? "float" : pick < 8 ? "string" : pick < 9 ? "bool" : "char";
 			int n = static_cast<int>(rng_.range(0, 4));

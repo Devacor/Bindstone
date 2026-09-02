@@ -6524,6 +6524,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
+	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
 
 	// Decl fast path (construction-stamped flags): a scalar payload whose storage
 	// index already matches the declared type stores straight into the slot -
@@ -6785,27 +6786,34 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 
 			if (requires_homogeneity) {
 				VM_TRY(vm_validate_container_homogeneous(value, ""));
+				// A uniform primitive literal infers the element type and takes its
+				// representation (KEEP BYTE-PARALLEL with the interpreter's decl)
+				if (value.is_array()) {
+					if (type_info_ptr inferred = detail::infer_uniform_array_type(value, engine_)) {
+						effective_decl_type = inferred;
+					}
+				}
 			}
 		}
 	}
 
-	if (decl->type) {
+	if (effective_decl_type) {
 		// Typed declarations convert their initializer exactly like assignment does
 		// (int d = 4.7 truncates instead of storing a mistagged float payload).
 		// Exception: a 'var' decl keeps a shared_ptr-tagged initializer's marker —
 		// `var p = new P()` IS `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the
 		// reference-semantics tag must survive the decl instead of flattening to 'any'
 		if (has_init) {
-			auto enforced = enforce_type_compatibility(std::move(value), decl->type);
+			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type);
 			if (!enforced) {
 				return raise_from(enforced);
 			}
 			value = std::move(enforced.value());
 		}
-		if (decl->type->base_type != script_value_type::jai_any_type ||
+		if (effective_decl_type->base_type != script_value_type::jai_any_type ||
 		    !value.get_type_info() ||
 		    value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
-			value.set_type_info(decl->type);
+			value.set_type_info(effective_decl_type);
 		} else if (engine_ && value.get_type_info()->element_type() &&
 		           !value.get_type_info()->dynamic_pointee) {
 			// var-held handle: '=' with a handle rhs REBINDS unchecked (Dev ruling

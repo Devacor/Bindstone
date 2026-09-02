@@ -335,9 +335,10 @@ public:
         check_eq(6, stops[0].line);   // region produced no stop before the sentinel
         check_eq(2, stops[1].line);
         check_eq(static_cast<int64_t>(42), eng->get_variable("serial").as_int());
-        const auto& pout = eng->get_variable("pout").as_array();
+        // pout is an inferred array<int> (raw buffer): the host extracts the typed vector
+        const auto pout = eng->get_variable("pout").as<std::vector<jai::script_int>>();
         check_eq(static_cast<size_t>(4), pout.size());
-        check_eq(static_cast<int64_t>(8), pout[3].as_int());
+        check_eq(static_cast<int64_t>(8), pout[3]);
     }
 
     void forge_tests() override {

@@ -125,8 +125,10 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
     
     // Vector<int64_t> - direct mapping to script_int
     registry->register_conversion<std::vector<int64_t>>(
-        [](const script_value& v) -> std::vector<int64_t> {
-            return v.as<std::vector<int64_t>>();
+        [registry](const script_value& v) -> std::vector<int64_t> {
+            // Direct kernel: as<std::vector<T>>() consults this registry first, so routing
+            // back through it recursed without bound (typed i64 buffers copy straight over)
+            return conversions::convert_script_array_to_vector<int64_t>(v, registry->get_engine());
         },
         [registry](const std::vector<int64_t>& vec) -> script_value {
             auto eng = registry->get_engine();
@@ -195,8 +197,8 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
     
     // Vector<std::string>
     registry->register_conversion<std::vector<std::string>>(
-        [](const script_value& v) -> std::vector<std::string> {
-            return v.as<std::vector<std::string>>();
+        [registry](const script_value& v) -> std::vector<std::string> {
+            return conversions::convert_script_array_to_vector<std::string>(v, registry->get_engine());
         },
         [registry](const std::vector<std::string>& vec) -> script_value {
             auto eng = registry->get_engine();

@@ -11,6 +11,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <string>
 #include <memory>
+#include <unordered_map>
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/Instance/team.h"
 #include "Game/standardScriptMethods.h"
@@ -364,7 +365,7 @@ protected:
 
 	const CreatureData& statTemplate;
 
-	std::map<std::string, jai::script_value> localVariables;
+	std::unordered_map<std::string, jai::script_value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
 

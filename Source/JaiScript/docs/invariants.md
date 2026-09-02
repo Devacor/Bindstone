@@ -151,5 +151,8 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
 - A raw fast lane tests the KIND it was written for (`kind() == i64 || kind() == f64`), never
   `is_typed()` — byte and string kinds are typed too and must take the enforcing `get`/`set`
   path (fuzz seed 129 stored an int into a string buffer through an `is_typed()` lane).
+- A `checked_result` message is a NON-OWNING view for literals: dynamic text (a caught
+  exception's `what()`, a built string) is interned through the engine's symbolizer and the
+  result holds a view of that stable copy (`intern_exception_text`), never the source buffer.
 - Parallel workers never borrow string handles raw: the "all primitive" short-circuit excludes
   the str kind, and a typed input is read through a boxed snapshot (stage-3 raw reads pending).

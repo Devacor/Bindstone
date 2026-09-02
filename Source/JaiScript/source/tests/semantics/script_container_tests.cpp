@@ -11,6 +11,8 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+struct boundary_creature { script_int hp = 3; };   // bound class for the boundary binding test
+
 // Test widget class to verify deep copy behavior
 struct TestWidget {
     std::string name;
@@ -403,6 +405,41 @@ public:
             check_eq((int64_t)6, eng->execute("array<int> a = [1, 2, 3]; sum_ints(a)").as_int());
             check_near(4.5, eng->execute("array<float> f = [1.5, 3.0]; sum_floats(f)").as_float(), 1e-9);
             check_eq((int64_t)6, eng->execute("array<var> v = [1, 2, 3]; sum_ints(v)").as_int());
+        });
+
+        test("class_typed_array_binds_vector_of_shared_ptr", [this]() {
+            // Dev's binding shape: array<K> of a bound C++ class hands its objects to a
+            // std::vector<std::shared_ptr<K>> parameter (by value: the binder rejects
+            // container references by design). The class is proven once per array (kind
+            // obj), each slot's holder gives up its object; identity is shared (C++ writes
+            // land in the script objects); a hybrid subclass array (different class id)
+            // binds through the registry path; dynamic arrays convert per element
+            auto eng = make_engine();
+            dynamic_binder<boundary_creature>(*eng, "Creature").constructor<>().property("hp", &boundary_creature::hp).build();
+            eng->add_function("sum_hp", [](std::vector<std::shared_ptr<boundary_creature>> cs) -> script_int {
+                script_int t = 0; for (const auto& c : cs) { t += c->hp; } return t;
+            });
+            eng->add_function("heal_all", [](std::vector<std::shared_ptr<boundary_creature>> cs) {
+                for (const auto& c : cs) { c->hp += 10; }
+            });
+            eng->add_function("count", [](std::vector<std::shared_ptr<boundary_creature>> cs) -> script_int {
+                return static_cast<script_int>(cs.size());
+            });
+            check_eq((int64_t)9, eng->execute("array<Creature> cs = [Creature(), Creature(), Creature()]; sum_hp(cs)").as_int());
+            check_eq((int64_t)39, eng->execute("array<Creature> cs = [Creature(), Creature(), Creature()]; heal_all(cs); sum_hp(cs)").as_int());
+            check_eq((int64_t)13, eng->execute("array<Creature> cs = [Creature()]; heal_all(cs); cs[0].hp").as_int());
+            check_eq((int64_t)0, eng->execute("array<Creature> none = []; count(none)").as_int());
+            check_eq((int64_t)6, eng->execute("var dyn = [Creature(), Creature()]; sum_hp(dyn)").as_int());
+            check_eq((int64_t)2, eng->execute("class Big : Creature { int extra = 1; Big() : super() {} } array<Big> bigs = [Big(), Big()]; count(bigs)").as_int());
+            check_eq((int64_t)26, eng->execute("class Big2 : Creature { int extra = 1; Big2() : super() {} } array<Big2> bigs = [Big2(), Big2()]; heal_all(bigs); sum_hp(bigs)").as_int());
+            check_eq((int64_t)13, eng->execute("class Big3 : Creature { int extra = 1; Big3() : super() {} } array<Big3> b = [Big3()]; heal_all(b); b[0].hp").as_int());
+            // a hybrid whose constructor never called super() has no C++ base yet: the
+            // conversion fails with a READABLE text (the result message used to be a view
+            // of the dead exception's what() - freed memory)
+            std::string msg;
+            try { eng->execute("class NoBase : Creature { int extra = 1; } array<NoBase> nb = [NoBase()]; count(nb)"); }
+            catch (const std::exception& ex) { msg = ex.what(); }
+            check_true(msg.find("_cpp_object") != std::string::npos, "hybrid without super() reports the missing C++ object by name: " + msg);
         });
 
         test("script_value_vector_view_is_array_var_only", [this]() {

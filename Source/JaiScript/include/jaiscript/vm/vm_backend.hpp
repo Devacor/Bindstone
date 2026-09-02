@@ -62,6 +62,13 @@ namespace jai::vm {
         // kind [4]=declared-type mismatch
         uint64_t profile_decl_paths_[5] = {};
         uint64_t profile_store_paths_[5] = {};
+        // op_store cycle taxonomy by landing path: [1]=slot provable [2]=slot other
+        // [3]=slot ref-through [4]=env cell [5]=env ref-through [6]=env handle ladder
+        // [7]=member/other; plus per-name cycles so hot store sites are named
+        uint64_t profile_store_path_cycles_[8] = {};
+        uint64_t profile_store_path_counts_[8] = {};
+        unsigned profile_store_last_path_ = 7;
+        std::map<std::string, uint64_t> profile_store_name_cycles_;
         // env production census: [0]=scope [1]=method [2]=static [3]=coroutine [4]=closure-capture
         uint64_t profile_env_births_[5] = {};
         uint64_t profile_scope_kinds_[4] = {};   // iter / scope_push / call_closure / call_plain
@@ -1178,10 +1185,12 @@ namespace jai::vm {
         bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val);
         // Resolves an identifier operand exactly like exec_load (catch var, frame slot,
         // type-ctor names, env, this-field/bound-method/static) without pushing;
-        // values that must be materialized land in scratch.
-        checked_result<const script_value*> fused_ident_value(frame& f, const fused_operand& operand,
-                                                              std::optional<script_value>& scratch,
-                                                              size_t cache_slot);
+        // values that must be materialized land in scratch. nullptr = failed, with the
+        // error already parked in pending_error_ (the hottest resolver: a bare pointer
+        // return instead of a 56-byte checked_result per operand).
+        const script_value* fused_ident_value(frame& f, const fused_operand& operand,
+                                              std::optional<script_value>& scratch,
+                                              size_t cache_slot);
         op_status exec_index(frame& f, const vm_instruction& ins);
         op_status exec_index_assign(frame& f, const vm_instruction& ins);
         op_status exec_index_compound(frame& f, const vm_instruction& ins);
@@ -1189,8 +1198,8 @@ namespace jai::vm {
         op_status exec_index_compound_fused(frame& f, const vm_instruction& ins);
         op_status exec_math(frame& f, const vm_instruction& ins);
         op_status exec_parallel_for(frame& f, const vm_instruction& ins);
-        checked_result<const script_value*> fused_subscript_value(frame& f, const fused_operand& operand,
-                                                                  std::optional<script_value>& scratch, size_t cache_slot);
+        const script_value* fused_subscript_value(frame& f, const fused_operand& operand,
+                                                  std::optional<script_value>& scratch, size_t cache_slot);
         op_status exec_unary(frame& f, const vm_instruction& ins);
         op_status exec_call(frame& f, const vm_instruction& ins);
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)

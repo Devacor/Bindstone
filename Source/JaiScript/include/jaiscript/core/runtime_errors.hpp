@@ -40,6 +40,7 @@ namespace jai {
         map_key_not_found = 44,
         array_element_type_mismatch = 45,
         map_value_type_mismatch = 46,
+        map_key_type_mismatch = 47,
 
         // Function/Method errors (51-70)
         argument_count_mismatch = 51,

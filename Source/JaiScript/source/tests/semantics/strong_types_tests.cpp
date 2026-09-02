@@ -1533,6 +1533,12 @@ public:
             check_quad_error("array<bool> f = [true]; int g = 1; f[0] = g", "bool buffer element store rejects int");
             check_quad_error("array<char> c = ['a']; c[0] += 1", "char buffer compound store rejects int");
             check_quad("array<string> s = [\"a\"]; string t = \"b\"; s[0] = t; s[0]", "b", "string buffer element store of a string");
+            // fuzz seed 6977 (2026-09-02): the vm's inline push named an ELEMENT-REFERENCE
+            // argument 'reference' in the mismatch text where the interpreter names the
+            // referent (pre-existing for dynamic tables too; ref locals and fields were fine)
+            check_quad_error("array<string> t = [\"a\"]; array<int> v = [1]; v.push(t[0])", "push of a string-buffer element into array<int> names the referent");
+            check_quad_error("array<var> t = [\"a\"]; array<int> v = [1]; v.push(t[0])", "push of a dynamic-table element into array<int> names the referent");
+            check_quad("array<string> t = [\"a\"]; array<string> v = []; v.push(t[0]); v[0]", "a", "push of a string-buffer element into array<string>");
         });
 
         test("typed_storage_errors_match_plain", [check_quad_error]() {

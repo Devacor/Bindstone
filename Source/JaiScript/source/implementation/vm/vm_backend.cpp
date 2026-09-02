@@ -9181,7 +9181,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					auto array_type_info = objd.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					if (!vm_is_element_type_compatible(stack_[args_base], element_type, objd)) {
-						std::string value_type = vm_value_type_name(stack_[args_base]);
+						std::string value_type = vm_value_type_name(stack_[args_base].deref());   // an element-reference argument names its referent
 						std::string expected_type = vm_type_info_name(element_type);
 						uint64_t value_type_id = symbolizer_->intern(value_type);
 						uint64_t expected_type_id = symbolizer_->intern(expected_type);
@@ -9472,7 +9472,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					auto array_type_info = objv.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					if (!vm_is_element_type_compatible(arguments[0], element_type, objv)) {
-						std::string value_type = vm_value_type_name(arguments[0]);
+						std::string value_type = vm_value_type_name(arguments[0].deref());
 						std::string expected_type = vm_type_info_name(element_type);
 						uint64_t value_type_id = symbolizer_->intern(value_type);
 						uint64_t expected_type_id = symbolizer_->intern(expected_type);

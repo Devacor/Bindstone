@@ -214,6 +214,33 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   buffers; C++ interop bulk paths (`vector<T>` ⇄ typed array near-memcpy,
   conversion_registry_impl.hpp:15-45, engine_impl.hpp:166-195). Measure.
 
+- **Stage 5 — every element type (Dev direction 2026-09-02).** As-built the same night:
+  `b8`/`c8` (bool/char, one shared byte buffer) and `str` (string handles, 8 bytes,
+  sharing exactly the object a boxed element shares) joined `i64`/`f64`; `auto`/`array<auto>`
+  uniform primitive literals infer the element type and take the buffer. Byte and string
+  kinds box through `get`/`set` in the INDEX family (raw lanes stay int/float — a
+  `raw_bool` decl sink is the cheap next lane). The parallel all-primitive check excludes
+  `str` (handles never borrow raw; `statically_all_primitive` already excluded strings).
+  Remaining kinds, designed not built:
+  - **object kind** (`array<CreatureBase>`): the node pins the `class_definition*` (typed
+    tag already names the class) and stores `strong_ptr<object_holder>` handles (8 bytes).
+    Homogeneity is by declared class at the boundary (subclasses and script hybrids of a
+    bound C++ base included: the hybrid layer's `cpp_object_pointer()` is the same object).
+    `get` boxes a handle (value semantics stay: stores through the boundary still clone
+    unless the element type is `shared_ptr<T>`), the holder ELEMENT mode works unchanged
+    (container+index re-resolve), and the C++ boundary gains the payoff Dev asked for:
+    `std::vector<std::shared_ptr<Base>>` / `std::vector<Base*>` parameters bind with ONE
+    class check per array (hybrids hand over their C++ object pointer), no per-element
+    probing; `bound_array<Base*>` can view the buffer. Open question for Dev: whether
+    `array<Derived>` converts into an `array<Base>` parameter implicitly (a copy of handles
+    with the upcast proven once) or requires an explicit spelling like the var/typed rule.
+  - **maps** (`map<string,int>` …): the same rule — typed key/value storage keyed by the
+    declared types, `map<var,var>` the only dynamic form, ordering contract kept
+    (`script_map` stays ordered). Wins: key compare without a `script_value` per entry,
+    value footprint. The boundary kernel's map branch is the producer, as for arrays.
+  - **parallel_transform stage 3**: workers read typed inputs raw (today a typed input is
+    read through a boxed snapshot — no demote — one copy per region).
+
 ## Risk register
 
 1. **Scratch write-back loss** (mutable deref on typed elements) — silent. Caught by:

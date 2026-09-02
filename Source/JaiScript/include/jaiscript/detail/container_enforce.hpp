@@ -157,6 +157,7 @@ namespace jai::detail {
 			case script_value_type::jai_float_type: return script_array::kind_t::f64;
 			case script_value_type::jai_bool_type: return script_array::kind_t::b8;
 			case script_value_type::jai_char_type: return script_array::kind_t::c8;
+			case script_value_type::jai_string_type: return script_array::kind_t::str;
 			default: return script_array::kind_t::hetero;
 		}
 	}
@@ -166,6 +167,7 @@ namespace jai::detail {
 			case script_array::kind_t::f64: return script_value_type::jai_float_type;
 			case script_array::kind_t::b8: return script_value_type::jai_bool_type;
 			case script_array::kind_t::c8: return script_value_type::jai_char_type;
+			case script_array::kind_t::str: return script_value_type::jai_string_type;
 			default: return script_value_type::jai_any_type;
 		}
 	}
@@ -174,7 +176,8 @@ namespace jai::detail {
 			case script_array::kind_t::i64: return eng->get_type_info_int();
 			case script_array::kind_t::f64: return eng->get_type_info_float();
 			case script_array::kind_t::b8: return eng->get_type_info_bool();
-			default: return eng->get_type_info_char();
+			case script_array::kind_t::c8: return eng->get_type_info_char();
+			default: return eng->get_type_info_string();
 		}
 	}
 

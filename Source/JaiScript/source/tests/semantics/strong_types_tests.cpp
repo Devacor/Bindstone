@@ -1518,6 +1518,14 @@ public:
             check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
             check_quad_error("array<bool> f = [true]; f.push(1)", "bool buffer rejects int");
             check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
+            // string handles: reads, stores, push, sort, join, copy, in-place mutator through an element, json
+            check_quad("array<string> s = [\"b\", \"a\"]; s.push(\"c\"); s.sort(); s.join(\"-\")", "a-b-c", "string buffer push/sort/join");
+            check_quad("array<string> s = [\"x\"]; s[0] = \"y\"; s[0] + to_string(s.size())", "y1", "string buffer store/read");
+            check_quad("array<string> s = [\"ab\"]; array<string> t = s; t[0] = \"zz\"; s[0] + t[0]", "abzz", "string buffer copy is a copy");
+            check_quad("array<string> s = [\"q\", \"r\"]; var o = \"\"; for (auto w : s) { o = o + w; } o", "qr", "string buffer range-for");
+            check_quad("array<string> s = [\"hi\"]; to_json(s)", "[\"hi\"]", "string buffer serializes");
+            check_quad("array<string> s = [\"a\", \"b\"]; s.reverse(); s[0]", "b", "string buffer reverse");
+            check_quad_error("array<string> s = [\"a\"]; s.push(1)", "string buffer rejects int");
         });
 
         test("typed_storage_errors_match_plain", [check_quad_error]() {
@@ -1612,6 +1620,10 @@ public:
             check(c.unchecked_array_node()->kind() == jai::script_array::kind_t::c8, "array<char> holds a byte buffer");
             auto ab = e->execute("auto inferred = [true, false]; inferred");
             check(ab.unchecked_array_node()->kind() == jai::script_array::kind_t::b8, "auto bool literal infers the b8 buffer");
+            auto st = e->execute("array<string> names = [\"a\", \"b\"]; names");
+            check(st.unchecked_array_node()->kind() == jai::script_array::kind_t::str, "array<string> holds a handle buffer");
+            auto as = e->execute("auto words = [\"x\", \"y\"]; words");
+            check(as.unchecked_array_node()->kind() == jai::script_array::kind_t::str, "auto string literal infers the handle buffer");
             auto d = e->execute("array<int> c = [1]; var laundered = c; laundered");
             check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes the node");
         });

@@ -20,6 +20,7 @@ namespace jai {
 
     // Forward declarations
     class script_value;
+    template<typename T> class strong_ptr;   // handle buffers (script_array::strs_) name it before value.hpp
     class engine;
 
     // Fixed-size primitive types for cross-platform serialization
@@ -40,7 +41,8 @@ namespace jai {
     class script_array {
     public:
         // b8/c8 share one byte buffer (bool and char payloads); the kind says how to box
-        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4 };
+        // str holds shared string handles (the same handle a boxed element would carry)
+        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5 };
 
         // Every body that instantiates a vector<script_value> member (including the
         // DEFAULTED special members - construction paths instantiate the vector dtor
@@ -72,6 +74,8 @@ namespace jai {
         const std::vector<script_float>& floats() const noexcept { return floats_; }
         std::vector<uint8_t>& bytes() noexcept { return bytes_; }
         const std::vector<uint8_t>& bytes() const noexcept { return bytes_; }
+        std::vector<strong_ptr<script_string>>& strs() noexcept { return strs_; }
+        const std::vector<strong_ptr<script_string>>& strs() const noexcept { return strs_; }
         // Same-kind buffer copy (clone / detach): one vector assignment whatever the kind
         inline void assign_buffer(const script_array& other);
 
@@ -103,6 +107,7 @@ namespace jai {
         std::vector<script_int> ints_;
         std::vector<script_float> floats_;
         std::vector<uint8_t> bytes_;
+        std::vector<strong_ptr<script_string>> strs_;
     };
     // Transparent probe for CONSTANT string keys: map lookups compare against the raw
     // constant bytes instead of materializing a script_value per access (`rec["px"]`

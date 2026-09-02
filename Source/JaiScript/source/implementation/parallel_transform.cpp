@@ -1365,7 +1365,9 @@ namespace {
 	bool parallel_content_all_primitive(const script_value& v) {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_ARRAY: {
-			if (v.unchecked_array_node()->is_typed()) { return true; }   // raw int/float payloads
+			if (const script_array* node = v.unchecked_array_node(); node->is_typed()) {
+				return node->kind() != script_array::kind_t::str;   // numeric/byte payloads only; handles never borrow raw
+			}
 			for (const auto& elem : v.unchecked_as_array()) {
 				switch (elem.raw_storage_index()) {
 				case script_value::TYPEID_NULL:

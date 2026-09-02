@@ -2947,8 +2947,9 @@ script_value hybrid_field_from_archive(engine* eng, const script_value& val) {
     if (val.is_array()) {
         script_value out = script_value::make_array(nullptr, eng);
         auto& outArr = const_cast<std::vector<script_value>&>(out.as_array());
-        outArr.reserve(val.as_array().size());
-        for (const auto& elem : val.as_array()) { outArr.push_back(hybrid_field_from_archive(eng, elem)); }
+        const script_array* node = val.unchecked_array_node();
+        outArr.reserve(node->size());
+        node->for_each(eng, [&](const script_value& elem) { outArr.push_back(hybrid_field_from_archive(eng, elem)); });
         return out;
     }
     return val;

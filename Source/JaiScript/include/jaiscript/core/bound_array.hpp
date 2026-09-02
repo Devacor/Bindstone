@@ -13,34 +13,51 @@
 
 namespace jai {
 
-// Forward declarations
 class engine;
 template<typename K, typename V> class bound_map;
 
 /**
  * @brief Zero-copy wrapper for JaiScript arrays with value semantics
- * 
+ *
  * When passed by value: Creates a deep copy of the array
  * When passed by reference: Zero-copy access to the underlying array
  * When passed by const reference: Zero-copy read-only access
- * 
+ *
+ * The view sits on the array NODE (script_array) and dispatches by its kind: an
+ * array<int>/array<float> raw buffer is mutated in place exactly like an array<var>
+ * vector (the node's get/set/push are the funnel), so a C++ function taking
+ * bound_array<int64_t>& writes straight into the typed storage. The element type must
+ * fit the node: a typed buffer only binds arithmetic element types.
+ *
  * @tparam T The element type of the array
  */
 template<typename T>
 class bound_array {
 private:
-    // Either owns the data (for by-value) or references it (for by-reference)
-    mutable std::shared_ptr<script_value> owned_value_;
-    std::vector<script_value>* arr_ = nullptr;
+    // The view keeps a HANDLE on the array value (a shallow copy shares the node, an
+    // owned clone is the value-semantics copy) - the node can never outlive the view
+    script_value handle_;
+    bool owned_ = false;
     engine* engine_ref_ = nullptr;
 
-    // Helper to get engine reference
     engine* get_engine() const {
         return engine_ref_;
     }
 
+    script_array* node() const {
+        return handle_.raw_storage_index() == script_value::TYPEID_ARRAY
+            ? const_cast<script_value&>(handle_).unchecked_get_array_storage().get()
+            : nullptr;
+    }
+
+    static void check_kind_fits(const script_array& n) {
+        if (n.is_typed() && !std::is_arithmetic_v<T>) {
+            throw runtime_error("bound_array element type does not fit a typed array buffer "
+                                "(array<int>/array<float> bind arithmetic element types; declare array<var> for the dynamic view)");
+        }
+    }
+
 public:
-    // Helper to create script_value from T (public for nested access)
     static script_value make_script_value(const T& value, engine* eng) {
         if constexpr (std::is_same_v<T, int>) {
             return script_value(static_cast<script_int>(value), eng);
@@ -74,7 +91,7 @@ public:
                 return result;
             }
         } else if constexpr (is_bound_map_v<T>) {
-            // For nested bound_map, return its underlying script_value  
+            // For nested bound_map, return its underlying script_value
             if (value.is_owned()) {
                 return value.as_script_value();
             } else {
@@ -82,7 +99,7 @@ public:
                 using K = typename T::key_type;
                 using V = typename T::mapped_type;
                 script_value result = script_value::make_map(
-                    type_info::make<K>(), 
+                    type_info::make<K>(),
                     type_info::make<V>(),
                     eng
                 );
@@ -100,27 +117,27 @@ public:
                               "Use dynamic_binder<T> to register the type first, then create objects via engine->make_object<T>()");
         }
     }
-    
+
     // Helper trait to detect bound_array types
     template<typename U>
     struct is_bound_array : std::false_type {};
-    
+
     template<typename U>
     struct is_bound_array<bound_array<U>> : std::true_type {};
-    
+
     template<typename U>
     static constexpr bool is_bound_array_v = is_bound_array<U>::value;
-    
+
     // Helper trait to detect bound_map types
     template<typename U>
     struct is_bound_map : std::false_type {};
-    
+
     template<typename K2, typename V2>
     struct is_bound_map<bound_map<K2, V2>> : std::true_type {};
-    
+
     template<typename U>
     static constexpr bool is_bound_map_v = is_bound_map<U>::value;
-    
+
     // Helper to extract T from script_value (public for nested access)
     static T extract_value(const script_value& val) {
         if constexpr (std::is_same_v<T, script_value>) {
@@ -130,7 +147,7 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val).as_array(), val.get_engine());
+            return T(const_cast<script_value&>(val), val.get_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
@@ -143,7 +160,7 @@ public:
             return val.as<T>();
         }
     }
-    
+
 public:
     // Type aliases for STL compatibility
     using value_type = T;
@@ -151,296 +168,279 @@ public:
     using difference_type = std::ptrdiff_t;
     using reference = T&;
     using const_reference = const T&;
-    
+
     /**
-     * @brief Construct from array reference (zero-copy)
-     * @param arr Reference to existing script array
+     * @brief Zero-copy view of an array value: shares the node, mutations land in it
+     * @param val Script value holding the array (any kind)
      * @param eng Engine reference for creating new script_values
      */
-    explicit bound_array(std::vector<script_value>& arr, engine* eng)
-        : owned_value_(nullptr), arr_(&arr), engine_ref_(eng) {}
-    
+    explicit bound_array(script_value& val, engine* eng)
+        : handle_(val), owned_(false), engine_ref_(eng) {
+        if (!val.is_array()) {
+            throw runtime_error("Cannot create bound_array from non-array script_value");
+        }
+        check_kind_fits(*node());
+    }
+
     /**
      * @brief Construct from script_value (creates deep copy for value semantics)
      * @param val Script value containing an array
      */
-    explicit bound_array(const script_value& val) {
+    explicit bound_array(const script_value& val)
+        : handle_(std::monostate{}, val.get_engine()), owned_(true), engine_ref_(val.get_engine()) {
         if (!val.is_array()) {
             throw runtime_error("Cannot create bound_array from non-array script_value");
         }
-        engine_ref_ = val.get_engine();
-        owned_value_ = std::make_shared<script_value>(val.clone());
-        arr_ = &owned_value_->as_array();
+        handle_ = val.clone();
+        check_kind_fits(*node());
     }
-    
+
     /**
      * @brief Copy constructor
      * Always creates an owned deep copy (value semantics)
      */
-    bound_array(const bound_array& other) {
-        engine_ref_ = other.engine_ref_;  // Copy engine reference
+    bound_array(const bound_array& other)
+        : handle_(other.handle_.deref().clone()), owned_(true), engine_ref_(other.engine_ref_) {}
 
-        // Always create owned copy when copy constructing (value semantics)
-        if (other.owned_value_) {
-            // Clone the entire array - this preserves class_instance wrappers
-            owned_value_ = std::make_shared<script_value>(other.owned_value_->deref().clone());
-        } else {
-            // Create a new array and deep copy each element via clone
-            owned_value_ = std::make_shared<script_value>(script_value::make_array(nullptr, engine_ref_));
-            auto& temp_arr = owned_value_->as_array();
-            if (other.arr_) {
-                for (const auto& elem : *other.arr_) {
-                    // Clone preserves wrapper structure (class_instance vs raw C++ object)
-                    temp_arr.push_back(elem.deref().clone());
-                }
-            }
-        }
-        arr_ = &owned_value_->as_array();
-    }
-    
     /**
      * @brief Move constructor
      */
     bound_array(bound_array&& other) noexcept
-        : owned_value_(std::move(other.owned_value_)), arr_(other.arr_), engine_ref_(other.engine_ref_) {
-        if (owned_value_) {
-            arr_ = &owned_value_->as_array();
-        }
-        other.arr_ = nullptr;
-    }
-    
+        : handle_(std::move(other.handle_)), owned_(other.owned_), engine_ref_(other.engine_ref_) {}
+
     /**
      * @brief Copy assignment
      */
     bound_array& operator=(const bound_array& other) {
         if (this != &other) {
             engine_ref_ = other.engine_ref_;
-            if (other.owned_value_) {
-                owned_value_ = std::make_shared<script_value>(other.owned_value_->clone());
-                arr_ = &owned_value_->as_array();
+            if (other.owned_) {
+                handle_ = other.handle_.clone();
+                owned_ = true;
             } else {
-                owned_value_ = nullptr;
-                arr_ = other.arr_;
+                handle_ = other.handle_;
+                owned_ = false;
             }
         }
         return *this;
     }
-    
+
     /**
      * @brief Move assignment
      */
     bound_array& operator=(bound_array&& other) noexcept {
         if (this != &other) {
             engine_ref_ = other.engine_ref_;
-            owned_value_ = std::move(other.owned_value_);
-            arr_ = other.arr_;
-            if (owned_value_) {
-                arr_ = &owned_value_->as_array();
-            }
-            other.arr_ = nullptr;
+            handle_ = std::move(other.handle_);
+            owned_ = other.owned_;
         }
         return *this;
     }
-    
+
     /**
      * @brief Check if this array owns its data (is a copy) or references external data
      */
-    bool is_owned() const { return owned_value_ != nullptr; }
-    
+    bool is_owned() const { return owned_; }
+
     // ===== Capacity =====
-    
-    size_type size() const { return arr_ ? arr_->size() : 0; }
-    bool empty() const { return !arr_ || arr_->empty(); }
-    
+
+    size_type size() const { script_array* n = node(); return n ? n->size() : 0; }
+    bool empty() const { return size() == 0; }
+
     void reserve(size_type new_cap) {
-        if (arr_) arr_->reserve(new_cap);
+        if (script_array* n = node()) n->reserve(new_cap);
     }
-    
-    size_type capacity() const { return arr_ ? arr_->capacity() : 0; }
-    
+
+    size_type capacity() const { script_array* n = node(); return n ? n->capacity() : 0; }
+
     // ===== Modifiers =====
-    
+
     void clear() {
-        if (arr_) arr_->clear();
+        if (script_array* n = node()) n->clear();
     }
-    
+
     void push_back(const T& value) {
-        if (!arr_) throw runtime_error("Cannot push_back to null bound_array");
-        arr_->push_back(make_script_value(value, get_engine()));
+        script_array* n = node();
+        if (!n) throw runtime_error("Cannot push_back to null bound_array");
+        n->push(make_script_value(value, get_engine()));
     }
-    
+
     void push_back(T&& value) {
-        if (!arr_) throw runtime_error("Cannot push_back to null bound_array");
-        arr_->push_back(make_script_value(std::forward<T>(value), get_engine()));
+        script_array* n = node();
+        if (!n) throw runtime_error("Cannot push_back to null bound_array");
+        n->push(make_script_value(std::forward<T>(value), get_engine()));
     }
-    
+
     void pop_back() {
-        if (arr_ && !arr_->empty()) {
-            arr_->pop_back();
+        script_array* n = node();
+        if (n && !n->empty()) {
+            n->pop_back();
         }
     }
-    
-    void resize(size_type count) {
-        if (!arr_) throw runtime_error("Cannot resize null bound_array");
 
-        if (count > arr_->size()) {
-            // Add default-constructed elements
-            while (arr_->size() < count) {
-                arr_->push_back(make_script_value(T{}, get_engine()));
+    void resize(size_type count) {
+        script_array* n = node();
+        if (!n) throw runtime_error("Cannot resize null bound_array");
+        if (count > n->size()) {
+            while (n->size() < count) {
+                n->push(make_script_value(T{}, get_engine()));
             }
         } else {
-            // erase, not resize: vector::resize instantiates construct_at on
-            // script_value's private default ctor (rejected by conforming compilers)
-            arr_->erase(arr_->begin() + count, arr_->end());
+            n->truncate(count);
         }
     }
 
     void resize(size_type count, const T& value) {
-        if (!arr_) throw runtime_error("Cannot resize null bound_array");
-
-        if (count > arr_->size()) {
-            // Add copies of value
-            while (arr_->size() < count) {
-                arr_->push_back(make_script_value(value, get_engine()));
+        script_array* n = node();
+        if (!n) throw runtime_error("Cannot resize null bound_array");
+        if (count > n->size()) {
+            while (n->size() < count) {
+                n->push(make_script_value(value, get_engine()));
             }
         } else {
-            arr_->erase(arr_->begin() + count, arr_->end());
+            n->truncate(count);
         }
     }
-    
+
     // ===== Element access =====
-    
+
     T operator[](size_type pos) const {
-        return extract_value((*arr_)[pos]);
+        return extract_value(node()->get(pos, get_engine()));
     }
-    
+
     T at(size_type pos) const {
-        if (!arr_ || pos >= arr_->size()) {
+        script_array* n = node();
+        if (!n || pos >= n->size()) {
             throw std::out_of_range("bound_array::at: index out of range");
         }
-        return extract_value((*arr_)[pos]);
+        return extract_value(n->get(pos, get_engine()));
     }
-    
+
     T front() const {
-        if (!arr_ || arr_->empty()) {
+        script_array* n = node();
+        if (!n || n->empty()) {
             throw runtime_error("bound_array::front: array is empty");
         }
-        return extract_value(arr_->front());
+        return extract_value(n->get(0, get_engine()));
     }
-    
+
     T back() const {
-        if (!arr_ || arr_->empty()) {
+        script_array* n = node();
+        if (!n || n->empty()) {
             throw runtime_error("bound_array::back: array is empty");
         }
-        return extract_value(arr_->back());
+        return extract_value(n->get(n->size() - 1, get_engine()));
     }
-    
+
     // ===== Element modification proxy =====
-    
+
     class element_proxy {
-        std::vector<script_value>& arr_;
+        script_array& node_;
         size_type idx_;
         engine* engine_ref_;
         // Storage for nested bound_map wrappers (no copying, just wrapper objects)
         mutable std::unique_ptr<std::any> nested_wrapper_storage_;
 
+        // Nested containers only exist in dynamic nodes (typed buffers hold scalars)
+        script_value& dynamic_slot() const {
+            if (node_.is_typed()) {
+                throw runtime_error("Element is not a container (typed array buffer)");
+            }
+            return node_.values()[idx_];
+        }
+
     public:
-        element_proxy(std::vector<script_value>& arr, size_type idx, engine* eng)
-            : arr_(arr), idx_(idx), engine_ref_(eng) {}
+        element_proxy(script_array& node, size_type idx, engine* eng)
+            : node_(node), idx_(idx), engine_ref_(eng) {}
 
         // Copy constructor
         element_proxy(const element_proxy& other)
-            : arr_(other.arr_), idx_(other.idx_), engine_ref_(other.engine_ref_) {}
+            : node_(other.node_), idx_(other.idx_), engine_ref_(other.engine_ref_) {}
 
         // Move constructor - efficient for temporary proxies
         element_proxy(element_proxy&& other) noexcept
-            : arr_(other.arr_), idx_(other.idx_), engine_ref_(other.engine_ref_),
+            : node_(other.node_), idx_(other.idx_), engine_ref_(other.engine_ref_),
               nested_wrapper_storage_(std::move(other.nested_wrapper_storage_)) {}
-        
+
         element_proxy& operator=(const T& value) {
-            arr_[idx_] = bound_array::make_script_value(value, engine_ref_);
+            node_.set(idx_, bound_array::make_script_value(value, engine_ref_));
             return *this;
         }
-        
+
         element_proxy& operator=(T&& value) {
-            arr_[idx_] = bound_array::make_script_value(std::forward<T>(value), engine_ref_);
+            node_.set(idx_, bound_array::make_script_value(std::forward<T>(value), engine_ref_));
             return *this;
         }
-        
+
         // Copy assignment from other element_proxy
         element_proxy& operator=(const element_proxy& other) {
-            arr_[idx_] = bound_array::make_script_value(other.get(), engine_ref_);
+            node_.set(idx_, bound_array::make_script_value(other.get(), engine_ref_));
             return *this;
         }
-        
-        // Move assignment from other element_proxy - PERFORMANCE WIN!
+
+        // Move assignment from other element_proxy: the element value moves node to node
         element_proxy& operator=(element_proxy&& other) {
-            // Direct script_value move - no extraction/conversion needed!
-            arr_[idx_] = std::move(other.arr_[other.idx_]);
+            node_.set(idx_, other.node_.get(other.idx_, other.engine_ref_));
             return *this;
         }
-        
+
         operator T() const {
-            return bound_array::extract_value(arr_[idx_]);
+            return bound_array::extract_value(node_.get(idx_, engine_ref_));
         }
-        
+
         T get() const {
-            return bound_array::extract_value(arr_[idx_]);
+            return bound_array::extract_value(node_.get(idx_, engine_ref_));
         }
-        
+
         // Support for nested bound_array operations
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::element_proxy>::type
         operator[](size_type pos) {
-            // Get the nested array and return its element_proxy
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return typename U::element_proxy(nested_arr, pos, engine_ref_);
+            return typename U::element_proxy(*nested_val.unchecked_get_array_storage(), pos, engine_ref_);
         }
-        
+
         // Const version for reading
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::value_type>::type
         operator[](size_type pos) const {
-            auto& nested_val = arr_[idx_];
+            const script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return U::extract_value(nested_arr[pos]);
+            return U::extract_value(nested_val.unchecked_array_node()->get(pos, engine_ref_));
         }
-        
+
         // Support for size() on nested arrays
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, size_type>::type
         size() const {
-            auto& nested_val = arr_[idx_];
+            const script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            return nested_val.as_array().size();
+            return nested_val.unchecked_array_node()->size();
         }
-        
+
         // Support for push_back on nested arrays
         template<typename U = T, typename V>
         typename std::enable_if<is_bound_array_v<U>, void>::type
         push_back(V&& value) {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            nested_arr.push_back(U::make_script_value(std::forward<V>(value), engine_ref_));
+            nested_val.unchecked_get_array_storage()->push(U::make_script_value(std::forward<V>(value), engine_ref_));
         }
-        
+
         // Support for nested bound_map subscript operations
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::element_proxy>::type
         operator[](const typename U::key_type& key) {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
@@ -450,12 +450,12 @@ public:
             U& bound_map_wrapper = std::any_cast<U&>(*nested_wrapper_storage_);
             return bound_map_wrapper[key];
         }
-        
+
         // Const version for reading nested maps
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::mapped_type>::type
         operator[](const typename U::key_type& key) const {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
@@ -463,90 +463,88 @@ public:
             U bound_map_wrapper(nested_map);
             return bound_map_wrapper[key];
         }
-        
+
         // Support for iterating nested arrays
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::iterator>::type
         begin() {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return typename U::iterator(nested_arr.begin());
+            return typename U::iterator(nested_val.unchecked_array_node(), 0, engine_ref_);
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::iterator>::type
         end() {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return typename U::iterator(nested_arr.end());
+            const script_array* nested = nested_val.unchecked_array_node();
+            return typename U::iterator(nested, nested->size(), engine_ref_);
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::const_iterator>::type
         begin() const {
-            auto& nested_val = arr_[idx_];
+            const script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return typename U::const_iterator(nested_arr.begin());
+            return typename U::const_iterator(nested_val.unchecked_array_node(), 0, engine_ref_);
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_array_v<U>, typename U::const_iterator>::type
         end() const {
-            auto& nested_val = arr_[idx_];
+            const script_value& nested_val = dynamic_slot();
             if (!nested_val.is_array()) {
                 throw runtime_error("Element is not an array");
             }
-            auto& nested_arr = nested_val.as_array();
-            return typename U::const_iterator(nested_arr.end());
+            const script_array* nested = nested_val.unchecked_array_node();
+            return typename U::const_iterator(nested, nested->size(), engine_ref_);
         }
-        
+
         // Support for iterating nested maps
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::iterator>::type
         begin() {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
             auto& nested_map = nested_val.as_map();
             return typename U::iterator(nested_map.begin());
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::iterator>::type
         end() {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
             auto& nested_map = nested_val.as_map();
             return typename U::iterator(nested_map.end());
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::const_iterator>::type
         begin() const {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
             auto& nested_map = nested_val.as_map();
             return typename U::const_iterator(nested_map.begin());
         }
-        
+
         template<typename U = T>
         typename std::enable_if<is_bound_map_v<U>, typename U::const_iterator>::type
         end() const {
-            auto& nested_val = arr_[idx_];
+            script_value& nested_val = dynamic_slot();
             if (!nested_val.is_map()) {
                 throw runtime_error("Element is not a map");
             }
@@ -554,123 +552,129 @@ public:
             return typename U::const_iterator(nested_map.end());
         }
     };
-    
+
     element_proxy operator[](size_type pos) {
-        return element_proxy(*arr_, pos, engine_ref_);
+        return element_proxy(*node(), pos, engine_ref_);
     }
-    
-    // ===== Iterators =====
-    
+
+    // ===== Iterators (index-based: one shape for every node kind) =====
+
     class iterator {
-        std::vector<script_value>::iterator it_;
-        
+        const script_array* node_ = nullptr;
+        size_type i_ = 0;
+        engine* engine_ref_ = nullptr;
+
     public:
         using iterator_category = std::random_access_iterator_tag;
         using value_type = T;
         using difference_type = std::ptrdiff_t;
         using pointer = T*;
         using reference = T;
-        
+
         iterator() = default;
-        explicit iterator(std::vector<script_value>::iterator it) : it_(it) {}
-        
-        T operator*() const { return extract_value(*it_); }
-        
-        iterator& operator++() { ++it_; return *this; }
-        iterator operator++(int) { iterator tmp = *this; ++it_; return tmp; }
-        iterator& operator--() { --it_; return *this; }
-        iterator operator--(int) { iterator tmp = *this; --it_; return tmp; }
-        
-        iterator& operator+=(difference_type n) { it_ += n; return *this; }
-        iterator& operator-=(difference_type n) { it_ -= n; return *this; }
-        
-        iterator operator+(difference_type n) const { return iterator(it_ + n); }
-        iterator operator-(difference_type n) const { return iterator(it_ - n); }
-        
-        difference_type operator-(const iterator& other) const { return it_ - other.it_; }
-        
-        bool operator==(const iterator& other) const { return it_ == other.it_; }
-        bool operator!=(const iterator& other) const { return it_ != other.it_; }
-        bool operator<(const iterator& other) const { return it_ < other.it_; }
-        bool operator<=(const iterator& other) const { return it_ <= other.it_; }
-        bool operator>(const iterator& other) const { return it_ > other.it_; }
-        bool operator>=(const iterator& other) const { return it_ >= other.it_; }
-        
-        T operator[](difference_type n) const { return extract_value(*(it_ + n)); }
+        iterator(const script_array* node, size_type i, engine* eng) : node_(node), i_(i), engine_ref_(eng) {}
+
+        T operator*() const { return extract_value(node_->get(i_, engine_ref_)); }
+
+        iterator& operator++() { ++i_; return *this; }
+        iterator operator++(int) { iterator tmp = *this; ++i_; return tmp; }
+        iterator& operator--() { --i_; return *this; }
+        iterator operator--(int) { iterator tmp = *this; --i_; return tmp; }
+
+        iterator& operator+=(difference_type n) { i_ = static_cast<size_type>(static_cast<difference_type>(i_) + n); return *this; }
+        iterator& operator-=(difference_type n) { i_ = static_cast<size_type>(static_cast<difference_type>(i_) - n); return *this; }
+
+        iterator operator+(difference_type n) const { iterator tmp = *this; tmp += n; return tmp; }
+        iterator operator-(difference_type n) const { iterator tmp = *this; tmp -= n; return tmp; }
+
+        difference_type operator-(const iterator& other) const { return static_cast<difference_type>(i_) - static_cast<difference_type>(other.i_); }
+
+        bool operator==(const iterator& other) const { return node_ == other.node_ && i_ == other.i_; }
+        bool operator!=(const iterator& other) const { return !(*this == other); }
+        bool operator<(const iterator& other) const { return i_ < other.i_; }
+        bool operator<=(const iterator& other) const { return i_ <= other.i_; }
+        bool operator>(const iterator& other) const { return i_ > other.i_; }
+        bool operator>=(const iterator& other) const { return i_ >= other.i_; }
+
+        T operator[](difference_type n) const { return extract_value(node_->get(static_cast<size_type>(static_cast<difference_type>(i_) + n), engine_ref_)); }
+
+        const script_array* node() const { return node_; }
+        size_type index() const { return i_; }
+        engine* eng() const { return engine_ref_; }
     };
-    
+
     class const_iterator {
-        std::vector<script_value>::const_iterator it_;
-        
+        const script_array* node_ = nullptr;
+        size_type i_ = 0;
+        engine* engine_ref_ = nullptr;
+
     public:
         using iterator_category = std::random_access_iterator_tag;
         using value_type = T;
         using difference_type = std::ptrdiff_t;
         using pointer = const T*;
         using reference = const T;
-        
+
         const_iterator() = default;
-        explicit const_iterator(std::vector<script_value>::const_iterator it) : it_(it) {}
-        const_iterator(const iterator& other) : it_(other.it_) {}
-        
-        T operator*() const { return extract_value(*it_); }
-        
-        const_iterator& operator++() { ++it_; return *this; }
-        const_iterator operator++(int) { const_iterator tmp = *this; ++it_; return tmp; }
-        const_iterator& operator--() { --it_; return *this; }
-        const_iterator operator--(int) { const_iterator tmp = *this; --it_; return tmp; }
-        
-        const_iterator& operator+=(difference_type n) { it_ += n; return *this; }
-        const_iterator& operator-=(difference_type n) { it_ -= n; return *this; }
-        
-        const_iterator operator+(difference_type n) const { return const_iterator(it_ + n); }
-        const_iterator operator-(difference_type n) const { return const_iterator(it_ - n); }
-        
-        difference_type operator-(const const_iterator& other) const { return it_ - other.it_; }
-        
-        bool operator==(const const_iterator& other) const { return it_ == other.it_; }
-        bool operator!=(const const_iterator& other) const { return it_ != other.it_; }
-        bool operator<(const const_iterator& other) const { return it_ < other.it_; }
-        bool operator<=(const const_iterator& other) const { return it_ <= other.it_; }
-        bool operator>(const const_iterator& other) const { return it_ > other.it_; }
-        bool operator>=(const const_iterator& other) const { return it_ >= other.it_; }
-        
-        T operator[](difference_type n) const { return extract_value(*(it_ + n)); }
+        const_iterator(const script_array* node, size_type i, engine* eng) : node_(node), i_(i), engine_ref_(eng) {}
+        const_iterator(const iterator& other) : node_(other.node()), i_(other.index()), engine_ref_(other.eng()) {}
+
+        T operator*() const { return extract_value(node_->get(i_, engine_ref_)); }
+
+        const_iterator& operator++() { ++i_; return *this; }
+        const_iterator operator++(int) { const_iterator tmp = *this; ++i_; return tmp; }
+        const_iterator& operator--() { --i_; return *this; }
+        const_iterator operator--(int) { const_iterator tmp = *this; --i_; return tmp; }
+
+        const_iterator& operator+=(difference_type n) { i_ = static_cast<size_type>(static_cast<difference_type>(i_) + n); return *this; }
+        const_iterator& operator-=(difference_type n) { i_ = static_cast<size_type>(static_cast<difference_type>(i_) - n); return *this; }
+
+        const_iterator operator+(difference_type n) const { const_iterator tmp = *this; tmp += n; return tmp; }
+        const_iterator operator-(difference_type n) const { const_iterator tmp = *this; tmp -= n; return tmp; }
+
+        difference_type operator-(const const_iterator& other) const { return static_cast<difference_type>(i_) - static_cast<difference_type>(other.i_); }
+
+        bool operator==(const const_iterator& other) const { return node_ == other.node_ && i_ == other.i_; }
+        bool operator!=(const const_iterator& other) const { return !(*this == other); }
+        bool operator<(const const_iterator& other) const { return i_ < other.i_; }
+        bool operator<=(const const_iterator& other) const { return i_ <= other.i_; }
+        bool operator>(const const_iterator& other) const { return i_ > other.i_; }
+        bool operator>=(const const_iterator& other) const { return i_ >= other.i_; }
+
+        T operator[](difference_type n) const { return extract_value(node_->get(static_cast<size_type>(static_cast<difference_type>(i_) + n), engine_ref_)); }
     };
-    
-    iterator begin() { return arr_ ? iterator(arr_->begin()) : iterator(); }
-    iterator end() { return arr_ ? iterator(arr_->end()) : iterator(); }
-    
-    const_iterator begin() const { return arr_ ? const_iterator(arr_->begin()) : const_iterator(); }
-    const_iterator end() const { return arr_ ? const_iterator(arr_->end()) : const_iterator(); }
-    
+
+    iterator begin() { script_array* n = node(); return n ? iterator(n, 0, engine_ref_) : iterator(); }
+    iterator end() { script_array* n = node(); return n ? iterator(n, n->size(), engine_ref_) : iterator(); }
+
+    const_iterator begin() const { script_array* n = node(); return n ? const_iterator(n, 0, engine_ref_) : const_iterator(); }
+    const_iterator end() const { script_array* n = node(); return n ? const_iterator(n, n->size(), engine_ref_) : const_iterator(); }
+
     const_iterator cbegin() const { return begin(); }
     const_iterator cend() const { return end(); }
-    
+
     // ===== Conversion =====
-    
+
     /**
      * @brief Convert to std::vector<T> (always creates a copy)
      */
     std::vector<T> to_vector() const {
         std::vector<T> result;
-        if (arr_) {
-            result.reserve(arr_->size());
-            for (const auto& val : *arr_) {
-                result.push_back(extract_value(val));
-            }
+        if (script_array* n = node()) {
+            result.reserve(n->size());
+            n->for_each(get_engine(), [&](const script_value& val) { result.push_back(extract_value(val)); });
         }
         return result;
     }
-    
+
     /**
      * @brief Get underlying script_value (for owned arrays only)
      */
     const script_value& as_script_value() const {
-        if (!owned_value_) {
+        if (!owned_) {
             throw runtime_error("Cannot get script_value from non-owned bound_array");
         }
-        return *owned_value_;
+        return handle_;
     }
 };
 

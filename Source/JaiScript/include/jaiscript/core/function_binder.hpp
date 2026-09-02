@@ -833,8 +833,9 @@ class engine;
                 if (!arg.is_array()) {
                     throw runtime_error("Cannot convert non-array to bound_array<T>&");
                 }
-                // Create bound_array object on stack - zero-copy reference to script_array
-                return bound_array<V>(const_cast<script_value&>(arg).as_array(), eng);
+                // Create bound_array object on stack - zero-copy view of the script array's
+                // node (typed buffers included; the element type must fit the node's kind)
+                return bound_array<V>(const_cast<script_value&>(arg), eng);
             } else if constexpr (is_bound_map_ref<T>::value) {
                 using K = typename is_bound_map_ref<T>::key_type;
                 using V = typename is_bound_map_ref<T>::value_type;

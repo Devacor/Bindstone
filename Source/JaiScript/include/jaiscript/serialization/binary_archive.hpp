@@ -204,11 +204,12 @@ public:
                 break;
                 
             case script_value_type::jai_array_type: {
-                const auto& arr = value.as_array();
-                write_uint32(static_cast<uint32_t>(arr.size()));
-                for (const auto& elem : arr) {
+                const script_array* node = value.unchecked_array_node();
+                if (!node) { throw runtime_error("script_value is not an array"); }
+                write_uint32(static_cast<uint32_t>(node->size()));
+                node->for_each(value.get_engine(), [&](const script_value& elem) {
                     write_value(elem);  // Recursive serialization
-                }
+                });
                 break;
             }
             

@@ -60,6 +60,8 @@ namespace jai {
         bool empty() const noexcept { return size() == 0; }
         void clear() noexcept;
         void reserve(size_t n);
+        inline size_t capacity() const noexcept;
+        inline void truncate(size_t n);   // drop elements past n (no default construction)
 
         std::vector<script_value>& values() noexcept { return values_; }
         const std::vector<script_value>& values() const noexcept { return values_; }
@@ -82,6 +84,10 @@ namespace jai {
         // Boxed snapshot of every element (typed builtin paths that need a hetero
         // vector: comparator sorts, predicate scans) — defined in value.hpp.
         inline std::vector<script_value> materialize_values(engine* eng) const;
+        // Kind-generic element visit: hetero elements by const reference (no copy), typed
+        // elements as boxed temporaries - the one loop every boundary reader uses so a
+        // typed node never has to demote just to be read.
+        template <typename F> inline void for_each(engine* eng, F&& f) const;
         // Rebox a typed buffer into hetero storage IN PLACE (same node identity) — the
         // demote-on-stamp kernel for var-laundered typed arrays.
         inline void demote_to_hetero(engine* eng);

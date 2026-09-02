@@ -233,10 +233,11 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_array(element_type);
 
-    // Typed flat storage (stage 2, behind the scaffold flag): int/float element types
-    // mint raw-buffer nodes. The airtight tag (stage 0) is what makes this sound.
+    // The declared element type IS the representation: int/float element types mint
+    // raw-buffer nodes, array<var> (null element type) the script_value vector. The
+    // airtight tag (typed_array_design.md stage 0) is what makes this sound.
     script_array::kind_t node_kind = script_array::kind_t::hetero;
-    if (eng->typed_array_storage() && element_type) {
+    if (element_type) {
         if (element_type->base_type == script_value_type::jai_int_type) {
             node_kind = script_array::kind_t::i64;
         } else if (element_type->base_type == script_value_type::jai_float_type) {

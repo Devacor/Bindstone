@@ -966,6 +966,7 @@ namespace {
 			if (worker_nodes && aliases_worker_state && worker_nodes->count(v.unchecked_array_node())) {
 				*aliases_worker_state = true;
 			}
+			if (v.unchecked_array_node()->is_typed()) { return true; }   // raw int/float payloads
 			for (const auto& elem : v.unchecked_as_array()) {
 				if (!result_value_semantic(elem, what, worker_nodes, aliases_worker_state)) { return false; }
 			}
@@ -1364,6 +1365,7 @@ namespace {
 	bool parallel_content_all_primitive(const script_value& v) {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_ARRAY: {
+			if (v.unchecked_array_node()->is_typed()) { return true; }   // raw int/float payloads
 			for (const auto& elem : v.unchecked_as_array()) {
 				switch (elem.raw_storage_index()) {
 				case script_value::TYPEID_NULL:
@@ -1700,14 +1702,14 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		captures.push_back(std::move(cap));
 	}
 
-	// STAGE-2a BRIDGE (typed_array_design.md): typed-node input demotes in place at the
-	// barrier (main thread, node identity preserved) so the hetero kernel stays correct;
-	// stage 3 reads typed buffers directly.
-	if (const script_array* input_node = array_value.unchecked_array_node(); input_node->is_typed()) {
-		const_cast<script_array*>(input_node)->demote_to_hetero(&eng);
+	// A typed input (array<int>/array<float>) never changes form: the transform reads a
+	// boxed snapshot of it (typed_array_design.md stage 3 reads the raw buffer directly)
+	std::vector<script_value> typed_source;
+	const script_array* input_node = array_value.unchecked_array_node();
+	if (input_node->is_typed()) {
+		typed_source = input_node->materialize_values(&eng);
 	}
-
-	const auto& source = array_value.as_array();
+	const std::vector<script_value>& source = input_node->is_typed() ? typed_source : array_value.as_array();
 	const size_t n = source.size();
 	std::vector<script_value> out(n, script_value(std::monostate{}, &eng));
 

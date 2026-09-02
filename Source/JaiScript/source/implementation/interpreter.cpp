@@ -270,6 +270,9 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
         return {};  // Not an array, nothing to validate
     }
 
+    if (array_value.unchecked_array_node()->is_typed()) {
+        return {};   // raw int/float buffers are homogeneous by construction
+    }
     const auto& elements = array_value.as_array();
     if (elements.size() <= 1) {
         // Empty or single-element arrays are trivially homogeneous

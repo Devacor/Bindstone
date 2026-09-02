@@ -18,28 +18,48 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
     }
     
     std::vector<T> result;
-    const auto& arr = v.as_array();
-    result.reserve(arr.size());
-    
-    for (const auto& elem : arr) {
+    const script_array* node = v.unchecked_array_node();
+    if (!node) {
+        throw runtime_error("Cannot convert non-array to vector");
+    }
+    result.reserve(node->size());
+
+    // The registry is probed once per array, not once per element
+    std::shared_ptr<conversions::conversion_registry> registry;
+    if constexpr (!std::is_same_v<T, script_value>) {
+        if (eng) {
+            registry = get_engine_conversion_registry(eng);
+            if (registry && !registry->template has_conversion<T>()) { registry.reset(); }
+        }
+    }
+    // Exact-width payloads leave a typed buffer without boxing; narrower targets keep
+    // as<T>()'s per-element range checks
+    if constexpr (std::is_same_v<T, script_int>) {
+        if (!registry && node->kind() == script_array::kind_t::i64) {
+            result.insert(result.end(), node->ints().begin(), node->ints().end());
+            return result;
+        }
+    } else if constexpr (std::is_same_v<T, script_float>) {
+        if (!registry && node->kind() == script_array::kind_t::f64) {
+            result.insert(result.end(), node->floats().begin(), node->floats().end());
+            return result;
+        }
+    }
+    node->for_each(eng, [&](const script_value& elem) {
         if constexpr (std::is_same_v<T, script_value>) {
             result.push_back(elem);
         } else {
-            // try conversion registry first to avoid infinite recursion via as<T>()
-            if (eng) {
-                auto registry = get_engine_conversion_registry(eng);
-                if (registry && registry->template has_conversion<T>()) {
-                    try {
-                        result.push_back(registry->template convert_from_script<T>(elem));
-                        continue;
-                    } catch (...) {
-                        // Fall through to direct conversion on any error
-                    }
+            if (registry) {
+                try {
+                    result.push_back(registry->template convert_from_script<T>(elem));
+                    return;
+                } catch (...) {
+                    // Fall through to direct conversion on any error
                 }
             }
             result.push_back(elem.as<T>());
         }
-    }
+    });
     return result;
 }
 

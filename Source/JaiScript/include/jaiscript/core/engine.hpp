@@ -313,12 +313,6 @@ namespace jai {
         void allow_unsafe_parallel(bool allowed);
         bool allow_unsafe_parallel() const;
 
-        // SCAFFOLDING (typed_array_design.md stage 2, DELETE when the default flips):
-        // array<int>/array<float> mint raw-buffer nodes instead of vector<script_value>.
-        // Off until every element path is kind-correct; tests and GLOOM opt in.
-        void typed_array_storage(bool enabled) { typed_array_storage_ = enabled; }
-        bool typed_array_storage() const { return typed_array_storage_; }
-
         // Hot-reload work counter: per-instance field migrations performed since engine
         // construction. Tests assert DELTAS of this instead of wall-clock ratios (a
         // fields-unchanged reload proves itself by migrating zero instances).
@@ -927,8 +921,6 @@ namespace jai {
         struct implementation;
         std::unique_ptr<implementation> impl;
 
-        // SCAFFOLDING (typed_array_design.md stage 2): see typed_array_storage() above.
-        bool typed_array_storage_ = false;
         size_t hot_reload_field_migrations_ = 0;
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
 

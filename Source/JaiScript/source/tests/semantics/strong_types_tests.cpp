@@ -1471,40 +1471,34 @@ public:
             check(i1.find("ERROR") == 0, "push through var& alias stays enforced");
         });
 
-        // ===== TYPED FLAT ARRAY STORAGE (typed_array_design.md stage 2) =====
-        // Behind engine::typed_array_storage(), array<int>/array<float> bindings hold
-        // raw primitive buffers. The contract: ZERO observable difference — every
-        // snippet runs interp/vm × flag off/on and all four outputs must be identical.
+        // ===== TYPED FLAT ARRAY STORAGE (typed_array_design.md) =====
+        // array<int>/array<float> hold raw primitive buffers by their declared type (the
+        // representation, not a mode - Dev ruling 2026-09-02). The contract: typed
+        // storage is observationally invisible - every snippet runs on both backends and
+        // the outputs pin the plain-semantics answer.
 
         auto quad = [](const char* src) {
-            std::string out[4];
+            std::string out[2];
             int idx = 0;
-            for (bool typed : {false, true}) {
-                for (bool use_vm : {false, true}) {
-                    auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
-                    e->execution_budget(0);
-                    e->typed_array_storage(typed);
-                    jai::stdlib::register_all(e);
-                    try { out[idx] = e->execute(src).to_string(); }
-                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
-                    ++idx;
-                }
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
             }
-            return std::array<std::string, 4>{out[0], out[1], out[2], out[3]};
+            return std::array<std::string, 2>{out[0], out[1]};
         };
         auto check_quad = [this, quad](const char* src, const std::string& expected, const char* what) {
             auto r = quad(src);
-            check_eq(expected, r[0], std::string("interp/plain: ") + what);
-            check_eq(expected, r[1], std::string("vm/plain: ") + what);
-            check_eq(expected, r[2], std::string("interp/typed: ") + what);
-            check_eq(expected, r[3], std::string("vm/typed: ") + what);
+            check_eq(expected, r[0], std::string("interp/typed: ") + what);
+            check_eq(expected, r[1], std::string("vm/typed: ") + what);
         };
         auto check_quad_error = [this, quad](const char* src, const char* what) {
             auto r = quad(src);
-            check_eq(r[0], r[1], std::string("plain parity: ") + what);
-            check_eq(r[0], r[2], std::string("typed/interp matches plain: ") + what);
-            check_eq(r[0], r[3], std::string("typed/vm matches plain: ") + what);
+            check_eq(r[0], r[1], std::string("backend parity: ") + what);
             check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
         };
 
@@ -1594,10 +1588,9 @@ public:
         });
 
         test("typed_storage_engages_raw_buffers", [this]() {
-            // Not just parity: the flag must actually produce typed nodes (and the
-            // laundering path must actually demote)
+            // Not just parity: declared element types must actually produce typed nodes
+            // (and the laundering path must actually demote)
             auto e = jai::engine::make();
-            e->typed_array_storage(true);
             jai::stdlib::register_all(e);
             auto v = e->execute("array<int> a = [1,2,3]; a");
             check(v.is_array(), "returns array");

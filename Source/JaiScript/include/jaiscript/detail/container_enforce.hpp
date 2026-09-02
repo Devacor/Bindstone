@@ -52,7 +52,7 @@ namespace jai::detail {
 		return container_base_type_name(val.type());
 	}
 
-	inline bool container_element_compatible(const script_value& element, const type_info_ptr& element_type) {
+	inline bool container_element_compatible(const script_value& element, const type_info_ptr& element_type, engine* eng = nullptr) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 
 		if (element_type && element_type->base_type == script_value_type::jai_any_type) {
@@ -69,7 +69,10 @@ namespace jai::detail {
 			if (target_type == script_value_type::jai_object_type) {
 				auto elem_type_info = actual_element.get_type_info();
 				if (elem_type_info && !element_type->type_name.empty()) {
-					return elem_type_info->type_name == element_type->type_name;
+					// exact class by interned id (one compare), else the subclass walk
+					return elem_type_info->id == element_type->id ||
+					       elem_type_info->type_name == element_type->type_name ||
+					       class_derives_from(eng, elem_type_info->id, element_type->id);
 				}
 			}
 			return true;
@@ -91,7 +94,8 @@ namespace jai::detail {
 				return true;
 			}
 			auto elem_type_info = actual_element.get_type_info();
-			return elem_type_info && elem_type_info->type_name == element_type->type_name;
+			return elem_type_info && (elem_type_info->type_name == element_type->type_name ||
+			                          class_derives_from(eng, elem_type_info->id, element_type->id));
 		}
 
 		if (target_type == script_value_type::jai_array_type && elem_type == script_value_type::jai_array_type) {
@@ -150,6 +154,9 @@ namespace jai::detail {
 		return actual_element.clone_element();
 	}
 
+	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02)
+	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
+
 	// Kind <-> primitive element type (the representation rule's one table)
 	inline script_array::kind_t kind_for_element_base(script_value_type base) {
 		switch (base) {
@@ -175,10 +182,11 @@ namespace jai::detail {
 	}
 	// An object buffer is homogeneous by EXACT class (the element rule today); the class
 	// lives in the array value's tag, not in the kind
-	inline bool same_object_class(const type_info_ptr& array_tag, const type_info_ptr& element_type) {
+	inline bool same_object_class(const type_info_ptr& array_tag, const type_info_ptr& element_type, engine* eng = nullptr) {
 		type_info_ptr src_elem = array_tag ? array_tag->element_type() : nullptr;
 		return src_elem && element_type && src_elem->base_type == script_value_type::jai_object_type &&
-		       src_elem->type_name == element_type->type_name;
+		       (src_elem->type_name == element_type->type_name ||
+		        class_derives_from(eng, src_elem->id, element_type->id));
 	}
 	inline type_info* typed_kind_element_type(script_array::kind_t kind, engine* eng) {
 		switch (kind) {
@@ -341,7 +349,7 @@ namespace jai::detail {
 			// Proof by kind: a same-kind typed node cannot hold a mismatched element
 			// (object buffers also need the same class: the kind alone says "objects")
 			if (src->is_typed() && src->kind() == expected_kind &&
-			    (expected_kind != script_array::kind_t::obj || same_object_class(value.get_type_info(), element_type))) {
+			    (expected_kind != script_array::kind_t::obj || same_object_class(value.get_type_info(), element_type, eng))) {
 				value.set_type_info(target_type);
 				out.value = std::move(value);
 				return out;
@@ -368,7 +376,7 @@ namespace jai::detail {
 					if (src->is_typed()) { boxed = src->get(i, eng); elem = &boxed; } else { elem = &src->values()[i]; }
 					const script_value& element = *elem;
 					const script_value& actual = element.is_reference() ? element.deref() : element;
-					if (!container_element_compatible(actual, element_type)) {
+					if (!container_element_compatible(actual, element_type, eng)) {
 						out.offending = container_value_type_name(actual);
 						out.expected = target_type->canonical_name();
 						return out;
@@ -423,7 +431,7 @@ namespace jai::detail {
 				}
 				if (!value_open) {
 					const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
-					if (!container_element_compatible(actual, value_type)) {
+					if (!container_element_compatible(actual, value_type, eng)) {
 						out.offending = container_value_type_name(actual);
 						out.expected = target_type->canonical_name();
 						return out;

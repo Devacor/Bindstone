@@ -110,9 +110,9 @@ namespace {
 static bool is_element_type_compatible(
     const script_value& element,
     type_info_ptr element_type,
-    script_value& /*array_owner*/
+    script_value& array_owner
 ) {
-    return detail::container_element_compatible(element, element_type);
+    return detail::container_element_compatible(element, element_type, array_owner.get_engine());
 }
 
 static script_value convert_array_element(

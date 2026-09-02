@@ -1037,6 +1037,42 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Push 200 Base into array<Base> (x20)", [this]() {
+            // the exact-class admission: one interned-id compare per push
+            if (!bite) {
+                test_engine->execute(R"(
+                    class PBase { int a = 1; }
+                    class PDerived : PBase { int b = 2; }
+                    PBase pbase_proto = PBase();
+                    PDerived pderived_proto = PDerived();
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { array<PBase> arr = []; for (auto i = 0; i < 200; ++i) { arr.push(pbase_proto); } acc += arr.size(); }
+                    if (acc != 4000) { throw "push mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Push 200 Derived into array<Base> (x20)", [this]() {
+            // the subclass admission: a name mismatch, then the parent-chain walk (Dev ruling 2026-09-02).
+            // Each benchmark runs on a fresh engine (pre_test), so the setup repeats
+            if (!bite) {
+                test_engine->execute(R"(
+                    class PBase { int a = 1; }
+                    class PDerived : PBase { int b = 2; }
+                    PDerived pderived_proto = PDerived();
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { array<PBase> arr = []; for (auto i = 0; i < 200; ++i) { arr.push(pderived_proto); } acc += arr.size(); }
+                    if (acc != 4000) { throw "push mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Object array element field reads: array<K> (x1000)", [this]() {
             if (!bite) {
                 test_engine->execute(R"(

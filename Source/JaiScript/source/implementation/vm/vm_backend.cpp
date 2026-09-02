@@ -132,8 +132,8 @@ namespace {
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
 	// kernel). These forwards keep the historical local names.
-	bool vm_is_element_type_compatible(const script_value& element, type_info_ptr element_type, script_value& /*array_owner*/) {
-		return detail::container_element_compatible(element, element_type);
+	bool vm_is_element_type_compatible(const script_value& element, type_info_ptr element_type, script_value& array_owner) {
+		return detail::container_element_compatible(element, element_type, array_owner.get_engine());
 	}
 
 	script_value vm_convert_array_element(engine* eng, const script_value& element, type_info_ptr element_type) {

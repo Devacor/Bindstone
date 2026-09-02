@@ -1537,7 +1537,7 @@ public:
             check_quad_error(q("array<K> ks = [K()]; ks.push(5)").c_str(), "an int does not push");
             check_quad_error(q("class J { int b = 0; } array<K> x = [J()]").c_str(), "another class does not declare");
             check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks[0] = J()").c_str(), "another class does not store");
-            check_quad_error(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds").c_str(), "array<Derived> does not convert to array<Base> (exact-class rule)");
+            check_quad(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds; to_string(ks.size()) + \",\" + to_string(ks[0].a)").c_str(), "1,1", "array<Derived> converts to array<Base> (Dev ruling 2026-09-02: subclasses admitted)");
         });
 
         test("map_behaviour_battery", [check_quad, check_quad_error]() {
@@ -1625,6 +1625,24 @@ public:
             check_quad_error("map<string,auto> m = {\"a\": 1}; m[\"b\"] = \"s\"", "an inferred int value rejects a string value");
             check_quad_error("auto m = {\"a\": 1}; m[5] = 1", "auto-inferred map<string,int> rejects an int key");
             check_quad_error("map<int,int> m = {}; m[1.5] = 1", "keys never coerce: a float key into an int map raises");
+        });
+
+        test("subclass_admission_battery", [check_quad, check_quad_error]() {
+            // Dev ruling 2026-09-02: class-typed arrays admit the class and its subclasses (exact
+            // ids compare first; the parent-chain walk runs only on a name mismatch); each
+            // slot keeps its own class tag; whole-array conversions prove the source class once
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B(), D()]; to_string(arr.size()) + \",\" + to_string(arr[1].b)", "2,2", "a subclass element keeps its own class (per-slot tag): its fields stay reachable");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr.push(D()); to_string(arr.size()) + \",\" + to_string(arr[1].a)", "2,1", "push of a subclass into array<Base>");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr[0] = D(); to_string(arr[0].b)", "2", "store of a subclass into an element");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } class E : D { int c = 3; } array<B> deep = [E()]; to_string(deep[0].c)", "3", "two inheritance levels");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<D> ds = [D()]; array<B> bs = ds; bs[0].a = 9; to_string(ds[0].a) + \",\" + to_string(bs[0].a)", "1,9", "array<Derived> into array<Base> is a copy (value semantics)");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [D(), D()]; array<D> back = bs; to_string(back.size()) + \",\" + to_string(back[1].b)", "2,2", "array<Base> whose elements are all Derived converts to array<Derived>");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } function total(array<B> xs) -> int { int t = 0; for (auto x : xs) { t += x.a; } return t; } array<D> ds = [D(), D()]; to_string(total(ds))", "2", "array<Derived> binds a by-value array<Base> parameter");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<B> bs = [D()]; grow(bs); to_string(bs.size())", "2", "reference parameter over array<Base> holding a subclass");
+            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [D()]; auto c = arr; c[0].b = 7; to_string(arr[0].b) + \",\" + to_string(c[0].b)", "2,7", "copy of an array<Base> clones the subclass element");
+            check_quad_error("class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [B()]; array<D> x = bs", "array<Base> holding a Base does not convert to array<Derived>");
+            check_quad_error("class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<D> ds = [D()]; grow(ds)", "a reference parameter aliases the caller's array under ITS tag: pushing a Base into array<Derived> still raises");
+            check_quad_error("class B { int a = 1; } class J { int j = 0; } array<B> bs = [B()]; bs.push(J())", "an unrelated class is still rejected");
         });
 
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {

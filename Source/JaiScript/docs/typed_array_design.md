@@ -252,6 +252,10 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     change, not a layout change. Until then the C++ boundary payoff is exact-class:
     `std::vector<std::shared_ptr<K>>` / `std::vector<K>` extraction can prove the class
     once per array (next step).
+    **RULED 2026-09-02 (Dev): subclasses are admitted.** Every element gate accepts the class
+    or a subclass (exact id first, then `class_derives_from`'s parent walk); the per-slot tag
+    is what makes a Derived element keep its own fields inside `array<Base>`; whole-array
+    conversions prove the source class once; the boundary fast path accepts a derived tag.
   - **maps** (`map<string,int>` …): the same rule — typed key/value storage keyed by the
     declared types, `map<var,var>` the only dynamic form, ordering contract kept
     (`script_map` stays ordered). Wins: key compare without a `script_value` per entry,

@@ -3104,8 +3104,8 @@ public:
 			};
 			auto parts = split(i_out);
 			check_eq((size_t)6, parts.size(), "six error captures");
-			check_true(parts[0].find("Cannot assign 'Dog' to element of type 'Animal'") != std::string::npos,
-				std::string("direct gate rejects subtype, got: ") + parts[0]);
+			// Dev ruling 2026-09-02: a subclass is admitted into a class-typed element (no error)
+			check_true(parts[0].empty(), std::string("direct gate admits a subtype, got: ") + parts[0]);
 			check_eq(parts[0], parts[1], "subtype: ref matches direct");
 			check_true(parts[2].find("Cannot assign 'any' to element of type 'Animal'") != std::string::npos,
 				std::string("direct gate rejects var-held instance, got: ") + parts[2]);

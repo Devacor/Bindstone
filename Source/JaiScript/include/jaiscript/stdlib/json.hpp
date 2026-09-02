@@ -83,20 +83,23 @@ namespace stdlib {
             break;
             
         case script_value_type::jai_array_type: {
-            const auto& arr = val.as_array();
+            const script_array* node = val.unchecked_array_node();
+            if (!node) { throw runtime_error("script_value is not an array"); }
+            const bool empty = node->size() == 0;
             oss << '[';
-            if (pretty && !arr.empty()) oss << '\n';
-            
-            for (size_t i = 0; i < arr.size(); ++i) {
-                if (i > 0) {
+            if (pretty && !empty) oss << '\n';
+
+            size_t i = 0;
+            node->for_each(val.get_engine(), [&](const script_value& elem) {
+                if (i++ > 0) {
                     oss << ',';
                     if (pretty) oss << '\n';
                 }
                 if (pretty) oss << next_indent;
-                oss << to_json_impl(arr[i], indent, current_depth + 1);
-            }
-            
-            if (pretty && !arr.empty()) {
+                oss << to_json_impl(elem, indent, current_depth + 1);
+            });
+
+            if (pretty && !empty) {
                 oss << '\n' << current_indent;
             }
             oss << ']';
@@ -566,9 +569,9 @@ namespace stdlib {
                     script_value arrayValue = script_value::make_array(nullptr, eng);
                     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
 
-                    for (const auto& elem : val.as_array()) {
+                    val.unchecked_array_node()->for_each(eng, [&](const script_value& elem) {
                         array.push_back(processValue(elem));
-                    }
+                    });
 
                     return arrayValue;
                 } else {

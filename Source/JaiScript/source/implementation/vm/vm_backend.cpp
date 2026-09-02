@@ -237,6 +237,9 @@ namespace {
 		if (!array_value.is_array()) {
 			return {};
 		}
+		if (array_value.unchecked_array_node()->is_typed()) {
+			return {};   // raw int/float buffers are homogeneous by construction
+		}
 		const auto& elements = array_value.as_array();
 		if (elements.size() <= 1) {
 			if (elements.size() == 1) {

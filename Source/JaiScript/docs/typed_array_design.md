@@ -180,6 +180,32 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   - Tests pin a 4-way battery: every snippet runs interp/vm × flag off/on and all four
     outputs must be byte-identical ("typed storage is observationally invisible"),
     plus C++-level checks that buffers actually engage and laundering actually demotes.
+  **As-built (2026-09-02, Dev ruling: the representation follows the declared type).**
+  The scaffold flag is DELETED: `array<int>`/`array<float>` are raw buffers always,
+  `array<var>` (and `array<auto>` without a uniform inferred type) is the only
+  `script_value`-vector form, and moving between them is an explicit language step
+  (`array<var> x = ints;`). No path demotes silently (a demote is a full copy the type
+  never asked for). Consequences at the C++ boundary, consistent in every build:
+  - `as_array()` / `checked_as_array()` are the `array<var>` view; on a typed node they
+    return the one error (`typed_array_vector_view_message`) instead of asserting in
+    Debug and reading empty in Release. `unchecked_as_array()` keeps its precondition.
+  - Readers iterate kind-generically: `script_array::for_each` (hetero by reference,
+    typed as boxed temporaries) in the json/binary archive writers, stdlib to_json,
+    the hybrid-archive reader, `concatenate`; homogeneity validators and the parallel
+    primitive scans short-circuit on typed nodes.
+  - `bound_array<T>` sits on the NODE (a value handle keeps it alive) and dispatches
+    through get/set/push/truncate: `bound_array<int64_t>&` mutates the raw buffer in
+    place; a typed buffer binds arithmetic element types only; `bound_array<script_value>&`
+    and `const std::vector<script_value>&` bind `array<var>` only.
+  - `as<std::vector<T>>` / the conversion registry hand exact-width payloads over from
+    typed buffers without boxing (`std::vector<script_int>` from i64, `std::vector<script_float>`
+    from f64); narrower targets keep the per-element range-checked path.
+  - parallel_transform no longer demotes a typed input at the barrier: it reads a boxed
+    snapshot (stage 3's raw typed worker reads replace the snapshot).
+  Pinned: `Script Container Tests` (typed_buffer_bound_array_mutates_in_place,
+  script_value_vector_view_is_array_var_only, ...), the strong-types battery (now both
+  backends on the one representation), the DOOM tape (5.96 -> 5.70 ms/tic).
+
 - **Stage 3 — parallel + GLOOM payoff.** Typed borrows/raw_input; kind-checked static
   proof; type GLOOM's PIX/zbuf/ROWIDX/mappack as `array<int>`/`array<float>` (globals get
   typed decls; `var&` param plumbing already tag-safe, banked as hash-safe). Measure:

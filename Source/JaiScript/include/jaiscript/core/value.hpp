@@ -643,12 +643,16 @@ namespace jai {
             return *storage_.get_if<TYPEID_CHAR>();
         }
 
-        // Unchecked array accessor - caller must verify is_array() first.
-        // HETERO surface: a typed node reaching here means a path missing its kind
-        // dispatch (typed_array_design.md stage 2) - loud in Debug, empty in Release.
+        static constexpr const char* typed_array_vector_view_message =
+            "array<int>/array<float> hold raw buffers: the script_value vector view exists only for array<var> "
+            "(iterate with script_array::for_each, extract as<std::vector<T>>, or assign to an array<var> first)";
+        // Unchecked array accessor - caller must verify is_array() AND that the node is
+        // dynamic (array<var>) first: array<int>/array<float> are raw buffers by their
+        // declared type and have no script_value vector (iterate with
+        // script_array::for_each / unchecked_array_node, extract as<std::vector<T>>).
         inline const std::vector<script_value>& unchecked_as_array() const noexcept {
             assert(!(*storage_.get_if<TYPEID_ARRAY>())->is_typed() &&
-                   "typed array reached a hetero-only path (missing kind dispatch)");
+                   "typed array reached the array<var>-only script_value vector surface");
             return (*storage_.get_if<TYPEID_ARRAY>())->values();
         }
 
@@ -698,9 +702,13 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            assert(!storage_.get<strong_ptr<script_array>>()->is_typed() &&
-                   "typed array reached a hetero-only path (missing kind dispatch)");
-            return storage_.get<strong_ptr<script_array>>()->values();
+            const auto& node = storage_.get<strong_ptr<script_array>>();
+            if (node->is_typed()) {
+                // Consistent in every build: the vector view is array<var>-only; converting
+                // an array<int> to it is an explicit language step (array<var> x = ints)
+                throw runtime_error(typed_array_vector_view_message);
+            }
+            return node->values();
         }
         
         inline const script_map& as_map() const {
@@ -923,9 +931,12 @@ namespace jai {
                     "script_value is not an array"
                 );
             }
-            assert(!storage_.get<strong_ptr<script_array>>()->is_typed() &&
-                   "typed array reached a hetero-only path (missing kind dispatch)");
-            return checked_result<const std::vector<script_value>*>(&storage_.get<strong_ptr<script_array>>()->values());
+            const auto& node = storage_.get<strong_ptr<script_array>>();
+            if (node->is_typed()) {
+                return checked_result<const std::vector<script_value>*>(
+                    make_error_code(runtime_error_code::type_mismatch), typed_array_vector_view_message);
+            }
+            return checked_result<const std::vector<script_value>*>(&node->values());
         }
 
         inline checked_result<const script_map*> checked_as_map() const {
@@ -1188,11 +1199,22 @@ namespace jai {
                         }
                         return checked_result<T>(*str_result.value());
                     } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
-                        auto arr_result = checked_as_array();
-                        if (!arr_result) {
-                            return arr_result.error_value();  // Preserves symbol IDs for formatting
+                        if (type() != script_value_type::jai_array_type || raw_storage_index() != TYPEID_ARRAY) {
+                            return checked_result<T>(make_error_code(runtime_error_code::not_an_array),
+                                                     "script_value is not an array");
                         }
-                        return checked_result<T>(*arr_result.value());
+                        const script_array* node = unchecked_array_node();
+                        if constexpr (std::is_reference_v<T>) {
+                            // A reference to the script_value vector exists only for array<var>
+                            if (node->is_typed()) {
+                                return checked_result<T>(make_error_code(runtime_error_code::type_mismatch),
+                                                         typed_array_vector_view_message);
+                            }
+                            return checked_result<T>(const_cast<std::vector<script_value>&>(node->values()));
+                        } else {
+                            // By-value request: a typed buffer boxes into the copy the caller asked for
+                            return checked_result<T>(node->materialize_values(engine_));
+                        }
                     } else if constexpr (std::is_same_v<base_type, script_map>) {
                         auto map_result = checked_as_map();
                         if (!map_result) {
@@ -1366,24 +1388,38 @@ namespace jai {
 
                 using element_type = typename T::value_type;
                 T result;
-                auto arr_result = checked_as_array();
-                if (!arr_result) {
-                    return arr_result.error_value();  // Preserves symbol IDs for formatting
+                if (raw_storage_index() != TYPEID_ARRAY) {
+                    return checked_result<T>(make_error_code(runtime_error_code::not_an_array),
+                                             "script_value is not an array");
                 }
-                const auto& arr = *arr_result.value();
-                result.reserve(arr.size());
-
-                for (const auto& elem : arr) {
+                const script_array* node = unchecked_array_node();
+                result.reserve(node->size());
+                // Exact-width payloads leave a typed buffer without boxing; every other
+                // element type keeps the per-element checked conversion (range checks intact)
+                if constexpr (std::is_same_v<element_type, script_int>) {
+                    if (node->kind() == script_array::kind_t::i64) {
+                        result.insert(result.end(), node->ints().begin(), node->ints().end());
+                        return checked_result<T>(std::move(result));
+                    }
+                } else if constexpr (std::is_same_v<element_type, script_float>) {
+                    if (node->kind() == script_array::kind_t::f64) {
+                        result.insert(result.end(), node->floats().begin(), node->floats().end());
+                        return checked_result<T>(std::move(result));
+                    }
+                }
+                bool failed = false;
+                error_propagator failure;
+                node->for_each(engine_, [&](const script_value& elem) {
+                    if (failed) { return; }
                     if constexpr (std::is_same_v<element_type, script_value>) {
                         result.push_back(elem);
                     } else {
                         auto elem_result = elem.checked_as<element_type>();
-                        if (!elem_result) {
-                            return elem_result.error_value();
-                        }
+                        if (!elem_result) { failed = true; failure = elem_result.error_value(); return; }
                         result.push_back(elem_result.value());
                     }
-                }
+                });
+                if (failed) { return failure; }
                 return checked_result<T>(std::move(result));
             }
             // Map types
@@ -2421,6 +2457,22 @@ namespace jai {
         }
     }
 
+    inline size_t script_array::capacity() const noexcept {
+        switch (kind_) {
+            case kind_t::i64: return ints_.capacity();
+            case kind_t::f64: return floats_.capacity();
+            default: return values_.capacity();
+        }
+    }
+
+    inline void script_array::truncate(size_t n) {
+        switch (kind_) {
+            case kind_t::i64: if (n < ints_.size()) { ints_.resize(n); } break;
+            case kind_t::f64: if (n < floats_.size()) { floats_.resize(n); } break;
+            default: if (n < values_.size()) { values_.erase(values_.begin() + static_cast<std::ptrdiff_t>(n), values_.end()); } break;
+        }
+    }
+
     inline void script_array::pop_back() {
         switch (kind_) {
             case kind_t::i64: ints_.pop_back(); break;
@@ -2442,6 +2494,15 @@ namespace jai {
             case kind_t::i64: std::reverse(ints_.begin(), ints_.end()); break;
             case kind_t::f64: std::reverse(floats_.begin(), floats_.end()); break;
             default: std::reverse(values_.begin(), values_.end()); break;
+        }
+    }
+
+    template <typename F>
+    inline void script_array::for_each(engine* eng, F&& f) const {
+        switch (kind_) {
+            case kind_t::i64: for (script_int n : ints_) { f(script_value(n, eng)); } break;
+            case kind_t::f64: for (script_float d : floats_) { f(script_value(d, eng)); } break;
+            default: for (const script_value& v : values_) { f(v); } break;
         }
     }
 

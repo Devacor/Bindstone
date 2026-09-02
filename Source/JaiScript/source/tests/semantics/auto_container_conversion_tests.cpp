@@ -331,8 +331,10 @@ public:
             std::cout << "count_dogs result: " << test1.as<int>() << std::endl;
             
             std::cout << "Testing count_script_values..." << std::endl;
+            // vector<script_value>& is the array<var> view: an auto literal of ints is an
+            // array<int> raw buffer and would not bind (typed representation rule)
             auto test2 = engine->execute(R"(
-                auto values = [1, 2, 3, 4, 5];
+                array<var> values = [1, 2, 3, 4, 5];
                 count_script_values(values)
             )");
             std::cout << "count_script_values result: " << test2.as<int>() << std::endl;
@@ -344,7 +346,7 @@ public:
                 dogs.push(Dog("Rex"));
                 dogs.push(Dog("Buddy"));
                 
-                auto values = [1, 2, 3, 4, 5];
+                array<var> values = [1, 2, 3, 4, 5];
                 
                 count_dogs(dogs) + count_script_values(values)
             )");

@@ -58,7 +58,7 @@ public:
             arr.push_back(eng->make_value(20));
             arr.push_back(eng->make_value(30));
 
-            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
+            bound_array<int> arr_ref(arr_val, eng.get());
             check_eq(arr_ref.size(), 3u);
             check(!arr_ref.is_owned());
 
@@ -91,7 +91,7 @@ public:
             auto& arr = arr_val.as_array();
             arr.push_back(eng->make_value(100));
 
-            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
+            bound_array<int> arr_ref(arr_val, eng.get());
 
             // Copy from reference creates owned copy
             bound_array<int> arr_copy(arr_ref);
@@ -111,7 +111,7 @@ public:
             arr.push_back(eng->make_value(2));
             arr.push_back(eng->make_value(3));
             
-            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
+            bound_array<int> arr_ref(arr_val, eng.get());
 
             // By value - should copy
             auto by_value = [](bound_array<int> arr) {
@@ -154,7 +154,7 @@ public:
             arr.push_back(eng->make_value(10));
             arr.push_back(eng->make_value(20));
             
-            bound_array<int> barr(arr_val.as_array(), eng.get());
+            bound_array<int> barr(arr_val, eng.get());
 
             check_eq(barr[0], 10);
             check_eq(barr[1], 20);
@@ -173,7 +173,7 @@ public:
             arr.push_back(eng->make_value(2));
             arr.push_back(eng->make_value(3));
             
-            bound_array<int> barr(arr_val.as_array(), eng.get());
+            bound_array<int> barr(arr_val, eng.get());
 
             int sum = 0;
             for (int val : barr) {
@@ -206,7 +206,7 @@ public:
             check_eq(TestWidget::instance_count, 2);
             check_eq(TestWidget::copy_count, 0);
             
-            bound_array<TestWidget> widgets_ref(arr_val.as_array(), eng.get());
+            bound_array<TestWidget> widgets_ref(arr_val, eng.get());
             check_eq(TestWidget::copy_count, 0);
 
             // By value parameter - should trigger copies
@@ -351,7 +351,7 @@ public:
             }
 
             auto start = std::chrono::high_resolution_clock::now();
-            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
+            bound_array<int> arr_ref(arr_val, eng.get());
             auto ref_time = std::chrono::high_resolution_clock::now() - start;
 
             // Iteration should be fast (no copying)
@@ -371,6 +371,61 @@ public:
             check(ref_time < copy_time / 10);
 
             check_eq(sum, (10000 * 9999) / 2);
+        });
+
+        // ===== Typed representation at the binding boundary (2026-09-02) =====
+        // array<int>/array<float> ARE raw buffers; bound_array<T>& mutates them in place
+        // through the node, and the script_value vector view exists only for array<var>.
+        test("typed_buffer_bound_array_mutates_in_place", [this]() {
+            auto eng = make_engine();
+            eng->add_function("bump", [](bound_array<int64_t>& v) {
+                v[0] = v[0] + 10;
+                v.push_back(100);
+            });
+            auto r = eng->execute(R"(
+                array<int> a = [1, 2, 3];
+                bump(a);
+                a[0] * 1000 + a[3] + a.size()
+            )");
+            check_eq((int64_t)(11000 + 100 + 4), r.as_int());
+            auto typed = eng->execute("array<int> b = [4, 5]; bump(b); b");
+            check(typed.unchecked_array_node()->kind() == script_array::kind_t::i64, "buffer stays typed after C++ mutation");
+        });
+
+        test("typed_buffer_extracts_to_cpp_vector", [this]() {
+            auto eng = make_engine();
+            eng->add_function("sum_ints", [](std::vector<int64_t> v) -> int64_t {
+                int64_t s = 0; for (auto n : v) { s += n; } return s;
+            });
+            eng->add_function("sum_floats", [](std::vector<double> v) -> double {
+                double s = 0; for (auto d : v) { s += d; } return s;
+            });
+            check_eq((int64_t)6, eng->execute("array<int> a = [1, 2, 3]; sum_ints(a)").as_int());
+            check_near(4.5, eng->execute("array<float> f = [1.5, 3.0]; sum_floats(f)").as_float(), 1e-9);
+            check_eq((int64_t)6, eng->execute("array<var> v = [1, 2, 3]; sum_ints(v)").as_int());
+        });
+
+        test("script_value_vector_view_is_array_var_only", [this]() {
+            auto eng = make_engine();
+            eng->add_function("count_vals", [](const std::vector<script_value>& v) -> int {
+                return static_cast<int>(v.size());
+            });
+            check_eq((int64_t)2, eng->execute("array<var> b = [1, 2]; count_vals(b)").as_int());
+            check_eq((int64_t)3, eng->execute("var c = [1, \"x\", 2.5]; count_vals(c)").as_int());
+            // an array<int> is a raw buffer: the dynamic view is a type mismatch, not a copy
+            check_throws([&]() { eng->execute("array<int> a = [1, 2, 3]; count_vals(a)"); });
+            // literals without a spelled element type stay dynamic today (array<auto>
+            // inference from a uniform literal is ruled but not yet implemented)
+            check_eq((int64_t)3, eng->execute("auto d = [1, 2, 3]; count_vals(d)").as_int());
+        });
+
+        test("bound_array_element_type_must_fit_typed_buffer", [this]() {
+            auto eng = make_engine();
+            eng->add_function("first_str", [](bound_array<std::string>& v) -> std::string { return v[0]; });
+            eng->add_function("first_dbl", [](bound_array<double>& v) -> double { return v[0]; });
+            check_eq(std::string("q"), eng->execute("array<var> s = [\"q\"]; first_str(s)").as<std::string>());
+            check_near(7.0, eng->execute("array<int> a = [7]; first_dbl(a)").as_float(), 1e-9);
+            check_throws([&]() { eng->execute("array<int> a = [7]; first_str(a)"); });
         });
     }
 };

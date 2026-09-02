@@ -6,7 +6,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
-#include <jaiscript/core/engine.hpp>   // typed_array_storage scaffold flag
+#include <jaiscript/core/engine.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -180,14 +180,12 @@ namespace jai::detail {
 			const script_array* src = value.unchecked_array_node();
 
 			// The node kind this binding wants: raw buffers for int/float element types
-			// when typed storage is on (the boundary kernel is THE typed-node producer)
+			// (the boundary kernel is THE typed-node producer)
 			script_array::kind_t expected_kind = script_array::kind_t::hetero;
-			if (eng && eng->typed_array_storage()) {
-				if (target_elem_base == script_value_type::jai_int_type) {
-					expected_kind = script_array::kind_t::i64;
-				} else if (target_elem_base == script_value_type::jai_float_type) {
-					expected_kind = script_array::kind_t::f64;
-				}
+			if (target_elem_base == script_value_type::jai_int_type) {
+				expected_kind = script_array::kind_t::i64;
+			} else if (target_elem_base == script_value_type::jai_float_type) {
+				expected_kind = script_array::kind_t::f64;
 			}
 
 			// Proof by kind: a same-kind typed node cannot hold a mismatched element

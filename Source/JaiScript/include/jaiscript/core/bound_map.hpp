@@ -133,7 +133,7 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val).as_array(), val.get_engine());
+            return T(const_cast<script_value&>(val), val.get_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
@@ -389,8 +389,8 @@ public:
                 throw runtime_error("Element is not an array");
             }
             
-            auto& nested_arr = it->second.as_array();
-            return typename U::element_proxy(nested_arr, pos);
+            script_array& nested = *it->second.unchecked_get_array_storage();
+            return typename U::element_proxy(nested, pos, it->second.get_engine());
         }
         
         // Const version for reading nested arrays
@@ -402,8 +402,8 @@ public:
                 throw runtime_error("Element is not an array");
             }
             
-            auto& nested_arr = it->second.as_array();
-            return U::extract_value(nested_arr[pos]);
+            const script_array& nested = *it->second.unchecked_array_node();
+            return U::extract_value(nested.get(pos, it->second.get_engine()));
         }
         
         // Support for iterating nested bound_map

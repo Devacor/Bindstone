@@ -80,24 +80,45 @@ namespace stdlib {
 
         // Handle array concatenation
         if (is_array_concat) {
+            engine* eng = args[0].get_engine();
+            size_t total_size = 0;
+            for (const auto& arg : args) { total_size += arg.unchecked_array_node()->size(); }
+            const script_array* first = args[0].unchecked_array_node();
+            if (first->is_typed()) {
+                // A typed first argument keeps its raw form when every appended element is
+                // numeric; anything else lands in a fresh dynamic array (no tag lie)
+                bool numeric_only = true;
+                for (size_t i = 1; i < args.size() && numeric_only; ++i) {
+                    const script_array* node = args[i].unchecked_array_node();
+                    if (node->is_typed()) { continue; }
+                    for (const script_value& elem : node->values()) {
+                        const size_t idx = elem.deref().raw_storage_index();
+                        if (idx != script_value::TYPEID_INT && idx != script_value::TYPEID_FLOAT) { numeric_only = false; break; }
+                    }
+                }
+                if (numeric_only) {
+                    script_value result = args[0].clone();
+                    script_array* out = const_cast<script_array*>(result.unchecked_array_node());
+                    out->reserve(total_size);
+                    for (size_t i = 1; i < args.size(); ++i) {
+                        args[i].unchecked_array_node()->for_each(eng, [&](const script_value& elem) { out->push(elem.deref()); });
+                    }
+                    return result;
+                }
+                script_value result = script_value::make_array(nullptr, eng);
+                auto& resultArray = const_cast<std::vector<script_value>&>(result.as_array());
+                resultArray.reserve(total_size);
+                for (const auto& arg : args) {
+                    arg.unchecked_array_node()->for_each(eng, [&](const script_value& elem) { resultArray.push_back(elem.clone()); });
+                }
+                return result;
+            }
             script_value result = args[0].clone();
             auto& resultArray = const_cast<std::vector<script_value>&>(result.as_array());
-
-            // Calculate total size needed
-            size_t total_size = resultArray.size();
-            for (size_t i = 1; i < args.size(); ++i) {
-                total_size += args[i].as_array().size();
-            }
             resultArray.reserve(total_size);
-
-            // Append all arrays
             for (size_t i = 1; i < args.size(); ++i) {
-                const auto& arr = args[i].as_array();
-                for (const auto& elem : arr) {
-                    resultArray.push_back(elem.clone());
-                }
+                args[i].unchecked_array_node()->for_each(eng, [&](const script_value& elem) { resultArray.push_back(elem.clone()); });
             }
-
             return result;
         }
 

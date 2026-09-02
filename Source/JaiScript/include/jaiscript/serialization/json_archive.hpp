@@ -238,12 +238,14 @@ public:
             }
             
             case script_value_type::jai_array_type: {
-                const auto& arr = value.as_array();
+                const script_array* node = value.unchecked_array_node();
+                if (!node) { throw runtime_error("script_value is not an array"); }
                 oss_ << '[';
-                for (size_t i = 0; i < arr.size(); ++i) {
-                    if (i > 0) oss_ << ',';
-                    write_value(arr[i]);  // Recursive call handles shared_ptrs
-                }
+                size_t i = 0;
+                node->for_each(value.get_engine(), [&](const script_value& elem) {
+                    if (i++ > 0) oss_ << ',';
+                    write_value(elem);  // Recursive call handles shared_ptrs
+                });
                 oss_ << ']';
                 break;
             }
@@ -448,12 +450,14 @@ private:
                 break;
                 
             case script_value_type::jai_array_type: {
-                const auto& arr = val.as_array();
+                const script_array* node = val.unchecked_array_node();
+                if (!node) { throw runtime_error("script_value is not an array"); }
                 oss << '[';
-                for (size_t i = 0; i < arr.size(); ++i) {
-                    if (i > 0) oss << ',';
-                    oss << to_json_impl_fallback(arr[i], indent, current_depth + 1);
-                }
+                size_t i = 0;
+                node->for_each(val.get_engine(), [&](const script_value& elem) {
+                    if (i++ > 0) oss << ',';
+                    oss << to_json_impl_fallback(elem, indent, current_depth + 1);
+                });
                 oss << ']';
                 break;
             }

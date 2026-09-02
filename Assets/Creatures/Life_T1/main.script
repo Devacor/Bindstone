@@ -78,12 +78,9 @@ self.update = [=](var& self, double dt) -> void {
 	if (self.getVar("shieldCooldown") <= 0.0) {
 		self.setVar("shieldCooldown", 10.0);
 		self.shield(10);
-		var allies = self.alliesInRange(8);
-		for (int i = 0; i < allies.size(); ++i) {
-			if (allies[i].networkId() != self.networkId()) {
-				allies[i].shield(7);
-				break;
-			}
+		var mate = pickWardHost(self, 8.0);
+		if (mate != 0) {
+			self.game().creature(mate).shield(7);
 		}
 	}
 	if (!self.getVar("attacking")) {

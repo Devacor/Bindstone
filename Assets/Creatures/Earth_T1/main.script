@@ -5,6 +5,7 @@ self.spawn = [=](var& self) -> void {
 	self.setVar("attacking", false);
 	self.setVar("activeTarget", 0);
 	self.setVar("shoutCooldown", 3.0);
+	self.setVar("tankingFor", 0.0);
 
 	self.setVar("attackTarget", [=](var& targeting, var target) -> void {
 		var me = targeting.self().networkId();
@@ -68,15 +69,20 @@ self.spawn = [=](var& self) -> void {
 
 self.update = [=](var& self, double dt) -> void {
 	statusTick(self, dt);
+	var tanking = self.getVar("tankingFor");
+	if (tanking > 0.0) {
+		self.setVar("tankingFor", tanking - dt);
+	}
 	self.setVar("shoutCooldown", self.getVar("shoutCooldown") - dt * self.abilitySpeedMultiplier());
 	if (self.getVar("shoutCooldown") <= 0.0) {
 		self.setVar("shoutCooldown", 8.0);
-		var enemies = self.enemiesInRange(6);
+		var enemies = self.enemiesInRange(8);
 		if (!enemies.empty()) {
 			for (int i = 0; i < enemies.size(); ++i) {
 				enemies[i].taunt(self.networkId(), 4.0);
 			}
 			self.shield(20);
+			self.setVar("tankingFor", 4.0);
 		} else {
 			self.setVar("shoutCooldown", 1.0);
 		}

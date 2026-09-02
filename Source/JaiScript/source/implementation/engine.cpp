@@ -3329,6 +3329,31 @@ type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp
     return def ? def->get_type_info() : nullptr;
 }
 
+// Subclass admission (Dev ruling 2026-09-02): does class `derived_id` equal or derive from
+// `base_id`? Exact ids answer without a lookup; otherwise one registry lookup and a
+// depth-capped walk over the parent chain (script parents and bound C++ bases alike).
+namespace detail {
+bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id) {
+    if (derived_id == base_id) { return true; }
+    if (!eng) { return false; }
+    auto def = eng->get_class_definition(derived_id);
+    if (!def) { return false; }
+    std::vector<const class_definition*> stack;
+    stack.push_back(def.get());
+    int budget = 64;
+    while (!stack.empty() && budget-- > 0) {
+        const class_definition* cur = stack.back();
+        stack.pop_back();
+        for (const auto& parent : cur->get_parent_classes()) {
+            if (!parent) { continue; }
+            if (parent->get_type_id() == base_id) { return true; }
+            stack.push_back(parent.get());
+        }
+    }
+    return false;
+}
+} // namespace detail
+
 std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data) {
     auto instance = std::static_pointer_cast<class_instance>(instance_data);
     return instance ? instance->get_cpp_object() : nullptr;

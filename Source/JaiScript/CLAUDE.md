@@ -257,6 +257,9 @@ engine stays usable", not by `check_throws`.
   `bound_array<int64_t>&` mutates the buffer in place, `std::vector<script_int>` extracts
   unboxed. Typed map STORAGE is the open campaign (`docs/typed_array_design.md` stage 6,
   `docs/PERF_PASS_2026-09-02.md`).
+- **Class-typed arrays admit subclasses** (Dev ruling 2026-09-02): `array<Base>` holds `Base`
+  or any subclass (exact id first, parent walk on a name mismatch); each slot keeps its own
+  class tag; `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.
 - **Map key types** (Dev ruling 2026-09-02): a direct store checks the declared key type
   (`map<string,int> m; m[5] = 1` raises; keys never coerce); `map<var,V>` takes any key; an
   `auto` key/value slot infers from a uniform literal (`map<auto,int> m = {5: 1}` is

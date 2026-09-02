@@ -526,7 +526,10 @@ namespace jai::detail {
 	// Verbatim mirror of vm_is_element_type_compatible / is_element_type_compatible
 	// (route-independence with direct subscript assign, including its exact-name object
 	// rule and rejection of 'any'-tagged values)
-	inline bool ref_element_constraint_compatible(const script_value& element, type_info_ptr element_type) {
+	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02; same symbol as container_enforce.hpp)
+	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
+
+	inline bool ref_element_constraint_compatible(const script_value& element, type_info_ptr element_type, engine* eng = nullptr) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
 			return true;
@@ -537,7 +540,9 @@ namespace jai::detail {
 			if (target_type == script_value_type::jai_object_type) {
 				auto elem_type_info = actual_element.get_type_info();
 				if (elem_type_info && !element_type->type_name.empty()) {
-					return elem_type_info->type_name == element_type->type_name;
+					return elem_type_info->id == element_type->id ||
+					       elem_type_info->type_name == element_type->type_name ||
+					       class_derives_from(eng, elem_type_info->id, element_type->id);
 				}
 			}
 			return true;
@@ -618,7 +623,7 @@ namespace jai::detail {
 	inline bool ref_constraint_compatible(const script_value& value, type_info_ptr constraint,
 	                                      engine* eng, bool is_field) {
 		return is_field ? ref_field_constraint_compatible(value, constraint, eng)
-		                : ref_element_constraint_compatible(value, constraint);
+		                : ref_element_constraint_compatible(value, constraint, eng);
 	}
 
 	inline checked_result<void> ref_constraint_error(string_symbolizer* symbolizer, const script_value& value,

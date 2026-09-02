@@ -12,6 +12,7 @@ namespace jai {
     // class_instance's owned C++ object - both kept out of this header's type set
     type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type);
     std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data);
+    namespace detail { bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id); }
 
 namespace conversions {
 
@@ -47,7 +48,7 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
                 type_info* bound_class = get_engine_class_type_info_for(eng, typeid(pointee));
                 type_info_ptr array_tag = v.deref().get_type_info();
                 type_info_ptr slot_class = array_tag ? array_tag->element_type() : nullptr;
-                if (bound_class && slot_class && slot_class->id == bound_class->id) {
+                if (bound_class && slot_class && detail::class_derives_from(eng, slot_class->id, bound_class->id)) {
                     for (const auto& slot : node->objs()) {
                         const auto& holder = slot.handle;
                         if (!holder) { result.push_back(nullptr); continue; }

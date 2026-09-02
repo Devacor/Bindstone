@@ -433,6 +433,9 @@ public:
             check_eq((int64_t)2, eng->execute("class Big : Creature { int extra = 1; Big() : super() {} } array<Big> bigs = [Big(), Big()]; count(bigs)").as_int());
             check_eq((int64_t)26, eng->execute("class Big2 : Creature { int extra = 1; Big2() : super() {} } array<Big2> bigs = [Big2(), Big2()]; heal_all(bigs); sum_hp(bigs)").as_int());
             check_eq((int64_t)13, eng->execute("class Big3 : Creature { int extra = 1; Big3() : super() {} } array<Big3> b = [Big3()]; heal_all(b); b[0].hp").as_int());
+            // Dev's shape: a base-typed array holding bound instances AND hybrid subclasses, handed over by the fast path
+            check_eq((int64_t)6, eng->execute("class Sub : Creature { int extra = 1; Sub() : super() {} } array<Creature> mixed = [Creature(), Sub()]; sum_hp(mixed)").as_int());
+            check_eq((int64_t)26, eng->execute("class Sub2 : Creature { int extra = 1; Sub2() : super() {} } array<Creature> mixed = [Creature(), Sub2()]; heal_all(mixed); sum_hp(mixed)").as_int());
             // a hybrid whose constructor never called super() has no C++ base yet: the
             // conversion fails with a READABLE text (the result message used to be a view
             // of the dead exception's what() - freed memory)

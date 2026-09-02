@@ -5640,9 +5640,11 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 		if (container_peek.raw_storage_index() == script_value::TYPEID_ARRAY && index_peek.is_int()) {
 			const script_int index = index_peek.unchecked_as_int();
 			auto storage = container_peek.get_array_storage();
-			// TYPED raw store: numeric rhs coerces into the buffer with no script_value
-			// element traffic; non-numeric rhs replays for the exact mismatch error
-			if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			// NUMERIC raw store: an int/float buffer takes a numeric rhs with no script_value
+			// element traffic; every other shape (non-numeric rhs, byte/string kinds) takes
+			// the enforcing path for the exact mismatch error
+			if (storage && (storage->kind() == script_array::kind_t::i64 || storage->kind() == script_array::kind_t::f64) &&
+			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
 				const size_t ri = rhs_peek.raw_storage_index();
 				if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
@@ -6408,9 +6410,11 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 		    container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
 			const script_int index = index_v.unchecked_as_int();
 			auto storage = container.get_array_storage();
-			// TYPED raw load-op-store: elements are int/float by construction; the node
-			// coerces the (always numeric) result back to the element kind on store
-			if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			// NUMERIC raw load-op-store: int/float buffers coerce the (always numeric)
+			// result back to the element kind on store; byte/string kinds take the
+			// enforcing path
+			if (storage && (storage->kind() == script_array::kind_t::i64 || storage->kind() == script_array::kind_t::f64) &&
+			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				token_type op;
 				switch (ins.a & compound_kind_mask) {
 					case compound_plus: op = token_type::plus; break;

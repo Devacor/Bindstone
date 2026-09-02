@@ -19,14 +19,8 @@ class fuzz_smoke_tests : public suite {
 public:
 	fuzz_smoke_tests() : suite("Differential Fuzz Smoke") {}
 
-	void forge_tests() override {
-		test("fixed_seeds_no_new_divergence", [this]() {
-			// Seed count is budgeted to keep this suite fast; bump it as the
-			// engines get faster. Seeds here are FIXED - failures reproduce with
-			// jaiscript_fuzz --seed <N>.
-			constexpr uint64_t k_first_seed = 0;
-			constexpr uint64_t k_seed_count = 40;
-			constexpr double k_budget_seconds = 0.1; // budget-skips cost 2x this; keeps the suite <2s
+	void run_seed_range(uint64_t k_first_seed, uint64_t k_seed_count) {
+			constexpr double k_budget_seconds = 0.1; // budget-skips cost 2x this; keeps the suite fast
 
 			int divergences = 0;
 			std::string first_report;
@@ -54,6 +48,19 @@ public:
 				}
 			}
 			check_eq(0, divergences, first_report.empty() ? "no divergences" : first_report);
+	}
+
+	void forge_tests() override {
+		test("fixed_seeds_no_new_divergence", [this]() {
+			// Seed count is budgeted to keep this suite fast; bump it as the
+			// engines get faster. Seeds here are FIXED - failures reproduce with
+			// jaiscript_fuzz --seed <N>.
+			run_seed_range(0, 40);
+		});
+		test("typed_kind_seeds_no_new_divergence", [this]() {
+			// A second fixed band: the generator now draws typed buffer declarations
+			// (int/float/string/bool/char) half the time an array is declared
+			run_seed_range(1000, 120);
 		});
 	}
 };

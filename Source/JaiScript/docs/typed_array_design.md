@@ -63,6 +63,13 @@ The store-enforced element type is what makes raw buffers sound. Scouted facts i
    (Cost: laundering a typed array into by-value `var` reboxes O(n) — it already paid a
    deep clone there; `var&` stays free and tag-safe.)
 
+**Lane rule (as built, 2026-09-02, fuzz seed 129):** a fast lane that touches a buffer raw tests the
+*kind* it was written for (`kind() == i64 || kind() == f64`), never `is_typed()`. `is_typed()` only says
+"no script_value elements exist"; the byte and string kinds are typed too and must take the enforcing
+`get`/`set` path. The vm's unfused element-store and compound-store lanes broke this once and stored an
+int into a string buffer unchecked (the interpreter raised); the pins live in the Strong Types battery,
+and the fuzz generator now draws typed declarations so the shape stays covered.
+
 ### Stage-0 prerequisite: the tag is NOT airtight today (two real holes)
 
 - **enforce_type_compatibility same-base fast path** (interpreter.cpp:6195 + vm twin):

@@ -279,8 +279,9 @@ public:
                     const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
                     if (metadata) {
                         version = metadata->current_version;
-                    } else {
-                        // Runtime validation: Ensure type is registered
+                    } else if (!eng->get_class_definition(type_name)) {
+                        // Runtime validation: script classes resolve through the engine's
+                        // class registry (default version 1); anything else is unloadable
                         throw serialization_error(
                             "Cannot serialize unregistered type '" + type_name + "'. " +
                             "Register the type with dynamic_binder before serialization."

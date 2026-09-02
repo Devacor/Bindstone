@@ -297,11 +297,11 @@ public:
                         oss_ << "\"_type_\":\"" << escape_json_string_local(type_name) << "\"";
                         first = false;
 
-                        // Check if this type is registered in the serialization registry
-                        const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
-
-                        if (metadata && !metadata->properties.empty() && class_def) {
-                            // C++ bound class with registered properties - use getters
+                        if (class_def) {
+                            // Getter walk (mirrors the binary writer): covers C++ bound
+                            // properties, script fields via their auto-getters, and hybrids —
+                            // inherited C++ properties chain through cpp_base_class_ and
+                            // _cpp_object has no getter so it never leaks into the payload.
                             for (const auto& prop_name : class_def->get_property_names()) {
                                 uint64_t getter_id = eng->symbolize("_get_" + prop_name);
                                 auto getter = class_def->get_method(getter_id);
@@ -321,13 +321,11 @@ public:
                                 }
                             }
                         } else {
-                            // Script-defined class or unregistered - serialize fields directly
-                            // (slot order: deterministic, ≈ declaration order — the old map
-                            // walk was hash-order)
+                            // No class definition - serialize fields directly (slot order:
+                            // deterministic, ≈ declaration order)
                             instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
-                                // Skip the __cpp_object__ field - it's not serializable
                                 std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
-                                if (field_name == "__cpp_object__") return;
+                                if (field_name == class_constants::CPP_OBJECT_FIELD) return;
 
                                 if (!first) oss_ << ',';
                                 first = false;

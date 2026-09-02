@@ -1078,6 +1078,25 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Map lookup: map<string,int> 100 keys, 1000 dynamic-key reads", [this]() {
+            // the typed-map campaign's yardstick (typed_array_design.md stage 6): dynamic
+            // string keys build a script string per read today; a typed string-keyed map
+            // can compare the bytes without one
+            if (!bite) {
+                test_engine->execute(R"(
+                    map<string,int> mtab = {};
+                    array<string> mkeys = [];
+                    for (auto i = 0; i < 100; ++i) { string k = "key" + to_string(i); mtab[k] = i; mkeys.push(k); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 1000; ++i) { acc += mtab[mkeys[i % 100]]; }
+                    if (acc != 49500) { throw "map lookup mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Array copy by value: 200 strings (x20)", [this]() {
             if (!bite) {
                 test_engine->execute(R"(

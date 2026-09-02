@@ -259,6 +259,51 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   - **parallel_transform stage 3**: workers read typed inputs raw (today a typed input is
     read through a boxed snapshot — no demote — one copy per region).
 
+## Stage 6 — typed maps (designed 2026-09-02, not built)
+
+Dev's rule: "maps follow similar rules" — `map<K,V>` with spelled key and value types is a
+typed node, `map<var,var>` (and untyped literals) the only dynamic form, conversion an
+explicit assignment, no silent demote, no Debug/Release difference. The ordering contract
+(`script_map` is ORDERED by `script_value <=>`: type rank, then content) is kept.
+
+**Size of the job.** `script_map` is a bare `std::map<script_value, script_value>` alias
+touched directly at 99 sites (value.hpp 21, conversion_registry.cpp 13, bound_map 11,
+value.cpp 10, function_binder 9, reflection/json/archives/backends the rest). Stage 0 is
+therefore the array campaign's stage 0 again: a node class (`script_map_node`) with a
+`kind` and funnels (`find`/`get`/`set`/`erase`/`size`/`for_each_entry`/`materialize`/
+`demote_to_hetero`), every direct user moved onto the funnels while the only kind is
+`hetero` (byte-identical behaviour, gated by suites + hashes), THEN typed kinds.
+
+**Kinds.** Key kinds `str` (string handle, compared by content) and `i64`; value kinds
+`i64`, `f64`, `str`, `obj` (the array's obj_slot rule: exact class, per-entry tag). A
+sorted `std::vector<std::pair<Key, Value>>` per kind keeps the ordering contract with one
+allocation and cache-friendly lookups (binary search on 8-byte keys); the dynamic kind
+stays the `std::map`. Iteration order is identical to today's (ascending by content;
+strings compare by bytes exactly like `script_value <=>` on two strings).
+
+**The hard part is the same as the array's: entry lvalues.** `m[k] = v`, `m[k].field = 1`,
+`m[k]++`, `auto& r = m[k]` all go through the reference holder's MAP-ENTRY mode
+(`container_map` + inline key → `&it->second`). A typed entry has no `script_value` to
+point to, so the holder gets a `typed_entry()` mode mirroring `typed_element()`: materialize
+into the holder scratch, commit through `set` (ref_write_through / ref_store_through
+already dispatch on `typed_element()` — add the entry twin). Auto-insert-on-read stays
+forbidden (the map-read audit fix).
+
+**Producers.** The boundary kernel's map branch mints typed nodes exactly like the array
+branch (`make_map(key_type, value_type)` by kinds; same-kind proof; per-entry check
+otherwise; rebuild copies entries as-is). Literals with spelled types produce typed nodes;
+`auto m = {"a": 1}` infers `map<string,int>` when uniform (the array's inference rule).
+
+**Yardstick.** Foundry row `Map lookup: map<string,int> 100 keys, 1000 dynamic-key reads`
+(added with this design; first reading 272 µs interp / 126 µs vm at `c5a47278`) and the existing
+`Map copy by value: 100 string keys (x20)` (219 µs). Dynamic string keys build a script
+string per read today; a str-keyed typed map compares bytes without one. Measure before
+building stage 1: if the dynamic-key row does not move ≥2× in a prototype, the campaign's
+value is footprint only.
+
+**Order.** Stage 0 (node + funnels, hetero-only) is the one to ship first and alone; it is
+the same shape as `d320732c`'s array stage 0 and the same gates apply.
+
 ## Risk register
 
 1. **Scratch write-back loss** (mutable deref on typed elements) — silent. Caught by:

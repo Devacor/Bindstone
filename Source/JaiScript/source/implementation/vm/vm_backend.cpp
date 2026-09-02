@@ -3272,7 +3272,18 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_t0 = __rdtsc();
+	profile_store_last_path_ = 7;
+	const op_status stored = store_popped_value(f, ins, std::move(value));
+	const uint64_t prof_dt = __rdtsc() - prof_t0;
+	profile_store_path_cycles_[profile_store_last_path_] += prof_dt;
+	++profile_store_path_counts_[profile_store_last_path_];
+	profile_store_name_cycles_[std::string(symbolizer_->get_string(f.code->symbols[ins.a]))] += prof_dt;
+	return stored;
+#else
 	return store_popped_value(f, ins, std::move(value));
+#endif
 }
 
 // The ONE identifier-store tail (everything op_store does after consuming its value),
@@ -3307,6 +3318,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 					storage = holder->cell();
 				} else {
+#ifdef JAISCRIPT_VM_PROFILE
+					profile_store_last_path_ = 3;
+#endif
 					VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
 					stack_.push_back(std::move(value));
 					return {};
@@ -3323,6 +3337,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				    storage->get_type_info().get() == value.get_type_info().get()) {
 #ifdef JAISCRIPT_VM_PROFILE
 					++profile_store_paths_[0];
+					profile_store_last_path_ = 1;
 #endif
 					*storage = value;
 					stack_.push_back(std::move(value));
@@ -3332,6 +3347,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_store_paths_[(ins.c & store_flag_type_provable) ? 4 : 3];
 			++profile_builtin_direct_names_[std::string("st:") + std::string(symbolizer_->get_string(sym))];
+			profile_store_last_path_ = 2;
 #endif
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)
@@ -3396,6 +3412,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 				currentVal = holder->cell();
 			} else {
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_store_last_path_ = 5;
+#endif
 				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
 				stack_.push_back(std::move(value));
 				return {};
@@ -3408,6 +3427,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			*currentVal = std::move(v);
 			return {};
 		};
+#ifdef JAISCRIPT_VM_PROFILE
+		profile_store_last_path_ = 6;
+#endif
 		if (currentVal && currentVal->is_cpp_bound()) {
 			currentVal->assign_through(value);
 			stack_.push_back(std::move(value));
@@ -3613,6 +3635,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		}
 
 		// Regular variable assignment with strong-types enforcement
+#ifdef JAISCRIPT_VM_PROFILE
+		profile_store_last_path_ = 4;
+#endif
 		type_info_ptr target_type = currentVal ? currentVal->get_type_info() : nullptr;
 
 		if (target_type && target_type->base_type == script_value_type::jai_object_type) {
@@ -4423,17 +4448,17 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
-                                                                  std::optional<script_value>& scratch,
-                                                                  size_t cache_slot) {
+const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
+                                                  std::optional<script_value>& scratch,
+                                                  size_t cache_slot) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
 	if (operand.load_flags & load_flag_global_only) {
 		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
 		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
 			return &g->deref();
 		}
-		return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}'", sym);
+		raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+		return nullptr;
 	}
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		scratch.emplace(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
@@ -4502,8 +4527,8 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 			        : environment_->get_value_ptr(sym)) {
 				return &beyond->deref();
 			}
-			return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
-				"Undefined variable '{0}'", sym);
+			raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+			return nullptr;
 		}
 	}
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
@@ -4546,8 +4571,8 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 			}
 		}
 	}
-	return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
-		"Undefined variable '{0}'", sym);
+	raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+	return nullptr;
 }
 
 // Fused subscript-read operand `base[i][j]...[k]` (docs/element_read_overhead_design.md
@@ -4559,13 +4584,12 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 // transient flags, matching what the classifier stamped on every chain node) into
 // scratch, then the walk continues - semantics and error text byte-identical per level
 // by construction.
-checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, const fused_operand& operand,
-                                                                      std::optional<script_value>& scratch,
-                                                                      size_t cache_slot) {
+const script_value* vm_backend::fused_subscript_value(frame& f, const fused_operand& operand,
+                                                      std::optional<script_value>& scratch,
+                                                      size_t cache_slot) {
 	std::optional<script_value> base_scratch;
-	auto base = fused_ident_value(f, operand, base_scratch, cache_slot);
-	if (!base) return base.error_value();
-	const script_value* current = base.value();
+	const script_value* current = fused_ident_value(f, operand, base_scratch, cache_slot);
+	if (!current) return nullptr;
 
 	for (const fused_subscript_index& level : operand.subscript_chain) {
 		std::optional<script_value> index_scratch;
@@ -4580,9 +4604,8 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 			index_operand.symbol = level.symbol;
 			// SIZE_MAX: no reserved cache role for indexes - a shared slot would alias
 			// different index symbols in one instruction (the cache is not symbol-checked)
-			auto idx = fused_ident_value(f, index_operand, index_scratch, SIZE_MAX);
-			if (!idx) return idx.error_value();
-			index_ptr = idx.value();
+			index_ptr = fused_ident_value(f, index_operand, index_scratch, SIZE_MAX);
+			if (!index_ptr) return nullptr;
 		}
 
 		if (current->raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
@@ -4610,7 +4633,7 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 		stack_.push_back(*index_ptr);
 		vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
 		auto indexed = exec_index(f, index_ins);
-		if (indexed == op_status::failed) return pending_error_;
+		if (indexed == op_status::failed) return nullptr;
 		script_value element = std::move(stack_.back());
 		stack_.pop_back();
 		scratch.emplace(std::move(element));
@@ -4641,24 +4664,24 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else if (p.left.is_subscript()) {
-		auto resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return raise_from(resolved);
-		lp = resolved.value();
+		const script_value* resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
+		if (!resolved) return op_status::failed;
+		lp = resolved;
 	} else {
 		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return raise_from(resolved);
-		lp = resolved.value();
+		if (!resolved) return op_status::failed;
+		lp = resolved;
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
 	} else if (p.right.is_subscript()) {
 		auto resolved = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return raise_from(resolved);
-		rp = resolved.value();
+		if (!resolved) return op_status::failed;
+		rp = resolved;
 	} else {
 		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return raise_from(resolved);
-		rp = resolved.value();
+		if (!resolved) return op_status::failed;
+		rp = resolved;
 	}
 
 	// Fast path: mirrors binary_fast_shape without materializing operand loads.
@@ -5735,10 +5758,10 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	} else {
 		// binary-index sites park the container at role 2: binary_fused_compute owns
 		// roles 0/1, and cache entries are provenance-checked by {env, epoch}, not symbol
-		auto resolved = fused_ident_value(f, p.container, cscratch,
+		const script_value* resolved = fused_ident_value(f, p.container, cscratch,
 		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
-		if (!resolved) return raise_from(resolved);
-		container_ptr = resolved.value();
+		if (!resolved) return op_status::failed;
+		container_ptr = resolved;
 		if (p.container.member_node != k_invalid_u32) {
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_index_read_paths_[7];
@@ -5796,9 +5819,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 					rp2 = &f.code->constants[sp.right.const_index];
 				} else {
 					rscratch.reset();
-					auto resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
-					if (!resolved) return raise_from(resolved);
-					rp2 = resolved.value();
+					const script_value* resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					rp2 = resolved;
 				}
 				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
 				bool step_handled = false;
@@ -5842,9 +5865,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
 				} else {
 					std::optional<script_value> rs;
-					auto resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
-					if (!resolved) return raise_from(resolved);
-					stack_.push_back(*resolved.value());
+					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					stack_.push_back(*resolved);
 				}
 				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
 				VM_TRY(exec_binary(f, bin_ins));
@@ -5868,8 +5891,8 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return raise_from(resolved);
-		index_ptr = resolved.value();
+		if (!resolved) return op_status::failed;
+		index_ptr = resolved;
 	}
 
 	const script_value& left = *container_ptr;      // fused_ident_value hands back deref'd storage
@@ -6119,10 +6142,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			vscratch.emplace(materialize_constant(f.code->constants[p.store_value.const_index]));
 			value_ptr = &*vscratch;
 		} else {
-			auto resolved = fused_ident_value(f, p.store_value, vscratch,
+			const script_value* resolved = fused_ident_value(f, p.store_value, vscratch,
 			                                  p.index_binary != k_invalid_u32 ? SIZE_MAX : f.ip * 3 + 2);
-			if (!resolved) return raise_from(resolved);
-			value_ptr = resolved.value();
+			if (!resolved) return op_status::failed;
+			value_ptr = resolved;
 		}
 		// Member getters / boxed index steps can run user code before the value is
 		// consumed — and value_ptr may target a frame slot, which stack growth moves
@@ -6139,8 +6162,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	} else {
 		auto resolved = fused_ident_value(f, p.container, cscratch,
 		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
-		if (!resolved) return raise_from(resolved);
-		container_ptr = resolved.value();
+		if (!resolved) return op_status::failed;
+		container_ptr = resolved;
 		if (p.container.member_node != k_invalid_u32) {
 			VM_TRY(fused_member_container(f, static_cast<size_t>(&ins - f.code->code.data()),
 			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
@@ -6186,9 +6209,9 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 					rp2 = &f.code->constants[sp.right.const_index];
 				} else {
 					rscratch.reset();
-					auto resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
-					if (!resolved) return raise_from(resolved);
-					rp2 = resolved.value();
+					const script_value* resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					rp2 = resolved;
 				}
 				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
 				bool step_handled = false;
@@ -6229,9 +6252,9 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
 				} else {
 					std::optional<script_value> rs;
-					auto resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
-					if (!resolved) return raise_from(resolved);
-					stack_.push_back(*resolved.value());
+					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					stack_.push_back(*resolved);
 				}
 				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
 				VM_TRY(exec_binary(f, bin_ins));
@@ -6249,8 +6272,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return raise_from(resolved);
-		index_ptr = resolved.value();
+		if (!resolved) return op_status::failed;
+		index_ptr = resolved;
 	}
 
 	script_value& container = const_cast<script_value&>(*container_ptr);
@@ -6915,11 +6938,9 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
 	std::optional<script_value> scratch;
-	auto resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
-	if (!resolved) {
-		return raise_from(resolved);
-	}
-	const script_value& calleeVal = *resolved.value();
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
+	if (!resolved) return op_status::failed;
+	const script_value& calleeVal = *resolved;
 	if (!calleeVal.is_function()) {
 		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
@@ -11707,6 +11728,27 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_store_paths_[4], (unsigned long long)profile_store_paths_[2]);
 	}
 	{
+		static const char* const store_path_names[8] = {"?", "slot-provable", "slot-other", "slot-ref-through", "env-cell", "env-ref-through", "env-handle-ladder", "member/other"};
+		bool any = false;
+		for (int i = 1; i < 8; ++i) { any = any || profile_store_path_counts_[i]; }
+		if (any) {
+			fprintf(stderr, "[vm-profile] STORE cycles by landing path (count / avg cyc):");
+			for (int i = 1; i < 8; ++i) {
+				if (profile_store_path_counts_[i]) {
+					fprintf(stderr, " %s %llu/%.0f |", store_path_names[i], (unsigned long long)profile_store_path_counts_[i],
+						(double)profile_store_path_cycles_[i] / (double)profile_store_path_counts_[i]);
+				}
+			}
+			fprintf(stderr, "\n");
+			std::vector<std::pair<std::string, uint64_t>> by_name(profile_store_name_cycles_.begin(), profile_store_name_cycles_.end());
+			std::sort(by_name.begin(), by_name.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+			fprintf(stderr, "[vm-profile] STORE cycles by name (top 14):\n");
+			for (size_t i = 0; i < by_name.size() && i < 14; ++i) {
+				fprintf(stderr, "  %-28s %10.1f Mcyc\n", by_name[i].first.c_str(), by_name[i].second / 1e6);
+			}
+		}
+	}
+	{
 		uint64_t idx_total = 0;
 		for (int i = 0; i < 8; ++i) { idx_total += profile_index_read_paths_[i]; }
 		if (idx_total) {
@@ -12992,11 +13034,9 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
 	std::optional<script_value> scratch;
-	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
-	if (!resolved) {
-		return raise_from(resolved);
-	}
-	return return_with_result(fp, script_value(*resolved.value()));
+	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
+	if (!resolved) return op_status::failed;
+	return return_with_result(fp, script_value(*resolved));
 }
 
 op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
@@ -13005,11 +13045,9 @@ op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& in
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
 	std::optional<script_value> scratch;
-	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
-	if (!resolved) {
-		return raise_from(resolved);
-	}
-	return_value_ = script_value(*resolved.value());
+	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
+	if (!resolved) return op_status::failed;
+	return_value_ = script_value(*resolved);
 	has_return_value_ = true;
 	return {};
 }

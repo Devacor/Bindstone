@@ -247,6 +247,15 @@ engine stays usable", not by `check_throws`.
   fall through). `throw`/`break`/`continue` correctly unwind out of loops.
 - Types: `int64`, `double`, `string`, `char`, `bool`, arrays `[1,2,3]`, maps `{"k": v}`,
   `weak_ptr`, references, functions. Automatic conversions.
+- **Array representation follows the declared type** (Dev ruling 2026-09-02): `array<int>`
+  / `array<float>` are raw int64/double buffers, always; `array<var>` (and literals without
+  a spelled element type) is the only `script_value`-vector form; converting between them
+  is an explicit assignment (`array<var> x = ints;`), nothing demotes silently, no
+  Debug/Release difference. On the C++ side `as_array()`/`checked_as_array()` are the
+  `array<var>` view (a typed node returns one error), readers use `script_array::for_each`,
+  `bound_array<int64_t>&` mutates the buffer in place, `std::vector<script_int>` extracts
+  unboxed. Next kinds (bool/char/string, user types, maps) are the open campaign
+  (`docs/typed_array_design.md`, `docs/PERF_PASS_2026-09-02.md`).
 - Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,

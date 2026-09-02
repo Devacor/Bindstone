@@ -1,6 +1,8 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/stdlib/json.hpp>   // reconstruct_typed_object (hybrid field hydration)
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -297,6 +299,11 @@ struct engine::implementation {
 
     // Sink for script errors surfacing at the C++ boundary - nullptr means std::cerr
     std::function<void(const std::string&)> script_error_handler;
+
+    // Hybrid reverse lookup (complete C++ object pointer -> owning script instance),
+    // weak entries swept lazily when the watermark is crossed
+    std::unordered_map<const void*, std::weak_ptr<class_instance>> hybrid_instances_;
+    size_t hybrid_sweep_watermark_ = 64;
 
     // Sink for advisory warnings (builtin-method shadowing) - nullptr means std::cerr
     std::function<void(const std::string&)> script_warning_handler;
@@ -2899,6 +2906,111 @@ script_value engine::execute_import(const std::string& resolved_path) {
 
 
 // Note: get_engine_weak_ptr() function removed - no longer needed since script_value uses engine* directly
+
+namespace {
+// Archive-shaped field values back to live ones: {"_type_": Name, ...} maps become class
+// instances through the injection-safe registry path, containers recurse, primitives pass.
+script_value hybrid_field_from_archive(engine* eng, const script_value& val) {
+    if (val.is_map()) {
+        const auto& map = val.as_map();
+        auto typeIt = map.find(script_value("_type_", eng));
+        if (typeIt != map.end() && typeIt->second.is_string()) {
+            script_value obj = stdlib::reconstruct_typed_object(eng, map, typeIt->second.as_string(),
+                [eng](const script_value& v) { return hybrid_field_from_archive(eng, v); });
+            if (!obj.is_null()) return obj;
+        }
+        script_value out = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+        auto& outMap = const_cast<script_map&>(out.as_map());
+        for (const auto& [k, v] : map) { outMap[k] = hybrid_field_from_archive(eng, v); }
+        return out;
+    }
+    if (val.is_array()) {
+        script_value out = script_value::make_array(nullptr, eng);
+        auto& outArr = const_cast<std::vector<script_value>&>(out.as_array());
+        outArr.reserve(val.as_array().size());
+        for (const auto& elem : val.as_array()) { outArr.push_back(hybrid_field_from_archive(eng, elem)); }
+        return out;
+    }
+    return val;
+}
+}
+
+void engine::note_hybrid_instance(const void* cpp_object, const std::weak_ptr<class_instance>& owner) {
+    if (!cpp_object) { return; }
+    auto& hybrids = impl->hybrid_instances_;
+    if (hybrids.size() >= impl->hybrid_sweep_watermark_) {
+        for (auto it = hybrids.begin(); it != hybrids.end();) {
+            it = it->second.expired() ? hybrids.erase(it) : std::next(it);
+        }
+        impl->hybrid_sweep_watermark_ = std::max<size_t>(64, hybrids.size() * 2);
+    }
+    hybrids[cpp_object] = owner;
+}
+
+std::shared_ptr<class_instance> engine::find_hybrid_instance(const void* cpp_object) const {
+    auto it = impl->hybrid_instances_.find(cpp_object);
+    return it == impl->hybrid_instances_.end() ? nullptr : it->second.lock();
+}
+
+bool engine::hybrid_save_info(const void* cpp_object, std::string& script_class_name, std::string& fields_json) {
+    auto instance = find_hybrid_instance(cpp_object);
+    if (!instance) { return false; }
+    auto class_def = instance->get_class_definition();
+    if (!class_def || !class_def->get_cpp_base_class()) { return false; }
+    script_class_name = class_def->get_name();
+    script_value fields = script_value::make_map(get_type_info_string(), nullptr, this);
+    auto& fieldMap = const_cast<script_map&>(fields.as_map());
+    uint64_t cpp_object_id = instance->get_cpp_object_field_id();
+    instance->for_each_field([&](uint64_t id, const script_value& value) {
+        if (id == cpp_object_id) { return; }
+        fieldMap.emplace(script_value(std::string(get_symbolizer()->get_string(id)), this), value);
+    });
+    serialization::json_archive_writer writer(-1, this);
+    writer.write_value(fields);
+    fields_json = writer.str();
+    return true;
+}
+
+std::string engine::hybrid_base_class_name(const std::string& script_class_name) {
+    auto script_def = get_class_registry().find_script_class(script_class_name);
+    if (!script_def) { return {}; }
+    auto base = script_def->get_cpp_base_class();
+    return base ? base->get_name() : std::string();
+}
+
+std::shared_ptr<class_instance> engine::load_hybrid_instance(const std::string& script_class_name,
+        const std::shared_ptr<void>& cpp_object, const std::string& fields_json) {
+    if (!cpp_object) { return nullptr; }
+    auto script_def = get_class_registry().find_script_class(script_class_name);
+    if (!script_def) { return nullptr; }
+    auto base = script_def->get_cpp_base_class();
+    if (!base) { return nullptr; }
+    auto instance = script_def->create_instance();
+    if (!instance) { return nullptr; }
+    instance->set_field(instance->get_cpp_object_field_id(),
+        script_value::make_cpp_object(base->get_name(), base->get_type_id(), cpp_object, this));
+    if (!fields_json.empty()) {
+        serialization::json_archive_reader reader(fields_json, this);
+        script_value fields = reader.read_value();
+        if (fields.is_map()) {
+            for (const auto& [key, value] : fields.as_map()) {
+                if (!key.is_string()) { continue; }
+                uint64_t field_id = symbolize(key.as_string());
+                if (instance->has_field(field_id)) {
+                    instance->set_field(field_id, hybrid_field_from_archive(this, value));
+                }
+            }
+        }
+    }
+    uint64_t post_load_id = symbolize("post_load");
+    script_value post_load = script_def->get_method(post_load_id, false);
+    if (post_load.type() == script_value_type::jai_function_type) {
+        script_value self_value = script_value::make_object(script_class_name, instance, this);
+        std::vector<script_value> args = { self_value, script_value(static_cast<script_int>(1), this) };
+        (void)post_load.as_function()(args);
+    }
+    return instance;
+}
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
     return eng ? eng->get_conversion_registry() : nullptr;

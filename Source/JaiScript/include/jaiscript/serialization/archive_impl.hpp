@@ -648,6 +648,34 @@ private:
         using elem_type = typename SharedPtr::element_type;
         if constexpr (std::is_polymorphic_v<elem_type>) {
             const auto& actual_type = typeid(*value);
+            // value.get() is a Base*; save_fn casts the void back to the concrete
+            // (Derived) type, so hand it the complete object — dynamic_cast<void*>
+            // recovers the most-derived address (correct under multiple inheritance).
+            const void* complete = dynamic_cast<const void*>(value.get());
+            std::string hybrid_type, hybrid_fields;
+            if (engine_ref_ && engine_ref_->hybrid_save_info(complete, hybrid_type, hybrid_fields)) {
+                // A script class deriving elem_type owns this object: $type carries the
+                // script class name, $script its script-level fields, $val the C++ payload
+                // through the dynamic C++ type's registered save (base bytes unchanged).
+                auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
+                if (!entry || !entry->save_fn) {
+                    throw serialization_error(std::string("Cannot serialize hybrid script class '") + hybrid_type +
+                        "': its C++ base '" + actual_type.name() +
+                        "' is not registered. Register it with jai::registrar<T, Context>(\"Name\") or derive from jai::property_owner<T, ...>.");
+                }
+                self()->serialize("$type", hybrid_type);
+                self()->serialize("$script", hybrid_fields);
+                self()->write_property_name("$val");
+                push_context(SerializationContext::PropertyValue);
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+                any_archive_writer wrapper(*self());
+                entry->save_fn(wrapper, complete);
+                pop_context();
+                self()->end_object();
+                pop_context();
+                return;
+            }
             if (actual_type != typeid(elem_type)) {
                 auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
                 if (entry && entry->save_fn) {
@@ -657,10 +685,7 @@ private:
                     self()->begin_object();
                     push_context(SerializationContext::ObjectBody);
                     any_archive_writer wrapper(*self());
-                    // value.get() is a Base*; save_fn casts the void back to the concrete
-                    // (Derived) type, so hand it the complete object — dynamic_cast<void*>
-                    // recovers the most-derived address (correct under multiple inheritance).
-                    entry->save_fn(wrapper, dynamic_cast<const void*>(value.get()));
+                    entry->save_fn(wrapper, complete);
                     pop_context();
                     self()->end_object();
                     pop_context();
@@ -1306,6 +1331,16 @@ private:
             }
             if (!poly_type.empty()) {
                 auto* entry = polymorphic_registry::instance().find(poly_type);
+                std::string hybrid_class;
+                if (!entry && engine_ref_) {
+                    // A $type naming a script class deriving a bound C++ base: load through
+                    // the base's registry entry, then re-attach the script layer below.
+                    std::string base_name = engine_ref_->hybrid_base_class_name(poly_type);
+                    if (!base_name.empty()) {
+                        entry = polymorphic_registry::instance().find(base_name);
+                        if (entry) { hybrid_class = poly_type; }
+                    }
+                }
                 if (entry && entry->load_fn) {
                     // Reject a tampered $type that names a registered type unrelated to the
                     // requested base BEFORE constructing it — otherwise the void->elem_type cast
@@ -1315,6 +1350,10 @@ private:
                         throw serialization_error("Polymorphic type '" + poly_type + "' is not a registered subtype of requested base '" +
                             std::type_index(typeid(elem_type)).name() + "' (declare it: static jai::serialization::register_relation<" +
                             poly_type + ", Base>, or .base<Base>() on its registrar)");
+                    }
+                    std::string hybrid_fields;
+                    if (!hybrid_class.empty() && self()->has_property("$script")) {
+                        self()->serialize("$script", hybrid_fields);
                     }
                     if (!self()->seek_property("$val")) {
                         throw serialization_error("Expected '$val' for polymorphic shared_ptr");
@@ -1329,6 +1368,16 @@ private:
                     void* adjusted = polymorphic_registry::instance().adjust_to_base(entry->type, std::type_index(typeid(elem_type)), void_ptr.get());
                     result = std::shared_ptr<elem_type>(void_ptr, static_cast<elem_type*>(adjusted));
                     self()->end_object();
+                    if (!hybrid_class.empty()) {
+                        // Re-attach the script layer: the instance owns the C++ object through
+                        // _cpp_object, and the returned pointer aliases the instance so the
+                        // script layer lives exactly as long as the loaded object.
+                        auto instance = engine_ref_->load_hybrid_instance(hybrid_class, void_ptr, hybrid_fields);
+                        if (!instance) {
+                            throw serialization_error("Failed to reconstruct hybrid script class '" + hybrid_class + "'");
+                        }
+                        result = std::shared_ptr<elem_type>(instance, static_cast<elem_type*>(adjusted));
+                    }
                     self()->register_deserialized_shared(id, result);
                     return result;
                 } else {

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/core/registrar.hpp>
@@ -1039,7 +1040,205 @@ public:
     }
 };
 
+// ============================================================================
+// Hybrid (script class deriving a bound C++ class) serialization
+// ============================================================================
+
+// The C++ base a script class derives: registered polymorphically (registrar) for the
+// archive $type path, bound per-engine (bind_hybrid_creature) so scripts can extend it.
+struct HybridCreature {
+    virtual ~HybridCreature() = default;
+    int health = 100;
+    std::string label = "creature";
+    virtual std::string speak() { return "grr"; }
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("health", health), jai::serialization::make_nvp("label", label));
+    }
+};
+static jai::registrar<HybridCreature, void> _hybridCreatureReg("HybridCreature");
+
+struct hybrid_holder {
+    std::shared_ptr<HybridCreature> pet;
+    int tag = 0;
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("pet", pet), jai::serialization::make_nvp("tag", tag));
+    }
+};
+
+class hybrid_serialization_tests : public suite {
+public:
+    hybrid_serialization_tests() : suite("Hybrid Serialization Tests") {}
+
+    std::shared_ptr<engine> hybrid_engine() {
+        auto eng = make_engine();
+        stdlib::register_json_functions(*eng);
+        dynamic_binder<HybridCreature>(*eng, "HybridCreature")
+            .constructor<>()
+            .property("health", &HybridCreature::health)
+            .property("label", &HybridCreature::label)
+            .method("speak", &HybridCreature::speak)
+            .build();
+        eng->execute(R"(
+            class Voidkin : HybridCreature {
+                int chomp = 3;
+                Voidkin() : super() {}
+                string speak() override { return "voidkin"; }
+            }
+            var v = Voidkin();
+            v.health = 42;
+            v.label = "gnasher";
+            v.chomp = 7;
+        )");
+        return eng;
+    }
+
+    // Puts a loaded C++ pointer's re-attached script layer back in front of the script
+    // (the observable identity check: overridden method + script field + inherited prop).
+    void check_script_layer(const std::shared_ptr<engine>& eng, const std::shared_ptr<HybridCreature>& loaded, const char* global_name) {
+        auto instance = eng->find_hybrid_instance(dynamic_cast<void*>(loaded.get()));
+        check(instance != nullptr, "loaded object re-attaches to a script instance");
+        eng->add_global(global_name, script_value::make_object("Voidkin", instance, eng.get()));
+        std::string g(global_name);
+        check_eq((script_int)7, eng->execute(g + ".chomp").as_int(), "script field survives the round trip");
+        check_eq(std::string("voidkin"), eng->execute(g + ".speak()").as<std::string>(), "script override dispatches after load");
+        check_eq((script_int)42, eng->execute(g + ".health").as_int(), "inherited C++ property reads through the reloaded _cpp_object");
+    }
+
+    void forge_tests() override {
+
+        test("hybrid_archive_json_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            auto original = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
+            check(original != nullptr);
+            check_eq(42, original->health);
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            std::string json = w.str();
+            check(json.find("Voidkin") != std::string::npos, "$type is the script class: " + json);
+            check(json.find("$script") != std::string::npos, "script fields ride along: " + json);
+
+            jai::serialization::json_archive_reader r(json, eng.get());
+            std::shared_ptr<HybridCreature> loaded;
+            r(loaded);
+            check(loaded != nullptr);
+            check(loaded.get() != original.get(), "a fresh object, not the original");
+            check_eq(42, loaded->health);
+            check_eq(std::string("gnasher"), loaded->label);
+            check_script_layer(eng, loaded, "loadedJson");
+        });
+
+        test("hybrid_archive_binary_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            auto original = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
+            auto loaded = roundtrip_binary(*eng, original);
+            check(loaded != nullptr);
+            check_eq(42, loaded->health);
+            check_eq(std::string("gnasher"), loaded->label);
+            check_script_layer(eng, loaded, "loadedBinary");
+        });
+
+        test("hybrid_inside_owning_struct_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            hybrid_holder original;
+            original.pet = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
+            original.tag = 5;
+
+            auto json = jai::to_json(*eng, original);
+            auto loaded = jai::from_json<hybrid_holder>(*eng, json);
+            check_eq(5, loaded.tag);
+            check(loaded.pet != nullptr);
+            check_eq(42, loaded.pet->health);
+            check_script_layer(eng, loaded.pet, "loadedHeldJson");
+
+            auto binary = jai::to_binary(*eng, original);
+            auto loadedBin = jai::from_binary<hybrid_holder>(*eng, binary);
+            check_eq(5, loadedBin.tag);
+            check(loadedBin.pet != nullptr);
+            check_eq(42, loadedBin.pet->health);
+            check_script_layer(eng, loadedBin.pet, "loadedHeldBinary");
+        });
+
+        // Property reads are by name, not position: consuming the holder's members in the
+        // opposite of written order must work in both archive formats (the hybrid payload's
+        // $type/$script/$val block included).
+        test("hybrid_out_of_order_property_reads", [&]() {
+            auto eng = hybrid_engine();
+            hybrid_holder original;
+            original.pet = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
+            original.tag = 5;
+
+            {
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(original);
+                jai::serialization::json_archive_reader r(w.str(), eng.get());
+                std::string tn; uint32_t ver{};
+                r.begin_object(tn, ver);
+                int tag{};
+                r.serialize("tag", tag);
+                std::shared_ptr<HybridCreature> pet;
+                r.serialize("pet", pet);
+                r.end_object();
+                check_eq(5, tag);
+                check(pet != nullptr && pet->health == 42, "json member read out of written order");
+            }
+            {
+                jai::serialization::binary_archive_writer w(eng.get());
+                w(original);
+                auto& d = w.data();
+                jai::serialization::binary_archive_reader r(d.data(), d.size(), eng.get());
+                std::string tn; uint32_t ver{};
+                r.begin_object(tn, ver);
+                int tag{};
+                r.serialize("tag", tag);
+                std::shared_ptr<HybridCreature> pet;
+                r.serialize("pet", pet);
+                r.end_object();
+                check_eq(5, tag);
+                check(pet != nullptr && pet->health == 42, "binary member read out of written order");
+            }
+        });
+
+        test("hybrid_stdlib_value_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                var vj = from_json(to_json(v));
+                var vb = from_binary(to_binary(v));
+            )");
+            check_eq((script_int)42, eng->execute("vj.health").as_int());
+            check_eq(std::string("gnasher"), eng->execute("vj.label").as<std::string>());
+            check_eq((script_int)7, eng->execute("vj.chomp").as_int());
+            check_eq(std::string("voidkin"), eng->execute("vj.speak()").as<std::string>());
+            check_eq((script_int)42, eng->execute("vb.health").as_int());
+            check_eq((script_int)7, eng->execute("vb.chomp").as_int());
+            check_eq(std::string("voidkin"), eng->execute("vb.speak()").as<std::string>());
+        });
+
+        test("cpp_object_handle_stays_out_of_json", [&]() {
+            auto eng = hybrid_engine();
+            std::string json = eng->execute("to_json(v)").as<std::string>();
+            check(json.find("_cpp_object") == std::string::npos, "the _cpp_object handle must not leak: " + json);
+            check(json.find("chomp") != std::string::npos, "script fields serialize: " + json);
+            check(json.find("health") != std::string::npos, "inherited C++ properties serialize: " + json);
+        });
+
+        test("binary_writer_unresolvable_type_still_throws", [&]() {
+            // The widened door admits types the WRITER's engine can resolve (metadata or a
+            // class definition); a foreign engine's writer resolves neither, so the
+            // throw-on-unregistered guarantee holds instead of emitting an unloadable payload.
+            auto eng = hybrid_engine();
+            auto other = make_engine();
+            script_value v = eng->execute("v");
+            check_throws([&]() {
+                jai::serialization::binary_archive_writer writer(other.get());
+                writer.write_value(v);
+            }, "a type the writer's engine cannot resolve still throws");
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 FOUNDRY_REGISTER(jai::foundry::tests::polymorphic_serialization_tests)
 FOUNDRY_REGISTER(jai::foundry::tests::implicit_registration_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::hybrid_serialization_tests)

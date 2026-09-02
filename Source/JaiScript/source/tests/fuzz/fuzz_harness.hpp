@@ -291,6 +291,10 @@ namespace jai::fuzz {
 			// seed 2072, previously masked by 250ms budget-skips). Needs its own pass.
 			{"KD-ENV-RECURSION-LIMIT", "interp env recursion guard fires before vm on deep legal recursion",
 				{}, {"Maximum environment recursion depth exceeded"}},
+			// Same class when the guard's error is CAUGHT and printed: only the outer
+			// message reaches the output (seed 13066 at depth 5, 2026-09-02).
+			{"KD-ENV-RECURSION-LIMIT", "interp env recursion guard fires before vm on deep legal recursion (caught)",
+				{}, {"Maximum recursion depth (10000) exceeded"}},
 			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,
 			// spaceship overflow swallow) were removed when their fixes landed on

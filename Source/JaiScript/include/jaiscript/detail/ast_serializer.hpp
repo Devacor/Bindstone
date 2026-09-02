@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 7;
+    inline constexpr uint32_t k_jaibite_version = 8;   // 8: assignment_expr carries postfix_old_result (++/-- desugar)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -247,6 +247,7 @@ namespace jai::detail {
                     node(e->target.get());
                     tok(e->op);
                     node(e->value.get());
+                    u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0)));
                     break;
                 }
                 case node_type::call_expr: {
@@ -827,6 +828,7 @@ namespace jai::detail {
                     auto v = expr_req();
                     auto e = std::make_shared<assignment_expr>(loc, t, op, v);
                     e->result_type = rt;
+                    { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; }
                     result = e;
                     break;
                 }

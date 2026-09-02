@@ -2003,6 +2003,10 @@ checked_result<expression_ptr> parser::unary() {
                token_type::minus_minus, token_type::ampersand, token_type::tilde})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
+        if ((op.type == token_type::plus_plus || op.type == token_type::minus_minus) &&
+            right->get_type() != node_type::identifier_expr) {
+            return desugar_incdec(op, right, false);
+        }
         return std::make_shared<unary_expr>(op.location, op, right);
     }
 
@@ -2101,13 +2105,32 @@ checked_result<expression_ptr> parser::postfix() {
         } else if (match({token_type::plus_plus, token_type::minus_minus})) {
             // Postfix increment/decrement
             token op = previous();
-            expr = std::make_shared<unary_expr>(op.location, op, expr, true);  // true = postfix
+            if (expr->get_type() != node_type::identifier_expr) {
+                expr = desugar_incdec(op, expr, true);
+            } else {
+                expr = std::make_shared<unary_expr>(op.location, op, expr, true);  // true = postfix
+            }
         } else {
             break;
         }
     }
 
     return expr;
+}
+
+// ++x / x++ on a non-identifier target (element, entry, member, nested) IS `x += 1` /
+// `x -= 1` through the compound-assignment machinery both backends already share for
+// every target kind, typed lane and error text; identifiers keep their dedicated unary
+// path. Postfix marks the node so the expression result is the old value.
+expression_ptr parser::desugar_incdec(const token& op, const expression_ptr& target, bool postfix) {
+    const bool increment = op.type == token_type::plus_plus;
+    token compound(increment ? token_type::plus_equal : token_type::minus_equal, increment ? "+=" : "-=", op.location);
+    script_value one(script_value::ast_literal_tag{}, static_cast<script_int>(1));
+    auto node = std::make_shared<assignment_expr>(op.location, target, compound,
+                                                  std::make_shared<literal_expr>(op.location, one));
+    node->postfix_old_result = postfix;
+    node->incdec_desugar = true;
+    return node;
 }
 
 // Stub for declaration

@@ -5514,6 +5514,15 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());
 	stack_.pop_back();
+	const bool old_result = (ins.a & compound_flag_old_result) != 0;
+	script_value postfix_old = old_result ? script_value(currentValue.deref()) : make_null();
+	if (ins.a & compound_flag_incdec) {
+		// ++/-- gate: numeric targets only, the identifier path's exact error
+		const size_t ci = currentValue.deref().raw_storage_index();
+		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
+			return raise_(make_error_code(runtime_error_code::invalid_numeric_operand));
+		}
+	}
 
 	token_type op;
 	switch (ins.a & compound_kind_mask) {
@@ -5621,7 +5630,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	if (typed_element) {
 		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
-	stack_.push_back(std::move(resultValue));
+	stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
 	return {};
 }
 
@@ -6401,6 +6410,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and
 	// evaluate_arithmetic on raw int/float runs no user code, so in-place refs are safe.
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
+	    (ins.a & compound_flag_old_result) == 0 &&
 	    !(operator_table_ && operator_table_->any())) {
 		const script_value& rhs = stack_.back();
 		const size_t rhs_idx = rhs.raw_storage_index();
@@ -8926,6 +8936,7 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
+	const bool old_result = (ins.c & compound_flag_old_result) != 0;
 
 	script_value objectValueRaw = std::move(stack_.back());
 	stack_.pop_back();
@@ -8934,6 +8945,13 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	script_value currentValue = std::move(stack_.back());
 	stack_.pop_back();
 	currentValue = currentValue.deref();
+	script_value postfix_old = old_result ? currentValue : make_null();
+	if (ins.c & compound_flag_incdec) {
+		const size_t ci = currentValue.raw_storage_index();
+		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
+			return raise_(make_error_code(runtime_error_code::invalid_numeric_operand));
+		}
+	}
 
 	if (currentValue.is_object()) {
 		uint64_t op_symbol_id = 0;
@@ -9073,7 +9091,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 
-	stack_.push_back(std::move(resultValue));
+	stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
 	return {};
 }
 

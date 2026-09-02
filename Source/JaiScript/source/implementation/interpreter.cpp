@@ -4671,6 +4671,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // First, get the current value of the property
             JAISCRIPT_TRY(dispatch_expr(memberExpr));
             script_value currentValue = pop_value().deref();
+            script_value postfix_old = expr->postfix_old_result ? currentValue : make_value();
+            if (expr->incdec_desugar) {
+                const size_t ci = currentValue.raw_storage_index();
+                if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                }
+            }
 
             // Evaluate the right-hand side
             JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
@@ -4826,7 +4833,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 return {};
             }
 
-            push_value(std::move(resultValue));
+            push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
         } else {
             // Numeric subscript-compound fast path (a[i] op= v, the GLOOM store shape):
             // compute + write in place - no reference mint, no synthetic assignment
@@ -4834,7 +4841,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // identical (semantics + error text stay the general path's). Sound to bail
             // AFTER probing because every probed expression is side-effect-free: base
             // ident, index ident/int-literal, and a callout_free RHS re-evaluate safely.
-            if (expr->target->get_type() == node_type::binary_expr && !has_custom_numeric_ops_) {
+            if (expr->target->get_type() == node_type::binary_expr && !has_custom_numeric_ops_ && !expr->postfix_old_result) {
                 auto* sub = static_cast<binary_expr*>(expr->target.get());
                 detail::op_slot cslot = detail::op_slot::none;
                 switch (expr->op.type) {
@@ -4931,6 +4938,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // First, evaluate the target expression to get current value
             JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
             script_value currentValue = pop_value();
+            script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
+            if (expr->incdec_desugar) {
+                // ++/-- gate: numeric targets only, the identifier path's exact error
+                const size_t ci = currentValue.deref().raw_storage_index();
+                if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                }
+            }
 
             // Evaluate the right-hand side
             JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
@@ -5041,7 +5056,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // silently replacing the binding with a detached value
                 if (currentVal && currentVal->is_cpp_bound()) {
                     currentVal->assign_through(resultValue);
-                    push_value(std::move(resultValue));
+                    push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
                     return {};
                 }
 
@@ -5062,6 +5077,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     std::make_shared<literal_expr>(expr->location, resultValue)
                 );
                 JAISCRIPT_TRY(dispatch_expr(regularAssignment.get()));
+                if (expr->postfix_old_result && !valueStack_.empty()) {
+                    // the synthetic store left the NEW value; postfix yields the old one
+                    valueStack_.discard();
+                    push_value(std::move(postfix_old));
+                }
             }
         }
     } else {

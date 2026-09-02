@@ -37,6 +37,7 @@ namespace jai {
         std::unordered_set<std::string> registered_template_types_;
         string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
         engine* engine_ = nullptr;  // Engine for interning type_info objects
+        expression_ptr desugar_incdec(const token& op, const expression_ptr& target, bool postfix);
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;

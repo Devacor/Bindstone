@@ -1041,11 +1041,12 @@ public:
 };
 
 // ============================================================================
-// Hybrid (script class deriving a bound C++ class) serialization
+// Script layers: a script class deriving a bound C++ class (docs/script_extensible.md)
 // ============================================================================
 
-// The C++ base a script class derives: registered polymorphically (registrar) for the
-// archive $type path, bound per-engine (bind_hybrid_creature) so scripts can extend it.
+// Two C++ bases, one per lookup path: HybridCreature carries no slot (the engine map),
+// SlotCreature derives script_extensible (the slot). Both registered polymorphically for
+// the archive $type path and bound per-engine so scripts can derive them.
 struct HybridCreature {
     virtual ~HybridCreature() = default;
     int health = 100;
@@ -1057,6 +1058,26 @@ struct HybridCreature {
 };
 static jai::registrar<HybridCreature, void> _hybridCreatureReg("HybridCreature");
 
+struct SlotCreature : jai::script_extensible {
+    virtual ~SlotCreature() = default;
+    int health = 100;
+    std::string label = "creature";
+    virtual std::string speak() { return "grr"; }
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("health", health), jai::serialization::make_nvp("label", label));
+    }
+};
+static jai::registrar<SlotCreature, void> _slotCreatureReg("SlotCreature");
+
+// A base whose copy constructor is deleted: copying its hybrid must refuse (S4).
+struct NoCopyCreature : jai::script_extensible {
+    NoCopyCreature() = default;
+    NoCopyCreature(const NoCopyCreature&) = delete;
+    NoCopyCreature& operator=(const NoCopyCreature&) = delete;
+    virtual ~NoCopyCreature() = default;
+    int health = 100;
+};
+
 struct hybrid_holder {
     std::shared_ptr<HybridCreature> pet;
     int tag = 0;
@@ -1065,10 +1086,22 @@ struct hybrid_holder {
     }
 };
 
+struct slot_holder {
+    std::shared_ptr<SlotCreature> pet;
+    int tag = 0;
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("pet", pet), jai::serialization::make_nvp("tag", tag));
+    }
+};
+
+static_assert(std::is_base_of_v<jai::script_extensible, ImplicitRegDerived>, "every property_owner is script_extensible");
+static_assert(std::is_base_of_v<jai::script_extensible, POMultiDerived>, "multi-base property_owner reaches a slot through its bases");
+
 class hybrid_serialization_tests : public suite {
 public:
     hybrid_serialization_tests() : suite("Hybrid Serialization Tests") {}
 
+    // Every assertion runs on both bases so the slot and map paths cannot drift.
     std::shared_ptr<engine> hybrid_engine() {
         auto eng = make_engine();
         stdlib::register_json_functions(*eng);
@@ -1078,90 +1111,227 @@ public:
             .property("label", &HybridCreature::label)
             .method("speak", &HybridCreature::speak)
             .build();
+        dynamic_binder<SlotCreature>(*eng, "SlotCreature")
+            .constructor<>()
+            .property("health", &SlotCreature::health)
+            .property("label", &SlotCreature::label)
+            .method("speak", &SlotCreature::speak)
+            .build();
+        dynamic_binder<NoCopyCreature>(*eng, "NoCopyCreature")
+            .constructor<>()
+            .property("health", &NoCopyCreature::health)
+            .build();
         eng->execute(R"(
             class Voidkin : HybridCreature {
                 int chomp = 3;
+                int untouched = 11;
                 Voidkin() : super() {}
                 string speak() override { return "voidkin"; }
+            }
+            class Slotkin : SlotCreature {
+                int chomp = 3;
+                int untouched = 11;
+                Slotkin() : super() {}
+                string speak() override { return "slotkin"; }
+            }
+            class Lockkin : NoCopyCreature {
+                int chomp = 3;
+                Lockkin() : super() {}
             }
             var v = Voidkin();
             v.health = 42;
             v.label = "gnasher";
             v.chomp = 7;
+            var s = Slotkin();
+            s.health = 42;
+            s.label = "gnasher";
+            s.chomp = 7;
         )");
         return eng;
     }
 
-    // Puts a loaded C++ pointer's re-attached script layer back in front of the script
-    // (the observable identity check: overridden method + script field + inherited prop).
-    void check_script_layer(const std::shared_ptr<engine>& eng, const std::shared_ptr<HybridCreature>& loaded, const char* global_name) {
-        auto instance = eng->find_hybrid_instance(dynamic_cast<void*>(loaded.get()));
-        check(instance != nullptr, "loaded object re-attaches to a script instance");
-        eng->add_global(global_name, script_value::make_object("Voidkin", instance, eng.get()));
+    // The observable identity of a layer reached from C++: the boundary return IS the layer
+    // (script field, override, inherited C++ property all resolve through it).
+    template<typename Base>
+    void check_layer(const std::shared_ptr<engine>& eng, const std::shared_ptr<Base>& object, const char* global_name,
+                     const char* speak, script_int chomp = 7, script_int health = 42) {
+        check(eng->script_layer(*object) != nullptr, "object carries a script layer");
+        eng->add_global(global_name, eng->make_object(object));
         std::string g(global_name);
-        check_eq((script_int)7, eng->execute(g + ".chomp").as_int(), "script field survives the round trip");
-        check_eq(std::string("voidkin"), eng->execute(g + ".speak()").as<std::string>(), "script override dispatches after load");
-        check_eq((script_int)42, eng->execute(g + ".health").as_int(), "inherited C++ property reads through the reloaded _cpp_object");
+        check_eq(chomp, eng->execute(g + ".chomp").as_int(), "script field through the layer");
+        check_eq(std::string(speak), eng->execute(g + ".speak()").as<std::string>(), "script override dispatches");
+        check_eq(health, eng->execute(g + ".health").as_int(), "C++ property reads through _cpp_object");
+    }
+
+    template<typename Base>
+    void archive_round_trips(const char* var, const char* cls, const char* speak) {
+        auto eng = hybrid_engine();
+        auto original = eng->execute(var).as<std::shared_ptr<Base>>();
+        check(original != nullptr, "hybrid extracts to its C++ base");
+        check_eq(42, original->health);
+
+        jai::serialization::json_archive_writer w(0, eng.get());
+        w(original);
+        std::string json = w.str();
+        check(json.find(cls) != std::string::npos, "$type is the script class: " + json);
+        check(json.find("$script") != std::string::npos, "script fields ride along: " + json);
+
+        jai::serialization::json_archive_reader r(json, eng.get());
+        std::shared_ptr<Base> loaded;
+        r(loaded);
+        check(loaded != nullptr);
+        check(loaded.get() != original.get(), "a fresh object, not the original");
+        check_eq(42, loaded->health);
+        check_eq(std::string("gnasher"), loaded->label);
+        check_layer(eng, loaded, "loadedJson", speak);
+
+        auto loadedBin = roundtrip_binary(*eng, original);
+        check(loadedBin != nullptr);
+        check_eq(42, loadedBin->health);
+        check_layer(eng, loadedBin, "loadedBinary", speak);
+    }
+
+    template<typename Holder, typename Base>
+    void holder_round_trips(const char* var, const char* speak) {
+        auto eng = hybrid_engine();
+        Holder original;
+        original.pet = eng->execute(var).as<std::shared_ptr<Base>>();
+        original.tag = 5;
+
+        auto json = jai::to_json(*eng, original);
+        auto loaded = jai::from_json<Holder>(*eng, json);
+        check_eq(5, loaded.tag);
+        check(loaded.pet != nullptr);
+        check_eq(42, loaded.pet->health);
+        check_layer(eng, loaded.pet, "loadedHeldJson", speak);
+
+        auto binary = jai::to_binary(*eng, original);
+        auto loadedBin = jai::from_binary<Holder>(*eng, binary);
+        check_eq(5, loadedBin.tag);
+        check(loadedBin.pet != nullptr);
+        check_eq(42, loadedBin.pet->health);
+        check_layer(eng, loadedBin.pet, "loadedHeldBinary", speak);
+    }
+
+    // A script class deriving a SCRIPT class that derives the C++ base: cpp_base_class_ lives
+    // only on the middle class, so every layer path chain-walks (find_cpp_base_class).
+    template<typename Base>
+    void two_level_chain(const char* mid, const char* leaf, const char* speak) {
+        auto eng = hybrid_engine();
+        std::string decl = std::string("class ") + leaf + " : " + mid + R"( {
+                int fangs = 1;
+                )" + leaf + R"(() : super() {}
+                string speak() override { return ")" + speak + R"("; }
+            }
+            var deep = )" + leaf + R"(();
+            deep.health = 64;
+            deep.chomp = 8;
+            deep.fangs = 4;)";
+        eng->execute(decl);
+        auto original = eng->execute("deep").as<std::shared_ptr<Base>>();
+        check(original != nullptr, "two-level hybrid extracts to the C++ base");
+
+        jai::serialization::json_archive_writer w(0, eng.get());
+        w(original);
+        std::string json = w.str();
+        check(json.find(leaf) != std::string::npos, "$type is the most-derived script class: " + json);
+
+        jai::serialization::json_archive_reader r(json, eng.get());
+        std::shared_ptr<Base> loaded;
+        r(loaded);
+        check(loaded != nullptr && loaded->health == 64);
+        check_layer(eng, loaded, "loadedDeep", speak, 8, 64);
+        check_eq((script_int)4, eng->execute("loadedDeep.fangs").as_int(), "leaf-class script field survives");
+
+        auto loadedBin = roundtrip_binary(*eng, original);
+        check(loadedBin != nullptr && loadedBin->health == 64, "binary round trip");
+        check(eng->script_layer(*loadedBin) != nullptr, "binary re-attach");
+    }
+
+    // A C++ boundary return of a base pointer hands back THE layer: fields and overrides
+    // visible, mutation through the return reaches the live instance, a local bound to the
+    // return shares it.
+    template<typename Base>
+    void boundary_identity(const char* var, const char* speak) {
+        auto eng = hybrid_engine();
+        auto ptr = eng->execute(var).as<std::shared_ptr<Base>>();
+        eng->add_function("fetch", [ptr]() { return ptr; });
+        check_eq((script_int)7, eng->execute("fetch().chomp").as_int(), "script field visible through boundary return");
+        check_eq(std::string(speak), eng->execute("fetch().speak()").as<std::string>(), "override dispatches through boundary return");
+        eng->execute("fetch().chomp = 9;");
+        check_eq((script_int)9, eng->execute(std::string(var) + ".chomp").as_int(), "mutation through the return reaches the live instance");
+        check_eq((script_int)9, eng->execute("var held = fetch(); held.chomp").as_int(), "a local bound to the return shares the instance");
+    }
+
+    // engine::extend: an existing C++ object gains a layer with no constructor - field
+    // defaults apply, the object carries the layer, the identity survives serialization.
+    template<typename Base>
+    void extend_existing(const char* cls, const char* speak) {
+        auto eng = hybrid_engine();
+        auto cpp = std::make_shared<Base>();
+        cpp->health = 55;
+        auto layer = eng->extend(cpp, cls);
+        check(layer.is_object(), "extend returns the layer");
+        auto first = eng->script_layer(*cpp);
+        check(first != nullptr, "the object carries its layer");
+        (void)eng->extend(cpp, cls);
+        check(eng->script_layer(*cpp) == first, "extending again with the same class keeps the layer");
+        eng->add_function("adopted", [cpp]() { return cpp; });
+        check_eq((script_int)3, eng->execute("adopted().chomp").as_int(), "field initializers ran on extend");
+        check_eq((script_int)11, eng->execute("adopted().untouched").as_int(), "every declared initializer ran");
+        check_eq((script_int)55, eng->execute("adopted().health").as_int(), "C++ state reads through the layer");
+        check_eq(std::string(speak), eng->execute("adopted().speak()").as<std::string>(), "override dispatches on the extended object");
+        eng->execute("adopted().chomp = 12;");
+
+        std::shared_ptr<Base> base = cpp;
+        auto loaded = roundtrip_binary(*eng, base);
+        check(loaded != nullptr && loaded->health == 55);
+        check_layer(eng, loaded, "loadedExtended", speak, 12, 55);
+        check_eq((script_int)11, eng->execute("loadedExtended.untouched").as_int(), "an initialized, never-written field survives the round trip");
+    }
+
+    // A plain C++ object crossing the boundary registers no layer.
+    template<typename Base>
+    void no_pollution() {
+        auto eng = hybrid_engine();
+        auto plain = std::make_shared<Base>();
+        eng->add_global("plainObj", eng->make_object(plain));
+        check_eq((script_int)100, eng->execute("plainObj.health").as_int());
+        check(eng->script_layer(*plain) == nullptr, "a pure C++ wrapper must not claim a layer");
+    }
+
+    // Copy semantics follow the C++ base (S4): assignment deep-copies a copyable base into a
+    // second identity; a non-copyable base refuses at the copy site; capture shares.
+    template<typename Base>
+    void copy_semantics(const char* var) {
+        auto eng = hybrid_engine();
+        std::string v(var);
+        eng->execute("var copy = " + v + "; copy.chomp = 99; copy.health = 1;");
+        check_eq((script_int)7, eng->execute(v + ".chomp").as_int(), "assignment copied the script layer");
+        check_eq((script_int)42, eng->execute(v + ".health").as_int(), "assignment copied the C++ object too");
+        auto original = eng->execute(var).as<std::shared_ptr<Base>>();
+        auto copied = eng->execute("copy").as<std::shared_ptr<Base>>();
+        check(original.get() != copied.get(), "two C++ identities after a copy");
+        check(eng->script_layer(*copied) != nullptr, "the copy carries its own layer");
+        eng->execute("auto pin = [" + v + "]() -> void { " + v + ".chomp = 55; }; pin();");
+        check_eq((script_int)55, eng->execute(v + ".chomp").as_int(), "by-value capture shares the hybrid");
     }
 
     void forge_tests() override {
 
-        test("hybrid_archive_json_round_trip", [&]() {
-            auto eng = hybrid_engine();
-            auto original = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
-            check(original != nullptr);
-            check_eq(42, original->health);
-
-            jai::serialization::json_archive_writer w(0, eng.get());
-            w(original);
-            std::string json = w.str();
-            check(json.find("Voidkin") != std::string::npos, "$type is the script class: " + json);
-            check(json.find("$script") != std::string::npos, "script fields ride along: " + json);
-
-            jai::serialization::json_archive_reader r(json, eng.get());
-            std::shared_ptr<HybridCreature> loaded;
-            r(loaded);
-            check(loaded != nullptr);
-            check(loaded.get() != original.get(), "a fresh object, not the original");
-            check_eq(42, loaded->health);
-            check_eq(std::string("gnasher"), loaded->label);
-            check_script_layer(eng, loaded, "loadedJson");
-        });
-
-        test("hybrid_archive_binary_round_trip", [&]() {
-            auto eng = hybrid_engine();
-            auto original = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
-            auto loaded = roundtrip_binary(*eng, original);
-            check(loaded != nullptr);
-            check_eq(42, loaded->health);
-            check_eq(std::string("gnasher"), loaded->label);
-            check_script_layer(eng, loaded, "loadedBinary");
+        test("hybrid_archive_round_trip", [&]() {
+            archive_round_trips<HybridCreature>("v", "Voidkin", "voidkin");
+            archive_round_trips<SlotCreature>("s", "Slotkin", "slotkin");
         });
 
         test("hybrid_inside_owning_struct_round_trip", [&]() {
-            auto eng = hybrid_engine();
-            hybrid_holder original;
-            original.pet = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
-            original.tag = 5;
-
-            auto json = jai::to_json(*eng, original);
-            auto loaded = jai::from_json<hybrid_holder>(*eng, json);
-            check_eq(5, loaded.tag);
-            check(loaded.pet != nullptr);
-            check_eq(42, loaded.pet->health);
-            check_script_layer(eng, loaded.pet, "loadedHeldJson");
-
-            auto binary = jai::to_binary(*eng, original);
-            auto loadedBin = jai::from_binary<hybrid_holder>(*eng, binary);
-            check_eq(5, loadedBin.tag);
-            check(loadedBin.pet != nullptr);
-            check_eq(42, loadedBin.pet->health);
-            check_script_layer(eng, loadedBin.pet, "loadedHeldBinary");
+            holder_round_trips<hybrid_holder, HybridCreature>("v", "voidkin");
+            holder_round_trips<slot_holder, SlotCreature>("s", "slotkin");
         });
 
         // Property reads are by name, not position: consuming the holder's members in the
-        // opposite of written order must work in both archive formats (the hybrid payload's
-        // $type/$script/$val block included).
+        // opposite of written order must work in both archive formats (the $type/$script/$val
+        // block included).
         test("hybrid_out_of_order_property_reads", [&]() {
             auto eng = hybrid_engine();
             hybrid_holder original;
@@ -1201,25 +1371,261 @@ public:
 
         test("hybrid_stdlib_value_round_trip", [&]() {
             auto eng = hybrid_engine();
-            eng->execute(R"(
-                var vj = from_json(to_json(v));
-                var vb = from_binary(to_binary(v));
-            )");
-            check_eq((script_int)42, eng->execute("vj.health").as_int());
-            check_eq(std::string("gnasher"), eng->execute("vj.label").as<std::string>());
-            check_eq((script_int)7, eng->execute("vj.chomp").as_int());
+            for (const char* var : {"v", "s"}) {
+                std::string x(var);
+                eng->execute("var " + x + "j = from_json(to_json(" + x + ")); var " + x + "b = from_binary(to_binary(" + x + "));");
+                check_eq((script_int)42, eng->execute(x + "j.health").as_int());
+                check_eq(std::string("gnasher"), eng->execute(x + "j.label").as<std::string>());
+                check_eq((script_int)7, eng->execute(x + "j.chomp").as_int());
+                check_eq((script_int)42, eng->execute(x + "b.health").as_int());
+                check_eq((script_int)7, eng->execute(x + "b.chomp").as_int());
+            }
             check_eq(std::string("voidkin"), eng->execute("vj.speak()").as<std::string>());
-            check_eq((script_int)42, eng->execute("vb.health").as_int());
-            check_eq((script_int)7, eng->execute("vb.chomp").as_int());
-            check_eq(std::string("voidkin"), eng->execute("vb.speak()").as<std::string>());
+            check_eq(std::string("slotkin"), eng->execute("sb.speak()").as<std::string>());
         });
 
         test("cpp_object_handle_stays_out_of_json", [&]() {
             auto eng = hybrid_engine();
-            std::string json = eng->execute("to_json(v)").as<std::string>();
-            check(json.find("_cpp_object") == std::string::npos, "the _cpp_object handle must not leak: " + json);
-            check(json.find("chomp") != std::string::npos, "script fields serialize: " + json);
-            check(json.find("health") != std::string::npos, "inherited C++ properties serialize: " + json);
+            for (const char* var : {"v", "s"}) {
+                std::string json = eng->execute(std::string("to_json(") + var + ")").as<std::string>();
+                check(json.find("_cpp_object") == std::string::npos, "the _cpp_object handle must not leak: " + json);
+                check(json.find("chomp") != std::string::npos, "script fields serialize: " + json);
+                check(json.find("health") != std::string::npos, "inherited C++ properties serialize: " + json);
+            }
+        });
+
+        test("hybrid_two_level_script_chain_round_trip", [&]() {
+            two_level_chain<HybridCreature>("Voidkin", "Voidspawn", "voidspawn");
+            two_level_chain<SlotCreature>("Slotkin", "Slotspawn", "slotspawn");
+        });
+
+        test("hybrid_boundary_return_is_owning_instance", [&]() {
+            boundary_identity<HybridCreature>("v", "voidkin");
+            boundary_identity<SlotCreature>("s", "slotkin");
+        });
+
+        test("extend_existing_cpp_object", [&]() {
+            extend_existing<HybridCreature>("Voidkin", "voidkin");
+            extend_existing<SlotCreature>("Slotkin", "slotkin");
+        });
+
+        test("pure_cpp_crossing_registers_no_layer", [&]() {
+            no_pollution<HybridCreature>();
+            no_pollution<SlotCreature>();
+        });
+
+        test("hybrid_copy_semantics_follow_the_cpp_base", [&]() {
+            copy_semantics<HybridCreature>("v");
+            copy_semantics<SlotCreature>("s");
+            auto eng = hybrid_engine();
+            eng->execute("var locked = Lockkin();");
+            std::string message;
+            try { eng->execute("var stolen = locked;"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Lockkin'") != std::string::npos,
+                  "a hybrid over a non-copyable base is nocopy by inheritance: " + message);
+            check_eq((script_int)3, eng->execute("locked.chomp").as_int(), "the original is untouched");
+        });
+
+        test("extend_errors_name_both_types", [&]() {
+            auto eng = hybrid_engine();
+            auto slot = std::make_shared<SlotCreature>();
+            std::string message;
+            try { (void)eng->extend(slot, "Voidkin"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("Voidkin") != std::string::npos && message.find("SlotCreature") != std::string::npos,
+                  "a class over the wrong C++ base names both: " + message);
+            check(eng->script_layer(*slot) == nullptr, "a refused extend attaches nothing");
+
+            message.clear();
+            try { (void)eng->extend(slot, "NoSuchClass"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("NoSuchClass") != std::string::npos, "unknown script class is named: " + message);
+
+            std::shared_ptr<SlotCreature> null_object;
+            check_throws([&]() { (void)eng->extend(null_object, "Slotkin"); }, "extending null throws");
+
+            // the script builtin reports through the error channel: catchable in script
+            eng->add_global("rawSlot", eng->make_object(slot));
+            check_eq(std::string("refused"), eng->execute(R"(
+                var outcome = "silent";
+                try { extend(rawSlot, Voidkin); } catch (e) { outcome = "refused"; }
+                outcome;
+            )").as<std::string>(), "script sees the rejection as an exception");
+            check_throws([&]() { eng->execute("extend(rawSlot, 5);"); }, "a non-class second argument is refused");
+            check_throws([&]() { eng->execute("extend(rawSlot);"); }, "arity is enforced");
+        });
+
+        // Re-derive: another class over an already layered object replaces the layer, carrying
+        // the fields both classes declare and retiring the old layer; the same class is idempotent.
+        test("extend_rederives_and_is_idempotent", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                class Slotspawn : Slotkin {
+                    int fangs = 1;
+                    Slotspawn() : super() {}
+                    string speak() override { return "slotspawn"; }
+                }
+            )");
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("raw", eng->make_object(slot));
+            eng->add_global("same", eng->make_object(slot));
+            eng->execute("extend(raw, Slotkin); raw.chomp = 9;");
+            check(eng->script_layer(*slot) != nullptr, "script extend attached the layer");
+            check_eq((script_int)9, eng->execute("extend(raw, Slotkin).chomp").as_int(), "same class returns the live layer");
+            check_eq((script_int)9, eng->execute("extend(raw, \"Slotkin\").chomp").as_int(), "a string names the class too");
+            check_eq((script_int)9, eng->execute("extend(same, Slotkin).chomp").as_int(), "another handle to the object is the same layer");
+
+            check(eng->execute("raw").get_class_instance() == eng->script_layer(*slot), "raw is the layer after the first extend");
+            eng->execute("extend(raw, Slotspawn);");
+            check_eq(std::string("Slotspawn"), eng->script_layer(*slot)->get_class_definition()->get_name(), "the object carries the new layer");
+            check(eng->execute("raw").get_class_instance() == eng->script_layer(*slot), "raw is still the layer after the re-derive");
+            check_eq(std::string("Slotspawn"), eng->execute("raw").get_class_instance()->get_class_definition()->get_name(), "raw's instance is Slotspawn");
+            check_eq((script_int)9, eng->execute("raw.chomp").as_int(), "a field both classes declare carries over");
+            check(eng->script_layer(*slot)->has_field(eng->symbolize("fangs")), "the new class's field exists on the instance");
+            check_eq((script_int)1, eng->execute("raw.fangs").as_int(), "the new class's own fields take their initializers");
+            check_eq(std::string("slotspawn"), eng->execute("raw.speak()").as<std::string>(), "the new class dispatches");
+            check_eq((script_int)1, eng->execute("same.fangs").as_int(), "a wrapper made before the extend resolves to the layer");
+            check_eq(std::string("slotspawn"), eng->execute("same.speak()").as<std::string>(), "and dispatches the layer's overrides");
+            check_eq((script_int)100, eng->execute("same.health").as_int(), "and still reaches the object");
+            eng->execute("same.chomp = 12;");
+            check_eq((script_int)12, eng->execute("raw.chomp").as_int(), "writes through the stale wrapper land on the layer");
+        });
+
+        // The handle you passed in IS the layer afterwards: no rebinding.
+        test("extend_upgrades_the_handle_in_place", [&]() {
+            auto eng = hybrid_engine();
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("kin", eng->make_object(slot));
+            eng->execute("extend(kin, Slotkin); kin.chomp = 17;");
+            eng->add_global("again", eng->make_object(slot));
+            check_eq((script_int)17, eng->execute("again.chomp").as_int(), "the object's layer is the handle that was extended");
+            check_eq(std::string("slotkin"), eng->execute("kin.speak()").as<std::string>(), "overrides dispatch on the upgraded handle");
+            auto plain = std::make_shared<HybridCreature>();
+            eng->add_global("pk", eng->make_object(plain));
+            eng->execute("extend(pk, Voidkin); pk.chomp = 21;");
+            eng->add_global("pk2", eng->make_object(plain));
+            check_eq((script_int)21, eng->execute("pk2.chomp").as_int(), "the map path upgrades in place too");
+        });
+
+        // A pure script instance re-derives in place too: the instance keeps its fields and
+        // gains the derived class's.
+        test("extend_rederives_pure_script_instances", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                class Pt { int a = 1; }
+                class Pt3 : Pt { int b = 2; Pt3() : super() {} }
+                var p = Pt();
+                p.a = 5;
+            )");
+            check_eq((script_int)5, eng->execute("extend(p, Pt).a").as_int(), "same class returns the instance");
+            eng->execute("extend(p, Pt3);");
+            check_eq((script_int)5, eng->execute("p.a").as_int(), "base field kept");
+            check_eq((script_int)2, eng->execute("p.b").as_int(), "derived field initialized on the same instance");
+            eng->execute("extend(p, Pt3).a = 6;");
+            check_eq((script_int)6, eng->execute("p.a").as_int(), "chained access reaches the instance");
+            check_throws([&]() { eng->execute("extend(p, Pt);"); }, "a class that does not derive the instance's class is refused");
+        });
+
+        // An extended object owns its layer: when the object dies, a layer a script still holds
+        // is retired (C++ access reports, fields stay). A slotless object's layer is engine-owned
+        // and keeps the object alive until script_layer_detach.
+        test("extended_object_owns_its_layer", [&]() {
+            auto eng = hybrid_engine();
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("dying", eng->extend(slot, "Slotkin"));
+            eng->execute("dying.chomp = 4;");
+            slot.reset();
+            check_eq((script_int)4, eng->execute("dying.chomp").as_int(), "script fields survive the object");
+            check_throws([&]() { eng->execute("dying.health"); }, "C++ access through a dead object's layer reports");
+
+            auto plain = std::make_shared<HybridCreature>();
+            HybridCreature* raw = plain.get();
+            eng->add_global("kept", eng->extend(plain, "Voidkin"));
+            plain.reset();
+            check_eq((script_int)100, eng->execute("kept.health").as_int(), "the engine-owned layer keeps a slotless object alive");
+            std::shared_ptr<HybridCreature> alias(std::shared_ptr<HybridCreature>(), raw);
+            check(!eng->script_layer_detach(alias).empty(), "detach releases it");
+            check_throws([&]() { eng->execute("kept.health"); }, "the detached layer is retired");
+        });
+
+        // S6/D7: the layer moves between engines through the name-keyed representation. Slot
+        // types move on extend; map types move through the explicit detach + extend pair.
+        test("script_layer_moves_between_engines", [&]() {
+            auto a = hybrid_engine();
+            auto b = hybrid_engine();
+
+            auto slot = std::make_shared<SlotCreature>();
+            slot->health = 33;
+            (void)a->extend(slot, "Slotkin");
+            a->add_global("ka", a->make_object(slot));
+            a->execute("ka.chomp = 21;");
+
+            (void)b->extend(slot, "Slotkin");
+            check(b->script_layer(*slot) != nullptr, "b owns the layer now");
+            check(a->script_layer(*slot) == nullptr, "a no longer owns a layer for it");
+            b->add_global("kb", b->make_object(slot));
+            check_eq((script_int)21, b->execute("kb.chomp").as_int(), "script state moved by name");
+            check_eq((script_int)33, b->execute("kb.health").as_int(), "the C++ object is the same one");
+            b->execute("kb.chomp = 22;");
+            check_eq((script_int)21, a->execute("ka.chomp").as_int(), "a's retired layer keeps its own fields");
+            check_throws([&]() { a->execute("ka.health"); }, "a's retired layer no longer reaches the object");
+            check_eq(33, slot->health, "the object itself is untouched");
+
+            auto plain = std::make_shared<HybridCreature>();
+            (void)a->extend(plain, "Voidkin");
+            a->add_global("pa", a->make_object(plain));
+            a->execute("pa.chomp = 31;");
+            std::string carried = a->script_layer_detach(plain);
+            check(carried.find("31") != std::string::npos, "detach returns the fields: " + carried);
+            check(a->script_layer(*plain) == nullptr, "detach cleared a's map entry");
+            (void)b->extend(plain, "Voidkin", carried);
+            b->add_global("pb", b->make_object(plain));
+            check_eq((script_int)31, b->execute("pb.chomp").as_int(), "explicit two-step migration carries fields");
+            check_eq(std::string(""), a->script_layer_detach(plain), "detaching an unlayered object is a no-op");
+        });
+
+        // The mixin's own state door: to_json gives {"$type","$script"}, from_json hydrates the
+        // live layer, or re-derives first when $type names another class.
+        test("script_extensible_json_state_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                class Slotspawn : Slotkin {
+                    int fangs = 1;
+                    Slotspawn() : super() {}
+                }
+            )");
+            auto slot = std::make_shared<SlotCreature>();
+            check_eq(std::string(""), slot->script_layer_to_json(), "no layer, no state");
+            check(!slot->script_layer_from_json("{}"), "no layer to hydrate");
+            eng->add_global("kin", eng->extend(slot, "Slotkin"));
+            eng->execute("kin.chomp = 17;");
+            std::string state = slot->script_layer_to_json();
+            check(state.find("\"$type\"") != std::string::npos && state.find("Slotkin") != std::string::npos &&
+                  state.find("17") != std::string::npos, "state carries the class and the fields: " + state);
+
+            auto twin = std::make_shared<SlotCreature>();
+            eng->add_global("twin", eng->extend(twin, "Slotkin"));
+            check(twin->script_layer_from_json(state), "same class hydrates in place");
+            check_eq((script_int)17, eng->execute("twin.chomp").as_int(), "fields hydrated by name");
+
+            eng->execute("kin.chomp = 18;");
+            std::string spawnState = std::string("{\"$type\":\"Slotspawn\",\"$script\":{\"chomp\":18,\"fangs\":7}}");
+            check(slot->script_layer_from_json(spawnState), "another $type re-derives");
+            check_eq(std::string("Slotspawn"), eng->script_layer(*slot)->get_class_definition()->get_name());
+            eng->add_global("spawn", eng->make_object(slot));
+            check_eq((script_int)7, eng->execute("spawn.fangs").as_int(), "the re-derived layer took the new class's fields");
+            check_eq((script_int)18, eng->execute("spawn.chomp").as_int());
+        });
+
+        test("property_owner_carries_the_slot", [&]() {
+            auto eng = hybrid_engine();
+            POMultiDerived multi;
+            check(!multi.has_script_layer(), "fresh object: no layer");
+            auto probe = eng->execute("Slotkin()");
+            auto layer = probe.as<std::shared_ptr<class_instance>>();
+            multi.jai_script_slot().attach_script_layer(layer);
+            check(multi.script_layer() == layer, "the multi-base slot resolves through the first extensible base");
+            check(eng->script_layer(multi) == layer, "engine::script_layer reads the same slot");
+            multi.jai_script_slot().detach_script_layer();
+            check(!multi.has_script_layer());
         });
 
         test("binary_writer_unresolvable_type_still_throws", [&]() {

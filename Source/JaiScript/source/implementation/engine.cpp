@@ -302,8 +302,13 @@ struct engine::implementation {
 
     // Hybrid reverse lookup (complete C++ object pointer -> owning script instance),
     // weak entries swept lazily when the watermark is crossed
-    std::unordered_map<const void*, std::weak_ptr<class_instance>> hybrid_instances_;
-    size_t hybrid_sweep_watermark_ = 64;
+    // Script layers of objects whose type carries no script_extensible slot, keyed by the
+    // pointer stored in _cpp_object (docs/script_extensible.md D3).
+    std::unordered_map<const void*, std::weak_ptr<class_instance>> script_layers_;
+    size_t script_layer_sweep_watermark_ = 64;
+    // Layers of slotless objects extended through this engine: nothing else can own them,
+    // so the engine does until script_layer_detach (the layer keeps its object alive).
+    std::unordered_map<const void*, std::shared_ptr<class_instance>> owned_script_layers_;
 
     // Sink for advisory warnings (builtin-method shadowing) - nullptr means std::cerr
     std::function<void(const std::string&)> script_warning_handler;
@@ -495,6 +500,7 @@ struct engine::implementation {
     uint64_t op_caret_id_ = 0;
     uint64_t op_left_shift_id_ = 0;
     uint64_t op_right_shift_id_ = 0;
+    uint64_t post_load_id_ = 0;
 
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
@@ -1109,6 +1115,7 @@ void engine::initialize_engine_reference() {
     impl->op_caret_id_ = impl->string_symbolizer_.intern("^");
     impl->op_left_shift_id_ = impl->string_symbolizer_.intern("<<");
     impl->op_right_shift_id_ = impl->string_symbolizer_.intern(">>");
+    impl->post_load_id_ = impl->string_symbolizer_.intern("post_load");
 
     // Now that we have a proper engine reference, add conversions and functions that create script_value
     auto engine_weak = this;
@@ -1121,13 +1128,16 @@ void engine::initialize_engine_reference() {
             // This is a registered class, obj should be a class_instance
             auto instance = std::static_pointer_cast<class_instance>(obj);
 
+            if (instance->script_layer_retired()) { instance->throw_retired_script_layer(); }
             // Get the C++ object from the special field
-            uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
-            script_value cppObjValue = instance->get_field(cpp_object_field_id);
+            script_value cppObjValue = instance->get_field(instance->get_cpp_object_field_id());
             if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
-                // Direct access to the object_holder to avoid recursive extraction
+                // Direct access to the object_holder to avoid recursive extraction. An extended
+                // object's holder is non-owning: hand its pointer out as an unowned alias (the
+                // shared_ptr extraction path upgrades it through engine_lock_instance_cpp_object).
                 auto objHolder = cppObjValue.get_object_holder();
-                return objHolder->data;
+                if (objHolder->data) { return objHolder->data; }
+                if (objHolder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_ptr); }
             }
         }
         return nullptr;
@@ -1337,6 +1347,16 @@ void engine::initialize_engine_reference() {
             throw runtime_error("unsupported format spec ':" + raw + "'");
         }
         return script_value(detail::format_value_with_spec(args[0], spec, raw), engine_weak);
+    });
+
+    // extend(object, Class): a script class layer over a C++ object, or a re-derived script
+    // instance (docs/script_extensible.md). Engine-core so the language feature exists on
+    // every engine.
+    add_variadic_function("extend", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::extend_rejected), "extend expects (object, Class)");
+        }
+        return engine_weak->extend_checked(args[0], args[1], std::string());
     });
 
     // Parallel builtins (parallel_transform v0; docs/parallel_design.md). thread_count()
@@ -2935,33 +2955,34 @@ script_value hybrid_field_from_archive(engine* eng, const script_value& val) {
 }
 }
 
-void engine::note_hybrid_instance(const void* cpp_object, const std::weak_ptr<class_instance>& owner) {
+void engine::note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner) {
     if (!cpp_object) { return; }
-    auto& hybrids = impl->hybrid_instances_;
-    if (hybrids.size() >= impl->hybrid_sweep_watermark_) {
-        for (auto it = hybrids.begin(); it != hybrids.end();) {
-            it = it->second.expired() ? hybrids.erase(it) : std::next(it);
+    auto& layers = impl->script_layers_;
+    if (layers.size() >= impl->script_layer_sweep_watermark_) {
+        for (auto it = layers.begin(); it != layers.end();) {
+            it = it->second.expired() ? layers.erase(it) : std::next(it);
         }
-        impl->hybrid_sweep_watermark_ = std::max<size_t>(64, hybrids.size() * 2);
+        impl->script_layer_sweep_watermark_ = std::max<size_t>(64, layers.size() * 2);
     }
-    hybrids[cpp_object] = owner;
+    layers[cpp_object] = owner;
 }
 
-std::shared_ptr<class_instance> engine::find_hybrid_instance(const void* cpp_object) const {
-    auto it = impl->hybrid_instances_.find(cpp_object);
-    return it == impl->hybrid_instances_.end() ? nullptr : it->second.lock();
+std::shared_ptr<class_instance> engine::script_layer_of(const void* cpp_object) const {
+    auto& layers = impl->script_layers_;
+    if (layers.empty()) { return nullptr; }
+    auto it = layers.find(cpp_object);
+    return it == layers.end() ? nullptr : it->second.lock();
 }
 
-bool engine::hybrid_save_info(const void* cpp_object, std::string& script_class_name, std::string& fields_json) {
-    auto instance = find_hybrid_instance(cpp_object);
-    if (!instance) { return false; }
-    auto class_def = instance->get_class_definition();
-    if (!class_def || !class_def->get_cpp_base_class()) { return false; }
+bool engine::script_layer_save(const std::shared_ptr<class_instance>& layer, std::string& script_class_name, std::string& fields_json) {
+    if (!layer || layer->get_engine() != this) { return false; }
+    auto class_def = layer->get_class_definition();
+    if (!class_def || !class_def->find_cpp_base_class()) { return false; }
     script_class_name = class_def->get_name();
     script_value fields = script_value::make_map(get_type_info_string(), nullptr, this);
     auto& fieldMap = const_cast<script_map&>(fields.as_map());
-    uint64_t cpp_object_id = instance->get_cpp_object_field_id();
-    instance->for_each_field([&](uint64_t id, const script_value& value) {
+    uint64_t cpp_object_id = layer->get_cpp_object_field_id();
+    layer->for_each_field([&](uint64_t id, const script_value& value) {
         if (id == cpp_object_id) { return; }
         fieldMap.emplace(script_value(std::string(get_symbolizer()->get_string(id)), this), value);
     });
@@ -2971,24 +2992,80 @@ bool engine::hybrid_save_info(const void* cpp_object, std::string& script_class_
     return true;
 }
 
-std::string engine::hybrid_base_class_name(const std::string& script_class_name) {
+std::string engine::script_layer_base_name(const std::string& script_class_name) {
     auto script_def = get_class_registry().find_script_class(script_class_name);
     if (!script_def) { return {}; }
-    auto base = script_def->get_cpp_base_class();
+    auto base = script_def->find_cpp_base_class();
     return base ? base->get_name() : std::string();
 }
 
-std::shared_ptr<class_instance> engine::load_hybrid_instance(const std::string& script_class_name,
+bool engine::script_layer_object_owned(const std::shared_ptr<class_instance>& layer) const {
+    auto class_def = layer ? layer->get_class_definition() : nullptr;
+    auto base = class_def ? class_def->find_cpp_base_class() : nullptr;
+    return base && base->slot_hooks();
+}
+
+std::shared_ptr<class_instance> engine::extend_loaded(const std::string& script_class_name,
         const std::shared_ptr<void>& cpp_object, const std::string& fields_json) {
-    if (!cpp_object) { return nullptr; }
     auto script_def = get_class_registry().find_script_class(script_class_name);
     if (!script_def) { return nullptr; }
-    auto base = script_def->get_cpp_base_class();
-    if (!base) { return nullptr; }
+    auto base = script_def->find_cpp_base_class();
+    if (!base || !cpp_object) { return nullptr; }
+    auto layer = build_script_layer(script_def, base, cpp_object, false, nullptr, fields_json);
+    return layer ? layer.value() : nullptr;
+}
+
+checked_result<std::shared_ptr<class_definition>> engine::resolve_script_class(const script_value& script_class) {
+    using result = checked_result<std::shared_ptr<class_definition>>;
+    std::string name;
+    if (script_class.is_string()) {
+        name = script_class.as_string();
+    } else if (script_class.is_function()) {
+        auto* thunk = script_class.as_function().target<script_callable_thunk>();
+        if (!thunk || thunk->payload.kind != script_callable::kind_type::constructor || !thunk->payload.cls) {
+            return result(make_error_code(runtime_error_code::extend_rejected),
+                "extend: the second argument must name a script class (a class name or a string), not a function");
+        }
+        if (thunk->payload.cls->is_script_class()) { return result(thunk->payload.cls); }
+        name = thunk->payload.cls->get_name();
+    } else {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: the second argument must name a script class (a class name or a string)");
+    }
+    auto script_def = get_class_registry().find_script_class(name);
+    if (!script_def) {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: '{0}' is not a script class defined in this engine", symbolize(name));
+    }
+    return result(std::shared_ptr<class_definition>(script_def));
+}
+
+checked_result<std::shared_ptr<class_instance>> engine::build_script_layer(const std::shared_ptr<class_definition>& script_def,
+        const std::shared_ptr<class_definition>& base_def, const std::shared_ptr<void>& object, bool engine_owned,
+        const std::shared_ptr<class_instance>& carry_from, const std::string& fields_json) {
+    using result = checked_result<std::shared_ptr<class_instance>>;
     auto instance = script_def->create_instance();
-    if (!instance) { return nullptr; }
-    instance->set_field(instance->get_cpp_object_field_id(),
-        script_value::make_cpp_object(base->get_name(), base->get_type_id(), cpp_object, this));
+    if (!instance) {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: could not instantiate script class '{0}'", script_def->get_type_id());
+    }
+    uint64_t cpp_object_id = instance->get_cpp_object_field_id();
+    if (auto hooks = base_def->slot_hooks()) {
+        // the object owns its layer: the layer only references the object (weakly for ownership)
+        instance->set_field(cpp_object_id,
+            script_value::make_cpp_reference(base_def->get_name(), base_def->get_type_id(), object.get(), object, this));
+        hooks->own(object.get(), instance);
+        base_def->note_extended();
+    } else {
+        instance->set_field(cpp_object_id, script_value::make_cpp_object(base_def->get_name(), base_def->get_type_id(), object, this));
+        if (engine_owned) { impl->owned_script_layers_[object.get()] = instance; }
+    }
+    backend()->apply_field_initializers(instance, script_def);
+    if (carry_from) {
+        carry_from->for_each_field([&](uint64_t id, const script_value& value) {
+            if (id != cpp_object_id && instance->has_field(id)) { instance->set_field(id, value.clone()); }
+        });
+    }
     if (!fields_json.empty()) {
         serialization::json_archive_reader reader(fields_json, this);
         script_value fields = reader.read_value();
@@ -3001,15 +3078,244 @@ std::shared_ptr<class_instance> engine::load_hybrid_instance(const std::string& 
                 }
             }
         }
+        script_value post_load = script_def->get_method(impl->post_load_id_, false);
+        if (post_load.type() == script_value_type::jai_function_type) {
+            script_value self_value = script_value::make_object(script_def->get_name(), instance, this);
+            std::vector<script_value> args = { self_value, script_value(static_cast<script_int>(1), this) };
+            auto ran = post_load.as_function()(args);
+            if (!ran) { return ran.error_value(); }
+        }
     }
-    uint64_t post_load_id = symbolize("post_load");
-    script_value post_load = script_def->get_method(post_load_id, false);
-    if (post_load.type() == script_value_type::jai_function_type) {
-        script_value self_value = script_value::make_object(script_class_name, instance, this);
-        std::vector<script_value> args = { self_value, script_value(static_cast<script_int>(1), this) };
-        (void)post_load.as_function()(args);
+    return result(std::move(instance));
+}
+
+script_value engine::extend(const script_value& object, const script_value& script_class) {
+    return extend(object, script_class, std::string());
+}
+
+script_value engine::extend(const script_value& object, const script_value& script_class, const std::string& fields_json) {
+    auto layer = extend_checked(object, script_class, fields_json);
+    if (!layer) {
+        throw runtime_error(jai::format_error(layer, *get_symbolizer()));
     }
-    return instance;
+    return std::move(layer.value());
+}
+
+namespace {
+// extend's in-place re-class: remember the fields the instance already carries, adopt the
+// new class, seed and initialize every declared field, then put the carried values back
+// where the new class declares them (fields only the old class declared stay in overflow).
+void reclass_in_place(engine& eng, const std::shared_ptr<class_instance>& instance,
+                      const std::shared_ptr<class_definition>& script_def, uint64_t skip_id) {
+    std::vector<std::pair<uint64_t, script_value>> carried;
+    instance->for_each_field([&](uint64_t id, const script_value& value) {
+        if (id != skip_id) { carried.emplace_back(id, value); }
+    });
+    instance->reclass(script_def);
+    for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
+        if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }
+    }
+    // a script class exists, so the backend that defined it does
+    if (auto* backend = eng.get_execution_backend()) { backend->apply_field_initializers(instance, script_def); }
+    for (auto& [id, value] : carried) {
+        if (instance->has_field(id)) { instance->set_field(id, value); }
+    }
+}
+}
+
+checked_result<script_value> engine::extend_checked(const script_value& object, const script_value& script_class, const std::string& fields_json) {
+    using result = checked_result<script_value>;
+    auto resolved = resolve_script_class(script_class);
+    if (!resolved) { return resolved.error_value(); }
+    const std::shared_ptr<class_definition>& script_def = resolved.value();
+    const uint64_t class_id = script_def->get_type_id();
+    auto holder = object.deref().get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) {
+        return result(make_error_code(runtime_error_code::extend_rejected), "extend: '{0}' needs an object to extend", class_id);
+    }
+    auto instance = std::static_pointer_cast<class_instance>(holder->data);
+    auto instance_def = instance->get_class_definition();
+    if (!instance_def) {
+        return result(make_error_code(runtime_error_code::extend_rejected), "extend: the object has no class", class_id);
+    }
+    auto as_layer = [&]() { return result(script_value::make_object(script_def->get_name(), instance, this)); };
+
+    // A pure script instance: re-derive in place (Class must derive its class)
+    if (!instance->has_cpp_object()) {
+        if (instance_def == script_def.get()) { return result(object); }
+        if (!script_def->derives_from(instance_def)) {
+            return result(make_error_code(runtime_error_code::extend_rejected),
+                "extend: '{0}' does not derive '{1}'", class_id, instance_def->get_type_id());
+        }
+        reclass_in_place(*this, instance, script_def, 0);
+        return as_layer();
+    }
+
+    // A C++ wrapper or a layer: Class must derive the object's C++ base
+    auto base = instance_def->is_script_class() ? instance_def->find_cpp_base_class()
+                                                : get_class_definition(instance_def->get_type_id());
+    if (!base) {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: the object's class '{0}' has no bound C++ base", instance_def->get_type_id());
+    }
+    if (!script_def->derives_from(base.get())) {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: '{0}' does not derive '{1}' (the object's C++ class)", class_id, base->get_type_id());
+    }
+    if (instance->script_layer_retired()) {
+        return result(make_error_code(runtime_error_code::script_layer_retired),
+            "Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
+            instance_def->get_type_id());
+    }
+    const uint64_t cpp_object_id = instance->get_cpp_object_field_id();
+    script_value cpp_value = instance->get_field(cpp_object_id);
+    auto cpp_holder = cpp_value.get_object_holder();
+    std::shared_ptr<void> cpp_object = cpp_holder->data ? cpp_holder->data : cpp_holder->weak_data.lock();
+    if (!cpp_object) {
+        return result(make_error_code(runtime_error_code::extend_rejected),
+            "extend: the C++ object behind '{0}' no longer exists", instance_def->get_type_id());
+    }
+    void* key = cpp_object.get();
+    auto existing = base->slot_hooks() ? base->slot_hooks()->read(key) : script_layer_of(key);
+
+    if (existing && existing->get_engine() != this) {
+        // another engine's layer: move it here as a fresh instance (symbols are engine-local)
+        std::string carried = fields_json;
+        engine* owner = existing->get_engine();
+        std::string moved_class, moved_fields;
+        if (owner && owner->script_layer_save(existing, moved_class, moved_fields) && carried.empty()) { carried = moved_fields; }
+        if (owner) { owner->detach_object(existing); }
+        auto layer = build_script_layer(script_def, base, cpp_object, true, nullptr, carried);
+        if (!layer) { return layer.error_value(); }
+        return result(script_value::make_object(script_def->get_name(), layer.value(), this));
+    }
+    if (existing && existing != instance) {
+        // a stale wrapper of an object that already carries a layer: the layer is the identity
+        instance = existing;
+        instance_def = instance->get_class_definition();
+    }
+    if (instance_def != script_def.get()) {
+        const bool was_wrapper = !instance_def->is_script_class();
+        reclass_in_place(*this, instance, script_def, cpp_object_id);
+        if (was_wrapper) {
+            // the wrapper owned the object outright; as a layer it must not (S2)
+            if (auto hooks = base->slot_hooks()) {
+                instance->set_field(cpp_object_id,
+                    script_value::make_cpp_reference(base->get_name(), base->get_type_id(), key, cpp_object, this));
+                hooks->own(key, instance);
+                base->note_extended();
+            } else {
+                impl->owned_script_layers_[key] = instance;
+                note_script_layer(key, instance);
+            }
+        }
+    }
+    if (!fields_json.empty()) {
+        serialization::json_archive_reader reader(fields_json, this);
+        script_value fields = reader.read_value();
+        if (fields.is_map()) {
+            for (const auto& [name, value] : fields.as_map()) {
+                if (!name.is_string()) { continue; }
+                uint64_t field_id = symbolize(name.as_string());
+                if (instance->has_field(field_id)) {
+                    instance->set_field(field_id, hybrid_field_from_archive(this, value));
+                }
+            }
+        }
+        script_value post_load = script_def->get_method(impl->post_load_id_, false);
+        if (post_load.type() == script_value_type::jai_function_type) {
+            std::vector<script_value> args = { script_value::make_object(script_def->get_name(), instance, this),
+                                               script_value(static_cast<script_int>(1), this) };
+            auto ran = post_load.as_function()(args);
+            if (!ran) { return ran.error_value(); }
+        }
+    }
+    return as_layer();
+}
+
+std::string engine::detach_object(const std::shared_ptr<class_instance>& layer) {
+    std::string class_name, fields;
+    script_layer_save(layer, class_name, fields);
+    uint64_t field_id = layer->get_cpp_object_field_id();
+    if (field_id == 0 || !layer->has_field_value(field_id)) { return fields; }
+    script_value owning = layer->get_field(field_id);
+    auto holder = owning.get_object_holder();
+    if (!holder) { return fields; }
+    void* object = holder->data ? holder->data.get() : holder->bound_ptr;
+    if (!object) { return fields; }
+    auto class_def = layer->get_class_definition();
+    auto base = class_def ? class_def->find_cpp_base_class() : nullptr;
+    // Retire first: an object-owned layer may die the moment the slot lets go
+    layer->retire_script_layer();
+    if (base && base->slot_hooks()) {
+        base->slot_hooks()->detach(object);
+    } else {
+        impl->script_layers_.erase(object);
+        impl->owned_script_layers_.erase(object);
+    }
+    return fields;
+}
+
+void detail::retire_script_layer(const std::weak_ptr<class_instance>& layer) {
+    if (auto live = layer.lock()) { live->retire_script_layer(); }
+}
+
+std::string detail::script_layer_to_json(const std::shared_ptr<class_instance>& layer) {
+    engine* eng = layer ? layer->get_engine() : nullptr;
+    std::string class_name, fields;
+    if (!eng || !eng->script_layer_save(layer, class_name, fields)) { return {}; }
+    script_value envelope = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& map = const_cast<script_map&>(envelope.as_map());
+    map.emplace(script_value(std::string("$type"), eng), script_value(class_name, eng));
+    serialization::json_archive_reader fields_reader(fields, eng);
+    map.emplace(script_value(std::string("$script"), eng), fields_reader.read_value());
+    serialization::json_archive_writer writer(-1, eng);
+    writer.write_value(envelope);
+    return writer.str();
+}
+
+bool detail::script_layer_from_json(const std::shared_ptr<class_instance>& layer, const std::string& json) {
+    engine* eng = layer ? layer->get_engine() : nullptr;
+    if (!eng || json.empty()) { return false; }
+    serialization::json_archive_reader reader(json, eng);
+    script_value envelope = reader.read_value();
+    if (!envelope.is_map()) { return false; }
+    const auto& map = envelope.as_map();
+    auto type_it = map.find(script_value(std::string("$type"), eng));
+    auto fields_it = map.find(script_value(std::string("$script"), eng));
+    if (type_it == map.end() || !type_it->second.is_string() || fields_it == map.end()) { return false; }
+    serialization::json_archive_writer fields_writer(-1, eng);
+    fields_writer.write_value(fields_it->second);
+    // a different $type re-derives (fields carried), the same class hydrates in place
+    std::shared_ptr<class_instance> target = layer;
+    if (layer->get_class_definition()->get_name() != type_it->second.as_string()) {
+        auto rederived = eng->extend_checked(script_value::make_object(layer->get_class_definition()->get_name(), layer, eng),
+                                             type_it->second, fields_writer.str());
+        return rederived.has_value();
+    }
+    serialization::json_archive_reader fields_reader(fields_writer.str(), eng);
+    script_value fields = fields_reader.read_value();
+    if (!fields.is_map()) { return false; }
+    for (const auto& [key, value] : fields.as_map()) {
+        if (!key.is_string()) { continue; }
+        uint64_t field_id = eng->symbolize(key.as_string());
+        if (target->has_field(field_id)) {
+            target->set_field(field_id, hybrid_field_from_archive(eng, value));
+        }
+    }
+    return true;
+}
+
+std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data) {
+    if (!eng || !instance_data) { return nullptr; }
+    auto instance = std::static_pointer_cast<class_instance>(instance_data);
+    uint64_t field_id = instance->get_cpp_object_field_id();
+    if (field_id == 0 || !instance->has_field_value(field_id)) { return nullptr; }
+    const script_value& cppObjValue = instance->get_field(field_id);
+    if (cppObjValue.is_null() || cppObjValue.type() != script_value_type::jai_object_type) { return nullptr; }
+    auto objHolder = cppObjValue.get_object_holder();
+    if (!objHolder) { return nullptr; }
+    return objHolder->data ? objHolder->data : objHolder->weak_data.lock();
 }
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
@@ -3036,14 +3342,18 @@ std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std:
         return nullptr;
     }
     auto instance = std::static_pointer_cast<class_instance>(instance_data);
-    uint64_t field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
-    if (!instance->has_field_value(field_id)) {
+    if (instance->script_layer_retired()) { instance->throw_retired_script_layer(); }
+    uint64_t field_id = instance->get_cpp_object_field_id();
+    if (field_id == 0 || !instance->has_field_value(field_id)) {
         return nullptr;
     }
     const script_value& cppObjValue = instance->get_field(field_id);
     if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
         auto objHolder = cppObjValue.get_object_holder();
-        return objHolder ? objHolder->data : nullptr;
+        if (!objHolder) { return nullptr; }
+        if (objHolder->data) { return objHolder->data; }
+        // extended object: non-owning alias (the retired check above guarantees it lives)
+        if (objHolder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_ptr); }
     }
     return nullptr;
 }

@@ -440,7 +440,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                     // Check if this is a C++ parent property that needs setter method
                     auto class_def = instance->get_class_definition();
                     if (class_def) {
-                        auto cpp_base = class_def->get_cpp_base_class();
+                        auto cpp_base = class_def->find_cpp_base_class();
                         if (cpp_base) {
                             uint64_t setter_id = cpp_base->get_property_setter_id(id);
                             if (setter_id != 0) {
@@ -523,7 +523,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
                     // Check if this is a C++ parent property that needs setter method
                     auto class_def = instance->get_class_definition();
                     if (class_def) {
-                        auto cpp_base = class_def->get_cpp_base_class();
+                        auto cpp_base = class_def->find_cpp_base_class();
                         if (cpp_base) {
                             uint64_t setter_id = cpp_base->get_property_setter_id(id);
                             if (setter_id != 0) {

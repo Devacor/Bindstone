@@ -58,6 +58,8 @@ namespace jai {
         static_member_not_found = 73,
         multiple_inheritance = 74,
         access_violation = 75,
+        script_layer_retired = 76,   // a detached/moved script layer reached for its C++ object
+        extend_rejected = 77,        // extend(object, Class): class/object relationship refused
 
         // File I/O errors (81-90)
         file_not_found = 81,

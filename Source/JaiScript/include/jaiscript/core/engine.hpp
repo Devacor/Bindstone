@@ -723,22 +723,60 @@ namespace jai {
         // Get the class registry for this engine
         class_registry& get_class_registry();
 
-        // Hybrid instances (a script class deriving a bound C++ class owns its C++ object
-        // through _cpp_object): a weak complete-object-pointer -> owning-script-instance map
-        // lets polymorphic serialization recover the script layer from a shared_ptr<CppBase>
-        // instead of silently slicing it. note_hybrid_instance is called from
-        // class_instance::set_field whenever _cpp_object lands on a hybrid instance.
-        void note_hybrid_instance(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
-        std::shared_ptr<class_instance> find_hybrid_instance(const void* cpp_object) const;
-        // Save side: true when cpp_object is owned by a live hybrid instance; fills the script
-        // class name ($type) and the script-level fields encoded as JSON ($script).
-        bool hybrid_save_info(const void* cpp_object, std::string& script_class_name, std::string& fields_json);
-        // Load side: the bound C++ base's registered name for a script class ("" when the name
-        // is not a script class with a C++ base), and re-attachment of the script layer around a
-        // freshly deserialized complete C++ object (hydrates fields, runs post_load).
-        std::string hybrid_base_class_name(const std::string& script_class_name);
-        std::shared_ptr<class_instance> load_hybrid_instance(const std::string& script_class_name,
+        // Script layers (docs/script_extensible.md). A script class deriving a bound C++ class
+        // owns its object through _cpp_object; the object carries the layer back through its
+        // script_extensible slot (else this engine's weak map), so every boundary return of a
+        // shared_ptr<Base> hands script the layer, and serialization writes the script class.
+        //
+        // extend(object, Class) - the script builtin and this engine's door. Class: a constructor
+        // value (the bare class name in script) or a name. object a C++ wrapper or a layer:
+        // Class must derive the object's C++ base; the current layer's class returns it
+        // (idempotent), another class re-derives (fields carried where both classes have them,
+        // the old layer retired). object a pure script instance: Class must derive its class; a
+        // new instance with its fields copied returns (script objects are values). Field
+        // initializers run, no constructor body. An extended object owns its layer for its
+        // lifetime (slot types); a type without the slot keeps the layer engine-owned until
+        // script_layer_detach. An object layered by another engine is moved here.
+        script_value extend(const script_value& object, const script_value& script_class);
+        // fields_json ($script from script_layer_detach) seeds the new layer: the explicit
+        // two-step migration for types without the slot, which no engine can see into another's
+        // map for.
+        script_value extend(const script_value& object, const script_value& script_class, const std::string& fields_json);
+        template<typename T>
+        script_value extend(const std::shared_ptr<T>& object, std::string_view script_class, const std::string& fields_json = std::string());
+        // extend-on-bind: hand an object to script already extended
+        template<typename T>
+        void add_global_extended(const std::string& name, const std::shared_ptr<T>& object, std::string_view script_class);
+        // The layer's fields as JSON, and the object no longer carries a layer; the old layer is
+        // retired (C++ access through it errors, its script fields stay). "" without a layer.
+        template<typename T>
+        std::string script_layer_detach(const std::shared_ptr<T>& object);
+        // The live layer owned by this engine, if any.
+        template<typename T>
+        std::shared_ptr<class_instance> script_layer(const T& object) const;
+
+        // Map path for types without the slot, keyed by the pointer stored in _cpp_object.
+        // note_script_layer is called from class_instance::set_field.
+        void note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
+        std::shared_ptr<class_instance> script_layer_of(const void* cpp_object) const;
+        // Archive: $type (script class) + $script (fields as JSON) for a layer this engine owns;
+        // the C++ base a script class extends ("" when it is not such a class); re-attachment
+        // around a freshly loaded object (initializers, then hydration, then post_load) - the
+        // caller aliases the returned layer only when the object cannot own it.
+        bool script_layer_save(const std::shared_ptr<class_instance>& layer, std::string& script_class_name, std::string& fields_json);
+        std::string script_layer_base_name(const std::string& script_class_name);
+        std::shared_ptr<class_instance> extend_loaded(const std::string& script_class_name,
             const std::shared_ptr<void>& cpp_object, const std::string& fields_json);
+        bool script_layer_object_owned(const std::shared_ptr<class_instance>& layer) const;
+        std::string detach_object(const std::shared_ptr<class_instance>& layer);
+        // Cores (error codes; the public extend throws at the host boundary): extend itself,
+        // the script class behind a constructor value / name, and a layer of script_def over an
+        // object typed as base_def (state from carry_from's fields or fields_json).
+        checked_result<script_value> extend_checked(const script_value& object, const script_value& script_class, const std::string& fields_json);
+        checked_result<std::shared_ptr<class_definition>> resolve_script_class(const script_value& script_class);
+        checked_result<std::shared_ptr<class_instance>> build_script_layer(const std::shared_ptr<class_definition>& script_def,
+            const std::shared_ptr<class_definition>& base_def, const std::shared_ptr<void>& object, bool engine_owned,
+            const std::shared_ptr<class_instance>& carry_from, const std::string& fields_json);
 
         // Monotonic counter bumped on every script-class (re)definition. Class-shape
         // caches (class_definition::flat_value_semantics) validate against it: a nested

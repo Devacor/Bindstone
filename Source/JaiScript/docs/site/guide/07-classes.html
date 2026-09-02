@@ -85,6 +85,19 @@ type_of(c);</code></pre></div>
 <p>Redefining a base method <strong>without</strong> <code>override</code> is an error — the message is explicit:</p>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Method &#x27;speak&#x27; shadows base class method. Use &#x27;override&#x27; keyword if this is intentional</code></pre></div>
 <p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected.</p>
+<h2 id="deriving-a-c-class-and-extend">Deriving a C++ class, and <code>extend</code><a class="hlink" href="#deriving-a-c-class-and-extend" aria-label="link">&#8203;</a></h2>
+<p>A class may derive a class the host bound from C++. Constructing it (<code>Voidkin()</code>) constructs the C++ object underneath; an object the host already owns is given the class with <code>extend(object, Class)</code>, <strong>in place</strong> — the handle you pass, and every other handle to that object, is the new class from then on:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Voidkin : Creature {               // Creature: bound from C++
+    int chomp = 3;
+    string speak() override { return &quot;voidkin&quot;; }
+}
+extend(raw, Voidkin);                     // raw came from C++ as a plain Creature
+raw.chomp = 17;
+print(raw.speak(), &quot; &quot;, raw.chomp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">voidkin 17</code></pre></div>
+<p><code>extend</code> is a no-op for the class the object already is and re-derives for another class that derives the object's C++ class (fields both classes declare keep their values; the new class's own fields take their initializers). It also re-classes pure script instances the same way. Overrides of C++ methods need <code>override</code> like any other; bare members and inherited C++ methods resolve inside methods as usual. The host side, ownership, and serialization of these <em>hybrids</em> are in <a href="../embedding/13-script-extensible.html">Script-Extensible Objects</a>.</p>
+<h2 id="nocopy">nocopy classes<a class="hlink" href="#nocopy" aria-label="link">&#8203;</a></h2>
+<p><code>nocopy class Ledger { ... }</code> refuses by-value copies — <code>auto copy = ledger;</code> and a by-value parameter are errors naming the class, like a deleted C++ copy constructor — while <code>auto&amp;</code> / <code>var&amp;</code> and <code>Ledger&amp;</code> parameters bind as usual. <code>nocopy</code> is inherited: every class derived from a <code>nocopy</code> class is <code>nocopy</code>, and so is a script class over a C++ base that has no copy constructor. There is no opt-out further down the chain.</p>
 <h2 id="typed-fields-are-enforced">Typed fields are enforced<a class="hlink" href="#typed-fields-are-enforced" aria-label="link">&#8203;</a></h2>
 <p>Fields follow the same type ladder as variables: explicit types enforce and convert; <code>var</code> fields stay dynamic; <code>auto</code> fields lock on their initializer.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Stats {

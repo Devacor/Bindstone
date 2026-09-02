@@ -409,6 +409,25 @@ public:
             check(message.find("nocopy class 'Ledger'") != std::string::npos);
         });
 
+        test("nocopy_is_inherited", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                nocopy class Ledger { int total = 1; }
+                class Audit : Ledger { int checks = 0; }
+                class Deep : Audit {}
+                auto audit = Audit();
+                auto deep = Deep();
+            )");
+            std::string message;
+            try { eng->execute("auto copy = audit;"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Audit'") != std::string::npos, "a derived class is nocopy: " + message);
+            message.clear();
+            try { eng->execute("void take(Deep d) {} take(deep);"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Deep'") != std::string::npos, "two levels down still nocopy: " + message);
+            check_eq(eng->execute("auto& same = deep; same.checks = 4; deep.checks == 4;").as<bool>(), true, "references still bind");
+        });
+
         test("destructuring_basic", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

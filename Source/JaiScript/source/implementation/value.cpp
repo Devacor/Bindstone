@@ -332,6 +332,27 @@ script_value script_value::make_cpp_object(const std::string& type_name, uint64_
     return v;
 }
 
+script_value script_value::make_cpp_reference(const std::string& type_name, uint64_t type_id, void* object,
+                                              std::weak_ptr<void> owner, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create cpp_reference with null engine pointer");
+    }
+    auto class_def = eng->get_class_definition(type_id);
+    if (!class_def) {
+        throw runtime_error("Cannot create cpp_reference of unregistered class '" + type_name + "'");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = class_def->get_type_info();
+    auto obj = make_strong<object_holder>();
+    obj->type_name = type_name;
+    obj->type_id = type_id;
+    obj->bound_ptr = object;
+    obj->weak_data = std::move(owner);
+    obj->is_class_instance_wrapper = false;
+    v.storage_ = obj;
+    return v;
+}
+
 script_value script_value::make_empty_weak_ptr(type_info_ptr weak_ptr_type, engine* eng) {
     script_value v(std::monostate{}, eng);
     if (weak_ptr_type) {

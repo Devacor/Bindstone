@@ -18,6 +18,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/script_extensible.hpp>
 #include <string>
 #include <vector>
 #include <array>
@@ -653,7 +654,15 @@ private:
             // recovers the most-derived address (correct under multiple inheritance).
             const void* complete = dynamic_cast<const void*>(value.get());
             std::string hybrid_type, hybrid_fields;
-            if (engine_ref_ && engine_ref_->hybrid_save_info(complete, hybrid_type, hybrid_fields)) {
+            std::shared_ptr<class_instance> layer;
+            if (engine_ref_) {
+                if constexpr (std::is_base_of_v<script_extensible, elem_type>) {
+                    layer = value->jai_script_slot().script_layer();
+                } else {
+                    layer = engine_ref_->script_layer_of(complete);
+                }
+            }
+            if (layer && engine_ref_->script_layer_save(layer, hybrid_type, hybrid_fields)) {
                 // A script class deriving elem_type owns this object: $type carries the
                 // script class name, $script its script-level fields, $val the C++ payload
                 // through the dynamic C++ type's registered save (base bytes unchanged).
@@ -1335,7 +1344,7 @@ private:
                 if (!entry && engine_ref_) {
                     // A $type naming a script class deriving a bound C++ base: load through
                     // the base's registry entry, then re-attach the script layer below.
-                    std::string base_name = engine_ref_->hybrid_base_class_name(poly_type);
+                    std::string base_name = engine_ref_->script_layer_base_name(poly_type);
                     if (!base_name.empty()) {
                         entry = polymorphic_registry::instance().find(base_name);
                         if (entry) { hybrid_class = poly_type; }
@@ -1369,14 +1378,16 @@ private:
                     result = std::shared_ptr<elem_type>(void_ptr, static_cast<elem_type*>(adjusted));
                     self()->end_object();
                     if (!hybrid_class.empty()) {
-                        // Re-attach the script layer: the instance owns the C++ object through
-                        // _cpp_object, and the returned pointer aliases the instance so the
-                        // script layer lives exactly as long as the loaded object.
-                        auto instance = engine_ref_->load_hybrid_instance(hybrid_class, void_ptr, hybrid_fields);
+                        // Re-attach the script layer. An object with a script_extensible slot owns
+                        // it; otherwise the layer owns the object and the returned pointer aliases
+                        // the layer, so the layer lives exactly as long as the loaded object.
+                        auto instance = engine_ref_->extend_loaded(hybrid_class, void_ptr, hybrid_fields);
                         if (!instance) {
                             throw serialization_error("Failed to reconstruct hybrid script class '" + hybrid_class + "'");
                         }
-                        result = std::shared_ptr<elem_type>(instance, static_cast<elem_type*>(adjusted));
+                        if (!engine_ref_->script_layer_object_owned(instance)) {
+                            result = std::shared_ptr<elem_type>(instance, static_cast<elem_type*>(adjusted));
+                        }
                     }
                     self()->register_deserialized_shared(id, result);
                     return result;

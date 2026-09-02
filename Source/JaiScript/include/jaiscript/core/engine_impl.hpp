@@ -6,6 +6,7 @@
 #include "engine.hpp"
 #include "conversion_registry.hpp"
 #include "class_definition.hpp"
+#include "script_extensible.hpp"
 
 namespace jai {
 
@@ -66,6 +67,23 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     // surface (ServerCreature::agent through a shared_ptr<Creature>). dynamic_cast<void*>
     // yields the complete-object pointer, so registry extractors keyed by the dynamic
     // type name cast correctly regardless of base offsets.
+    // An object's script layer IS its identity: hand it back instead of a fresh wrapper, so
+    // script sees the derived script class (fields, overrides) through any boundary return
+    // — virtual dispatch through a base pointer, carried across the boundary. Slot when the
+    // type carries one (a pointer read), else the map by complete-object pointer.
+    if constexpr (std::is_base_of_v<script_extensible, T>) {
+        if (data) {
+            if (auto layer = data->jai_script_slot().script_layer(); layer && layer->get_engine() == this) {
+                return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
+            }
+        }
+    } else if constexpr (std::is_polymorphic_v<T>) {
+        if (data) {
+            if (auto layer = script_layer_of(dynamic_cast<void*>(data.get()))) {
+                return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
+            }
+        }
+    }
     if constexpr (std::is_polymorphic_v<T>) {
         if (data && std::type_index(typeid(*data)) != std::type_index(typeid(T))) {
             if (auto dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
@@ -99,6 +117,38 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     // Fallback: store as raw C++ object (properties won't work)
     auto type_id = get_symbolizer()->intern(type_name);
     return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
+}
+
+template<typename T>
+script_value engine::extend(const std::shared_ptr<T>& object, std::string_view script_class, const std::string& fields_json) {
+    if (!object) {
+        throw runtime_error("extend: cannot extend a null object with '" + std::string(script_class) + "'");
+    }
+    return extend(make_object(object), script_value(std::string(script_class), this), fields_json);
+}
+
+template<typename T>
+void engine::add_global_extended(const std::string& name, const std::shared_ptr<T>& object, std::string_view script_class) {
+    add_global(name, extend(object, script_class));
+}
+
+template<typename T>
+std::shared_ptr<class_instance> engine::script_layer(const T& object) const {
+    if constexpr (std::is_base_of_v<script_extensible, T>) {
+        auto layer = object.jai_script_slot().script_layer();
+        return (layer && layer->get_engine() == this) ? layer : nullptr;
+    } else if constexpr (std::is_polymorphic_v<T>) {
+        return script_layer_of(dynamic_cast<const void*>(&object));
+    } else {
+        return script_layer_of(&object);
+    }
+}
+
+template<typename T>
+std::string engine::script_layer_detach(const std::shared_ptr<T>& object) {
+    if (!object) { return {}; }
+    auto layer = script_layer(*object);
+    return layer ? detach_object(layer) : std::string();
 }
 
 template<typename T>

@@ -235,6 +235,76 @@ namespace jai::detail {
 		return type_info_ptr{eng->get_type_info_array(element)};
 	}
 
+	// Map twin of the array rule (Dev ruling 2026-09-02): an `auto` key or value slot
+	// (the parser leaves it null: plain `auto m`, `map<auto,V>`, `map<K,auto>`) infers its
+	// type from a uniform primitive literal; an empty literal stays dynamic; mixed kinds
+	// answer null with mixed_part set (1 = keys, 2 = values) so the caller raises. Spelled
+	// `var` slots (base any) are never inferred. Callers already validated value
+	// homogeneity for auto-value declarations.
+	inline type_info_ptr infer_uniform_map_type(const script_value& map_value, type_info_ptr declared, engine* eng, int& mixed_part) {
+		mixed_part = 0;
+		if (!eng || map_value.raw_storage_index() != script_value::TYPEID_MAP) {
+			return nullptr;
+		}
+		if (declared && !declared->is_map()) {
+			return nullptr;   // `var m = {...}` (any) is not an auto slot: fully dynamic
+		}
+		const bool key_auto = !declared || !declared->key_type();
+		const bool value_auto = !declared || !declared->value_type();
+		if (!key_auto && !value_auto) {
+			return nullptr;
+		}
+		const auto& entries = map_value.unchecked_as_map();
+		if (entries.empty()) {
+			return nullptr;
+		}
+		auto primitive_of = [&](const script_value& v, size_t& kind) -> bool {
+			kind = v.deref().raw_storage_index();
+			return kind == script_value::TYPEID_INT || kind == script_value::TYPEID_FLOAT || kind == script_value::TYPEID_STRING ||
+			       kind == script_value::TYPEID_BOOL || kind == script_value::TYPEID_CHAR;
+		};
+		auto type_of_kind = [&](size_t kind) -> type_info* {
+			switch (kind) {
+				case script_value::TYPEID_INT: return eng->get_type_info_int();
+				case script_value::TYPEID_FLOAT: return eng->get_type_info_float();
+				case script_value::TYPEID_STRING: return eng->get_type_info_string();
+				case script_value::TYPEID_BOOL: return eng->get_type_info_bool();
+				default: return eng->get_type_info_char();
+			}
+		};
+		type_info* key_type = key_auto ? nullptr : declared->key_type().get();
+		type_info* value_type = value_auto ? nullptr : declared->value_type().get();
+		if (key_auto) {
+			size_t first = 0;
+			if (primitive_of(entries.begin()->first, first)) {
+				bool uniform = true;
+				for (const auto& entry : entries) {
+					size_t k = 0;
+					if (!primitive_of(entry.first, k) || k != first) { uniform = false; break; }
+				}
+				if (!uniform) { mixed_part = 1; return nullptr; }
+				key_type = type_of_kind(first);
+			}
+		}
+		if (value_auto) {
+			size_t first = 0;
+			if (primitive_of(entries.begin()->second, first)) {
+				bool uniform = true;
+				for (const auto& entry : entries) {
+					size_t k = 0;
+					if (!primitive_of(entry.second, k) || k != first) { uniform = false; break; }
+				}
+				if (!uniform) { mixed_part = 2; return nullptr; }
+				value_type = type_of_kind(first);
+			}
+		}
+		if (!key_type && !value_type) {
+			return nullptr;   // nothing primitive to infer: stays as declared (dynamic)
+		}
+		return type_info_ptr{eng->get_type_info_map(key_type ? key_type : eng->get_type_info_any(),
+		                                            value_type ? value_type : eng->get_type_info_any())};
+	}
+
 	// The one message both backends raise at a failed boundary (byte-identical errors).
 	inline constexpr const char* container_boundary_mismatch_text = "Cannot store '{0}' in '{1}'";
 

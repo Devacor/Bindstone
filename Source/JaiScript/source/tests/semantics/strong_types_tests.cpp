@@ -1574,7 +1574,7 @@ public:
             check_quad("map<string,int> m = {\"a\": 1}; m.clear(); m[\"b\"] = 2; to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "clear then store");
             check_quad("map<string,array<int>> m = {\"a\": [1, 2]}; m[\"a\"].push(3); to_string(m[\"a\"].size()) + \",\" + to_string(m[\"a\"][2])", "3,3", "array value mutates through the entry");
             check_quad("coroutine int walk(map<string,int> mm) { for (auto kv : mm) { yield kv.second; } return 0; } map<string,int> m = {\"a\": 5, \"b\": 6}; auto h = walk(m); to_string(h.resume()) + \",\" + to_string(h.resume())", "5,6", "coroutine over a map");
-            check_quad("map<string,int> m = {}; m[5] = 1; to_string(m.size()) + \",\" + to_string(m.contains(5)) + \",\" + type_of(m.keys()[0])", "1,true,int", "EDGE (pre-existing, both backends): a direct store does not enforce the declared key type");
+            check_quad_error("map<string,int> m = {}; m[5] = 1", "key type enforced on a direct store (Dev ruling 2026-09-02)");
             check_quad_error("map<string,int> m = {}; m[\"k\"] = \"str\"", "value type enforced on store");
             check_quad_error("map<string,int> m = {\"a\": \"s\"}", "value type enforced on declaration");
             check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
@@ -1607,6 +1607,24 @@ public:
             check_quad_error("var m = {}; m[\"missing\"]++", "++ on a missing map entry raises the same text on both backends");
             check_quad_error("5++", "++ on a literal raises the same text on both backends");
             check_quad_error("array<int> a = [9223372036854775807]; a[0]++", "++ overflow on a typed element follows the overflow policy (checked build raises)");
+        });
+
+        test("map_key_types_battery", [check_quad, check_quad_error]() {
+            // Dev ruling 2026-09-02: the declared key type is enforced on direct stores; map<var,V>
+            // takes any key; an `auto` key or value slot infers from a uniform literal (mixed = error)
+            // and stays dynamic for an empty literal - the array rule applied to maps
+            check_quad("map<var,int> m = {}; m[5] = 1; m[\"x\"] = 2; to_string(m.size())", "2", "map<var,V> takes any key");
+            check_quad("map<auto,int> m = {}; m[\"x\"] = 1; m[2] = 3; to_string(m.size())", "2", "map<auto,V> with an empty literal stays dynamic");
+            check_quad("map<auto,int> m = {5: 1}; m[6] = 2; to_string(m.size()) + \",\" + to_string(m[6])", "2,2", "map<auto,V> infers an int key from a uniform literal");
+            check_quad("map<string,auto> m = {\"a\": 1}; m[\"b\"] = 2; to_string(m[\"b\"])", "2", "map<K,auto> infers an int value");
+            check_quad("auto m = {\"a\": 1, \"b\": 2}; m[\"c\"] = 3; to_string(m.size())", "3", "auto with a uniform map literal infers map<string,int>");
+            check_quad("map<auto,auto> m = {1.5: \"x\"}; m[2.5] = \"y\"; to_string(m.size())", "2", "both slots infer");
+            check_quad("map<auto,int> m = {5: 1}; type_of(m)", "map", "the inferred map is still a map");
+            check_quad_error("map<auto,int> m = {5: 1}; m[\"x\"] = 1", "an inferred int key rejects a string key");
+            check_quad_error("map<auto,int> m = {5: 1, \"hi\": 1}", "mixed keys under an auto key slot raise");
+            check_quad_error("map<string,auto> m = {\"a\": 1}; m[\"b\"] = \"s\"", "an inferred int value rejects a string value");
+            check_quad_error("auto m = {\"a\": 1}; m[5] = 1", "auto-inferred map<string,int> rejects an int key");
+            check_quad_error("map<int,int> m = {}; m[1.5] = 1", "keys never coerce: a float key into an int map raises");
         });
 
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {

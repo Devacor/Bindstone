@@ -60,6 +60,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Array element type mismatch";
         case runtime_error_code::map_value_type_mismatch:
             return "Map value type mismatch";
+        case runtime_error_code::map_key_type_mismatch:
+            return "Map key type mismatch";
         case runtime_error_code::member_access_on_null:
             return "Member access on null value";
 

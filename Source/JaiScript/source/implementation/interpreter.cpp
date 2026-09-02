@@ -3612,6 +3612,18 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     if (!key.has_valid_engine()) {
                         key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
                     }
+                    // Declared key type: keys never coerce (Dev ruling 2026-09-02), so the
+                    // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
+                    if (auto map_tag = left.get_type_info()) {
+                        if (type_info_ptr key_type = map_tag->key_type();
+                            key_type && key_type->base_type != script_value_type::jai_any_type &&
+                            key.deref().type() != key_type->base_type) {
+                            uint64_t got_id = string_symbolizer_->intern(get_value_type_name(key.deref()));
+                            uint64_t want_id = string_symbolizer_->intern(get_type_info_name(key_type));
+                            return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
+                                "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+                        }
+                    }
                     const size_t prior_map_size = map.size();
                     script_value& value_ref = map[key];
                     // engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
@@ -6352,6 +6364,18 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                         if (type_info_ptr inferred = detail::infer_uniform_array_type(value, engine_)) {
                             effective_decl_type = inferred;
                         }
+                    }
+                }
+                // Map twin: `auto` key/value slots infer from a uniform literal; mixed keys
+                // raise (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+                if (value.is_map()) {
+                    int mixed_part = 0;
+                    if (type_info_ptr inferred = detail::infer_uniform_map_type(value, decl->type, engine_, mixed_part)) {
+                        effective_decl_type = inferred;
+                    } else if (mixed_part != 0) {
+                        return checked_result<void>(
+                            make_error_code(mixed_part == 1 ? runtime_error_code::map_key_type_mismatch : runtime_error_code::map_value_type_mismatch),
+                            mixed_part == 1 ? "Map 'auto' requires homogeneous keys" : "Map 'auto' requires homogeneous values");
                     }
                 }
             }

@@ -255,8 +255,14 @@ engine stays usable", not by `check_throws`.
   Debug/Release difference. On the C++ side `as_array()`/`checked_as_array()` are the
   `array<var>` view (a typed node returns one error), readers use `script_array::for_each`,
   `bound_array<int64_t>&` mutates the buffer in place, `std::vector<script_int>` extracts
-  unboxed. Next kinds (bool/char/string, user types, maps) are the open campaign
-  (`docs/typed_array_design.md`, `docs/PERF_PASS_2026-09-02.md`).
+  unboxed. Typed map STORAGE is the open campaign (`docs/typed_array_design.md` stage 6,
+  `docs/PERF_PASS_2026-09-02.md`).
+- **Map key types** (Dev ruling 2026-09-02): a direct store checks the declared key type
+  (`map<string,int> m; m[5] = 1` raises; keys never coerce); `map<var,V>` takes any key; an
+  `auto` key/value slot infers from a uniform literal (`map<auto,int> m = {5: 1}` is
+  `map<int,int>`), stays dynamic for an empty literal, and a mixed literal raises.
+- **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
+  non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
 - Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,

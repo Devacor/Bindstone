@@ -931,6 +931,8 @@ namespace jai::vm {
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,
                                          bool skip_parent_recursion = false);
+        void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                      const std::shared_ptr<class_definition>& class_def) override;
 
         // Mirrors visit_member_expr's non-static path; unwinding cases leave out null
         // Lexical access context for member enforcement: an env-untouched frame

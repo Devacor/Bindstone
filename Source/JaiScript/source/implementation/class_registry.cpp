@@ -222,7 +222,7 @@ bool class_registry::check_inheritance_chain(const std::string& derived, const s
         // For now, we can only check direct parent relationships
         // A full implementation would need to maintain an inheritance graph
         // or have access to the parent_class_ member
-        auto cpp_base = derived_script->get_cpp_base_class();
+        auto cpp_base = derived_script->find_cpp_base_class();
         if (cpp_base && cpp_base->get_name() == base) {
             return true;
         }
@@ -242,7 +242,7 @@ bool class_registry::check_inheritance_chain(const std::string& derived, const s
     
     // Check for cross-type inheritance (script class inheriting from C++ class)
     if (derived_script) {
-        auto cpp_base = derived_script->get_cpp_base_class();
+        auto cpp_base = derived_script->find_cpp_base_class();
         if (cpp_base) {
             return check_inheritance_chain(cpp_base->get_name(), base);
         }

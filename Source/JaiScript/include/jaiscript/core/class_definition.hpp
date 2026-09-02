@@ -50,11 +50,12 @@ public:
 
     void set_field_unchecked(uint64_t id, const script_value& value);
 
-    // Registers this instance as its C++ object's owner in the engine's hybrid map when
-    // _cpp_object lands on a script class deriving a bound C++ class (serialization needs
-    // the reverse lookup). Called from set_field so every adoption path — binder-ctor
-    // super() in both backends, wrap_cpp_object, archive load — feeds the same map.
-    void note_hybrid_owner(const script_value& value);
+    // Records this instance as its C++ object's script layer when _cpp_object lands on a
+    // script class deriving a bound C++ class: into the object's script_extensible slot
+    // when its base registered one, else the engine's weak map. Called from set_field so
+    // every path — binder-ctor super() in both backends, extend, archive load — registers
+    // identically (docs/script_extensible.md).
+    void note_script_layer_owner(const script_value& value);
 
     // Script-write enforcement: declared-type fields convert like '=' on locals or error
     // with the locals-identical text; 'var' (any) fields pass through; undeclared ('auto')
@@ -68,6 +69,17 @@ public:
     bool has_field(uint64_t id) const;
 
     bool has_field_value(uint64_t id) const { return find_field_value(id) != nullptr; }
+
+    engine* get_engine() const { return engine_; }
+
+    // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
+    // owning its object so old handles never dangle, but every C++ extraction through it
+    // throws instead of reaching an object another layer now speaks for.
+    void retire_script_layer() { script_layer_retired_ = true; }
+    bool script_layer_retired() const { return script_layer_retired_; }
+    [[noreturn]] void throw_retired_script_layer() const {
+        throw runtime_error("Script layer '" + class_name_ + "' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+    }
 
     // Field storage lookup WITHOUT lazy default insertion (field-reference resolution:
     // a reload-removed field must error, not silently resurrect as a default)
@@ -112,6 +124,12 @@ public:
 
     void set_class_definition(std::shared_ptr<class_definition> class_def);
 
+    // Re-class this instance in place (extend's re-derive): every field cell moves to the
+    // new definition's slot for its id - cells never relocate, so captured field addresses
+    // survive exactly as under hot reload - and ids the new class does not declare stay
+    // reachable in overflow. Every handle to this instance sees the new class.
+    void reclass(const std::shared_ptr<class_definition>& class_def);
+
     // Field iteration, slot order (first build ≈ declaration order, base-first) then
     // runtime-overflow entries; replaces get_fields()/get_fields_mutable() — flat
     // storage has no map to hand out. fn(uint64_t id, script_value& value).
@@ -129,6 +147,7 @@ public:
     std::shared_ptr<void> get_cpp_object() const {
         uint64_t field_id = get_cpp_object_field_id();
         if (field_id == 0) return nullptr;
+        if (script_layer_retired_) { throw_retired_script_layer(); }
 
         auto cpp_field = get_field(field_id);
         if (!cpp_field.is_null() && cpp_field.is_object()) {
@@ -146,7 +165,20 @@ public:
     bool has_cpp_object() const {
         uint64_t field_id = get_cpp_object_field_id();
         if (field_id == 0) return false;
-        return !get_field(field_id).is_null();
+        const script_value* held = find_field_value(field_id);
+        return held && !held->is_null();
+    }
+
+    // The C++ object's address as _cpp_object holds it (owning or not); null without one.
+    // A raw read - no handle copies - for the slot lookups on member resolution.
+    void* cpp_object_pointer() const {
+        uint64_t field_id = get_cpp_object_field_id();
+        if (field_id == 0) return nullptr;
+        const script_value* held = find_field_value(field_id);
+        if (!held || !held->is_object()) return nullptr;
+        auto holder = held->get_object_holder();
+        if (!holder) return nullptr;
+        return holder->data ? holder->data.get() : holder->bound_ptr;
     }
 
     std::shared_ptr<class_instance> deep_copy() const;
@@ -190,6 +222,7 @@ private:
     void rehome_overflow_fields();
     class_definition* class_def_ = nullptr;
     engine* engine_ = nullptr;
+    bool script_layer_retired_ = false;
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
     mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;
@@ -1014,6 +1047,35 @@ public:
 
     std::shared_ptr<class_definition> get_cpp_base_class() const { return cpp_base_class_; }
 
+    // Slot access for a bound C++ type deriving script_extensible, installed by its
+    // dynamic_binder; the void* is _cpp_object's pointer, a T* by the holder contract.
+    struct script_slot_hooks {
+        void (*attach)(void* object, const std::weak_ptr<class_instance>& layer) = nullptr;
+        void (*own)(void* object, const std::shared_ptr<class_instance>& layer) = nullptr;
+        void (*detach)(void* object) = nullptr;
+        std::shared_ptr<class_instance> (*read)(const void* object) = nullptr;
+    };
+    void set_script_slot_hooks(const script_slot_hooks& hooks) { script_slot_hooks_ = hooks; }
+    const script_slot_hooks* slot_hooks() const { return script_slot_hooks_.attach ? &script_slot_hooks_ : nullptr; }
+    // Set once an object of this C++ class has been extended: only then does member
+    // resolution on a plain wrapper of the class consult the object's slot (a wrapper made
+    // before the extend still resolves to the layer). Definitions never extended pay nothing.
+    void note_extended() { extended_ever_ = true; }
+    bool extended_ever() const { return extended_ever_; }
+
+    // Nearest C++ base anywhere up the script parent chain — the class an instance's
+    // _cpp_object is typed as. cpp_base_class_ is only set on the script class whose DIRECT
+    // first base is C++, so multi-level hybrids (script : script : C++) must walk.
+    std::shared_ptr<class_definition> find_cpp_base_class() const {
+        if (cpp_base_class_) { return cpp_base_class_; }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (auto found = parent->find_cpp_base_class()) { return found; }
+            }
+        }
+        return nullptr;
+    }
+
     void register_property_setter(uint64_t field_id, uint64_t setter_id) {
         property_setter_ids_[field_id] = setter_id;
     }
@@ -1223,15 +1285,32 @@ public:
 
     void set_copy_function(copy_function copier) {
         copy_function_ = std::move(copier);
+        bump_method_epoch();   // nocopy verdicts of script classes over this base re-evaluate
     }
 
     bool has_copy_function() const {
         return copy_function_ != nullptr;
     }
 
-    // 'nocopy class': instances refuse by-value copies, like a deleted C++ copy constructor
-    void nocopy(bool value) { nocopy_ = value; }
-    bool nocopy() const { return nocopy_; }
+    // 'nocopy class': instances refuse by-value copies, like a deleted C++ copy constructor.
+    // Inherited: a class derived from a nocopy class is nocopy, and so is a script class over
+    // a C++ base that has no copy function (a deleted copy constructor reads the same way).
+    // Consulted on every object copy, so the chain verdict is memoized against method_epoch_,
+    // which every base-class change and hot reload cascades into derived classes.
+    void nocopy(bool value) { nocopy_ = value; nocopy_memo_epoch_ = 0; }
+    bool nocopy() const {
+        if (nocopy_memo_epoch_ != method_epoch_) {
+            bool verdict = nocopy_;
+            for (const auto& parent : parent_classes_) {
+                if (verdict) { break; }
+                verdict = parent && parent->nocopy();
+            }
+            if (!verdict && cpp_base_class_) { verdict = !cpp_base_class_->has_copy_function(); }
+            nocopy_memo_ = verdict;
+            nocopy_memo_epoch_ = method_epoch_;
+        }
+        return nocopy_memo_;
+    }
 
     std::shared_ptr<void> copy_object(const void* src) const {
         if (!copy_function_) {
@@ -1577,6 +1656,8 @@ private:
     bool chain_has_nonpublic_ = false;
 
     std::shared_ptr<class_definition> cpp_base_class_;
+    script_slot_hooks script_slot_hooks_;
+    bool extended_ever_ = false;
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
 
@@ -1596,6 +1677,8 @@ private:
 
     copy_function copy_function_;
     bool nocopy_ = false;
+    mutable bool nocopy_memo_ = false;
+    mutable uint64_t nocopy_memo_epoch_ = 0;
 
     std::unordered_map<uint64_t, method_metadata> method_metadata_;
 
@@ -1735,6 +1818,39 @@ inline void class_instance::rehome_overflow_fields() {
 inline void class_instance::set_class_definition(std::shared_ptr<class_definition> class_def) {
     class_def_ = class_def.get();
     rehome_overflow_fields();
+}
+
+inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def) {
+    if (!class_def || class_def.get() == class_def_) { return; }
+    std::vector<std::pair<uint64_t, std::unique_ptr<script_value>>> cells;
+    if (class_def_) {
+        cells.reserve(flat_fields_.size());
+        for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
+            if (flat_fields_[slot]) {
+                cells.emplace_back(class_def_->slot_field(static_cast<uint32_t>(slot)), std::move(flat_fields_[slot]));
+            }
+        }
+        class_def_->unregister_instance(this);
+    }
+    flat_fields_.clear();
+    class_def_ = class_def.get();
+    class_name_ = class_def->get_name();
+    bound_method_cache_.clear();
+    flat_fields_.resize(class_def_->field_slot_count());
+    for (auto& [id, cell] : cells) {
+        const uint32_t slot = class_def_->field_slot(id);
+        if (slot != class_definition::k_no_field_slot) {
+            if (slot >= flat_fields_.size()) { flat_fields_.resize(static_cast<size_t>(slot) + 1); }
+            flat_fields_[slot] = std::move(cell);
+        } else if (cell->raw_storage_index() != script_value::TYPEID_INVALID) {
+            if (!overflow_fields_) {
+                overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
+            }
+            overflow_fields_->insert_or_assign(id, std::move(*cell));
+        }
+    }
+    rehome_overflow_fields();
+    class_def_->register_instance(weak_from_this());
 }
 
 template <typename F>
@@ -1984,13 +2100,21 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     return std::move(*converted);
 }
 
-inline void class_instance::note_hybrid_owner(const script_value& value) {
-    if (!engine_ || !class_def_ || !class_def_->get_cpp_base_class()) { return; }
+inline void class_instance::note_script_layer_owner(const script_value& value) {
+    if (!engine_ || !class_def_) { return; }
+    auto cpp_base = class_def_->find_cpp_base_class();
+    if (!cpp_base) { return; }
     auto holder = value.get_object_holder();
-    if (!holder || !holder->data) { return; }
+    if (!holder) { return; }
+    void* object = holder->data ? holder->data.get() : holder->bound_ptr;
+    if (!object) { return; }
     auto weak_self = weak_from_this();
     if (weak_self.expired()) { return; }
-    engine_->note_hybrid_instance(holder->data.get(), weak_self);
+    if (auto hooks = cpp_base->slot_hooks()) {
+        hooks->attach(object, weak_self);
+        return;
+    }
+    engine_->note_script_layer(object, weak_self);
 }
 
 inline void class_instance::set_field(uint64_t id, const script_value& value) {
@@ -1998,7 +2122,7 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
     // uninitialized fields) must remain storable from C++.
     if (class_def_ && !value.is_null()) {
         if (id == get_cpp_object_field_id()) [[unlikely]] {
-            note_hybrid_owner(value);
+            note_script_layer_owner(value);
         }
         if (type_info_ptr declared = class_def_->get_field_declared_type(id);
             declared && declared->base_type != script_value_type::jai_any_type) {
@@ -2098,7 +2222,10 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
         if (!obj_holder) {
             throw runtime_error("script_value is not an object type");
         }
-        return obj_holder->data;
+        if (obj_holder->data) { return obj_holder->data; }
+        // an extended object's non-owning holder: hand the pointer out as an unowned alias
+        if (obj_holder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), obj_holder->bound_ptr); }
+        return nullptr;
     }
     return nullptr;
 }
@@ -2146,6 +2273,13 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     // no-enforcement order); adopt the definition then slot them.
     new_instance->class_def_ = class_def_;
     new_instance->rehome_overflow_fields();
+    // The copied C++ object is a new identity: register the copy as its script layer (the
+    // set_field hook above ran before the definition existed and could not).
+    if (cpp_obj_id != 0) {
+        if (const script_value* copied = new_instance->find_field_value(cpp_obj_id); copied && !copied->is_null()) {
+            new_instance->note_script_layer_owner(*copied);
+        }
+    }
 
     if (class_def_) {
         class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
@@ -2221,7 +2355,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
             }
         }
 
-        auto cpp_base = class_def_->get_cpp_base_class();
+        auto cpp_base = class_def_->find_cpp_base_class();
         if (cpp_base) {
             auto& cpp_defaults = cpp_base->get_all_field_defaults();
             auto cpp_it = cpp_defaults.find(id);
@@ -2264,7 +2398,7 @@ inline bool class_instance::has_field(uint64_t id) const {
             return true;
         }
 
-        auto cpp_base = class_def_->get_cpp_base_class();
+        auto cpp_base = class_def_->find_cpp_base_class();
         if (cpp_base) {
             const auto& cpp_fields = cpp_base->get_all_field_defaults();
             if (cpp_fields.find(id) != cpp_fields.end()) {

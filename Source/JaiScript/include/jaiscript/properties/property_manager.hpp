@@ -8,6 +8,7 @@
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/core/engine_bindable.hpp>
+#include <jaiscript/core/script_extensible.hpp>
 #include <jaiscript/signals/receiver_owner.hpp>
 
 namespace jai {
@@ -166,12 +167,33 @@ namespace jai {
 	//       }
 	//   };
 
+	// Every property_owner is script_extensible (docs/script_extensible.md): the slot comes
+	// from the first extensible base when one exists (so multiple property_owner bases never
+	// leave two ambiguous slots), else from deriving the mixin here.
 	template<typename Derived, typename... Bases>
-	class property_owner : public Bases... {
+	class property_owner : public Bases...,
+	                       public std::conditional_t<detail::any_script_extensible_v<Bases...>, detail::no_script_slot<Derived>, script_extensible> {
 	public:
 		using _jai_owner_type = Derived;
 		using _jai_base_types = std::tuple<Bases...>;
 		static constexpr size_t _jai_base_count = sizeof...(Bases);
+
+		script_extensible& jai_script_slot() {
+			if constexpr (detail::any_script_extensible_v<Bases...>) {
+				return static_cast<detail::first_script_extensible_t<Bases...>&>(*this);
+			} else {
+				return static_cast<script_extensible&>(*this);
+			}
+		}
+		const script_extensible& jai_script_slot() const {
+			if constexpr (detail::any_script_extensible_v<Bases...>) {
+				return static_cast<const detail::first_script_extensible_t<Bases...>&>(*this);
+			} else {
+				return static_cast<const script_extensible&>(*this);
+			}
+		}
+		std::shared_ptr<class_instance> script_layer() const { return jai_script_slot().script_layer(); }
+		bool has_script_layer() const { return jai_script_slot().has_script_layer(); }
 
 		property_manager property_mgr;
 

@@ -15,6 +15,7 @@ namespace jai {
 // Forward declarations
 class string_symbolizer;
 class class_definition;
+class class_instance;
 class coroutine_handle;
 namespace debug { class controller; }
 namespace detail { class engine_operator_table; }
@@ -120,6 +121,13 @@ public:
     // Execute a script-defined callable (see script_callable). For kind::method the
     // receiver rides in payload.this_obj and args exclude it.
     virtual checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) = 0;
+
+    // Field initializers for an instance created OUTSIDE construction (engine::extend,
+    // archive load): the declared initializers run chain-root first in declaration order
+    // with 'this' bound, exactly as construction seeds them, parented on the global
+    // environment (a class declared inside a function sees globals here). No ctor body.
+    virtual void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                          const std::shared_ptr<class_definition>& class_def) = 0;
     
     // Variable access (needed by engine)
     virtual script_value get_variable(const std::string& name) const = 0;

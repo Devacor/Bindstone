@@ -2173,6 +2173,19 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         target.instance = std::static_pointer_cast<class_instance>(holder->data);
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
+            // A plain wrapper of an extended object IS the object's layer (docs/script_extensible.md
+            // S1): re-point the handle itself, so every copy of it - and every receiver site,
+            // getters, setters, bound methods, the vm's caches - sees the layer from now on.
+            if (target.class_def && !target.class_def->is_script_class() && target.class_def->extended_ever()) {
+                if (auto hooks = target.class_def->slot_hooks()) {
+                    auto layer = hooks->read(target.instance->cpp_object_pointer());
+                    if (layer && layer != target.instance && layer->get_engine() == engine_) {
+                        holder->data = layer;
+                        target.instance = std::move(layer);
+                        target.class_def = target.instance->get_class_definition();
+                    }
+                }
+            }
         }
     } else if (engine_) {
         target.engine_def = holder->type_id != UINT64_MAX
@@ -5523,7 +5536,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 // Check if this is a C++ parent property that needs setter method
                                 auto class_def = instance->get_class_definition();
                                 if (class_def) {
-                                    auto cpp_base = class_def->get_cpp_base_class();
+                                    auto cpp_base = class_def->find_cpp_base_class();
                                     if (cpp_base) {
                                         // Check if field has a pre-registered setter ID (fast path)
                                         uint64_t setter_id = cpp_base->get_property_setter_id(identifier->symbol_id);
@@ -7907,6 +7920,14 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
                 // Call the getter with 'this' as argument
                 const script_function& func = getter.as_function();
+                // A bound C++ getter on a retired script layer reports (script getters
+                // still see the layer's own fields)
+                if (target.instance && target.instance->script_layer_retired() &&
+                    !func.target<script_method_dispatch>() && !target.class_def->is_auto_accessor(getter_id)) {
+                    return checked_result<void>(make_error_code(runtime_error_code::script_layer_retired),
+                        "Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
+                        target.class_def->get_type_id());
+                }
                 std::vector<script_value> args = {objectValue};
                 auto result = func(args);
                 if (!result) {
@@ -7930,6 +7951,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             }
         } catch (const std::exception&) {
             // If the getter fails (e.g., class definition expired), fall back to field access
+            if (target.instance && target.instance->script_layer_retired()) { throw; }
         }
     }
 
@@ -11058,17 +11080,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         ctor_payload.kind = script_callable::kind_type::constructor;
         ctor_payload.cls = class_def;
         ctor_payload.definition_env = definition_env;
-        engine* ctor_eng = engine_;
-        auto ctor_dispatcher = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-            execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
-            if (!backend) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before constructor call");
-            }
-            return backend->execute_callable(ctor_payload, args);
-        };
-
-        // Register the dispatcher in global environment (constructors are always global)
-        get_global_environment()->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_));
+        // Named thunk (vm parity): extend(obj, ClassName) recovers the class from the
+        // constructor value through target<script_callable_thunk>()
+        get_global_environment()->define(decl->name_id, script_value::make_function(
+            script_function(script_callable_thunk{engine_, std::move(ctor_payload)}), engine_));
     }
 
     // If no constructor was found, create a default constructor
@@ -11077,19 +11092,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         script_callable ctor_payload;
         ctor_payload.kind = script_callable::kind_type::constructor;
         ctor_payload.cls = class_def;
-        engine* ctor_eng = engine_;
-        auto default_ctor_func = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-            execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
-            if (!backend) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::internal_error),
-                    "Interpreter was destroyed before constructor call");
-            }
-            return backend->execute_callable(ctor_payload, args);
-        };
-
         // Register default constructor in global environment (constructors are always global)
-        get_global_environment()->define(decl->name_id, script_value::make_function(default_ctor_func, engine_));
-        // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
+        get_global_environment()->define(decl->name_id, script_value::make_function(
+            script_function(script_callable_thunk{engine_, std::move(ctor_payload)}), engine_));
     }
     
     reflect_field_order_instance.insert(reflect_field_order_instance.end(),
@@ -11661,6 +11666,17 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     // Restore environment
     environment_ = old_env;
     member_scope_ = old_scope;
+}
+
+void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                           const std::shared_ptr<class_definition>& class_def) {
+    auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
+    if (!script_def || !instance) { return; }
+    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+    auto init_env = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
+    init_env->define("this", this_value);
+    init_env->set_access_context(class_def.get());
+    evaluate_field_initializers(instance, script_def, init_env, false);
 }
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {

@@ -28,6 +28,11 @@ public:
         return interpreter_->execute_callable(payload, args);
     }
 
+    void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                  const std::shared_ptr<class_definition>& class_def) override {
+        interpreter_->apply_field_initializers(instance, class_def);
+    }
+
     const class_definition* current_access_context() const override {
         return interpreter_->current_access_context();
     }

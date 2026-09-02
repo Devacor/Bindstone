@@ -14,6 +14,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "bound_cpp_vector.hpp"
+#include "script_extensible.hpp"
 #include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
 #include <jaiscript/properties/property_schema.hpp>
@@ -1590,6 +1591,19 @@ public:
         // Prevent double-build
         if (built_) return;
         built_ = true;
+
+        if constexpr (std::is_base_of_v<script_extensible, T>) {
+            class_definition::script_slot_hooks hooks;
+            hooks.attach = [](void* object, const std::weak_ptr<class_instance>& layer) {
+                static_cast<T*>(object)->jai_script_slot().attach_script_layer(layer);
+            };
+            hooks.own = [](void* object, const std::shared_ptr<class_instance>& layer) {
+                static_cast<T*>(object)->jai_script_slot().own_script_layer(layer);
+            };
+            hooks.detach = [](void* object) { static_cast<T*>(object)->jai_script_slot().detach_script_layer(); };
+            hooks.read = [](const void* object) { return static_cast<const T*>(object)->jai_script_slot().script_layer(); };
+            class_def_->set_script_slot_hooks(hooks);
+        }
 
         // Auto-register default constructor if:
         // 1. User didn't explicitly register any constructor

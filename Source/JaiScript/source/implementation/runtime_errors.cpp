@@ -82,6 +82,10 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Class not found";
         case runtime_error_code::member_not_found:
             return "Member not found";
+        case runtime_error_code::script_layer_retired:
+            return "Script layer was detached: this handle no longer reaches its object";
+        case runtime_error_code::extend_rejected:
+            return "extend rejected";
         case runtime_error_code::static_member_not_found:
             return "Static member not found";
         case runtime_error_code::multiple_inheritance:

@@ -476,6 +476,9 @@ namespace jai {
                                         std::shared_ptr<script_class_definition> class_def,
                                         std::shared_ptr<environment> init_env,
                                         bool skip_parent_recursion = false);
+        // interpreter_backend forwards execution_backend::apply_field_initializers here
+        void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                      const std::shared_ptr<class_definition>& class_def);
 
         // Parameter binding semantics
         enum class parameter_semantics {

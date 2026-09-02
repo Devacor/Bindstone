@@ -134,7 +134,7 @@ namespace jai::detail {
 		}
 
 		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
-			return actual_element.clone();
+			return actual_element.clone_element();
 		}
 
 		auto elem_type = actual_element.type();
@@ -147,7 +147,7 @@ namespace jai::detail {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
 		}
 
-		return actual_element.clone();
+		return actual_element.clone_element();
 	}
 
 	// The one message both backends raise at a failed boundary (byte-identical errors).

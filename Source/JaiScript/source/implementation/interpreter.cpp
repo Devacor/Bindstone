@@ -9685,6 +9685,14 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             // If type changed mid-loop, continue with slow path dispatch
                             if (fell_through) [[unlikely]] {
                                 while (true) {
+                                    // Same back-edge limit check as every other loop path: a counter
+                                    // boxed mid-loop (bound by reference once) used to land here
+                                    // unbudgeted and spin forever (fuzz seed 33294)
+                                    if (execution_limit_exhausted()) [[unlikely]] {
+                                        release_environment(loop_env);
+                                        environment_ = previous;
+                                        return execution_limit_failure();
+                                    }
                                     auto cond_result = dispatch_expr(stmt->condition.get());
                                     if (!cond_result) {
                                         release_environment(loop_env);

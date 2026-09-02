@@ -150,6 +150,34 @@ namespace jai::detail {
 		return actual_element.clone_element();
 	}
 
+	// Kind <-> primitive element type (the representation rule's one table)
+	inline script_array::kind_t kind_for_element_base(script_value_type base) {
+		switch (base) {
+			case script_value_type::jai_int_type: return script_array::kind_t::i64;
+			case script_value_type::jai_float_type: return script_array::kind_t::f64;
+			case script_value_type::jai_bool_type: return script_array::kind_t::b8;
+			case script_value_type::jai_char_type: return script_array::kind_t::c8;
+			default: return script_array::kind_t::hetero;
+		}
+	}
+	inline script_value_type typed_kind_element_base(script_array::kind_t kind) {
+		switch (kind) {
+			case script_array::kind_t::i64: return script_value_type::jai_int_type;
+			case script_array::kind_t::f64: return script_value_type::jai_float_type;
+			case script_array::kind_t::b8: return script_value_type::jai_bool_type;
+			case script_array::kind_t::c8: return script_value_type::jai_char_type;
+			default: return script_value_type::jai_any_type;
+		}
+	}
+	inline type_info* typed_kind_element_type(script_array::kind_t kind, engine* eng) {
+		switch (kind) {
+			case script_array::kind_t::i64: return eng->get_type_info_int();
+			case script_array::kind_t::f64: return eng->get_type_info_float();
+			case script_array::kind_t::b8: return eng->get_type_info_bool();
+			default: return eng->get_type_info_char();
+		}
+	}
+
 	// Uniform-literal inference (Dev ruling 2026-09-02): `auto a = [1, 2, 3]` and
 	// `array<auto> a = [...]` infer their element type from a homogeneous primitive
 	// literal and take that type's representation (array<int>/array<float> = raw buffer,
@@ -161,8 +189,7 @@ namespace jai::detail {
 		}
 		const script_array* node = array_value.unchecked_array_node();
 		if (node->is_typed()) {
-			return type_info_ptr{eng->get_type_info_array(
-				node->kind() == script_array::kind_t::i64 ? eng->get_type_info_int() : eng->get_type_info_float())};
+			return type_info_ptr{eng->get_type_info_array(typed_kind_element_type(node->kind(), eng))};
 		}
 		const auto& elems = node->values();
 		if (elems.empty()) {
@@ -224,14 +251,9 @@ namespace jai::detail {
 			const auto target_elem_base = element_type->base_type;
 			const script_array* src = value.unchecked_array_node();
 
-			// The node kind this binding wants: raw buffers for int/float element types
-			// (the boundary kernel is THE typed-node producer)
-			script_array::kind_t expected_kind = script_array::kind_t::hetero;
-			if (target_elem_base == script_value_type::jai_int_type) {
-				expected_kind = script_array::kind_t::i64;
-			} else if (target_elem_base == script_value_type::jai_float_type) {
-				expected_kind = script_array::kind_t::f64;
-			}
+			// The node kind this binding wants: raw buffers for the primitive element
+			// types (the boundary kernel is THE typed-node producer)
+			const script_array::kind_t expected_kind = kind_for_element_base(target_elem_base);
 
 			// Proof by kind: a same-kind typed node cannot hold a mismatched element
 			if (src->is_typed() && src->kind() == expected_kind) {
@@ -243,13 +265,13 @@ namespace jai::detail {
 			bool needs_conversion = src->is_typed() || src->kind() != expected_kind;
 			const size_t count = src->size();
 			if (src->is_typed()) {
-				// typed source elements are int/float by construction — compatible with
-				// numeric targets, mismatched with everything else
-				if (target_elem_base != script_value_type::jai_int_type &&
-				    target_elem_base != script_value_type::jai_float_type) {
-					out.offending = container_base_type_name(
-						src->kind() == script_array::kind_t::i64 ? script_value_type::jai_int_type
-						                                         : script_value_type::jai_float_type);
+				// typed source elements are one primitive by construction: int/float cross-
+				// convert into numeric targets, everything else is a mismatch
+				const script_value_type src_elem = typed_kind_element_base(src->kind());
+				const bool numeric_pair = (src_elem == script_value_type::jai_int_type || src_elem == script_value_type::jai_float_type) &&
+				                          (target_elem_base == script_value_type::jai_int_type || target_elem_base == script_value_type::jai_float_type);
+				if (!numeric_pair && src_elem != target_elem_base) {
+					out.offending = container_base_type_name(src_elem);
 					out.expected = target_type->canonical_name();
 					return out;
 				}

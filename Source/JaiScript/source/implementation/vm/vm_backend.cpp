@@ -5927,18 +5927,20 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			}
 			if (node->is_typed()) {
 				// Raw-capable sinks take the buffer payload with no value mint at all
-				// (the decl lane lands it straight in the slot)
+				// (the decl lane lands it straight in the slot); byte kinds box through get()
 				if constexpr (requires(Sink& s, script_int iv) { s.raw_int(iv); }) {
 					if (node->kind() == script_array::kind_t::i64) {
 #ifdef JAISCRIPT_VM_PROFILE
 						++profile_index_read_paths_[0];
 #endif
 						sink.raw_int(node->ints()[static_cast<size_t>(index)]);
-					} else {
+					} else if (node->kind() == script_array::kind_t::f64) {
 #ifdef JAISCRIPT_VM_PROFILE
 						++profile_index_read_paths_[1];
 #endif
 						sink.raw_float(node->floats()[static_cast<size_t>(index)]);
+					} else {
+						sink(node->get(static_cast<size_t>(index), engine_));
 					}
 					return {};
 				} else {
@@ -6295,7 +6297,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		// the buffer with set()'s exact casts — no handle copy, no value copy (the raw
 		// node stands in for the strong_ptr because no user code runs here); non-numeric
 		// rhs replays for the exact mismatch error.
-		if (node && node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
+		if (node && (node->kind() == script_array::kind_t::i64 || node->kind() == script_array::kind_t::f64) &&
+		    index >= 0 && index < static_cast<script_int>(node->size())) {
 			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 			const size_t ri = rhs_peek.raw_storage_index();
 			if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {

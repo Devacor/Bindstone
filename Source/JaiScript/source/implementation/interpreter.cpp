@@ -577,8 +577,17 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& node = *self.unchecked_get_array_storage();
         if (node.is_typed() && args.empty()) {
             // raw buffer sort: no comparator, so no user script can mutate mid-sort
-            if (node.kind() == script_array::kind_t::i64) { std::sort(node.ints().begin(), node.ints().end()); }
-            else { std::sort(node.floats().begin(), node.floats().end()); }
+            switch (node.kind()) {
+                case script_array::kind_t::i64: std::sort(node.ints().begin(), node.ints().end()); break;
+                case script_array::kind_t::f64: std::sort(node.floats().begin(), node.floats().end()); break;
+                case script_array::kind_t::c8:
+                    // chars order as script_char (signed), exactly like the boxed compare
+                    std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a, uint8_t b) {
+                        return static_cast<script_char>(a) < static_cast<script_char>(b);
+                    });
+                    break;
+                default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true
+            }
             return ctx.make_value();
         }
 

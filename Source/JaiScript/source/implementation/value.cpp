@@ -238,10 +238,12 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     // airtight tag (typed_array_design.md stage 0) is what makes this sound.
     script_array::kind_t node_kind = script_array::kind_t::hetero;
     if (element_type) {
-        if (element_type->base_type == script_value_type::jai_int_type) {
-            node_kind = script_array::kind_t::i64;
-        } else if (element_type->base_type == script_value_type::jai_float_type) {
-            node_kind = script_array::kind_t::f64;
+        switch (element_type->base_type) {
+            case script_value_type::jai_int_type: node_kind = script_array::kind_t::i64; break;
+            case script_value_type::jai_float_type: node_kind = script_array::kind_t::f64; break;
+            case script_value_type::jai_bool_type: node_kind = script_array::kind_t::b8; break;
+            case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
+            default: break;
         }
     }
 
@@ -420,8 +422,12 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     script_value v(std::monostate{}, eng);
     type_info_ptr referent_tag;
     if (container->is_typed()) {
-        referent_tag = container->kind() == script_array::kind_t::i64 ? eng->get_type_info_int()
-                                                                      : eng->get_type_info_float();
+        switch (container->kind()) {
+            case script_array::kind_t::i64: referent_tag = eng->get_type_info_int(); break;
+            case script_array::kind_t::f64: referent_tag = eng->get_type_info_float(); break;
+            case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
+            default: referent_tag = eng->get_type_info_char(); break;
+        }
     } else {
         referent_tag = container->values()[index].get_type_info();
     }
@@ -558,11 +564,7 @@ script_value script_value::clone() const {
                 // kind-preserving deep copy = one buffer copy (8B/element)
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
                 auto new_node = make_strong<script_array>(other_node.kind());
-                if (other_node.kind() == script_array::kind_t::i64) {
-                    new_node->ints() = other_node.ints();
-                } else {
-                    new_node->floats() = other_node.floats();
-                }
+                new_node->assign_buffer(other_node);
                 result.storage_ = new_node;
                 break;
             }
@@ -732,11 +734,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 // all-primitive by construction: detach = one buffer copy
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));
                 auto fresh = make_strong<script_array>(handle->kind());
-                if (handle->kind() == script_array::kind_t::i64) {
-                    fresh->ints() = handle->ints();
-                } else {
-                    fresh->floats() = handle->floats();
-                }
+                fresh->assign_buffer(*handle);
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
                 break;

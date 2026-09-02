@@ -33,6 +33,7 @@ namespace jai {
 
     // Forward declarations
     class class_definition;
+    class class_instance;
     class class_registry;
     class execution_backend;
     class string_symbolizer;
@@ -721,6 +722,23 @@ namespace jai {
         
         // Get the class registry for this engine
         class_registry& get_class_registry();
+
+        // Hybrid instances (a script class deriving a bound C++ class owns its C++ object
+        // through _cpp_object): a weak complete-object-pointer -> owning-script-instance map
+        // lets polymorphic serialization recover the script layer from a shared_ptr<CppBase>
+        // instead of silently slicing it. note_hybrid_instance is called from
+        // class_instance::set_field whenever _cpp_object lands on a hybrid instance.
+        void note_hybrid_instance(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
+        std::shared_ptr<class_instance> find_hybrid_instance(const void* cpp_object) const;
+        // Save side: true when cpp_object is owned by a live hybrid instance; fills the script
+        // class name ($type) and the script-level fields encoded as JSON ($script).
+        bool hybrid_save_info(const void* cpp_object, std::string& script_class_name, std::string& fields_json);
+        // Load side: the bound C++ base's registered name for a script class ("" when the name
+        // is not a script class with a C++ base), and re-attachment of the script layer around a
+        // freshly deserialized complete C++ object (hydrates fields, runs post_load).
+        std::string hybrid_base_class_name(const std::string& script_class_name);
+        std::shared_ptr<class_instance> load_hybrid_instance(const std::string& script_class_name,
+            const std::shared_ptr<void>& cpp_object, const std::string& fields_json);
 
         // Monotonic counter bumped on every script-class (re)definition. Class-shape
         // caches (class_definition::flat_value_semantics) validate against it: a nested

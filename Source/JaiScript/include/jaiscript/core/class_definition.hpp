@@ -50,6 +50,12 @@ public:
 
     void set_field_unchecked(uint64_t id, const script_value& value);
 
+    // Registers this instance as its C++ object's owner in the engine's hybrid map when
+    // _cpp_object lands on a script class deriving a bound C++ class (serialization needs
+    // the reverse lookup). Called from set_field so every adoption path — binder-ctor
+    // super() in both backends, wrap_cpp_object, archive load — feeds the same map.
+    void note_hybrid_owner(const script_value& value);
+
     // Script-write enforcement: declared-type fields convert like '=' on locals or error
     // with the locals-identical text; 'var' (any) fields pass through; undeclared ('auto')
     // fields infer from the current value's tag then enforce. Callers store the returned
@@ -1978,10 +1984,22 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     return std::move(*converted);
 }
 
+inline void class_instance::note_hybrid_owner(const script_value& value) {
+    if (!engine_ || !class_def_ || !class_def_->get_cpp_base_class()) { return; }
+    auto holder = value.get_object_holder();
+    if (!holder || !holder->data) { return; }
+    auto weak_self = weak_from_this();
+    if (weak_self.expired()) { return; }
+    engine_->note_hybrid_instance(holder->data.get(), weak_self);
+}
+
 inline void class_instance::set_field(uint64_t id, const script_value& value) {
     // Null passes through: typed-null placeholders (create_instance defaults,
     // uninitialized fields) must remain storable from C++.
     if (class_def_ && !value.is_null()) {
+        if (id == get_cpp_object_field_id()) [[unlikely]] {
+            note_hybrid_owner(value);
+        }
         if (type_info_ptr declared = class_def_->get_field_declared_type(id);
             declared && declared->base_type != script_value_type::jai_any_type) {
             auto converted = detail::try_convert_field_value(value, declared, engine_);

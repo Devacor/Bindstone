@@ -1526,6 +1526,13 @@ public:
             check_quad("array<string> s = [\"hi\"]; to_json(s)", "[\"hi\"]", "string buffer serializes");
             check_quad("array<string> s = [\"a\", \"b\"]; s.reverse(); s[0]", "b", "string buffer reverse");
             check_quad_error("array<string> s = [\"a\"]; s.push(1)", "string buffer rejects int");
+            // fuzz seed 129 (2026-09-02): the vm's unfused element-store lane took ANY typed
+            // node with a numeric rhs - an int landed unchecked in a string buffer
+            check_quad_error("array<string> s = [\"a\"]; int g = 5; s[0] = g", "string buffer element store rejects int");
+            check_quad("array<string> s = [\"a\"]; s[0] += 1; s[0]", "a1", "string buffer compound store concatenates through the enforcing path");
+            check_quad_error("array<bool> f = [true]; int g = 1; f[0] = g", "bool buffer element store rejects int");
+            check_quad_error("array<char> c = ['a']; c[0] += 1", "char buffer compound store rejects int");
+            check_quad("array<string> s = [\"a\"]; string t = \"b\"; s[0] = t; s[0]", "b", "string buffer element store of a string");
         });
 
         test("typed_storage_errors_match_plain", [check_quad_error]() {

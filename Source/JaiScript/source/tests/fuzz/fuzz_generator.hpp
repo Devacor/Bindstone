@@ -459,6 +459,24 @@ namespace jai::fuzz {
 			return array_expr(0);
 		}
 
+		std::string typed_array_decl(const std::string& name) {
+			const uint32_t pick = rng_.below(10);
+			const char* elem_type = pick < 4 ? "int" : pick < 6 ? "float" : pick < 8 ? "string" : pick < 9 ? "bool" : "char";
+			int n = static_cast<int>(rng_.range(0, 4));
+			std::string out = std::string("array<") + elem_type + "> " + name + " = [";
+			for (int i = 0; i < n; ++i) {
+				if (i) out += ", ";
+				switch (pick < 4 ? 0 : pick < 6 ? 1 : pick < 8 ? 2 : pick < 9 ? 3 : 4) {
+					case 0: out += int_literal(); break;
+					case 1: out += float_literal(); break;
+					case 2: out += string_literal(); break;
+					case 3: out += rng_.chance(50) ? "true" : "false"; break;
+					default: out += std::string("'") + static_cast<char>('a' + rng_.below(5)) + "'"; break;
+				}
+			}
+			return out + "];";
+		}
+
 		std::string map_expr(int depth) {
 			if (const var_info* v = random_var(vt::map)) if (rng_.chance(50)) return v->name;
 			(void)depth;
@@ -980,7 +998,14 @@ namespace jai::fuzz {
 					declare(name, vt::f);
 					break;
 				case 5:
-					lines_.push_back("auto " + name + " = " + array_expr(2) + ";");
+					if (rng_.chance(50)) {
+						// Typed buffer declarations (the representation rule, 2026-09-02): every
+						// primitive element kind, uniform literals; later pushes/stores of other
+						// types are error-parity draws, not noise
+						lines_.push_back(typed_array_decl(name));
+					} else {
+						lines_.push_back("auto " + name + " = " + array_expr(2) + ";");
+					}
 					declare(name, vt::arr);
 					break;
 				case 6:

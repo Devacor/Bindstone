@@ -365,7 +365,6 @@ protected:
 
 	const CreatureData& statTemplate;
 
-	std::unordered_map<std::string, jai::script_value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
 

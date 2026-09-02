@@ -134,3 +134,20 @@ The Foundry benchmark harness (Release BENCHMARKS config) reports **integer µs/
 ±50% run-to-run variance** (Source/JaiScript/CLAUDE.md "Benchmarks"). Compare min-of-3 runs,
 and never claim a sub-µs win from it — anything under ~1 µs needs a dedicated ns micro-bench
 (see `execution_mode_metrics.md` for the methodology that resolved the 0.4 µs regime).
+
+## 8. Typed array representation follows the declared type (2026-09-02)
+
+- `array<int>` / `array<float>` / `array<bool>` / `array<char>` / `array<string>` are raw
+  buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str); `array<var>` (and a
+  literal with no spelled or inferable element type) is the ONLY `script_value`-vector form.
+  A uniform `auto` literal infers its element type. There is no flag and no Debug/Release
+  difference; converting between forms is an explicit assignment, nothing demotes silently.
+- The tag is the node kind: `as_array()` / `checked_as_array()` are the `array<var>` view and
+  return ONE consistent error on a typed node (`typed_array_vector_view_message`). Readers use
+  `script_array::for_each` / `get`; writers use `set` / `push`; `bound_array<T>&` mutates the
+  buffer in place and binds only element types that fit the kind.
+- A raw fast lane tests the KIND it was written for (`kind() == i64 || kind() == f64`), never
+  `is_typed()` — byte and string kinds are typed too and must take the enforcing `get`/`set`
+  path (fuzz seed 129 stored an int into a string buffer through an `is_typed()` lane).
+- Parallel workers never borrow string handles raw: the "all primitive" short-circuit excludes
+  the str kind, and a typed input is read through a boxed snapshot (stage-3 raw reads pending).

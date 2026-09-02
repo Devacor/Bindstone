@@ -572,7 +572,7 @@ script_value script_value::clone() const {
             auto new_node = make_strong<script_array>();
             new_node->values().reserve(other_array.size());
             for (const auto& elem : other_array) {
-                new_node->values().push_back(elem.clone());
+                new_node->values().push_back(elem.clone_element());
             }
             result.storage_ = new_node;
             break;
@@ -584,7 +584,7 @@ script_value script_value::clone() const {
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
             auto new_map = make_strong<script_map>();
             for (const auto& [key, value] : other_map) {
-                new_map->emplace(key.clone(), value.clone());
+                new_map->emplace(key.clone_element(), value.clone_element());
             }
             result.storage_ = new_map;
             break;

@@ -968,6 +968,70 @@ public:
         // === String Performance Benchmarks ===
         // These measure the shared_ptr string optimization effectiveness
 
+        // Container copy by value (2026-09-02 pass): the STORE taxonomy on GLOOM named one
+        // `pix = G.bg` per frame at 527k cycles - an untyped 4000-int array deep-copied
+        // element by element. These rows pin that shape: untyped scalar, typed buffer,
+        // string elements, and a map.
+        benchmark("Array copy by value: 1000 ints untyped (x20)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    var src = [];
+                    for (auto i = 0; i < 1000; ++i) { src.push(i); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { var c = src; acc += c[999]; }
+                    if (acc != 19980) { throw "array copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Array copy by value: array<int> 1000 typed (x20)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    array<int> tsrc = [];
+                    for (auto i = 0; i < 1000; ++i) { tsrc.push(i); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { array<int> c = tsrc; acc += c[999]; }
+                    if (acc != 19980) { throw "typed array copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Array copy by value: 200 strings (x20)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    var ssrc = [];
+                    for (auto i = 0; i < 200; ++i) { ssrc.push("s" + to_string(i)); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { var c = ssrc; acc += c.size(); }
+                    if (acc != 4000) { throw "string array copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Map copy by value: 100 string keys (x20)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    var msrc = {};
+                    for (auto i = 0; i < 100; ++i) { msrc["k" + to_string(i)] = i; }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { var c = msrc; acc += c["k50"]; }
+                    if (acc != 1000) { throw "map copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("String Copy (Long String)", [this]() {
             test_engine->execute(R"(
                 auto original = "This is a longer string that would be expensive to copy without shared_ptr optimization";

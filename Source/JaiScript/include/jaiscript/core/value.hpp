@@ -170,6 +170,24 @@ namespace jai {
         // Explicit deep copy method
         script_value clone() const;
 
+        // Element clone: plain scalars and strings clone as their shallow copy (clone()'s
+        // default case for these raw indexes IS the copy constructor - the same gate
+        // clone_for_assignment applies at store boundaries), so container copies and
+        // element conversions spend the out-of-line clone only where a deep copy can happen
+        script_value clone_element() const {
+            switch (raw_storage_index()) {
+                case TYPEID_NULL:
+                case TYPEID_INT:
+                case TYPEID_FLOAT:
+                case TYPEID_STRING:
+                case TYPEID_CHAR:
+                case TYPEID_BOOL:
+                    return *this;
+                default:
+                    return clone();
+            }
+        }
+
         // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
         // node gets a fresh strong_ptr - including strings, which clone() and plain
         // copies deliberately share - bound primitives decode to detached values, and

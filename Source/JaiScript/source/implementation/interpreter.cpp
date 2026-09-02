@@ -586,6 +586,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                         return static_cast<script_char>(a) < static_cast<script_char>(b);
                     });
                     break;
+                case script_array::kind_t::str:
+                    std::sort(node.strs().begin(), node.strs().end(),
+                              [](const strong_ptr<script_string>& a, const strong_ptr<script_string>& b) { return *a < *b; });
+                    break;
                 default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true
             }
             return ctx.make_value();
@@ -1783,21 +1787,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             script_value array_val = script_value::make_array(eng->get_type_info_string(), eng);
-            auto& result = array_val.as_array();
+            script_array& result = *array_val.unchecked_get_array_storage();   // array<string> is a handle buffer: push through the node
 
             if (delim.empty()) {
                 // Split into individual characters
                 for (char c : str) {
-                    result.push_back(ctx.make_value(std::string(1, c)));
+                    result.push(ctx.make_value(std::string(1, c)));
                 }
             } else {
                 size_t start = 0;
                 size_t end;
                 while ((end = str.find(delim, start)) != std::string::npos) {
-                    result.push_back(ctx.make_value(str.substr(start, end - start)));
+                    result.push(ctx.make_value(str.substr(start, end - start)));
                     start = end + delim.size();
                 }
-                result.push_back(ctx.make_value(str.substr(start)));
+                result.push(ctx.make_value(str.substr(start)));
             }
 
             return array_val;

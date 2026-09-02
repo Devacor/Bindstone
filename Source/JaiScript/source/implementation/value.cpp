@@ -30,6 +30,12 @@ script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr)
     }
 }
 
+script_value::script_value(strong_ptr<script_string> shared, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::move(shared)) {
+    if (eng) {
+        type_info_ = eng->get_type_info_string();
+    }
+}
+
 script_value::script_value(const char* s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(s)) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
@@ -243,6 +249,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
             case script_value_type::jai_float_type: node_kind = script_array::kind_t::f64; break;
             case script_value_type::jai_bool_type: node_kind = script_array::kind_t::b8; break;
             case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
+            case script_value_type::jai_string_type: node_kind = script_array::kind_t::str; break;
             default: break;
         }
     }
@@ -426,7 +433,8 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
             case script_array::kind_t::i64: referent_tag = eng->get_type_info_int(); break;
             case script_array::kind_t::f64: referent_tag = eng->get_type_info_float(); break;
             case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
-            default: referent_tag = eng->get_type_info_char(); break;
+            case script_array::kind_t::c8: referent_tag = eng->get_type_info_char(); break;
+            default: referent_tag = eng->get_type_info_string(); break;
         }
     } else {
         referent_tag = container->values()[index].get_type_info();

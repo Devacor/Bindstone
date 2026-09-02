@@ -51,9 +51,13 @@ private:
     }
 
     static void check_kind_fits(const script_array& n) {
-        if (n.is_typed() && !std::is_arithmetic_v<T>) {
+        if (!n.is_typed()) { return; }
+        const bool fits = n.kind() == script_array::kind_t::str ? std::is_same_v<T, std::string>
+                                                                  : std::is_arithmetic_v<T>;
+        if (!fits) {
             throw runtime_error("bound_array element type does not fit a typed array buffer "
-                                "(array<int>/array<float> bind arithmetic element types; declare array<var> for the dynamic view)");
+                                "(numeric buffers bind arithmetic element types, array<string> binds std::string; "
+                                "declare array<var> for the dynamic view)");
         }
     }
 

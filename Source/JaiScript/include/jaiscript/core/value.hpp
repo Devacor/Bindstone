@@ -121,6 +121,9 @@ namespace jai {
         script_value(const script_string& s, engine* eng);
         script_value(script_string&& s, engine* eng);
         script_value(strong_ptr<script_string> shared, engine* eng);   // shares the string object
+        struct object_holder;
+        friend struct obj_slot;   // the class-typed buffer's slot names the holder type
+        script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng);   // reboxes an object slot
         script_value(const char* s, engine* eng);
         script_value(script_char c, engine* eng);
         script_value(script_bool b, engine* eng);
@@ -630,6 +633,10 @@ namespace jai {
         // The string HANDLE (raw storage index STRING only): typed string buffers store this
         inline const strong_ptr<script_string>& unchecked_string_handle() const noexcept {
             return *storage_.get_if<TYPEID_STRING>();
+        }
+        // The object HANDLE (raw storage index OBJECT only): class-typed buffers store this
+        inline const strong_ptr<object_holder>& unchecked_object_handle() const noexcept {
+            return *storage_.get_if<TYPEID_OBJECT>();
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead)
@@ -2398,6 +2405,11 @@ namespace jai {
     // script_value is complete here, so the vector<script_value> member
     // instantiations these trigger are legal on Clang/GCC, not just under MSVC's
     // deferred instantiation.
+    struct obj_slot {
+        strong_ptr<script_value::object_holder> handle;
+        type_info_ptr tag;
+    };
+
     inline script_array::script_array() = default;
     inline script_array::script_array(kind_t k) : kind_(k) {}
     inline script_array::script_array(const script_array&) = default;
@@ -2413,10 +2425,11 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: return bytes_.size();
             case kind_t::str: return strs_.size();
+            case kind_t::obj: return objs_.size();
             default: return values_.size();
         }
     }
-    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); bytes_.clear(); strs_.clear(); }
+    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); bytes_.clear(); strs_.clear(); objs_.clear(); }
     inline void script_array::reserve(size_t n) {
         switch (kind_) {
             case kind_t::i64: ints_.reserve(n); break;
@@ -2424,6 +2437,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: bytes_.reserve(n); break;
             case kind_t::str: strs_.reserve(n); break;
+            case kind_t::obj: objs_.reserve(n); break;
             default: values_.reserve(n); break;
         }
     }
@@ -2434,6 +2448,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: bytes_ = other.bytes_; break;
             case kind_t::str: strs_ = other.strs_; break;   // handles share objects, like boxed copies
+            case kind_t::obj: objs_ = other.objs_; break;   // handle copies; clone() deep-copies per slot (value.cpp)
             default: values_ = other.values_; break;
         }
         kind_ = other.kind_;
@@ -2446,6 +2461,7 @@ namespace jai {
             case kind_t::b8: return script_value(static_cast<script_bool>(bytes_[i] != 0), eng);
             case kind_t::c8: return script_value(static_cast<script_char>(bytes_[i]), eng);
             case kind_t::str: return script_value(strs_[i], eng);
+            case kind_t::obj: return script_value(objs_[i].handle, objs_[i].tag, eng);
             default: return values_[i];
         }
     }
@@ -2468,6 +2484,10 @@ namespace jai {
                 break;
             case kind_t::str:
                 strs_[i] = v.unchecked_string_handle();   // pre-converted: exactly a string
+                break;
+            case kind_t::obj:
+                assert(v.raw_storage_index() == script_value::TYPEID_OBJECT && "object slot store: caller converts first");
+                objs_[i] = obj_slot{v.unchecked_object_handle(), v.get_type_info()};   // pre-converted: exactly an object
                 break;
             default:
                 values_[i] = std::move(v);
@@ -2494,6 +2514,10 @@ namespace jai {
             case kind_t::str:
                 strs_.push_back(pre_converted.unchecked_string_handle());
                 break;
+            case kind_t::obj:
+                assert(pre_converted.raw_storage_index() == script_value::TYPEID_OBJECT && "object slot push: caller converts first");
+                objs_.push_back(obj_slot{pre_converted.unchecked_object_handle(), pre_converted.get_type_info()});
+                break;
             default:
                 values_.push_back(std::move(pre_converted));
                 break;
@@ -2507,6 +2531,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: return bytes_.capacity();
             case kind_t::str: return strs_.capacity();
+            case kind_t::obj: return objs_.capacity();
             default: return values_.capacity();
         }
     }
@@ -2518,6 +2543,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: if (n < bytes_.size()) { bytes_.resize(n); } break;
             case kind_t::str: if (n < strs_.size()) { strs_.erase(strs_.begin() + static_cast<std::ptrdiff_t>(n), strs_.end()); } break;
+            case kind_t::obj: if (n < objs_.size()) { objs_.erase(objs_.begin() + static_cast<std::ptrdiff_t>(n), objs_.end()); } break;
             default: if (n < values_.size()) { values_.erase(values_.begin() + static_cast<std::ptrdiff_t>(n), values_.end()); } break;
         }
     }
@@ -2529,6 +2555,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: bytes_.pop_back(); break;
             case kind_t::str: strs_.pop_back(); break;
+            case kind_t::obj: objs_.pop_back(); break;
             default: values_.pop_back(); break;
         }
     }
@@ -2540,6 +2567,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: bytes_.erase(bytes_.begin() + i); break;
             case kind_t::str: strs_.erase(strs_.begin() + i); break;
+            case kind_t::obj: objs_.erase(objs_.begin() + i); break;
             default: values_.erase(values_.begin() + i); break;
         }
     }
@@ -2551,6 +2579,7 @@ namespace jai {
             case kind_t::b8:
             case kind_t::c8: std::reverse(bytes_.begin(), bytes_.end()); break;
             case kind_t::str: std::reverse(strs_.begin(), strs_.end()); break;
+            case kind_t::obj: std::reverse(objs_.begin(), objs_.end()); break;
             default: std::reverse(values_.begin(), values_.end()); break;
         }
     }
@@ -2563,6 +2592,7 @@ namespace jai {
             case kind_t::b8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_bool>(b != 0), eng)); } break;
             case kind_t::c8: for (uint8_t c : bytes_) { f(script_value(static_cast<script_char>(c), eng)); } break;
             case kind_t::str: for (const auto& h : strs_) { f(script_value(h, eng)); } break;
+            case kind_t::obj: for (const auto& s : objs_) { f(script_value(s.handle, s.tag, eng)); } break;
             default: for (const script_value& v : values_) { f(v); } break;
         }
     }
@@ -2606,6 +2636,12 @@ namespace jai {
                 for (auto& h : strs_) { values_.emplace_back(std::move(h), eng); }
                 strs_.clear();
                 strs_.shrink_to_fit();
+                break;
+            case kind_t::obj:
+                values_.reserve(objs_.size());
+                for (auto& s : objs_) { values_.emplace_back(std::move(s.handle), s.tag, eng); }
+                objs_.clear();
+                objs_.shrink_to_fit();
                 break;
             default:
                 break;

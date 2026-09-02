@@ -590,6 +590,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     std::sort(node.strs().begin(), node.strs().end(),
                               [](const strong_ptr<script_string>& a, const strong_ptr<script_string>& b) { return *a < *b; });
                     break;
+                case script_array::kind_t::obj:
+                    // objects order by held-object identity, exactly like the boxed compare
+                    std::sort(node.objs().begin(), node.objs().end(), [](const obj_slot& a, const obj_slot& b) {
+                        return std::less<const void*>()(a.handle.get(), b.handle.get());
+                    });
+                    break;
                 default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true
             }
             return ctx.make_value();
@@ -10023,7 +10029,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 } else {
                     // Copy binding: values deep-copy per iteration, shared_ptr
                     // elements share (for (auto e : registry) e.hurt() mutates)
-                    *loop_var_ptr = array_storage->is_typed()
+                    *loop_var_ptr = array_storage->kind() == script_array::kind_t::obj
+                        ? clone_for_assignment(array_storage->get(i, engine_))   // object slots deep-copy like boxed elements
+                        : array_storage->is_typed()
                         ? array_storage->get(i, engine_)   // raw buffer read
                         : clone_for_assignment(array_storage->values()[i]);
                 }

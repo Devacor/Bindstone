@@ -257,37 +257,41 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                    std::is_same_v<T, float> || std::is_same_v<T, double> ||
                    std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                    std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||
-                   is_specialization_v<T, std::shared_ptr>) {
+                   is_specialization_v<T, std::shared_ptr> ||
+                   is_specialization_v<T, std::vector> || is_specialization_v<T, std::map> ||
+                   is_specialization_v<T, std::unordered_map>) {
+        // nested containers convert to arrays/maps, never to objects: the element type
+        // stays dynamic (a class-typed element type would mint an object buffer)
         element_type = nullptr;
     } else {
         element_type = eng->get_type_info_for_cpp_type<T>();
     }
 
     auto script_array = script_value::make_array(element_type, eng);
-    auto& arr = const_cast<std::vector<script_value>&>(script_array.as_array());
+    auto& arr = *script_array.unchecked_get_array_storage();   // typed element types mint buffer nodes: push through the node
 
     for (const auto& item : vec) {
         if constexpr (std::is_same_v<T, script_value>) {
-            arr.push_back(item);
+            arr.push(item);
         } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                            std::is_same_v<T, float> || std::is_same_v<T, double> ||
                            std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                            std::is_same_v<T, std::string>) {
-            arr.push_back(script_value(item, eng));
+            arr.push(script_value(item, eng));
         } else if constexpr (is_specialization_v<T, std::shared_ptr>) {
             // The element IS a handle: share identity via make_object<U>. Wrapping the
             // handle in another shared_ptr registered as "std::shared_ptr<U>" throws.
-            arr.push_back(eng->make_value(item));
+            arr.push(eng->make_value(item));
         } else {
             if (eng) {
                 auto registry = eng->get_conversion_registry();
                 if (registry && registry->template has_conversion<T>()) {
-                    arr.push_back(registry->template convert_to_script<T>(item));
+                    arr.push(registry->template convert_to_script<T>(item));
                     continue;
                 }
             }
             auto sharedObj = std::make_shared<T>(item);
-            arr.push_back(eng->make_object(sharedObj));
+            arr.push(eng->make_object(sharedObj));
         }
     }
 

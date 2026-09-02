@@ -11249,6 +11249,8 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 				}
 			}
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
+		} else if (array_storage->kind() == script_array::kind_t::obj) {
+			element = clone_for_assignment(array_storage->get(state.index, engine_));   // object slots deep-copy like boxed elements
 		} else if (array_storage->is_typed()) {
 			element = array_storage->get(state.index, engine_);   // raw buffer read
 		} else {

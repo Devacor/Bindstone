@@ -228,19 +228,30 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   kinds box through `get`/`set` in the INDEX family (raw lanes stay int/float — a
   `raw_bool` decl sink is the cheap next lane). The parallel all-primitive check excludes
   `str` (handles never borrow raw; `statically_all_primitive` already excluded strings).
-  Remaining kinds, designed not built:
-  - **object kind** (`array<CreatureBase>`): the node pins the `class_definition*` (typed
-    tag already names the class) and stores `strong_ptr<object_holder>` handles (8 bytes).
-    Homogeneity is by declared class at the boundary (subclasses and script hybrids of a
-    bound C++ base included: the hybrid layer's `cpp_object_pointer()` is the same object).
-    `get` boxes a handle (value semantics stay: stores through the boundary still clone
-    unless the element type is `shared_ptr<T>`), the holder ELEMENT mode works unchanged
-    (container+index re-resolve), and the C++ boundary gains the payoff Dev asked for:
-    `std::vector<std::shared_ptr<Base>>` / `std::vector<Base*>` parameters bind with ONE
-    class check per array (hybrids hand over their C++ object pointer), no per-element
-    probing; `bound_array<Base*>` can view the buffer. Open question for Dev: whether
-    `array<Derived>` converts into an `array<Base>` parameter implicitly (a copy of handles
-    with the upcast proven once) or requires an explicit spelling like the var/typed rule.
+  - **object kind — BUILT (`kind_t::obj`, 2026-09-02).** `array<UserType>` (script or
+    bound C++ class) is a buffer of `obj_slot{strong_ptr<object_holder> handle, type_info_ptr tag}`
+    (16 bytes vs 32 boxed). The per-slot tag reproduces the boxed value exactly on `get`
+    (a `shared_ptr<K>`-tagged element stays shared, a plain one stays a value), so every
+    reader/writer that goes through get/set/push/for_each is unchanged. Homogeneity is by
+    **exact class** — that is the element rule both backends enforce today (a `Derived`
+    is rejected from `array<Base>` on push, declaration and array-to-array; probed before
+    building), so the kernel's proof-by-kind shortcut also compares the array tag's class
+    (`same_object_class`); object sources into a different class take the per-element
+    check (mismatch text unchanged), and a rebuild copies handles as-is — ownership
+    (clone or share) is the assignment/binding site's decision exactly as before. `clone()`
+    and the parallel detach deep-clone per slot; by-value range-for clones the slot like a
+    boxed element (the first probe diff caught the raw-read aliasing on both backends);
+    default `sort` orders by held-object identity like the boxed compare; parallel
+    workers exclude the kind (handles never borrow raw); `bound_array<Class>` binds it
+    (every access boxes through get/set). 37 behaviour probes captured on the pre-change
+    build are byte-identical on both backends after the change and live in the Strong
+    Types battery. **Ruling needed from Dev:** Dev's target shape `array<CreatureBase>
+    {VoidElemental, LifeElemental}` needs subclass admission, which today's exact-class
+    rule forbids (C++ `vector<Base>` slices; `vector<shared_ptr<Base>>` does not). The
+    slot already carries a per-element tag, so admitting subclasses is a kernel-rule
+    change, not a layout change. Until then the C++ boundary payoff is exact-class:
+    `std::vector<std::shared_ptr<K>>` / `std::vector<K>` extraction can prove the class
+    once per array (next step).
   - **maps** (`map<string,int>` …): the same rule — typed key/value storage keyed by the
     declared types, `map<var,var>` the only dynamic form, ordering contract kept
     (`script_map` stays ordered). Wins: key compare without a `script_value` per entry,

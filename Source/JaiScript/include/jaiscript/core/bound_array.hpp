@@ -52,7 +52,10 @@ private:
 
     static void check_kind_fits(const script_array& n) {
         if (!n.is_typed()) { return; }
-        const bool fits = n.kind() == script_array::kind_t::str ? std::is_same_v<T, std::string>
+        // object buffers (array<UserType>) bind class element types: every access boxes the
+        // slot through get/set, so the extraction path is the boxed one
+        const bool fits = n.kind() == script_array::kind_t::obj ? (!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>)
+                        : n.kind() == script_array::kind_t::str ? std::is_same_v<T, std::string>
                                                                   : std::is_arithmetic_v<T>;
         if (!fits) {
             throw runtime_error("bound_array element type does not fit a typed array buffer "

@@ -38,11 +38,17 @@ namespace jai {
     // element surface only — every caller either sits behind a kind check or handles
     // typed nodes through get()/set()/typed buffers (kind-dispatch helpers live in
     // value.hpp where script_value is complete).
+    // Object slot of a class-typed buffer: the handle plus the element's own class tag
+    // (exact-class homogeneous today; per-slot so a subclass ruling costs no layout
+    // change). Defined in value.hpp where script_value::object_holder is complete.
+    struct obj_slot;
+
     class script_array {
     public:
         // b8/c8 share one byte buffer (bool and char payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
-        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5 };
+        // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
+        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6 };
 
         // Every body that instantiates a vector<script_value> member (including the
         // DEFAULTED special members - construction paths instantiate the vector dtor
@@ -76,6 +82,8 @@ namespace jai {
         const std::vector<uint8_t>& bytes() const noexcept { return bytes_; }
         std::vector<strong_ptr<script_string>>& strs() noexcept { return strs_; }
         const std::vector<strong_ptr<script_string>>& strs() const noexcept { return strs_; }
+        std::vector<obj_slot>& objs() noexcept { return objs_; }
+        const std::vector<obj_slot>& objs() const noexcept { return objs_; }
         // Same-kind buffer copy (clone / detach): one vector assignment whatever the kind
         inline void assign_buffer(const script_array& other);
 
@@ -108,6 +116,7 @@ namespace jai {
         std::vector<script_float> floats_;
         std::vector<uint8_t> bytes_;
         std::vector<strong_ptr<script_string>> strs_;
+        std::vector<obj_slot> objs_;
     };
     // Transparent probe for CONSTANT string keys: map lookups compare against the raw
     // constant bytes instead of materializing a script_value per access (`rec["px"]`

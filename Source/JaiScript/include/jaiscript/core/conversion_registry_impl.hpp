@@ -8,6 +8,10 @@ namespace jai {
 
     // Must be defined after engine.hpp is included
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
+    // engine.cpp: the class type_info registered for a C++ type (null when unbound), and a
+    // class_instance's owned C++ object - both kept out of this header's type set
+    type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type);
+    std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data);
 
 namespace conversions {
 
@@ -30,6 +34,32 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
         if (eng) {
             registry = get_engine_conversion_registry(eng);
             if (registry && !registry->template has_conversion<T>()) { registry.reset(); }
+        }
+    }
+    // A class-typed buffer (kind obj) is homogeneous by exact class: prove the class
+    // against the bound C++ type ONCE, then every slot's holder hands over its object
+    // (raw C++ objects cast directly, hybrids through their _cpp_object field) - no
+    // per-element registry lookup, type-erased call, heap temporary or copy-out
+    if constexpr (is_specialization_v<T, std::shared_ptr>) {
+        using pointee = typename T::element_type;
+        if constexpr (!std::is_void_v<pointee> && std::is_class_v<pointee>) {
+            if (registry && node->kind() == script_array::kind_t::obj) {
+                type_info* bound_class = get_engine_class_type_info_for(eng, typeid(pointee));
+                type_info_ptr array_tag = v.deref().get_type_info();
+                type_info_ptr slot_class = array_tag ? array_tag->element_type() : nullptr;
+                if (bound_class && slot_class && slot_class->id == bound_class->id) {
+                    for (const auto& slot : node->objs()) {
+                        const auto& holder = slot.handle;
+                        if (!holder) { result.push_back(nullptr); continue; }
+                        if (holder->is_class_instance_wrapper) {
+                            result.push_back(std::static_pointer_cast<pointee>(class_instance_cpp_object(holder->data)));
+                        } else {
+                            result.push_back(std::static_pointer_cast<pointee>(holder->data));
+                        }
+                    }
+                    return result;
+                }
+            }
         }
     }
     // Exact-width payloads leave a typed buffer without boxing; narrower targets keep

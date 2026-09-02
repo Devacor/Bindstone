@@ -35,6 +35,13 @@ namespace jai {
 
     // Forward declarations for helper functions
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
+    // Interns a caught exception's text for a checked_result message (engine is
+    // incomplete here; the dependent E defers the lookup to the instantiation point)
+    template<typename E>
+    inline std::string_view intern_exception_text(E* eng, const char* text) {
+        if (!eng) { return "conversion failed"; }
+        return eng->get_symbolizer()->get_string(eng->symbolize(text));   // a view into the engine-owned interned copy
+    }
 
     // as<T&> bridges (defined in engine.cpp): validate an object holder's registered type
     // against a requested C++ type, and extract the C++ payload behind a class_instance
@@ -1377,9 +1384,11 @@ namespace jai {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
+                            // the result's message is a non-owning view: intern the text (the
+                            // exception dies with this handler; a view of what() read freed memory)
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
-                                e.what()
+                                intern_exception_text(engine_, e.what())
                             );
                         } catch (...) {
                             return checked_result<T>(
@@ -1443,9 +1452,11 @@ namespace jai {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
+                            // the result's message is a non-owning view: intern the text (the
+                            // exception dies with this handler; a view of what() read freed memory)
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
-                                e.what()
+                                intern_exception_text(engine_, e.what())
                             );
                         } catch (...) {
                             return checked_result<T>(
@@ -1560,9 +1571,11 @@ namespace jai {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
+                            // the result's message is a non-owning view: intern the text (the
+                            // exception dies with this handler; a view of what() read freed memory)
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
-                                e.what()
+                                intern_exception_text(engine_, e.what())
                             );
                         } catch (...) {
                             return checked_result<T>(
@@ -1633,9 +1646,11 @@ namespace jai {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
+                            // the result's message is a non-owning view: intern the text (the
+                            // exception dies with this handler; a view of what() read freed memory)
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
-                                e.what()
+                                intern_exception_text(engine_, e.what())
                             );
                         } catch (...) {
                             return checked_result<T>(

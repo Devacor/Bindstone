@@ -3323,6 +3323,17 @@ std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry
     return eng ? eng->get_conversion_registry() : nullptr;
 }
 
+type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type) {
+    if (!eng) { return nullptr; }
+    auto def = eng->get_class_definition_by_type(std::type_index(cpp_type));
+    return def ? def->get_type_info() : nullptr;
+}
+
+std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data) {
+    auto instance = std::static_pointer_cast<class_instance>(instance_data);
+    return instance ? instance->get_cpp_object() : nullptr;
+}
+
 bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested) {
     if (!eng) {
         return true;

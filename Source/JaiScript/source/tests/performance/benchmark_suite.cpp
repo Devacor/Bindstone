@@ -13,6 +13,8 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+struct bench_creature { script_int hp = 3; };   // the boundary row's bound class
+
 class performance_benchmarks : public suite {
 public:
     performance_benchmarks() : suite("Performance Benchmarks") {}
@@ -1018,6 +1020,23 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Array copy by value: var 200 objects (x20)", [this]() {
+            // the dynamic twin of the array<K> copy row: same instance clones, boxed elements
+            if (!bite) {
+                test_engine->execute(R"(
+                    class VObj { int a = 1; VObj() {} VObj(int v) { a = v; } }
+                    var vsrc = [];
+                    for (auto i = 0; i < 200; ++i) { vsrc.push(VObj(i)); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 20; ++k) { var c = vsrc; acc += c.size(); }
+                    if (acc != 4000) { throw "object array copy mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Object array element field reads: array<K> (x1000)", [this]() {
             if (!bite) {
                 test_engine->execute(R"(
@@ -1028,6 +1047,32 @@ public:
                     auto acc = 0;
                     for (auto i = 0; i < 1000; ++i) { acc += fsrc[i & 3].a; }
                     if (acc != 2500) { throw "object field read mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Boundary: array<K> (200) -> std::vector<std::shared_ptr<K>> (x100)", [this]() {
+            // Dev's binding shape: a class-typed script array handed to a C++ parameter of
+            // shared pointers to the bound class
+            if (!bite) {
+                dynamic_binder<bench_creature>(*test_engine, "BenchCreature")
+                    .constructor<>()
+                    .property("hp", &bench_creature::hp)
+                    .build();
+                test_engine->add_function("sum_hp", [](std::vector<std::shared_ptr<bench_creature>> cs) -> script_int {
+                    script_int total = 0;
+                    for (const auto& c : cs) { total += c->hp; }
+                    return total;
+                });
+                test_engine->execute(R"(
+                    array<BenchCreature> csrc = [];
+                    for (auto i = 0; i < 200; ++i) { csrc.push(BenchCreature()); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto k = 0; k < 100; ++k) { acc += sum_hp(csrc); }
+                    if (acc != 60000) { throw "boundary sum mismatch"; }
                 )");
             }
             bite->execute();

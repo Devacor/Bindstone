@@ -1540,6 +1540,46 @@ public:
             check_quad_error(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds").c_str(), "array<Derived> does not convert to array<Base> (exact-class rule)");
         });
 
+        test("map_behaviour_battery", [check_quad, check_quad_error]() {
+            // Every row is the pre-change output of BOTH backends (scratchpad mapprobes_before.txt,
+            // 2026-09-02): the typed-map campaign (typed_array_design.md stage 6) must keep them
+            // byte-identical, and the two EDGE rows are rulings for Dev, not behaviour to copy
+            check_quad("var m = {\"a\": 1, \"b\": 2}; to_string(m[\"a\"] + m[\"b\"]) + \",\" + to_string(m.size())", "3,2", "literal read + size");
+            check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(m[\"b\"]) + \"|\" + type_of(m)", "2|map", "typed declaration");
+            check_quad("map<int,string> m = {3: \"c\", 1: \"a\", 2: \"b\"}; string s = \"\"; for (auto kv : m) { s += kv.second; } s", "abc", "int keys iterate in key order");
+            check_quad("var m = {\"zeta\": 1, \"alpha\": 2, \"mid\": 3}; string s = \"\"; for (auto kv : m) { s += kv.first + \",\"; } s", "alpha,mid,zeta,", "string keys iterate in byte order");
+            check_quad("var m = {2: \"i\", \"x\": \"s\", 1.5: \"f\", true: \"b\"}; string s = \"\"; for (auto kv : m) { s += type_of(kv.first) + \",\"; } s", "int,float,string,bool,", "mixed keys order by type rank");
+            check_quad("map<string,int> m = {}; m[\"k\"] = 5; m[\"k\"] = m[\"k\"] + 1; to_string(m[\"k\"]) + \",\" + to_string(m.size())", "6,1", "store and re-store");
+            check_quad("map<string,int> m = {\"a\": 1}; to_string(m[\"nope\"] == null)", "true", "missing key reads null, no auto-insert");
+            check_quad("map<string,int> m = {\"a\": 1}; to_string(m.contains(\"a\")) + \",\" + to_string(m.contains(\"b\"))", "true,false", "contains");
+            check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; m.erase(\"a\"); to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "erase");
+            check_quad("map<string,int> m = {\"b\": 2, \"a\": 1}; to_json(m.keys()) + to_json(m.values())", "[\"a\",\"b\"][1,2]", "keys and values in order");
+            check_quad("map<string,int> m = {\"a\": 1}; auto c = m; c[\"a\"] = 9; to_string(m[\"a\"]) + \",\" + to_string(c[\"a\"])", "1,9", "copy is a deep copy");
+            check_quad("class K { int a = 1; K() {} K(int v) { a = v; } } map<string,K> m = {\"x\": K(4)}; m[\"x\"].a = 7; to_string(m[\"x\"].a)", "7", "field write through an entry");
+            check_quad("class K { int a = 1; K() {} K(int v) { a = v; } } map<string,K> m = {\"x\": K(4)}; auto c = m; c[\"x\"].a = 9; to_string(m[\"x\"].a) + \",\" + to_string(c[\"x\"].a)", "4,9", "object values clone on copy");
+            check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"] += 10; to_string(m[\"n\"])", "11", "compound store on an entry");
+            check_quad("map<string,int> m = {\"n\": 1}; auto& r = m[\"n\"]; r = 42; to_string(m[\"n\"])", "42", "reference to an entry writes through");
+            check_quad("var m = {\"inner\": {\"x\": 1}}; m[\"inner\"][\"x\"] = 2; to_string(m[\"inner\"][\"x\"])", "2", "nested map write");
+            check_quad("map<string,int> m = {\"b\": 2, \"a\": 1}; to_json(m)", "{\"a\":1,\"b\":2}", "json in key order");
+            check_quad("map<float,int> m = {1.5: 1, 0.5: 2}; string s = \"\"; for (auto kv : m) { s += to_string(kv.second); } s", "21", "float keys order by value");
+            check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; for (auto& kv : m) { kv.second = kv.second * 10; } to_string(m[\"a\"] + m[\"b\"])", "30", "reference range-for writes values");
+            check_quad("map<string,int> m = {}; to_string(m.size()) + \",\" + to_string(m.empty())", "0,true", "empty");
+            check_quad("function total(map<string,int> mm) -> int { int s = 0; for (auto kv : mm) { s += kv.second; } mm[\"z\"] = 100; return s; } map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(total(m)) + \",\" + to_string(m.size())", "3,2", "by-value parameter");
+            check_quad("function grow(map<string,int>& mm) { mm[\"z\"] = 100; } map<string,int> m = {\"a\": 1}; grow(m); to_string(m.size()) + \",\" + to_string(m[\"z\"])", "2,100", "by-reference parameter");
+            check_quad("map<string,int> m = {\"a\": 1}; var v = m; v[5] = 2; to_string(v.size()) + \",\" + type_of(v)", "2,map", "var laundering then anything goes");
+            check_quad("var v = {\"a\": 1, \"b\": 2}; map<string,int> m = v; v[\"a\"] = 50; to_string(m[\"a\"]) + \",\" + to_string(m.size())", "1,2", "typed map from a dynamic map copies");
+            check_quad("map<string,int> a = {\"x\": 1}; map<string,int> b = a; to_string(a == b)", "false", "equality is identity");
+            check_quad("map<string,int> m = {\"px\": 3}; int acc = 0; for (int i = 0; i < 1000; i++) { acc += m[\"px\"]; } to_string(acc)", "3000", "constant-key reads");
+            check_quad("map<string,int> m = {}; for (int i = 0; i < 50; i++) { m[\"k\" + to_string(i)] = i; } int acc = 0; for (int i = 0; i < 50; i++) { acc += m[\"k\" + to_string(i)]; } to_string(acc) + \",\" + to_string(m.size())", "1225,50", "dynamic-key stores and reads");
+            check_quad("map<string,int> m = {\"a\": 1}; m.clear(); m[\"b\"] = 2; to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "clear then store");
+            check_quad("map<string,array<int>> m = {\"a\": [1, 2]}; m[\"a\"].push(3); to_string(m[\"a\"].size()) + \",\" + to_string(m[\"a\"][2])", "3,3", "array value mutates through the entry");
+            check_quad("coroutine int walk(map<string,int> mm) { for (auto kv : mm) { yield kv.second; } return 0; } map<string,int> m = {\"a\": 5, \"b\": 6}; auto h = walk(m); to_string(h.resume()) + \",\" + to_string(h.resume())", "5,6", "coroutine over a map");
+            check_quad("map<string,int> m = {}; m[5] = 1; to_string(m.size()) + \",\" + to_string(m.contains(5)) + \",\" + type_of(m.keys()[0])", "1,true,int", "EDGE (pre-existing, both backends): a direct store does not enforce the declared key type");
+            check_quad_error("map<string,int> m = {}; m[\"k\"] = \"str\"", "value type enforced on store");
+            check_quad_error("map<string,int> m = {\"a\": \"s\"}", "value type enforced on declaration");
+            check_quad_error("map<string,int> m = {\"n\": 1}; m[\"n\"]++", "EDGE (pre-existing, both backends): increment of a map entry is rejected while compound assignment works");
+        });
+
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {
             // fuzz seed 22684 (2026-09-02): the interpreter's typed declaration enforced the
             // declared type on the null a raising member read leaves behind, reporting

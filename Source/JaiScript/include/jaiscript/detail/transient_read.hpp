@@ -207,6 +207,9 @@ namespace jai::detail {
                 case node_type::yield_expr:
                     walk_expr(static_cast<yield_expr*>(e)->value.get(), false);
                     return;
+                case node_type::cast_expr:
+                    walk_expr(static_cast<cast_expr*>(e)->operand.get(), false);   // cast<T&> needs the mint
+                    return;
                 default:
                     return;   // literal/identifier/this/super: leaves
             }

@@ -264,6 +264,17 @@ engine stays usable", not by `check_throws`.
   (`map<string,int> m; m[5] = 1` raises; keys never coerce); `map<var,V>` takes any key; an
   `auto` key/value slot infers from a uniform literal (`map<auto,int> m = {5: 1}` is
   `map<int,int>`), stays dynamic for an empty literal, and a mixed literal raises.
+- **`cast<T>(e)` / `cast<T&>(e)` / `cast<shared_ptr<T>>(e)`**: the explicit typed-boundary
+  spelling. `cast<T>(e)` yields what `T tmp = e;` would hold (class targets copy by value
+  when e's class is T or derives from T; primitives take the assignment conversion table);
+  `cast<T&>(e)` is a reference to the same object (member reads and stores go through -
+  `cast<T&>(h.p).t = 5`, the strict-mode fix for a subtype member on a base-typed receiver);
+  `cast<shared_ptr<T>>(e)` shares the instance as a `shared_ptr<T>`. A class mismatch raises
+  the catchable `Cannot cast 'X' to 'T'`; null passes the value/handle forms and fails the
+  reference form. Char converts only through the cast (`cast<int>('a') == 97`,
+  `cast<char>(97) == 'a'` range-checked 0..255, `cast<string>(c)`, `cast<char>("a")` for a
+  one-character string; `char c = 65` still raises). Shared kernel `detail/cast_kernel.hpp`
+  (`.jaibite` version 9 added the node).
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
 - Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
@@ -277,6 +288,12 @@ engine stays usable", not by `check_throws`.
   in every mode and stamps same-type/field proofs on AST nodes; both backends consume them behind
   total runtime guards (`detail/type_proofs.hpp`), so `engine::type_proofs(false)` is
   observationally identical (gates: `proof_differential_gate`, `jaiscript_fuzz --no-proofs`).
+- **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
+  declares a name defined outside the program (checker: a declared global, typed -> checked and
+  proven; both backends: a no-op, the name resolves dynamically); `[[warn_mode]]` / `[[strict_mode]]`
+  set the checker's mode for a unit (first declaration), a block (first statement) or one
+  statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
+  mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.
 
 ```jaiscript
 class Cat { int a = 0; Cat(int v) { a = v; } }

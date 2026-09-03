@@ -68,16 +68,20 @@ namespace jai {
         
         // declaration parsing
         checked_result<declaration_ptr> declaration();
+        checked_result<declaration_ptr> declaration_body();
         checked_result<declaration_ptr> class_declaration(bool nocopy = false);
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
         checked_result<declaration_ptr> variable_declaration();
         checked_result<declaration_ptr> include_declaration();
         checked_result<declaration_ptr> import_declaration();
+        checked_result<declaration_ptr> extern_declaration();
+        checked_result<uint8_t> check_mode_attribute();
         std::optional<std::string> parse_operator_method_symbol();
         
         // statement parsing
         checked_result<statement_ptr> statement();
+        checked_result<statement_ptr> statement_body();
         checked_result<statement_ptr> expression_statement();
         checked_result<statement_ptr> block_statement();
         checked_result<statement_ptr> if_statement();

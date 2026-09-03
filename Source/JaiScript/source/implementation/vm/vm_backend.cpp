@@ -12,6 +12,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
@@ -11680,6 +11681,107 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 	return {};
 }
 
+// cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): operand shape, class verdict and
+// class-target outcomes come from detail/cast_kernel.hpp; primitive/container targets
+// convert through the assignment table. KEEP BYTE-PARALLEL with interpreter::visit_cast_expr.
+op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
+	auto* expr = static_cast<cast_expr*>(f.code->nodes[ins.a].get());
+	script_value operand = make_null();
+	switch (static_cast<detail::cast_operand_mode>(ins.b)) {
+		case detail::cast_operand_mode::identifier: {
+			// The ref-decl identifier arm (exec_decl_ref_ident): slot-first, then env,
+			// then method-lazy bare fields
+			const uint64_t target_sym = f.code->symbols[ins.c];
+			script_value* targetPtr = nullptr;
+			const size_t target_slot = static_cast<identifier_expr*>(expr->operand.get())->slot_index;
+			if (target_slot != SIZE_MAX && f.locals && !f.top_level) {
+				targetPtr = frame_slot(f, target_slot);
+			}
+			if (!targetPtr) {
+				targetPtr = environment_->get_value_ptr(target_sym);
+			}
+			if (!targetPtr) {
+				targetPtr = frame_this_member_ptr(f, target_sym);
+			}
+			if (!targetPtr) {
+				return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+			}
+			if (targetPtr->is_reference()) {
+				auto aliased = vm_decl_ref_alias(*targetPtr, engine_);
+				if (!aliased) {
+					return raise_from(aliased);
+				}
+				operand = std::move(aliased.value());
+			} else {
+				operand = share_env_ref(*targetPtr);
+			}
+			break;
+		}
+		case detail::cast_operand_mode::lvalue_chain: {
+			ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
+			auto resolved = detail::resolve_ref_lvalue(expr->operand.get(), caller_view(&f),
+			                                           environment_.get(), engine_, symbolizer_);
+			if (!resolved) {
+				if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+					return raise_from(resolved);
+				}
+				return raise_(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+			}
+			operand = std::move(resolved.value());
+			break;
+		}
+		case detail::cast_operand_mode::value:
+			operand = std::move(stack_.back());
+			stack_.pop_back();
+			break;
+	}
+
+	if (expr->by_reference) {
+		auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, symbolizer_);
+		if (!out) {
+			return raise_from(out);
+		}
+		stack_.push_back(std::move(out.value()));
+		return {};
+	}
+
+	const bool lvalue_source = operand.is_reference() || detail::cast_lvalue_source(expr->operand.get());
+	if (operand.is_reference()) {
+		script_value derefed = operand.deref();
+		operand = std::move(derefed);
+	}
+	if (detail::cast_target_is_class(*expr->target)) {
+		auto out = detail::cast_class_value(std::move(operand), *expr, lvalue_source, engine_, symbolizer_);
+		if (!out) {
+			return raise_from(out);
+		}
+		stack_.push_back(std::move(out.value()));
+		return {};
+	}
+	if (detail::cast_char_rule_applies(operand, *expr->target)) {
+		auto out = detail::cast_char_value(operand, *expr, engine_, symbolizer_);
+		if (!out) {
+			return raise_from(out);
+		}
+		script_value converted = std::move(out.value());
+		converted.set_type_info(expr->target);
+		stack_.push_back(std::move(converted));
+		return {};
+	}
+	if (lvalue_source) {
+		script_value copy = clone_for_assignment(operand);
+		operand = std::move(copy);
+	}
+	auto enforced = enforce_type_compatibility(operand, expr->target);
+	if (!enforced) {
+		return raise_from(detail::cast_error(operand, *expr, symbolizer_));
+	}
+	script_value out = std::move(enforced.value());
+	out.set_type_info(expr->target);
+	stack_.push_back(std::move(out));
+	return {};
+}
+
 // ============================================================
 // Dispatch loop
 // ============================================================
@@ -11720,6 +11822,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_index_fused: return exec_index_fused(f, ins);
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
 		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
+		case opcode::op_cast: return exec_cast(f, ins);
 		default: return {};
 	}
 }
@@ -12276,6 +12379,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:
 			case opcode::op_parallel_for:
+			case opcode::op_cast:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

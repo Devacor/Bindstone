@@ -724,6 +724,83 @@ public:
                 f();
             )").as_int());
         });
+        // ---- fuzz seed 110753: ++/-- on a MISSING member. The member read raises through
+        // the unwinding state (placeholder null on the stack) and the interpreter's ++/--
+        // numeric gate then clobbered it with a bare invalid_numeric_operand ("" when
+        // caught); the vm unwinds at the read ----
+        test("fuzz_incdec_missing_member_surfaces_member_error", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                class C6 { int m8 = 1; }
+                var v = C6();
+                var out = "";
+                try { v.m1--; } catch (e) { out += to_string(e) + "|"; }
+                try { v.m1++; } catch (e) { out += to_string(e) + "|"; }
+                try { --v.m1; } catch (e) { out += to_string(e) + "|"; }
+                try { ++v.m1; } catch (e) { out += to_string(e) + "|"; }
+                try { var r = v.m1--; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                var arr = [C6()];
+                try { arr[0].m1--; } catch (e) { out += to_string(e) + "|"; }
+                class H { C6 c = C6(); }
+                var h = H();
+                try { h.c.m1--; } catch (e) { out += to_string(e) + "|"; }
+                h.c.m8--;
+                out + to_string(h.c.m8);
+            )");
+            std::string expected;
+            for (int i = 0; i < 7; ++i) expected += "Object has no member 'm1'|";
+            check_eq(expected + "0", r.as_string());
+        });
+        // Same clobber class: a receiver/base whose evaluation raised is a placeholder
+        // null, and the interpreter's member read / member store / subscript store then
+        // reported the placeholder ("accessed on null", "Cannot assign to rvalue
+        // expression", a bare `true`) instead of the pending exception
+        test("fuzz_raising_receiver_surfaces_original_exception", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                function thrower() { throw "boom"; }
+                var out = "";
+                try { var x = thrower().m1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower().m1 = 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower().m1 -= 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower().m1--; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower()[0] = 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower()[0]--; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower().m1(); out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                var arr = [1, 2];
+                try { arr[thrower()]--; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { arr[thrower()] = 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                out;
+            )");
+            std::string expected;
+            for (int i = 0; i < 9; ++i) expected += "boom|";
+            check_eq(expected, r.as_string());
+        });
+        // Non-lvalue assignment targets: the vm rejects them at compile time without
+        // evaluating anything; the interpreter evaluated target and rhs first (side
+        // effects, and a raising target won the error)
+        test("assignment_to_call_result_rejected_before_evaluation", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var cnt = 0;
+                function bump() { cnt++; return 5; }
+                function thrower() { throw "boom"; }
+                var out = "";
+                try { bump() = 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { bump() += 1; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { bump()++; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { bump() = bump(); out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { thrower()--; out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                try { bump() += thrower(); out += "unreached|"; } catch (e) { out += to_string(e) + "|"; }
+                out + to_string(cnt);
+            )");
+            std::string expected;
+            for (int i = 0; i < 6; ++i) expected += "Complex assignment targets not yet implemented|";
+            check_eq(expected + "0", r.as_string());
+        });
         test("fuzz_typed_fn_falls_off_end_returns_null", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(
@@ -850,21 +927,32 @@ public:
         // undefined identifier resolved the TARGET before evaluating the rhs on the
         // interpreter, so `v1 += v1` blamed the lhs while the vm (C++17 order: rhs
         // first) blamed the rhs load. The "(no 'this' in scope)" decoration itself is
-        // symmetric on both backends and stays. ----
+        // symmetric on both backends and stays. Strict (the default) rejects the
+        // undeclared name at load, so the runtime ordering is pinned under warn. ----
         test("fuzz_compound_undef_eval_order_parity", [this]() {
-            auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
+            auto run_both = [](const char* src, check_mode mode) {
                 std::string msg[2];
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->static_checking(mode);
                     try { e->execute(src); }
                     catch (const std::exception& ex) { msg[idx] = ex.what(); }
                     ++idx;
                 }
-                check_eq(msg[0], msg[1], what + " error text is byte-identical across backends");
-                check_true(msg[0].find(needle) != std::string::npos,
-                    what + " blames the right name (got: " + msg[0] + ")");
+                return std::make_pair(msg[0], msg[1]);
+            };
+            auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
+                auto [i_msg, v_msg] = run_both(src, check_mode::warn);
+                check_eq(i_msg, v_msg, what + " error text is byte-identical across backends");
+                check_true(i_msg.find(needle) != std::string::npos,
+                    what + " blames the right name (got: " + i_msg + ")");
+                auto [i_strict, v_strict] = run_both(src, check_mode::strict);
+                check_eq(i_strict, v_strict, what + " strict listing is byte-identical across backends");
+                check_true(i_strict.find("static check failed") == 0 &&
+                    i_strict.find("use of undeclared identifier 'v1'") != std::string::npos,
+                    what + " is a strict load error (got: " + i_strict + ")");
             };
             // rhs load fails first (rhs-first sequencing): plain undefined-variable text
             expect_both("v1 += v1;", "Undefined variable 'v1'", "undef += same undef");
@@ -873,14 +961,28 @@ public:
             expect_both("v1 += 1;", "Undefined variable 'v1' (no 'this' in scope)", "undef += literal");
         });
         test("fuzz_compound_undef_rhs_side_effects_run_first", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            const char* src = R"(
                 var log = "";
                 function s() { log += "x"; return 1; }
                 try { v1 += s(); } catch (err) { log += "c"; }
                 log;
-            )");
-            check_eq(std::string("xc"), r.as_string());
+            )";
+            auto strict = make_engine();
+            check_throws<static_check_error>([&]() { strict->execute(src); });
+            auto e = make_engine();
+            e->static_checking(check_mode::warn);
+            check_eq(std::string("xc"), e->execute(src).as_string());
+            // strict admits the same ordering through a typed target: the rhs call runs,
+            // then the var-sourced string fails the int store
+            auto typed = make_engine();
+            check_eq(std::string("xc"), typed->execute(R"(
+                var log = "";
+                var bad = "s";
+                function s() { log += "x"; return bad; }
+                int t = 0;
+                try { t += s(); } catch (err) { log += "c"; }
+                log;
+            )").as_string());
         });
 
         // ---- fuzz KD-CORO-RESUME-PAST-END (seeds 4/38/98/195/216/387/626/840/...):

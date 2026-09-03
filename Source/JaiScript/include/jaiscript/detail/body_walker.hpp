@@ -74,6 +74,9 @@ namespace jai::detail {
 			case node_type::yield_expr:
 				expr(static_cast<yield_expr*>(e.get())->value);
 				return;
+			case node_type::cast_expr:
+				expr(static_cast<cast_expr*>(e.get())->operand);
+				return;
 			default:
 				return;
 			}

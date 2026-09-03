@@ -1,24 +1,31 @@
-# Static type checking (opt-in, 2026-07)
+# Static type checking
 
 Backend-neutral AST checker that runs at parse-cache-entry creation — one hook in
 `engine.cpp` covers `execute(string)`, jaibite creation, hot-reload re-parses (new source
 = new cache entry) and registration-epoch changes uniformly. Amortized once per unique
-source, like parsing. Off by default: the off path costs one branch. Implementation:
+source, like parsing. Strict by default; the off path costs one branch. Implementation:
 `detail/type_checker.hpp` + `source/implementation/type_checker.cpp`.
 
 ## Mode API
 
 ```cpp
-engine->static_checking(check_mode::off | warn | strict);   // default: off
+engine->static_checking(check_mode::off | warn | strict);   // default: strict
 check_report r = engine->check(source);        // parse (cached) + check, ANY mode; tooling
 const check_report& d = engine->last_check_diagnostics();   // last checked execute/bite
 ```
 
+- **strict** (the default) — any error-severity diagnostic makes `execute()` /
+  `engine->jaibite()` / `jaibite_load*()` throw `jai::static_check_error` BEFORE anything
+  runs. A strongly-typed → strongly-typed mismatch (`int x = "s"`, returning a string from
+  a function declared `-> int`, passing an array to an `int` parameter, an unrelated class
+  into a typed slot) is therefore a load error; only a `var`-sourced value can still fail
+  at runtime, where `try`/`catch` sees it.
+- **warn** — diagnostics collected and retrievable; execution proceeds and the runtime's
+  own conversion errors apply unchanged (the pre-checker behavior, selectable per engine).
 - **off** — zero behavior change. No diagnostics collected anywhere.
-- **warn** — diagnostics collected and retrievable; execution proceeds.
-- **strict** — any error-severity diagnostic makes `execute()` / `engine->jaibite()` /
-  `jaibite_load*()` throw `jai::static_check_error` BEFORE anything runs. `what()` is the
-  full accumulated, location-sorted, deduplicated listing (cap 100), compiler style:
+
+`what()` under strict is the full accumulated, location-sorted, deduplicated listing
+(cap 100), compiler style:
 
 ```
 script:12:5: error: cannot assign 'string' to 'x' declared 'int' (declared at 8:3)
@@ -27,8 +34,9 @@ script:12:5: error: cannot assign 'string' to 'x' declared 'int' (declared at 8:
 ```
 
 Diagnostics are mode-independent (`check_diagnostic {severity, line, column, message,
-related_line/column}`); mode only decides whether errors gate execution. Warning
-severity never gates.
+related_line/column, strict_region}`); mode only decides whether errors gate execution
+(strict: every error; warn: only errors a `[[strict_mode]]` region raised - "Escape hatches").
+Warning severity never gates.
 
 ## Rule table (mirrors `interpreter::enforce_type_compatibility`)
 
@@ -40,10 +48,10 @@ severity never gates.
 | `string` | anything | to_string conversion |
 | `char` | char only | `char c = 65` is a runtime error too |
 | `array` / `map` | array / map | element/key types NOT checked (lenient v1) |
-| object `C` | null; same class; derived→base; ctor conversion `C(src)` | unrelated classes with no viable 1-arg ctor = error; array/map/function into object = error |
+| object `C` | null; same class; derived→base; ctor conversion `C(src)`; on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
 | `shared_ptr` / `weak_ptr` / references / function slots | anything | lenient v1 |
 | `var` | anything, forever | THE opt-out: a var-typed expression makes downstream types unknown (like TS `any`); unknown never errors |
-| `auto` + initializer | inferred, then enforced as that type | |
+| `auto` + initializer | inferred, then enforced as that type | a `null` initializer leaves it dynamic — null carries no type; the runtime locks at the first non-null store |
 | `auto` without initializer | dynamic (unchecked) | runtime locks at first assignment; the checker can't see branch order, so it opts out — documented leniency |
 
 **Compound assign** (Dev ruling 2026-07, settled): typed targets follow C++ rules —
@@ -75,22 +83,179 @@ aren't checked in v1.
 **Identifiers** — undeclared = error, checked against: scopes, the current class's members
 (incl. inherited), top-level declarations (two-pass, so forward references work), every
 name declared ANYWHERE in the script (flow-insensitive safety net — execution order can
-make later declarations visible), the host's per-call instance variables, and the
-engine's full registration surface (globals, functions, classes, template types,
-namespaces — visible because checking happens at execute/jaibite time). If the script
-contains `include`/`import`, undeclared-identifier drops to warning severity (included
-files can define anything).
+make later declarations visible), the host's per-call instance variables, the top-level
+names of every unit in the program (Programs below — a literal `import`/`include` never
+hides a name), `extern` declarations (Escape hatches below — a name defined outside the
+program, typed or not), and the engine's full registration surface (globals, functions,
+classes, template types, namespaces — visible because checking happens at execute/jaibite
+time).
+Only a unit with a dynamic-path `import(expr)`/`include(expr)` drops undeclared-identifier
+to warning severity (that file can define anything). Lambda capture-list entries are not
+identifier uses (`[this]` inside a method reaches the class); `weak_from_this()` /
+`shared_from_this()` are call-shape builtins resolved before any lookup, like the runtime.
+
+**Language namespaces** — `math::<fn>(...)` is the intrinsic lane (`detail/
+math_intrinsics.hpp`, the same shape gate both backends use): typed by the kernel's result
+(`int` for `itrunc`/`ifloor`/`wrap_*`, `float` for the transcendental and interpolation
+families, operand-typed for `abs`/`min`/`max`/`clamp`/`random` — uniform int → `int`,
+uniform float → `float`, mixed or unknown → unknown; `random_seed` unknown). Arity is the
+kernel's runtime error, not a static one. A user namespace path `a::b::c` (a flat name;
+declared here or registered with the engine) is lenient at every depth.
 
 **Members** — on a receiver whose class is fully known (in-script hierarchy resolvable, or
 engine-registered `class_definition` incl. `_get_`/`_set_` properties and statics),
 an unknown field/method is an error, reads and writes both (declared intent — the runtime
-tolerates dynamic field creation on writes). Any unresolvable ancestor opens the class:
-silence. Builtin container/string/map methods, subscripts, enum values (existence IS
-checked: `Direction.zzz` errors), namespaces: lenient.
+tolerates dynamic field creation on writes). A member that only a SUBTYPE declares is an
+error on a receiver whose static class is certain, exactly like C++ — the fixes are a `var`
+receiver or `cast<T&>(expr).member`. Any unresolvable ancestor opens the class: silence.
+Builtin container/string/map methods, subscripts, enum values (existence IS checked:
+`Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
+(`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
+object receiver; a class method of the same name wins first.
+
+**Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
+`same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
+`cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. The operand
+is the explicit typed boundary and is never checked against `T` — the verdict is the runtime's
+(`Cannot cast 'X' to 'T'`, catchable). A `T` that names no class is an error
+(`unknown type in cast`).
+
+Open surfaces (misses silent, hits still typed):
+- a class this unit declares that the engine already holds with a different instance or
+  static field set is a hot-reload redefinition: receivers that carry the OLD shape are
+  open — values that predate the unit (engine globals, whose type is read off a value tag)
+  and `this` / bare field names inside the class's own methods (migration hooks run on the
+  old shape; probes expect the runtime error). A fresh instance of the new definition in
+  the same unit is checked against it, and an identical re-execution keeps the same field
+  set and stays closed everywhere.
+- a C++-bound class once any script layer was `extend`ed over it (`class_definition::
+  extended_ever`), and — flow-insensitively, by name — every variable or member passed to
+  `extend(...)` anywhere in the unit.
+- a C++-bound class whose registration lacks the member while a REGISTERED subclass binds
+  it: the binder surface is a lower bound on the C++ declaration (a virtual bound only on
+  the derived still dispatches through a base-typed handle), so the miss is uncertain.
+  In-script classes are closed by their own text and do not get this walk.
 
 **Recovery** — an erroring expression assumes its declared/expected type, so one bad line
 produces one diagnostic, not a cascade; (line, col, message) dedupe on top. Cap 100
 (`detail::k_check_diagnostic_cap`), `report.capped` set.
+
+## Programs
+
+A unit whose top-level `import`/`include` declarations carry literal paths is the root of a
+**program**. Before anything runs, the engine gathers the program's **closure**: every unit
+those paths reach, resolved through the include paths exactly as the runtime resolves them,
+recursively, each file once (cycles are fine), parsed into the same cache entries the unit's
+later `import` executes through. The union of every unit's top-level names — functions,
+variables, destructured names, classes, enums and their values, namespaces with every `::`
+prefix, namespace members flattened — is handed to the checker as declared names, and the
+root plus every closure unit whose entry is not already checked at the current surface epoch
+is checked against it. A function in one file may therefore use a global or class another
+file declares, whatever the import order (GLOOM's `maps.jai` reads `G`, declared in
+`game.jai`, imported last). The closure carries **class models** as well as names: every
+top-level class of every unit (parent, fields with declared types, methods with signatures,
+constructors) is modeled exactly as a class declared in the unit being checked, and member
+lookup consults the unit's own classes, then the program's, then the engine's registrations,
+so a subclass whose parent lives in another unit resolves inherited fields and methods bare
+in its methods, through `this`, and on typed receivers — down a chain that may end in a
+registered C++ class — and a typed mismatch against a cross-unit field or method is the same
+error the same-unit case reports (without the declaration's location, which belongs to the
+other file). A parent found nowhere — not this unit, not the program, not registered (a
+dynamic-path import, an `extern` name used as a base) — can define anything: bare names in
+that class's methods type as unknown and are never `undeclared`. Class knowledge that comes
+from the program table alone is for diagnostics: a cross-unit member types as tentative
+(checked, never a proof source) until its declaring unit has run; that run moves the surface
+epoch, the unit re-checks with the registered definitions in view, and proofs land on that
+second check — the same second-check rule as a unit that declares its own classes.
+
+Under strict, an error anywhere in the program fails the root's `execute()` before any unit
+runs. `what()` lists the root's diagnostics first, then each erroring unit's own listing,
+formatted against that unit's source and named by its resolved path:
+
+```
+D:/.../scripts/maps.jai:12:5: error: use of undeclared identifier 'G'
+    G.map = m;
+    ^
+```
+
+Under warn — and in the report `engine->check()` returns — closure diagnostics follow the
+root's with line/column 0 and the path-qualified location leading the message (the snippet
+belongs to another source, so none is printed).
+
+The union is the engine's **program-name memory**: it lives for the engine's lifetime and
+rides every later check, so a leaf re-parsed on its own after a hot edit (a new cache entry
+reached through `import`) still knows the names of the program it belongs to. The memory is
+a superset by construction — a name it admits is never a false error, only a typo the
+checker cannot catch. The class table rides the engine the same way; a class re-declared with
+a different shape replaces its entry at the next gather (the last unit gathered wins), and a
+unit's own declaration always wins over the table's.
+
+A unit the closure cannot resolve, read or parse contributes no names and is skipped; the
+runtime reports it exactly as before, when the unit executes. A **dynamic-path**
+`import(expr)`/`include(expr)`, or an import below the top level, can define anything: that
+unit keeps warning severity for undeclared identifiers. Names the program never declares —
+a host global bound after load, a value injected at run time — are outside the closure by
+definition; `extern` (below) is the spelling that declares such a name to the checker without
+defining it.
+
+## Escape hatches
+
+Two spellings tell the checker about what it cannot see or should not gate on, without
+loosening anything else.
+
+`extern` declares a name that exists outside the program - a host global bound after load,
+a function the running instance registers, a value injected at run time:
+
+```
+extern function spawnOnNetwork;   // a callable of unknown signature: calls are unchecked
+extern shared_ptr<Game> G;        // typed: G.hp is checked against Game and proven per "Proofs"
+extern config;                    // untyped: var - reads and stores are dynamic
+```
+
+An extern name counts as declared, and a program's closure carries it to every unit like any
+top-level name. It is also the spelling for a shared leaf that calls into a module only some
+programs import (a netplay hook behind a runtime flag): the leaf declares the names it
+reaches for, and in a program that imports the module too the declaration is inert - the
+closure knows the real definition, and the call resolves to it at run time. The typed form
+gives the name that certain type: member checks, assignment checks and proofs flow exactly
+as for a declared variable of that type (a proof stays a runtime-guarded lane, so a host
+value that contradicts the declared type runs the ordinary conversion). At run time the
+declaration is a no-op on both backends - the name resolves dynamically as before, and a
+name still missing when used raises the ordinary `Undefined variable 'name'` error.
+
+`[[warn_mode]]` and `[[strict_mode]]` set the checker's mode for a region of one unit. They
+compose, innermost wins, and the engine's mode (`static_checking`) is the default for every
+unit. An attribute leads one of three positions:
+
+- **A unit.** As the first declaration of a file (a leading comment is fine, the trailing `;`
+  optional) it sets the unit's mode: `[[warn_mode]];` at the top of a file keeps the checker
+  running there but reports every error it finds as a warning.
+- **A statement.** Before any statement - top level, in a function/method/lambda body, in an
+  if/while/for body, in a bare block - it covers that one statement's own subtree, then the
+  mode reverts: `int x = 5; [[warn_mode]] y = 5; z = 5;` leaves `y` lenient and `z` checked.
+  A nested function or lambda body is a new scope that keeps the ENCLOSING mode:
+  `[[warn_mode]] self.spawnOnNetwork([](){ x = 5; });` accepts `self`, the member and the
+  call, but `x = 5` inside the lambda is still an error.
+- **A block.** As the first statement of a block - a function/method/lambda body, an
+  if/while/for body, a bare `{ }` - it covers the whole block, nested bodies included:
+  `self.spawnOnNetwork([](){ [[warn_mode]] x = 5; });` demotes the lambda body only (the call
+  is still checked); `{ [[warn_mode]] y = 5; z = 5; }` covers both statements. Two attributed
+  statements in a row each cover their own.
+
+In a warn region every error-severity diagnostic is reported as a warning (still collected,
+still in `last_check_diagnostics()` and `engine->check()`), and an undeclared identifier is
+accepted as unknown - an undeclared callee is assumed callable with an unknown result, so
+nothing downstream is proven from it. In a strict region errors gate the load: `[[strict_mode]]`
+inside a warn region re-arms strict there, and a `[[strict_mode]]` unit or statement in a
+warn-mode ENGINE gates that load even though the engine's own errors do not (a diagnostic
+raised in a strict region carries `check_diagnostic::strict_region`;
+`check_report::has_strict_errors()` is what warn mode gates on). Engine mode `off` runs no
+diagnostics walk at all (proofs still stamp), so attributes have no effect under off. The
+runtime never changes: both backends treat the attribute as nothing, and a warn region's type
+mistakes raise at run time exactly as they would without the checker. A unit's mode says
+nothing about the units it imports, and a `[[warn_mode]]` leaf never fails its program.
+`warn_mode` and `strict_mode` are the only attribute names: `[[bogus]]` is a parse error
+naming the attribute, and `[[` in expression position opens a nested array literal.
 
 ## The false-positive contract
 

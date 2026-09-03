@@ -2612,18 +2612,22 @@ public:
 		// Tier-1 reference args x coroutines x deep recursion: dual-backend differentials
 		// (parity is checked as interp == vm; absolute values pin sanctioned semantics)
 
-		auto run_both_backends = [](const char* src) {
+		auto run_both_backends_in = [](jai::check_mode mode, const char* src) {
 			std::string out[2];
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				e->execution_budget(0);
+				e->static_checking(mode);
 				try { out[idx] = e->execute(src).to_string(); }
 				catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
 				++idx;
 			}
 			return std::make_pair(out[0], out[1]);
+		};
+		auto run_both_backends = [run_both_backends_in](const char* src) {
+			return run_both_backends_in(jai::check_mode::strict, src);
 		};
 
 		test("tier1_field_ref_call_inside_coroutine_body", [this, run_both_backends]() {
@@ -3201,9 +3205,27 @@ public:
 		});
 
 		// Tier 3(c): a throw during callee setup (default-arg eval / param conversion)
-		// restores the caller environment - script keeps running and sees caller locals
-		test("tier3_env_restored_after_throwing_bind", [this, run_both_backends]() {
+		// restores the caller environment - script keeps running and sees caller locals.
+		// The literal NC-into-int argument is a strict load error, so the strict probe
+		// sources the object from a var and the literal form runs under warn.
+		test("tier3_env_restored_after_throwing_bind", [this, run_both_backends, run_both_backends_in]() {
 			const char* src = R"(
+				class NC { int z = 0; }
+				function boom(int n, int d = 1 / 0) -> int { return n + d; }
+				function wants(int x) -> int { return x; }
+				var keep = 40;
+				var msg = "";
+				var nc = NC();
+				try { boom(1); } catch (e) { msg = "caught"; }
+				keep = keep + 1;
+				try { wants(nc); } catch (e) { msg = msg + "+caught2"; }
+				keep = keep + 1;
+				msg + ":" + keep;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("caught+caught2:42"), i_out, "interp env restored after throwing bind");
+			check_eq(i_out, v_out, "throwing-bind parity");
+			const char* literal = R"(
 				class NC { int z = 0; }
 				function boom(int n, int d = 1 / 0) -> int { return n + d; }
 				function wants(int x) -> int { return x; }
@@ -3215,9 +3237,14 @@ public:
 				keep = keep + 1;
 				msg + ":" + keep;
 			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("caught+caught2:42"), i_out, "interp env restored after throwing bind");
-			check_eq(i_out, v_out, "throwing-bind parity");
+			auto [w_out, wv_out] = run_both_backends_in(jai::check_mode::warn, literal);
+			check_eq(std::string("caught+caught2:42"), w_out, "warn: literal mismatch throws at bind and restores");
+			check_eq(w_out, wv_out, "warn throwing-bind parity");
+			auto [s_out, sv_out] = run_both_backends(literal);
+			check_eq(s_out, sv_out, "strict listing parity");
+			check_true(s_out.find("ERROR: static check failed") == 0 &&
+				s_out.find("argument 1 of 'wants': cannot pass 'NC' to 'x' declared 'int'") != std::string::npos,
+				"strict rejects the literal mismatch at load (got: " + s_out + ")");
 		});
 
 		// ---- compound fusion: bare identifier/constant rhs + ident+ident rhs ----
@@ -3576,17 +3603,35 @@ public:
 		// IS the language, matching C++17; the vm's probe pair keeps the observation
 		// point without materializing the callee on the value stack) ===
 
-		test("callee_first_missing_fn_error_before_args", [this, run_both_backends]() {
-			// An undefined callee errors BEFORE argument side effects run
-			auto [i1, v1] = run_both_backends(R"(
+		test("callee_first_missing_fn_error_before_args", [this, run_both_backends, run_both_backends_in]() {
+			// An undefined callee errors BEFORE argument side effects run. Strict (the
+			// default) rejects the undeclared name at load; the runtime ordering runs under
+			// warn and, under strict, through a null callable held in a var.
+			const char* src = R"(
 				var ran = false;
 				function side() -> auto { ran = true; return 1; }
 				var msg = "";
 				try { undefined_callee(side()); } catch (e) { msg = "caught"; }
 				"" + msg + ":" + ran;
-			)");
+			)";
+			auto [i1, v1] = run_both_backends_in(jai::check_mode::warn, src);
 			check_eq(std::string("caught:false"), i1, "interp: missing callee beats arg side effects");
 			check_eq(i1, v1, "missing-callee ordering parity");
+			auto [s1, sv1] = run_both_backends(src);
+			check_eq(s1, sv1, "strict listing parity");
+			check_true(s1.find("ERROR: static check failed") == 0 &&
+				s1.find("use of undeclared identifier 'undefined_callee'") != std::string::npos,
+				"strict rejects the undeclared callee at load (got: " + s1 + ")");
+			auto [n1, nv1] = run_both_backends(R"(
+				var ran = false;
+				function side() -> auto { ran = true; return 1; }
+				var msg = "";
+				var missing = null;
+				try { missing(side()); } catch (e) { msg = "caught"; }
+				"" + msg + ":" + ran;
+			)");
+			check_eq(std::string("caught:false"), n1, "interp: null callee beats arg side effects");
+			check_eq(n1, nv1, "null-callee ordering parity");
 		});
 
 		test("callee_first_not_a_function_before_args", [this, run_both_backends]() {

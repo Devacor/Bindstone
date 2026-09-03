@@ -126,9 +126,7 @@ namespace MV {
 		}
 		engine->memory_cap(a_memoryCapBytes);
 		engine->add_include_path("Assets");   // include "Creatures/Shared/status.script" from any script
-#ifdef _DEBUG
-		engine->static_checking(jai::check_mode::warn);
-#endif
+		engine->static_checking(jai::check_mode::warn);   // engine default is strict; the live client stays at warn (-verifyassets runs the same scripts strict)
 		engine->set_script_error_handler([raw = engine.get()](const std::string& a_message) {
 			auto trace = raw->format_stack_trace();
 			MV::error("Script callback failed: ", a_message, trace.empty() ? "" : "\n", trace);

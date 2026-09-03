@@ -311,6 +311,14 @@ namespace {
                 }
                 case node_type::call_expr:
                     return math_intrinsic_class(static_cast<const call_expr*>(e));
+                case node_type::cast_expr: {
+                    // cast<int>/cast<float> yield the target or raise (the store aborts)
+                    auto* c = static_cast<const cast_expr*>(e);
+                    if (c->by_reference) return cls_unknown;
+                    if (c->target->base_type == script_value_type::jai_int_type) return cls_int;
+                    if (c->target->base_type == script_value_type::jai_float_type) return cls_float;
+                    return cls_unknown;
+                }
                 default:
                     return cls_unknown;
             }
@@ -452,6 +460,15 @@ namespace {
                 case node_type::yield_expr:
                     walk_expr(static_cast<yield_expr*>(e)->value.get());
                     break;
+                case node_type::cast_expr: {
+                    auto* c = static_cast<cast_expr*>(e);
+                    // cast<T&>(x) shares x's cell exactly like auto& r = x
+                    if (c->by_reference && c->operand->get_type() == node_type::identifier_expr) {
+                        escape(static_cast<identifier_expr*>(c->operand.get())->symbol_id);
+                    }
+                    walk_expr(c->operand.get());
+                    break;
+                }
                 default:
                     break;   // literal/identifier/this/super: leaves
             }
@@ -779,6 +796,7 @@ void parser::synchronize() {
         
         switch (peek().type) {
             case token_type::class_keyword:
+            case token_type::extern_keyword:
             case token_type::auto_keyword:
             case token_type::var_keyword:
             case token_type::int_keyword:
@@ -1113,6 +1131,30 @@ checked_result<expression_ptr> parser::primary() {
             JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
         }
         return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
+    }
+
+    // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): the explicit typed-boundary
+    // spelling (detail/cast_kernel.hpp); the type is anything a declaration accepts
+    if (match(token_type::cast_keyword)) {
+        token castToken = previous();
+        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'cast'"));
+        if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
+            check(token_type::void_keyword) || check(token_type::function_keyword)) {
+            report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
+        if (!target || target->base_type == script_value_type::jai_any_type ||
+            (target->base_type == script_value_type::jai_shared_ptr_type && !target->element_type())) {
+            report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", castToken);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        const bool by_reference = match(token_type::ampersand);
+        consume_greater_in_generic("Expected '>' after cast type");
+        JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after cast type"));
+        JAISCRIPT_TRY_ASSIGN(auto operand, expression());
+        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after cast operand"));
+        return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
     }
 
     // Global-qualified identifier (C++ ::name): reach a global deliberately shadowed by
@@ -2135,6 +2177,21 @@ expression_ptr parser::desugar_incdec(const token& op, const expression_ptr& tar
 
 // Stub for declaration
 checked_result<declaration_ptr> parser::declaration() {
+    JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
+    if (mode == check_mode_attr_none) { return declaration_body(); }
+    if (is_at_end() || check(token_type::right_brace)) {
+        // nothing follows: the attribute covers an empty block
+        auto empty = std::make_shared<block_stmt>(previous().location, std::vector<declaration_ptr>{});
+        auto wrapped = std::make_shared<statement_decl>(empty->location, empty);
+        wrapped->check_mode_attr = mode;
+        return wrapped;
+    }
+    JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration_body());
+    if (decl) { decl->check_mode_attr = mode; }
+    return decl;
+}
+
+checked_result<declaration_ptr> parser::declaration_body() {
     // Statement-level recursion (blocks, if-chains) needs the same protection as
     // expressions: declaration->statement->block->declaration is unbounded.
     depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
@@ -2157,6 +2214,10 @@ checked_result<declaration_ptr> parser::declaration() {
     }
     if (match(token_type::namespace_keyword)) {
         return namespace_declaration();
+    }
+
+    if (match(token_type::extern_keyword)) {
+        return extern_declaration();
     }
 
     // Check for include/import directives
@@ -2665,6 +2726,19 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
 
 // statement parsing implementations
 checked_result<statement_ptr> parser::statement() {
+    JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
+    if (mode == check_mode_attr_none) { return statement_body(); }
+    if (is_at_end() || check(token_type::right_brace)) {
+        auto empty = std::make_shared<block_stmt>(previous().location, std::vector<declaration_ptr>{});
+        empty->check_mode_attr = mode;
+        return empty;
+    }
+    JAISCRIPT_TRY_ASSIGN(statement_ptr stmt, statement_body());
+    if (stmt) { stmt->check_mode_attr = mode; }
+    return stmt;
+}
+
+checked_result<statement_ptr> parser::statement_body() {
     // statement->if_statement->statement (and friends) recurse without passing
     // through declaration(); guard here too.
     depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
@@ -3849,6 +3923,45 @@ checked_result<declaration_ptr> parser::import_declaration() {
     }
 
     return std::make_shared<import_decl>(previous().location, path);
+}
+
+checked_result<declaration_ptr> parser::extern_declaration() {
+    // extern function name; | extern name; | extern <type> name;
+    source_location loc = previous().location;
+    type_info_ptr type;
+    bool is_function = false;
+    if (match(token_type::function_keyword)) {
+        is_function = true;
+    } else if (!(check(token_type::identifier) && current_ + 1 < tokens_.size() &&
+                 tokens_[current_ + 1].type == token_type::semicolon)) {
+        JAISCRIPT_TRY_ASSIGN(type, parse_type());
+    }
+    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected name after 'extern'"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after extern declaration"));
+    auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
+    return std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
+}
+
+// [[warn_mode]] / [[strict_mode]] at a statement position, optional trailing ';'. none when
+// the position holds no attribute (a '[[' there opens a nested array literal as before).
+checked_result<uint8_t> parser::check_mode_attribute() {
+    if (!(current_ + 4 < tokens_.size() && check(token_type::left_bracket) &&
+          tokens_[current_ + 1].type == token_type::left_bracket &&
+          tokens_[current_ + 2].type == token_type::identifier &&
+          tokens_[current_ + 3].type == token_type::right_bracket &&
+          tokens_[current_ + 4].type == token_type::right_bracket)) {
+        return check_mode_attr_none;
+    }
+    const token name = tokens_[current_ + 2];
+    const uint8_t mode = name.lexeme == "warn_mode" ? check_mode_attr_warn
+                       : name.lexeme == "strict_mode" ? check_mode_attr_strict : check_mode_attr_none;
+    if (mode == check_mode_attr_none) {
+        report_error("unknown attribute '" + std::string(name.lexeme) + "'", name);
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    current_ += 5;
+    match(token_type::semicolon);
+    return mode;
 }
 
 type_info_ptr parser::wrap_reference_return_type(type_info_ptr return_type) {

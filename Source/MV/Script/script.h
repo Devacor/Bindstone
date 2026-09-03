@@ -16,8 +16,9 @@ namespace MV {
 
 	// One place for engine policy: VM backend (env MV_SCRIPT_INTERPRETER=1 forces the
 	// tree-walking interpreter for parity debugging), stdlib, Services-bound registrars,
-	// script-error logging via MV::error, a memory cap, and static_checking(warn) in
-	// debug builds (diagnostics surface through Script::eval as MV::warning).
+	// script-error logging via MV::error, a memory cap, and static_checking(warn) (debug
+	// builds surface the diagnostics through Script::eval as MV::warning; -verifyassets
+	// re-arms its engine to strict so a typed mistake in any shipped script is a [FAIL]).
 	// Callers still connect the engine into their Services themselves.
 	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes = 256 * 1024 * 1024);
 

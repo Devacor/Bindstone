@@ -725,6 +725,11 @@ namespace {
 			}
 			case node_type::throw_expr:
 				return walk_expr(static_cast<throw_expr*>(e.get())->value);
+			case node_type::cast_expr: {
+				auto* n = static_cast<cast_expr*>(e.get());
+				if (n->by_reference) { return fail(e.get(), "cast<T&> is not allowed in a parallel body"); }
+				return walk_expr(n->operand);
+			}
 			case node_type::yield_expr:
 				return fail(e.get(), "yield is not allowed in a parallel body");
 			case node_type::include_expr:

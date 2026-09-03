@@ -10,6 +10,9 @@ import "vid.jai";
 import "tex.jai";
 import "things.jai";
 
+// netplay.jai mirror behind NET_GAME: extern-declared so programs that never import netplay.jai still check
+extern NET_FRAGS_MINE;
+
 var BAR_H = 0;
 var BSX = 1.0;                // bar space (320x32) -> screen scale
 var BSY = 1.0;

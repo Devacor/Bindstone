@@ -280,6 +280,7 @@ int main(int argc, char** argv) {
 			bool ok = true;
 			try {
 				auto probe = jai::engine::make();
+				probe->static_checking(jai::check_mode::warn);
 				for (const auto& s : p.segments) (void)probe->jaibite(s);
 			} catch (...) { ok = false; }
 			if (ok) ++parse_valid;

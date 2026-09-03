@@ -59,6 +59,7 @@ namespace jai {
         throw_expr,
         yield_expr,
         include_expr,   // include in expression position: evaluates to the file's result
+        cast_expr,      // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e)
 
         // Statements (20-39)
         expression_stmt = 20,
@@ -88,6 +89,7 @@ namespace jai {
         import_decl,
         enum_decl,
         destructuring_decl,
+        extern_decl,      // extern [type | function] name; - a name defined outside the program
     };
 
     // parameter information for functions and lambdas
@@ -128,6 +130,7 @@ namespace jai {
         virtual checked_result<void> visit_this_expr(class this_expr* expr) = 0;
         virtual checked_result<void> visit_super_expr(class super_expr* expr) = 0;
         virtual checked_result<void> visit_throw_expr(class throw_expr* expr) = 0;
+        virtual checked_result<void> visit_cast_expr(class cast_expr* expr) = 0;
 
         // statement visitors
         virtual checked_result<void> visit_expression_stmt(class expression_stmt* stmt) = 0;
@@ -156,6 +159,7 @@ namespace jai {
         virtual checked_result<void> visit_import_decl(class import_decl* decl) = 0;
         virtual checked_result<void> visit_enum_decl(class enum_decl* decl) = 0;
         virtual checked_result<void> visit_destructuring_decl(class destructuring_decl* decl) = 0;
+        virtual checked_result<void> visit_extern_decl(class extern_decl* decl) = 0;
     };
     
     // Base AST node
@@ -497,9 +501,27 @@ namespace jai {
         yield_expr(const source_location& loc, expression_ptr val = nullptr)
             : expression(loc, node_type::yield_expr), value(std::move(val)) {}    };
 
+    // cast<T>(e) (value copy tagged T), cast<T&>(e) (reference, by_reference), and
+    // cast<shared_ptr<T>>(e) (target IS the shared_ptr<T> spelling) - detail/cast_kernel.hpp
+    class cast_expr : public expression {
+    public:
+        type_info_ptr target;
+        bool by_reference;
+        expression_ptr operand;
+
+        cast_expr(const source_location& loc, type_info_ptr t, bool by_ref, expression_ptr e)
+            : expression(loc, node_type::cast_expr), target(std::move(t)), by_reference(by_ref), operand(std::move(e)) {}    };
+
     // Base statement node
+    // [[warn_mode]] / [[strict_mode]] led the statement (docs/static_checking.md "Escape hatches").
+    // Checker-only: on a block's first statement it covers the block, elsewhere the statement's
+    // own subtree; both backends ignore it.
+    inline constexpr uint8_t check_mode_attr_none = 0, check_mode_attr_warn = 1, check_mode_attr_strict = 2;
+
     class statement : public ast_node {
     public:
+        uint8_t check_mode_attr = check_mode_attr_none;
+
         statement(const source_location& loc, node_type t) : ast_node(loc, t) {}
     };
     
@@ -871,6 +893,20 @@ namespace jai {
 
         destructuring_decl(const source_location& loc, expression_ptr init)
             : declaration(loc, node_type::destructuring_decl), initializer(std::move(init)) {}
+    };
+
+    // extern declaration: a name defined outside the program (host-registered, another engine,
+    // a later dynamic definition). The checker treats it as a declared global; both backends
+    // run it as a no-op and the name resolves dynamically as before.
+    class extern_decl : public declaration {
+    public:
+        type_info_ptr type;   // null for `extern name;` (var) and the function form
+        bool is_function;     // extern function name; - a callable of unknown signature
+        std::string_view name;
+        uint64_t name_id;
+
+        extern_decl(const source_location& loc, type_info_ptr t, bool fn, std::string_view n, uint64_t nid)
+            : declaration(loc, node_type::extern_decl), type(std::move(t)), is_function(fn), name(n), name_id(nid) {}
     };
 
     // Helper function to check if an expression is GUARANTEED to return a boolean

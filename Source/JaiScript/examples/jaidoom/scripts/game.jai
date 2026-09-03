@@ -14,6 +14,14 @@ import "spec.jai";
 import "anim.jai";
 import "demo.jai";
 
+// netplay.jai hooks behind NET_GAME: extern-declared so programs that never import netplay.jai still check
+extern function np_tic;
+extern function np_fire_send;
+extern function np_take_request;
+extern function np_item_announce;
+extern function np_use_send;
+extern function np_switch_announce;
+
 var P_X = 0.0;
 var P_Y = 0.0;
 var P_ANG = 0.0;

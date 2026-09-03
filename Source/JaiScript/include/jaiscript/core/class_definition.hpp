@@ -111,7 +111,7 @@ public:
         }
         auto& cell = flat_fields_[slot];
         if (!cell) {
-            cell = std::make_unique<script_value>(std::move(v));
+            cell = make_cell(std::move(v));
         } else if (cell->is_reference()) {
             cell->deref() = std::move(v);
         } else {
@@ -219,7 +219,33 @@ private:
     // check, NOT is_invalid(): a reference field derefs). Runtime-added fields and
     // pre-definition writes (deserialization) live in the lazily-built overflow map;
     // set_class_definition re-homes them into slots.
-    std::vector<std::unique_ptr<script_value>> flat_fields_;
+    // One cell arena per instance (allocated when the definition attaches, sized to the
+    // class's slot count); slots the class gains afterwards (reload) get heap cells. Either
+    // way a pointee never moves - reclass/migration move the POINTERS - and the arena
+    // frees after every cell died (declared before flat_fields_ on purpose).
+    struct cell_deleter {
+        bool heap = true;
+        void operator()(script_value* p) const noexcept { if (heap) { delete p; } else { p->~script_value(); } }
+    };
+    using field_cell = std::unique_ptr<script_value, cell_deleter>;
+    std::unique_ptr<std::byte[]> cell_arena_;
+    uint32_t arena_cells_ = 0;
+    uint32_t arena_used_ = 0;
+    void reserve_cell_arena(size_t n) {
+        if (!cell_arena_ && n) {
+            cell_arena_.reset(new std::byte[n * sizeof(script_value)]);
+            arena_cells_ = static_cast<uint32_t>(n);
+        }
+    }
+    field_cell make_cell(script_value&& v) {
+        if (arena_used_ < arena_cells_) {
+            auto* p = reinterpret_cast<script_value*>(cell_arena_.get()) + arena_used_++;
+            new (p) script_value(std::move(v));
+            return field_cell(p, cell_deleter{false});
+        }
+        return field_cell(new script_value(std::move(v)), cell_deleter{true});
+    }
+    std::vector<field_cell> flat_fields_;
     std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields_;
     // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
     // copy_fields_from and lazy-default materialization replace a held reference value
@@ -789,8 +815,6 @@ public:
     }
 
     std::shared_ptr<class_instance> create_instance() {
-        auto* raw_instance = new class_instance(name_, engine_);
-
         std::shared_ptr<class_instance> instance;
         // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
         // class-static facts, recomputed per MINT before this (measured 2026-07-12 in
@@ -807,6 +831,7 @@ public:
         }
 
         if (has_script_dtor_) {
+            auto* raw_instance = new class_instance(name_, engine_);
             auto class_def = shared_from_this();
 
             instance = std::shared_ptr<class_instance>(raw_instance,
@@ -847,7 +872,7 @@ public:
                     }
                 });
         } else {
-            instance = std::shared_ptr<class_instance>(raw_instance);
+            instance = std::make_shared<class_instance>(name_, engine_);   // instance + control block, one allocation
         }
 
         instance->set_class_definition(shared_from_this());
@@ -1834,7 +1859,7 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
             }
             auto& cell = flat_fields_[slot];
             if (!cell) {
-                cell = std::make_unique<script_value>(std::move(v));
+                cell = make_cell(std::move(v));
             } else {
                 *cell = std::move(v);
             }
@@ -1876,12 +1901,13 @@ inline void class_instance::rehome_overflow_fields() {
 
 inline void class_instance::set_class_definition(std::shared_ptr<class_definition> class_def) {
     class_def_ = class_def.get();
+    if (class_def_) { reserve_cell_arena(class_def_->field_slot_count()); }
     rehome_overflow_fields();
 }
 
 inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def) {
     if (!class_def || class_def.get() == class_def_) { return; }
-    std::vector<std::pair<uint64_t, std::unique_ptr<script_value>>> cells;
+    std::vector<std::pair<uint64_t, field_cell>> cells;
     if (class_def_) {
         cells.reserve(flat_fields_.size());
         for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
@@ -2312,6 +2338,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
         // clone through references exactly as set_field(id, value.clone()) did; the
         // C++ object field keeps its copy_object + script-layer hook route.
         new_instance->class_def_ = class_def_;
+        new_instance->reserve_cell_arena(flat_fields_.size());
         new_instance->flat_fields_.resize(flat_fields_.size());
         for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
             const auto& cell = flat_fields_[slot];
@@ -2334,7 +2361,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                 new_instance->set_field(id, cell->clone());
                 continue;
             }
-            new_instance->flat_fields_[slot] = std::make_unique<script_value>(cell->clone());
+            new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone());
         }
         class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
         return new_instance;

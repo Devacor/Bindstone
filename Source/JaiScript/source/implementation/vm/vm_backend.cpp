@@ -7630,7 +7630,9 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::constructor &&
 	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
-		auto script_cls = std::dynamic_pointer_cast<script_class_definition>(thunk->payload.cls);
+		auto script_cls = thunk->payload.cls && thunk->payload.cls->is_script_class()
+			? std::static_pointer_cast<script_class_definition>(thunk->payload.cls)
+			: std::shared_ptr<script_class_definition>();
 		if (script_cls) {
 			if (script_cls->get_constructor_asts().empty()) {
 				auto result = construct_default_instance(script_cls, arguments);
@@ -9714,13 +9716,12 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				stack_.push_back(make_null());
 				return {};
 			}
-			std::string innerTypeName = inner_type->type_name;
-			auto ctor_result = environment_->get(innerTypeName);
-			if (!ctor_result || !ctor_result.value().is_function()) {
+			script_value* ctor_cell = environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
+			if (!ctor_cell || !ctor_cell->is_function()) {
 				return raise_(make_error_code(runtime_error_code::undefined_variable),
 					"No constructor found for class '{0}'", inner_type->id);
 			}
-			script_value constructorFunc = std::move(ctor_result.value());
+			script_value constructorFunc = ctor_cell->deref();
 			const script_function& func = constructorFunc.as_function();
 			auto result = func({});
 			if (!result) {
@@ -9738,13 +9739,12 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			return raise_(make_error_code(runtime_error_code::type_mismatch),
 				"shared_ptr requires a type parameter when called with arguments");
 		}
-		std::string innerTypeName = inner_type->type_name;
-		auto ctor_result = environment_->get(innerTypeName);
-		if (!ctor_result || !ctor_result.value().is_function()) {
+		script_value* ctor_cell = environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
+		if (!ctor_cell || !ctor_cell->is_function()) {
 			return raise_(make_error_code(runtime_error_code::undefined_variable),
 				"No constructor found for class '{0}'", inner_type->id);
 		}
-		script_value constructorFunc = std::move(ctor_result.value());
+		script_value constructorFunc = ctor_cell->deref();
 		const script_function& func = constructorFunc.as_function();
 		// Typed ctor value: in-loop body entry with the shared_ptr type stamped onto
 		// the completed frame's object result (the exact post-call set_type_info below)
@@ -9752,7 +9752,9 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
 		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
-			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(ctor_thunk->payload.cls);
+			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
+				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
+				: std::shared_ptr<script_class_definition>();
 			if (script_cls) {
 				if (script_cls->get_constructor_asts().empty()) {
 					auto result = construct_default_instance(script_cls, args);
@@ -9804,7 +9806,9 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
 		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
-			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(ctor_thunk->payload.cls);
+			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
+				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
+				: std::shared_ptr<script_class_definition>();
 			if (script_cls) {
 				if (script_cls->get_constructor_asts().empty()) {
 					auto result = construct_default_instance(script_cls, args);
@@ -10525,6 +10529,25 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 	}
 }
 
+// Literal-only twin of evaluate_field_initializers for chains chain_initializers_all_literal
+// proved: same order (parents first, then own), same set_field stamps, no env, no eval
+void vm_backend::stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                                  const std::shared_ptr<script_class_definition>& class_def,
+                                                  bool skip_parent_recursion) {
+	if (!skip_parent_recursion) {
+		for (const auto& parent : class_def->get_parent_classes()) {
+			if (parent && parent->is_script_class()) {
+				stamp_literal_field_initializers(instance, std::static_pointer_cast<script_class_definition>(parent), false);
+			}
+		}
+	}
+	for (const auto& [field_id, initializer_ast] : class_def->get_field_initializer_asts()) {
+		if (initializer_ast) {
+			instance->set_field(field_id, materialize_constant(static_cast<const literal_expr*>(initializer_ast.get())->value));
+		}
+	}
+}
+
 void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                           const std::shared_ptr<class_definition>& class_def) {
 	auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
@@ -10630,20 +10653,24 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 
 	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
 
-	auto init_env = std::make_shared<environment>(definition_env, symbolizer_);
-	init_env->define(symbolizer_->get_this_id(), this_value);
-	init_env->set_access_context(class_def.get());   // field initializers are class-body code
-
 	// (binding evaluates trailing defaults for omitted args; omitted params are simply
 	// absent here, like C++ field-inits that can't see ctor params)
 	if (!arity_accepts(matching_ctor->parameters, args.size())) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
 			"Constructor parameter count mismatch");
 	}
+	// The init env serves initializer-list arguments and non-literal field
+	// initializers; a literal-only chain with no initializer list never reads it
+	std::shared_ptr<environment> init_env;
+	if (!matching_ctor->initializers.empty() || !class_def->chain_initializers_all_literal()) {
+		init_env = std::make_shared<environment>(definition_env, symbolizer_);
+		init_env->define(symbolizer_->get_this_id(), this_value);
+		init_env->set_access_context(class_def.get());   // field initializers are class-body code
+	}
 	for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
 		const auto& param = matching_ctor->parameters[i];
 		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
-		init_env->define(param.symbol_id, args[i]);
+		if (init_env) { init_env->define(param.symbol_id, args[i]); }
 	}
 
 	bool handled_parent_init = false;
@@ -10882,7 +10909,11 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	const uint64_t prof_c3 = __rdtsc();
 #endif
 	if (!delegated_to_this) {
-		evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+		if (init_env) {
+			evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+		} else {
+			stamp_literal_field_initializers(instance, class_def, handled_parent_init);
+		}
 	}
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -10940,10 +10971,10 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		return raise_from(pre);
 	}
 	script_value this_value = std::move(pre.value());
-	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
-	method_env->set_access_context(class_def.get());
-	method_env->define(symbolizer_->get_this_id(), this_value);
 	if (matching_ctor->is_coroutine) [[unlikely]] {
+		auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+		method_env->set_access_context(class_def.get());
+		method_env->define(symbolizer_->get_this_id(), this_value);
 		auto result = execute_method_ast(matching_ctor, method_env, args);
 		if (!result) {
 			return raise_from(result);
@@ -10959,9 +10990,18 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	// needs (name into the record, chunk from the body-keyed cache, env installed during
 	// setup) and the parameter vector is the decl-owned shared instance - nothing points
 	// back into this local after the push returns.
+	// The closure env is a CARRIER: push_script_frame's eager setup copies its parent,
+	// this and access context into a pooled scope env and never chains through it, so
+	// it comes from the pool and goes back right after the push
 	script_defined_function ctor_func(matching_ctor->name, shared_parameters_for(matching_ctor.get()),
 	                                  matching_ctor->return_type, matching_ctor->body,
-	                                  std::move(method_env), matching_ctor->local_count);
+	                                  acquire_method_scope_env(definition_env, this_value, class_def.get()),
+	                                  matching_ctor->local_count);
+	struct carrier_release {
+		vm_backend* vm;
+		std::shared_ptr<environment>& env;
+		~carrier_release() { if (env) { vm->release_scope_env(std::move(env)); } }
+	} carrier{this, ctor_func.closure_env};
 	op_status pushed;
 	try {
 		pushed = push_script_frame(f, make_null(), ctor_func, args, 0, args.size(), nullptr);
@@ -10998,19 +11038,19 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 
 	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
 
-	std::unordered_set<environment*> visited;
+	if (class_def->chain_initializers_all_literal()) {
+		stamp_literal_field_initializers(instance, class_def, false);
+		return this_value;
+	}
+	// Chain root (the global env, or a worker's root): a bounded walk, no visited set
 	auto current_env = environment_;
-	while (current_env && current_env->get_parent()) {
-		if (visited.count(current_env.get()) > 0) {
-			break;
-		}
-		visited.insert(current_env.get());
+	for (int hops = 0; current_env && current_env->get_parent() && hops < 65536; ++hops) {
 		current_env = current_env->get_parent();
 	}
 	auto global_env = current_env ? current_env : environment_;
 
 	auto init_env = std::make_shared<environment>(global_env, symbolizer_);
-	init_env->define("this", this_value);
+	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
 	evaluate_field_initializers(instance, class_def, init_env);
 

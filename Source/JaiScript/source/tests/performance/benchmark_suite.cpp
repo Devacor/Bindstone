@@ -1037,6 +1037,42 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Instance creation: 200 x Vec2(float, float) (x20)", [this]() {
+            // construction protocol: create_instance + init/method envs + literal stamps + in-loop ctor body
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BVec2 { float x = 0.0; float y = 0.0; BVec2(float px, float py) { x = px; y = py; } }
+                    function make_vecs() -> float { float sx = 0.0; for (auto k = 0; k < 20; ++k) { for (auto i = 0; i < 200; ++i) { auto v = BVec2(1.0, 2.0); sx += v.x; } } return sx; }
+                )");
+                bite = test_engine->jaibite(R"(if (make_vecs() != 4000.0) { throw "vec mismatch"; })");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Instance creation: 200 x P() default (x20)", [this]() {
+            // no constructor: create_instance + literal stamps only
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BP { int a = 1; int b = 2; }
+                    function make_ps() -> int { int s = 0; for (auto k = 0; k < 20; ++k) { for (auto i = 0; i < 200; ++i) { auto p = BP(); s += p.a; } } return s; }
+                )");
+                bite = test_engine->jaibite(R"(if (make_ps() != 4000) { throw "p mismatch"; })");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Instance creation: 200 x shared_ptr<Node>(int) (x20)", [this]() {
+            // the BST node shape: typed-ctor value through the shared_ptr arm
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BNode { int value = 0; shared_ptr<BNode> left; shared_ptr<BNode> right; BNode(int v) { value = v; } }
+                    function make_nodes() -> int { int s = 0; for (auto k = 0; k < 20; ++k) { for (auto i = 0; i < 200; ++i) { auto n = shared_ptr<BNode>(i); s += n.value; } } return s; }
+                )");
+                bite = test_engine->jaibite(R"(if (make_nodes() != 398000) { throw "node mismatch"; })");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Push 200 Base into array<Base> (x20)", [this]() {
             // the exact-class admission: one interned-id compare per push
             if (!bite) {

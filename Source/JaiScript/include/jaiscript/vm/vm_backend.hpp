@@ -946,6 +946,9 @@ namespace jai::vm {
                                             type_info* result_stamp);
         checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                 const std::vector<script_value>& args);
+        void stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
+                                              const std::shared_ptr<script_class_definition>& class_def,
+                                              bool skip_parent_recursion);
         void evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,

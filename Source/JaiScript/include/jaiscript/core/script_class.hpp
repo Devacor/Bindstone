@@ -161,6 +161,36 @@ public:
         return field_initializer_asts_;
     }
 
+    // Construction fast path: every field initializer in the script chain is a scalar
+    // literal (the shape evaluate_field_initializers stamps without evaluating), so a
+    // construction with no initializer list never consults its init env. Memo under
+    // method_epoch (a reload re-adds the ASTs after clear_asts and bumps it)
+    bool chain_initializers_all_literal() const {
+        if (literal_memo_epoch_ != method_epoch() || literal_memo_count_ != field_initializer_asts_.size()) {
+            bool all = true;
+            for (const auto& parent : get_parent_classes()) {
+                if (parent && parent->is_script_class() &&
+                    !std::static_pointer_cast<script_class_definition>(parent)->chain_initializers_all_literal()) {
+                    all = false;
+                    break;
+                }
+            }
+            for (size_t i = 0; all && i < field_initializer_asts_.size(); ++i) {
+                const auto& ast = field_initializer_asts_[i].second;
+                if (!ast) { continue; }
+                if (ast->get_type() != node_type::literal_expr) { all = false; break; }
+                const size_t li = static_cast<const literal_expr*>(ast.get())->value.raw_storage_index();
+                all = li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
+                      li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
+                      li == script_value::TYPEID_NULL;
+            }
+            literal_memo_ = all;
+            literal_memo_epoch_ = method_epoch();
+            literal_memo_count_ = field_initializer_asts_.size();
+        }
+        return literal_memo_;
+    }
+
     // Clear all stored ASTs (for hot reload)
     void clear_asts() {
         method_asts_.clear();
@@ -176,6 +206,9 @@ private:
     std::shared_ptr<function_decl> destructor_ast_;
     // Vector (not map) to preserve source declaration order for field initializers.
     std::vector<std::pair<uint64_t, expression_ptr>> field_initializer_asts_;
+    mutable uint64_t literal_memo_epoch_ = UINT64_MAX;
+    mutable size_t literal_memo_count_ = SIZE_MAX;
+    mutable bool literal_memo_ = false;
 };
 
 // For backward compatibility during migration

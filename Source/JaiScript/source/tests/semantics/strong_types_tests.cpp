@@ -3,6 +3,8 @@
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <array>
+#include <string>
+#include <vector>
 
 namespace jai::foundry::tests {
 
@@ -1938,6 +1940,215 @@ public:
             check_both((std::string(decl) +
                 "auto a = P(); auto b = new P(); type_of(a) + \"==\" + type_of(b)").c_str(),
                 "object==object", "value == shared");
+        });
+
+        // ===== PARSE-TIME TYPE PROOFS (docs/static_checking.md "Proofs") =====
+        // A proof selects a lane and a total runtime guard makes it sound, so every program
+        // must read the same on {interp, vm} x {type_proofs on, off}. Segments run in order on
+        // one engine per lane; a class unit is executed three times so its field proofs arm
+        // (first execute -> stamped -> identical-reload hit) before the rows that use them.
+        auto proof_run = [](const std::vector<std::string>& segments) {
+            std::array<std::string, 4> out;   // interp/proofs, interp/plain, vm/proofs, vm/plain
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                for (bool proofs : {true, false}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->type_proofs(proofs);
+                    e->execution_budget(0);
+                    jai::stdlib::register_all(e);
+                    std::string acc;
+                    for (const auto& seg : segments) {
+                        try { acc += e->execute(seg).to_string(); }
+                        catch (const std::exception& ex) { acc += std::string("ERROR: ") + ex.what(); }
+                        acc += '\x1f';
+                    }
+                    out[idx++] = acc;
+                }
+            }
+            return out;
+        };
+        auto last_outcome = [](const std::string& joined) {
+            const std::string body = joined.substr(0, joined.empty() ? 0 : joined.size() - 1);
+            const size_t cut = body.rfind('\x1f');
+            return cut == std::string::npos ? body : body.substr(cut + 1);
+        };
+        auto check_proof_lanes = [this](const std::array<std::string, 4>& r, const std::string& what) {
+            const char* lane[4] = {"interp/proofs", "interp/plain", "vm/proofs", "vm/plain"};
+            for (int i = 0; i < 4; ++i) { check_eq(r[1], r[i], std::string(lane[i]) + " vs interp/plain: " + what); }
+        };
+        // every lane equal; the final segment's outcome pinned when `expected` is non-empty
+        auto check_proof_run = [this, proof_run, last_outcome, check_proof_lanes](const std::vector<std::string>& segments, const std::string& expected, const std::string& what) {
+            auto r = proof_run(segments);
+            check_proof_lanes(r, what);
+            if (!expected.empty()) { check_eq(expected, last_outcome(r[0]), "value: " + what); }
+        };
+        auto check_proof_error = [this, proof_run, last_outcome, check_proof_lanes](const std::vector<std::string>& segments, const std::string& what) {
+            auto r = proof_run(segments);
+            check_proof_lanes(r, what);
+            check(last_outcome(r[0]).rfind("ERROR", 0) == 0, "raises: " + what + " -> " + last_outcome(r[0]));
+        };
+        auto thrice = [](const std::string& unit) { return std::vector<std::string>{unit, unit, unit}; };
+        auto thrice_then = [](const std::string& unit, const std::string& tail) { return std::vector<std::string>{unit, unit, unit, tail}; };
+
+        test("proof_battery_same_type_stores", [check_proof_run, check_proof_error, thrice, thrice_then]() {
+            // per certain kind: env-global `=`, decl init, bare `f =`, `this.f =`, `o.f =`,
+            // typed and var parameters, typed return, type_of after the stores, then a
+            // mismatching store that must take the ladder behind the (now stale) proof
+            struct kind_row { const char* type; const char* a; const char* b; const char* mismatch; const char* expect; const char* expect_mismatch; };
+            const kind_row rows[] = {
+                {"int",    "1",     "2",     "2.5", "int:2:int:2:2:1:2",                      "int:2:int:2"},
+                {"float",  "1.5",   "2.5",   "3",   "float:2.500000:float:2.500000:2.500000:1.500000:2.500000", "float:3.000000:float:3.000000"},
+                {"bool",   "true",  "false", "1",   "bool:false:bool:false:false:true:false", "bool:true:bool:true"},
+                {"char",   "'a'",   "'b'",   "65",  "char:b:char:b:b:a:b",                    ""},
+                {"string", "\"a\"", "\"b\"", "3",   "string:b:string:b:b:a:b",                "string:3:string:3"},
+            };
+            for (const kind_row& k : rows) {
+                const std::string T = k.type;
+                const std::string unit =
+                    "class C { " + T + " f = " + k.a + ";\n"
+                    "  " + T + " set(" + T + " v) { f = v; this.f = v; return f; }\n"
+                    "  " + T + " pass(var v) { " + T + " local = v; local = v; return local; }\n"
+                    "  " + T + " viaArg(" + T + " v) { return set(v); } }\n"
+                    + T + " g = " + k.a + "; g = " + k.b + ";\n"
+                    + T + " fn(" + T + " v) { " + T + " local = v; local = " + k.b + "; return local; }\n"
+                    "C c = C(); c.f = " + k.b + "; " + T + " r = c.set(" + k.a + "); r = c.viaArg(" + k.b + "); " + T + " q = c.pass(" + k.a + ");\n"
+                    "type_of(g) + \":\" + to_string(g) + \":\" + type_of(c.f) + \":\" + to_string(c.f) + \":\" + to_string(r) + \":\" + to_string(q) + \":\" + to_string(fn(" + k.a + "))";
+                const std::string mismatch =
+                    "c.f = " + std::string(k.mismatch) + "; g = " + k.mismatch + "; type_of(c.f) + \":\" + to_string(c.f) + \":\" + type_of(g) + \":\" + to_string(g)";
+                check_proof_run(thrice(unit), k.expect, T + " same-type lanes");
+                if (T == "char") { check_proof_error(thrice_then(unit, mismatch), "int into a proven char field/global raises"); }
+                else { check_proof_run(thrice_then(unit, mismatch), k.expect_mismatch, T + " mismatching store takes the ladder"); }
+            }
+            const std::string obj_unit =
+                "class K { int n = 0; K(int v) { n = v; } }\n"
+                "class C { K f = K(0);\n"
+                "  K set(K v) { f = v; this.f = v; return f; }\n"
+                "  K pass(var v) { K local = v; local = v; return local; }\n"
+                "  K viaArg(K v) { return set(v); } }\n"
+                "K g = K(1); g = K(2);\n"
+                "K fn(K v) { K local = v; local = K(2); return local; }\n"
+                "C c = C(); c.f = K(2); K r = c.set(K(1)); r = c.viaArg(K(2)); K q = c.pass(K(1));\n"
+                "type_of(g) + \":\" + to_string(g.n) + \":\" + type_of(c.f) + \":\" + to_string(c.f.n) + \":\" + to_string(r.n) + \":\" + to_string(q.n) + \":\" + to_string(fn(K(1)).n)";
+            check_proof_run(thrice(obj_unit), "object:2:object:2:2:1:2", "object same-type lanes");
+            check_proof_run(thrice_then(obj_unit, "c.f = 5; g = 6; to_string(c.f.n) + \":\" + to_string(g.n)"), "", "int into an object slot takes the ctor-conversion ladder");
+            check_proof_error(thrice_then(obj_unit, "class J { int m = 0; } g = J(); g.n"), "unrelated class into an object slot raises");
+            check_proof_run(thrice_then(obj_unit, "c.f = null; type_of(c.f)"), "", "null into an object field takes the ladder");
+        });
+
+        test("proof_battery_not_certain", [check_proof_run, check_proof_error, thrice_then]() {
+            // nothing here is certain (var, auto without initializer, handles, containers,
+            // references, by-ref params, callable locals, coroutines, null, placeholders,
+            // derived-into-base, handle-into-value): the ladder runs and all lanes agree
+            const std::string cls = "class C { int v = 1; } class D : C { int w = 2; }\n";
+            check_proof_run({"var v = 1; v = \"s\"; v = 2.5; type_of(v) + \":\" + to_string(v)"}, "float:2.500000", "var");
+            check_proof_run({"auto n; n = 3; n = 4; type_of(n) + \":\" + to_string(n)"}, "int:4", "auto without initializer");
+            check_proof_error({"auto n; n = 3; n = \"s\"; n"}, "auto locks at its first assignment");
+            check_proof_run({cls + "shared_ptr<C> sp = C(); shared_ptr<C> sq = sp; sq.v = 5; to_string(sp.v)"}, "5", "shared_ptr handle");
+            check_proof_run({cls + "shared_ptr<C> sp = C(); weak_ptr<C> wp = sp; to_string(wp.expired()) + \":\" + to_string(wp.lock().v)"}, "false:1", "weak_ptr handle");
+            check_proof_run({"array<int> a = [1, 2]; array<int> b = a; b[0] = 9; to_string(a[0]) + to_string(b[0])"}, "19", "typed array copies");
+            check_proof_run({"map<string,int> m = {\"a\": 1}; map<string,int> n = m; n[\"a\"] = 2; to_string(m[\"a\"]) + to_string(n[\"a\"])"}, "12", "typed map copies");
+            check_proof_run({"int x = 1; int& r = x; r = 5; to_string(x)"}, "5", "reference declaration");
+            check_proof_run({"void bump(int& r) { r = r + 1; } int x = 1; bump(x); to_string(x)"}, "2", "by-reference parameter");
+            check_proof_run({"int twice(int v) { return v * 2; } var f = twice; to_string(f(4))"}, "8", "callable local");
+            check_proof_error({"int twice(int v) { return v * 2; } var f = twice; f(\"s\")"}, "callable local still enforces its parameter");
+            check_proof_run({"coroutine int gen(int n) { yield n; return n + 1; } auto h = gen(3); to_string(h.resume()) + \":\" + to_string(h.resume())"}, "3:4", "coroutine callee");
+            check_proof_run({cls + "C a = C(); a = null; type_of(a)"}, "", "null into an object slot");
+            check_proof_run({cls + "C a; C b = a; type_of(b)"}, "", "typed-null placeholder");
+            check_proof_run({cls + "C b = D(); to_string(b.v) + \":\" + type_of(b)"}, "1:object", "derived into base");
+            check_proof_run({cls + "shared_ptr<C> sp = C(); C c = sp; c.v = 9; to_string(sp.v) + \":\" + to_string(c.v)"}, "", "handle into a value slot");
+            check_proof_error({"int x = 1; x = \"s\"; x"}, "string into int raises");
+            check_proof_error({"char c = 'a'; c = 65; c"}, "int into char raises");
+            check_proof_error({"int f(int v) { return v; } f(\"s\")"}, "string argument into an int parameter raises");
+            check_proof_error({"int g() { return \"s\"; } g()"}, "string returned from an int function raises");
+            check_proof_error({cls + "class J { int m = 1; } C c = C(); c = J(); c"}, "unrelated class into an object slot raises");
+            const std::string armed = "class F { int v = 1; int set(int x) { v = x; return v; } } F f = F(); f.set(2); f.v";
+            check_proof_error(thrice_then(armed, "f.set(\"z\")"), "string into a proven int parameter raises after arming");
+            check_proof_error(thrice_then(armed, "f.v = \"z\"; f.v"), "string into a proven member store raises after arming");
+        });
+
+        test("proof_call_arg_identity_guard", [check_proof_run, check_proof_error, thrice_then]() {
+            // a stamped call site names its callee body: another function bound to the same
+            // name, a later redefinition, overload sets, defaults and by-ref params all run
+            // the unproven path and every lane agrees
+            check_proof_run({"int f(int v) { return v + 1; } int other(int v) { return v * 10; } int a = f(1); f = other; int b = f(1); to_string(a) + \":\" + to_string(b)"}, "", "global function rebound between calls");
+            check_proof_run({"int f(int v) { return v + 1; } var use(var a) { return f(a); } to_string(use(2))",
+                             "string f(string s) { return s + \"!\"; } to_string(use(\"2\"))",
+                             "to_string(use(\"3\"))"}, "3!", "later execute redefines the callee with another signature");
+            check_proof_error({"int f(int v) { return v + 1; } var use() { return f(2); } to_string(use())",
+                               "string f(string s) { return s + \"!\"; } to_string(use())"}, "a stamped int argument meets a string parameter after the redefinition");
+            check_proof_run({"class O { int m(int v) { return v; } int m(int a, int b) { return a + b; } int m(string s) { return 100; } }\n"
+                             "O o = O(); to_string(o.m(1)) + \":\" + to_string(o.m(1, 2)) + \":\" + to_string(o.m(\"s\"))"}, "1:3:100", "overloaded methods");
+            check_proof_run({"int d(int a, int b = 5) { return a + b; } to_string(d(1)) + \":\" + to_string(d(1, 2))"}, "6:3", "defaults");
+            check_proof_run({"void inc(int& r, int by) { r = r + by; } int x = 1; inc(x, 2); to_string(x)"}, "3", "by-reference parameter");
+            const std::string unit = "class O { int m(int v) { return v * 2; } } O o = O(); int use2() { return o.m(3); } to_string(use2())";
+            check_proof_run(thrice_then(unit, "class O { int m(int v) { return v * 2; } int m(string s) { return 7; } } to_string(use2()) + \":\" + to_string(o.m(\"s\"))"), "6:7", "reload grows the overload set behind a stamped site");
+            check_proof_run(thrice_then(unit, "class O { string m(int v) { return \"m\"; } } to_string(use2())"), "", "reload retypes the callee's return behind a stamped site");
+            check_proof_error(thrice_then("int twice(int v) { return v * 2; } int r = twice(4); to_string(twice(r))", "twice(\"s\")"), "string into a proven int parameter raises");
+        });
+
+        test("proof_member_second_execute", [check_proof_run, thrice]() {
+            // the same source three times on one engine: first execute (no field proofs),
+            // second (stamped, then the first redefinition's full-path reload), third
+            // (re-stamped; identical reloads keep hitting) - equal across passes and lanes
+            const std::string unit =
+                "class P { int hp = 10; float x = 1.5; string tag = \"p\"; bool alive = true; char c = 'a';\n"
+                "  int tick(int d) { hp = hp - d; this.hp = this.hp + 1; x = x * 2.0; tag = tag + \"!\"; alive = !alive; c = 'b'; return hp; } }\n"
+                "P p = P(); int r = p.tick(3); r = r + p.tick(1); p.hp = r;\n"
+                "to_string(r) + \":\" + to_string(p.hp) + \":\" + type_of(p.hp) + \":\" + type_of(p.x) + \":\" + p.tag + \":\" + to_string(p.alive) + \":\" + to_string(p.c)";
+            check_proof_run(thrice(unit), "16:16:int:float:p!!:true:b", "self-defining unit executed three times");
+            // module pattern: the class unit runs three times before its users' first check
+            const std::string cls = "class Q { int f = 10; string tag = \"q\"; int tick(int d) { f = f - d; this.f = this.f + 1; tag = tag + \"!\"; return f; } Q dup() { Q q = Q(); q.f = f; q.tag = tag; return q; } }";
+            const std::string users = "Q q = Q(); int r2 = q.tick(3); Q d = q.dup(); d.f = r2; d.tag = q.tag; to_string(r2) + \":\" + to_string(q.f) + \":\" + to_string(d.f) + \":\" + d.tag + \":\" + to_string(q.dup().f)";
+            check_proof_run({cls, cls, cls, users, users, users}, "8:8:8:q!:8", "module pattern");
+        });
+
+        test("proof_stats_fire_and_kill_switch", [this]() {
+            // the runner's backend: the proof pass stamps every kind on an armed unit (the
+            // counters prove the lanes are reachable), a type_proofs(false) twin stamps nothing,
+            // and both read identically at every step - including a switch flipped mid-run
+            auto on = make_engine();
+            auto off = make_engine();
+            off->type_proofs(false);
+            jai::stdlib::register_all(on);
+            jai::stdlib::register_all(off);
+            auto outcome = [](jai::engine& e, const std::string& src) -> std::string {
+                try { return "VALUE " + e.execute(src).to_string(); }
+                catch (const std::exception& ex) { return std::string("ERROR ") + ex.what(); }
+            };
+            const std::string unit =
+                "class P { int hp = 10; float x = 1.5; string tag = \"p\"; bool alive = true; char c = 'a';\n"
+                "  int tick(int d) { hp = hp - d; this.hp = this.hp + 1; x = x * 2.0; tag = tag + \"!\"; alive = !alive; c = 'b'; return hp; } }\n"
+                "P p = P(); int r = p.tick(3); r = r + p.tick(1); p.hp = r;\n"
+                "to_string(r) + \":\" + to_string(p.hp) + \":\" + type_of(p.hp) + \":\" + p.tag";
+            const std::string use = "r = p.tick(2); p.hp = r; p.tag = \"t\"; to_string(p.hp) + \":\" + p.tag";
+            const std::string bad = "p.hp = \"x\"; p.hp";
+            for (int pass = 0; pass < 3; ++pass) {
+                check_eq(outcome(*off, unit), outcome(*on, unit), "unit pass " + std::to_string(pass));
+            }
+            const proof_stats st = on->last_proof_stats();
+            check_ge(st.members, (uint32_t)8, "field proofs on the hp/x/tag/alive/c sites");
+            check_ge(st.stores, (uint32_t)5, "same-type stores");
+            check_ge(st.decls, (uint32_t)2, "same-type decls");
+            check_ge(st.calls, (uint32_t)1, "statically resolved method calls");
+            check_ge(st.args, (uint32_t)1, "int argument into an int parameter");
+            check_ge(st.returns, (uint32_t)1, "int returned from an int method");
+            const proof_stats none = off->last_proof_stats();
+            check_eq((uint32_t)0, none.members + none.stores + none.decls + none.calls + none.args + none.returns, "the twin stamps nothing");
+            for (int pass = 0; pass < 3; ++pass) {
+                const std::string got = outcome(*on, use);
+                check_eq(outcome(*off, use), got, "use pass " + std::to_string(pass));
+                if (pass == 0) { check_eq(std::string("VALUE 15:t"), got); }
+                const std::string rejected = outcome(*on, bad);
+                check_eq(outcome(*off, bad), rejected, "bad pass " + std::to_string(pass));
+                check(rejected.rfind("ERROR", 0) == 0, "string into a proven int field raises: " + rejected);
+            }
+            on->type_proofs(false);
+            check_eq(outcome(*off, use), outcome(*on, use), "switched off mid-run");
+            check_eq((uint32_t)0, on->last_proof_stats().members, "stripped at the next execute");
+            on->type_proofs(true);
+            check_eq(outcome(*off, use), outcome(*on, use), "switched back on");
+            check_ge(on->last_proof_stats().members, (uint32_t)1, "re-stamped at the next execute");
         });
     }
 };

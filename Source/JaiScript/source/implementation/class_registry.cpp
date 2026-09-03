@@ -94,10 +94,15 @@ checked_result<void> class_registry::register_script_class(std::shared_ptr<scrip
         return checked_result<void>(make_error_code(runtime_error_code::class_not_found));
     }
 
-    script_classes_[class_def->get_name()] = class_def;
+    auto& slot = script_classes_[class_def->get_name()];
+    const bool first_definition = slot != class_def;   // redefinitions re-register the same object
+    slot = class_def;
 
     validate_class_hierarchy(class_def->get_name());
 
+    if (first_definition) {
+        if (engine* eng = class_def->get_engine()) { eng->note_class_shape_change(); }
+    }
     return {};
 }
 

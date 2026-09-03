@@ -21,6 +21,7 @@ namespace jai {
     class statement;
     class declaration;
     struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
+    class class_definition;           // class_definition.hpp; proof stamps hold it by raw pointer
     
     using ast_node_ptr = std::shared_ptr<ast_node>;
     using expression_ptr = std::shared_ptr<expression>;
@@ -190,6 +191,14 @@ namespace jai {
 #endif
         }    };
     
+    // Parse-time type proofs (docs/type_proofs_design.md). Stamped by the static checker's proof
+    // pass, never serialized (jaibite re-derives them at load), consumed behind total runtime
+    // guards (detail/type_proofs.hpp). Default = no proof.
+    inline constexpr uint8_t proof_none = 0;
+    inline constexpr uint8_t proof_same_type = 1;
+    inline constexpr uint8_t operand_class_unknown = 0, operand_class_int_int = 1, operand_class_float_float = 2,
+        operand_class_int_float = 3, operand_class_float_int = 4, operand_class_string_string = 5, operand_class_bool_bool = 6;
+
     // identifier expression
     class identifier_expr : public expression {
     public:
@@ -205,6 +214,15 @@ namespace jai {
         // when the storage holds a cell: value-decl names write the cell like the variable
         // itself (typed enforcement); ref-alias names store through unconstrained.
         bool names_value_decl = true;
+        // Field proof (bare this-field read/write inside a method): the receiver's certain class
+        // object, its flat field slot, the field_shape_epoch at stamp time, the declared type and
+        // whether a write may bypass the accessor ladder. Raw pointers like mcache_*: script
+        // class_definitions are engine-lifetime and hot reload reuses the object.
+        mutable class_definition* proven_class = nullptr;
+        mutable uint32_t proven_slot = UINT32_MAX;
+        mutable uint64_t proven_epoch = 0;
+        mutable type_info* proven_field_type = nullptr;
+        mutable bool proven_field_write = false;
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}
@@ -221,6 +239,8 @@ namespace jai {
         // shallow copy instead (runtime-gated on operator overrides). Stamped by the
         // parser's transient_read_marker pass (detail/transient_read.hpp).
         bool transient_element_read = false;
+        // Static operand kinds (operand_class_*): annotation only in v1, no consumer.
+        mutable uint8_t static_operand_class = operand_class_unknown;
 
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc, node_type::binary_expr), left(l), op(o), right(r) {}
@@ -271,6 +291,8 @@ namespace jai {
         // parser.cpp): both backends may skip store-time type enforcement. Consumers
         // re-guard on the runtime type tags, so a stale/wrong stamp only costs the skip.
         bool typed_store_provable = false;
+        // proof_same_type: the RHS static type IS the target's declared type (identity conversion)
+        mutable uint8_t static_store_proof = proof_none;
         // Postfix ++/-- on a non-identifier target desugars to this node with `+= 1`;
         // the expression result is then the OLD value (the parser sets this)
         bool postfix_old_result = false;
@@ -286,6 +308,10 @@ namespace jai {
     public:
         expression_ptr callee;
         std::vector<expression_ptr> arguments;
+        // Per-argument proof_same_type against the ONE statically resolved same-script callee
+        // (identified by body); empty = unproven call
+        mutable std::vector<uint8_t> static_arg_proofs;
+        mutable const block_stmt* proven_callee_body = nullptr;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };
@@ -317,6 +343,12 @@ namespace jai {
         mutable uint8_t mcache_sig[8] = {};              // expected raw storage index per arg; 0xFF = any
         mutable uint8_t mcache_argc = 0xFF;
         mutable uint8_t mcache_flags = 0;                // 1 = access check needed, 2 = member is an sp-builtin name
+        // Field proof (see identifier_expr::proven_class)
+        mutable class_definition* proven_class = nullptr;
+        mutable uint32_t proven_slot = UINT32_MAX;
+        mutable uint64_t proven_epoch = 0;
+        mutable type_info* proven_field_type = nullptr;
+        mutable bool proven_field_write = false;
 
         // math:: intrinsic resolution cache (static access `math::<fn>`): 255 = not yet
         // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,
@@ -572,6 +604,7 @@ namespace jai {
         // value binds as a reference instead of evaluating to a copy. Stamped by the
         // parser's ref_escape_marker pass (innermost function, coroutines excluded).
         bool binds_reference = false;
+        mutable uint8_t static_return_proof = proof_none;
 
         return_stmt(const source_location& loc, expression_ptr v = nullptr)
             : statement(loc, node_type::return_stmt), value(v) {}    };
@@ -658,6 +691,7 @@ namespace jai {
         static constexpr uint8_t decl_fast_scalar = 1 << 1; // auto/var/int/float/bool/char: matching payloads need no conversion
         static constexpr uint8_t decl_fast_slot_store = decl_fast_plain | decl_fast_scalar;
         uint8_t decl_fast_flags = 0;
+        mutable uint8_t static_init_proof = proof_none;
 
         static uint8_t classify_decl_fast(const type_info_ptr& t) {
             if (!t) {

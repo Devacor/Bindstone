@@ -20,6 +20,7 @@
 //   jaiscript_fuzz --isolate                spawn a --child process per seed (crash isolation:
 //                                           a VM crash doesn't kill the campaign)
 //   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
+//   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //
 // Exit code: 0 = no new divergences, 1 = new divergences found, 20/21 = child verdicts.
 
@@ -54,6 +55,7 @@ namespace {
 		bool isolate = false;
 		bool dump = false;
 		bool use_suppressions = true;
+		bool proofs = true;
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
 	};
@@ -77,6 +79,7 @@ namespace {
 			else if (a == "--isolate") { opt.isolate = true; }
 			else if (a == "--dump") { const char* v = next("--dump"); if (!v) return false; opt.seed = std::stoull(v); opt.seed_given = true; opt.dump = true; }
 			else if (a == "--no-suppressions") { opt.use_suppressions = false; }
+			else if (a == "--no-proofs") { opt.proofs = false; }
 			else if (a == "--run") { const char* v = next("--run"); if (!v) return false; opt.run_file = v; }
 			else { std::cerr << "unknown argument: " << a << "\n"; return false; }
 		}
@@ -118,7 +121,7 @@ namespace {
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
 		program p = generate_program(seed, opt.max_depth);
 		double budget_seconds = opt.timeout_ms / 1000.0;
-		compare_result cr = compare_program(p, budget_seconds);
+		compare_result cr = compare_program(p, budget_seconds, opt.proofs);
 
 		if (cr.kind == compare_result::budget_skip) {
 			if (verbose || cr.budget_suspect) {
@@ -152,13 +155,13 @@ namespace {
 			auto still = [&](const program& cand) {
 				// Any divergence keeps the reduction: drifting into a KNOWN shape is
 				// handled by re-matching suppressions on the minimized form below.
-				return compare_program(cand, budget_seconds).kind == compare_result::diverge;
+				return compare_program(cand, budget_seconds, opt.proofs).kind == compare_result::diverge;
 			};
 			minimized = minimize(p, still, stats);
 			have_min = true;
 			std::cout << "--- minimized (" << stats.reductions << " reductions, " << stats.checks << " checks) ---\n";
 			std::cout << minimized.joined() << "\n";
-			compare_result mc = compare_program(minimized, budget_seconds);
+			compare_result mc = compare_program(minimized, budget_seconds, opt.proofs);
 			std::cout << "--- minimized diff ---\n" << mc.diff;
 			// Some shapes only become recognizable after minimization (e.g. an
 			// eval-order divergence buried under printed-output noise): re-match
@@ -183,6 +186,7 @@ namespace {
 		if (opt.minimize_flag) cmd += " --minimize";
 		if (!opt.corpus.empty()) cmd += " --corpus \"" + opt.corpus + "\"";
 		if (!opt.use_suppressions) cmd += " --no-suppressions";
+		if (!opt.proofs) cmd += " --no-proofs";
 #ifdef _WIN32
 		cmd = "\"" + cmd + "\""; // cmd.exe strips one layer of quotes
 		FILE* pipe = _popen(cmd.c_str(), "r");
@@ -227,7 +231,7 @@ int main(int argc, char** argv) {
 			p.segments.push_back(text.substr(pos, hit - pos));
 			pos = hit + marker.size();
 		}
-		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0);
+		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs);
 		if (cr.kind == compare_result::diverge) {
 			std::cout << "DIVERGE\n" << cr.diff;
 			for (size_t i = 0; i < cr.interp.segment_results.size(); ++i)

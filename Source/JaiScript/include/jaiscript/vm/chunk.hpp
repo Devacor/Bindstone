@@ -38,6 +38,9 @@ namespace jai::vm {
         uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
         uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
         uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
+        // Env-resolved plain identifier: chunk::nodes index of its identifier_expr, read live
+        // for field proofs (docs/type_proofs_design.md); invalid = slotted / literal / subscript
+        uint32_t ident_node = k_invalid_u32;
 
         // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
         // elision ruling applies): slot/symbol above name the BASE container; the chain
@@ -65,6 +68,7 @@ namespace jai::vm {
         // lazily materialized - empty when no argument qualifies
         std::vector<uint32_t> arg_lvalue_nodes;
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
+        uint32_t call_node = k_invalid_u32;        // chunk::nodes index of the call_expr (static_arg_proofs, read live)
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
         // Compile-time builtin dispatch indices (name-sorted, engine-independent — see
         // builtin_method_registries): 0xFFFF = the member is not a builtin of that
@@ -282,6 +286,10 @@ namespace jai::vm {
         std::vector<uint64_t> symbols;
         std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive
+        // Per ip (lazily sized, never longer than code): nodes index of the env-resolved
+        // identifier_expr behind an op_load / op_store / op_binary_fused_store /
+        // op_return_ident, read live for field proofs; k_invalid_u32 = none
+        std::vector<uint32_t> ident_nodes;
         std::vector<call_site> call_sites;
         std::vector<function_proto> function_protos;
         std::vector<closure_proto> closure_protos;

@@ -141,6 +141,7 @@ namespace jai::fuzz {
 		// where the wall-clock budget's 1024-tick gate never accumulates; the cap makes
 		// them terminate deterministically.
 		size_t memory_cap_bytes = 64 * 1024 * 1024;
+		bool proofs = true;                       // engine::type_proofs (the proof differential gate flips it)
 	};
 
 	inline bool contains_ci(const std::string& hay, const std::string& needle) {
@@ -152,6 +153,7 @@ namespace jai::fuzz {
 		run_outcome out;
 		auto eng = jai::engine::make();
 		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
+		eng->type_proofs(cfg.proofs);
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
 
@@ -229,10 +231,15 @@ namespace jai::fuzz {
 			"\n      vm    (len " + std::to_string(b.size()) + "): ..." + excerpt(b);
 	}
 
-	inline compare_result compare_program(const program& p, double budget_seconds) {
+	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true) {
 		compare_result cr;
-		cr.interp = run_program(p, run_config{false, budget_seconds});
-		cr.vm = run_program(p, run_config{true, budget_seconds});
+		run_config interp_cfg;
+		interp_cfg.budget_seconds = budget_seconds;
+		interp_cfg.proofs = proofs;
+		run_config vm_cfg = interp_cfg;
+		vm_cfg.use_vm = true;
+		cr.interp = run_program(p, interp_cfg);
+		cr.vm = run_program(p, vm_cfg);
 		if (cr.interp.budget_hit || cr.vm.budget_hit) {
 			// The budget is wall-clock: one side can time out while the other squeaks
 			// by, so budget programs are never findings. Flag one-sided hits for review.

@@ -6,8 +6,13 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/type_proofs.hpp>
+#include <jaiscript/core/class_registry.hpp>
 
 #include "fuzz/fuzz_generator.hpp"
+#include "fuzz/fuzz_harness.hpp"
+
+#include <algorithm>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -24,6 +29,20 @@ struct probe_object {
 size_t error_count(const check_report& r) { return r.error_count(); }
 size_t warning_count(const check_report& r) {
     return r.diagnostics.size() - r.error_count();
+}
+
+// Proof differential helper: one line per outcome, error text included verbatim.
+std::string outcome(jai::engine& e, const std::string& src) {
+    try {
+        return "VALUE " + e.execute(src).to_string();
+    } catch (const std::exception& ex) {
+        return std::string("ERROR ") + ex.what();
+    }
+}
+
+uint64_t shape_epoch(jai::engine& e, const std::string& cls) {
+    auto def = e.get_class_registry().find_script_class(cls);
+    return def ? def->field_shape_epoch() : 0;
 }
 
 } // namespace
@@ -775,6 +794,273 @@ public:
             }
         });
 
+        // ------------------------------------------------------------ type proofs
+        // docs/type_proofs_design.md: the proof pass rides the checker walk in every mode
+        // and stamps AST nodes; consumers guard at runtime, so proofs on/off must be
+        // observationally identical. These pin the stamping side (counters) and the
+        // engine plumbing (switch, re-stamp on surface moves, jaibite paths).
+
+        test("proofs_default_on_and_switch_roundtrip", [this]() {
+            auto e = make_engine();
+            check_true(e->type_proofs());
+            e->type_proofs(false);
+            check_false(e->type_proofs());
+            e->type_proofs(true);
+            check_true(e->type_proofs());
+        });
+
+        test("proofs_stamp_in_off_mode_with_counters", [this]() {
+            // check mode off: no diagnostics anywhere, yet the proof pass stamps
+            auto e = make_engine();
+            check_true(e->static_checking() == check_mode::off);
+            const std::string src =
+                "int a = 1; a = 2; string s = \"x\"; s = s + \"y\";\n"
+                "int twice(int v) { return v * 2; }\n"
+                "int r = twice(a);\n"
+                "float f = 1.5; f = 2.5; bool b = true; b = false; char c = 'q'; c = 'r';\n"
+                "r";
+            check_eq((int64_t)4, e->execute(src).as_int());
+            const proof_stats& st = e->last_proof_stats();
+            check_ge(st.decls, (uint32_t)6, "typed decls with same-type initializers");
+            check_ge(st.stores, (uint32_t)5, "same-type stores");
+            check_eq((uint32_t)1, st.calls, "one statically resolved callee");
+            check_eq((uint32_t)1, st.args, "int argument into int parameter");
+            check_eq((uint32_t)1, st.returns, "int expression returned from int function");
+            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size());
+
+            // the twin with proofs off runs the same source with zero stamps and equal output
+            auto off = make_engine();
+            off->type_proofs(false);
+            check_eq((int64_t)4, off->execute(src).as_int());
+            const proof_stats& none = off->last_proof_stats();
+            check_eq((uint32_t)0, none.decls + none.stores + none.calls + none.args + none.returns + none.members);
+        });
+
+        test("proofs_not_stamped_from_uncertain_types", [this]() {
+            auto e = make_engine();
+            // var/auto-no-init/shared_ptr/weak_ptr/array/map/reference decls, engine globals,
+            // defaulted and by-ref params, includes-free but dynamic: nothing is certain here
+            e->add_global("g", script_value((int64_t)3, e.get()));
+            const std::string src =
+                "var v = 1; v = 2; auto n; n = 3; array<int> xs = [1]; map<string,int> m = {\"a\": 1};\n"
+                "int gi = g; gi = g;\n"
+                "int dflt(int a, int b = 1) { return a + b; } dflt(1);\n"
+                "void byref(int& r) { r = 5; } int q = 0; byref(q);\n"
+                "class Foo { int x = 1; } shared_ptr<Foo> sp = new Foo(); weak_ptr<Foo> wp = sp; Foo cp = Foo(); cp = Foo();\n"
+                "q";
+            e->execute(src);
+            const proof_stats& st = e->last_proof_stats();
+            check_eq((uint32_t)1, st.stores, "only `cp = Foo()` (object same_type) proves");
+            check_eq((uint32_t)2, st.decls, "only `int q = 0` and `Foo cp = Foo()` prove");
+            check_eq((uint32_t)0, st.calls, "defaulted/by-ref callees are never proven");
+            check_eq((uint32_t)0, st.args);
+            check_eq((uint32_t)0, st.members, "first execute: the class is not registered yet");
+        });
+
+        test("proofs_off_strips_cached_entry_and_on_restamps", [this]() {
+            auto e = make_engine();
+            const std::string src = "int a = 1; a = 2; a";
+            check_eq((int64_t)2, e->execute(src).as_int());
+            check_ge(e->last_proof_stats().stores, (uint32_t)1);
+            check_ge(e->last_proof_stats().decls, (uint32_t)1);
+            // switching off re-runs the cached entry in clear mode at its next execute
+            e->type_proofs(false);
+            check_eq((int64_t)2, e->execute(src).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().stores + e->last_proof_stats().decls);
+            // and back on re-stamps
+            e->type_proofs(true);
+            check_eq((int64_t)2, e->execute(src).as_int());
+            check_ge(e->last_proof_stats().stores, (uint32_t)1);
+        });
+
+        test("proof_field_stamps_on_second_execute_and_hold_across_identical_reload", [this]() {
+            auto e = make_engine();
+            const std::string src =
+                "class Pt { int x = 1; float y = 2.0;\n"
+                "  int bump(int d) { x = x + d; this.y = this.y * 2.0; return x; } }\n"
+                "Pt p = Pt(); p.bump(3); p.x";
+            // first execute: the class is not registered when the entry is checked -> no
+            // field proofs, but same_type decl/arg/return proofs do stamp
+            check_eq((int64_t)4, e->execute(src).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().members);
+            check_ge(e->last_proof_stats().decls, (uint32_t)1);
+            check_ge(e->last_proof_stats().args, (uint32_t)1);
+            check_ge(e->last_proof_stats().returns, (uint32_t)1);
+            const uint64_t epoch_after_first = shape_epoch(*e, "Pt");
+            // registering the class moved the surface: the SAME cached entry re-checks
+            // and now carries field proofs (bare x read/write, this.y read/write, p.x).
+            // Its class_decl then runs as the FIRST redefinition, which is a full-path
+            // reload (the structural key stores lazily): shape epoch and surface move once more
+            check_eq((int64_t)4, e->execute(src).as_int());
+            check_ge(e->last_proof_stats().members, (uint32_t)5);
+            check_ge(e->last_proof_stats().stores, (uint32_t)2, "bare + member field same-type stores");
+            check_ne(epoch_after_first, shape_epoch(*e, "Pt"));
+            const uint64_t epoch_after_second = shape_epoch(*e, "Pt");
+            // third execute: re-checks (surface moved), its reload is identical -> epoch holds
+            check_eq((int64_t)4, e->execute(src).as_int());
+            check_ge(e->last_proof_stats().members, (uint32_t)5);
+            check_eq(epoch_after_second, shape_epoch(*e, "Pt"));
+            const uint64_t epoch_after_third = shape_epoch(*e, "Pt");
+            // from here on: identical reloads move nothing (no re-check, shape epoch holds)
+            e->execute("1 + 1");
+            check_eq((uint32_t)0, e->last_proof_stats().members);
+            check_eq((int64_t)4, e->execute(src).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().members, "identical reload must not re-check");
+            check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
+            check_eq((int64_t)4, e->execute(src).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().members);
+            check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
+            // non-identical reload (field retype) moves the shape epoch and the surface:
+            // the original entry re-checks at its next execute (spelling disagreement on x
+            // refuses that field's proof; y and p.x still prove)
+            e->execute("class Pt { string x = \"1\"; float y = 2.0;\n"
+                       "  int bump(int d) { return d; } }");
+            check_ne(epoch_after_third, shape_epoch(*e, "Pt"));
+            e->execute("1 + 1");
+            e->execute(src);
+            check_ge(e->last_proof_stats().members, (uint32_t)1, "re-stamped after the shape change");
+        });
+
+        test("proof_field_refusals", [this]() {
+            // statics, custom accessors, nonpublic labels, static methods, ctor initializer
+            // args and [=] lambdas never carry field proofs (design 4.4 / bare_field_context)
+            auto e = make_engine();
+            const std::string src =
+                "class R { static int count = 0; int a = 1; int b = 2;\n"
+                "  private: int hidden = 3;\n"
+                "  public:\n"
+                "  int _get_b() { return b * 10; }\n"
+                "  static int peek() { return count; }\n"
+                "  int read() { auto f = [=]() { return 1; }; return count + b + hidden + f(); } }\n"
+                "R r = R(); r.read()";
+            e->execute(src);
+            e->execute(src);   // class registered: field proofs would stamp if admissible
+            check_eq((uint32_t)0, e->last_proof_stats().members, "nonpublic chain: no field proofs at all");
+            // A same-class `_get_b` is shadowed by the synthesized accessor at definition
+            // (is_auto_accessor stays true; q.b reads the raw field at runtime), so the three
+            // `b` sites prove and only the static `count` is refused.
+            const std::string plain =
+                "class Q { static int count = 0; int b = 2;\n"
+                "  int _get_b() { return b * 10; }\n"
+                "  int read() { return count + b; } }\n"
+                "Q q = Q(); q.read() + q.b";
+            check_eq((int64_t)4, e->execute(plain).as_int());
+            e->execute(plain);
+            check_eq((uint32_t)3, e->last_proof_stats().members, "static field refused; b proven at its three sites");
+        });
+
+        test("proof_jaibite_paths_restamp_without_touching_diagnostics", [this]() {
+            auto e = make_engine();   // off
+            auto bite = e->jaibite("int a = 5; int b = a; b");
+            check_eq((uint32_t)2, e->last_proof_stats().decls, "proof pass at creation under off");
+            check_false(bite.checked_clean());   // diagnostics untouched under off
+            auto loaded = e->jaibite_load_bytes(bite.save_bytes());
+            check_eq((uint32_t)2, e->last_proof_stats().decls, "re-derived at load, never serialized");
+            check_false(loaded.checked_clean());
+            check_eq((int64_t)5, loaded.execute().as_int());
+            e->type_proofs(false);
+            check_eq((int64_t)5, loaded.execute().as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().decls, "next execute clears the bite's stamps");
+            e->type_proofs(true);
+            // strict: a trusted-clean load keeps its empty report and still stamps
+            e->static_checking(check_mode::strict);
+            auto clean = e->jaibite("int q = 1; int w = q; w");
+            check_true(clean.checked_clean());
+            auto trusted = e->jaibite_load_bytes(clean.save_bytes());
+            check_true(trusted.checked_clean());
+            check_eq((size_t)0, trusted.check_diagnostics().diagnostics.size());
+            check_eq((uint32_t)2, e->last_proof_stats().decls);
+            check_eq((int64_t)1, trusted.execute().as_int());
+        });
+
+        test("proof_kernel_same_type_payload", [this]() {
+            auto e = make_engine();
+            script_value i((int64_t)5, e.get());
+            script_value f(2.5, e.get());
+            script_value s(std::string("x"), e.get());
+            check_true(detail::same_type_payload(i, e->get_type_info_int()));
+            check_false(detail::same_type_payload(i, e->get_type_info_float()));
+            check_true(detail::same_type_payload(f, e->get_type_info_float()));
+            check_true(detail::same_type_payload(s, e->get_type_info_string()));
+            check_false(detail::same_type_payload(s, e->get_type_info_int()));
+            check_false(detail::same_type_payload(i, nullptr));
+            // a non-any tag naming another base defeats the identity claim
+            script_value tagged((int64_t)5, e.get());
+            tagged.set_type_info(type_info_ptr{e->get_type_info_float()});
+            check_false(detail::same_type_payload(tagged, e->get_type_info_int()));
+            check_true(detail::retags_on_field_write(e->get_type_info_int()));
+            check_false(detail::retags_on_field_write(e->get_type_info_void()));
+            check_null(detail::proven_field_instance(i, nullptr, 1));
+        });
+
+        test("proof_battery_results_equal_with_proofs_on_and_off", [this]() {
+            // Same backend, two engines: proofs on vs off must agree on every value and
+            // every error text (consumers are guard-gated; this pins the contract).
+            auto on = make_engine();
+            auto off = make_engine();
+            off->type_proofs(false);
+            const char* snippets[] = {
+                "int x = 1; x = 2; x = 2.5; type_of(x) + \":\" + to_string(x)",
+                "string s = \"a\"; s = \"b\"; s = 3; s",
+                "float f = 1.0; f = 2.0; f = 3; f",
+                "bool b = true; b = false; b = 1; b",
+                "char c = 'a'; c = 'b'; c",
+                "int x = 1; x = \"s\"; x",
+                "class C { int v = 1; string n = \"a\"; int get() { v = v + 1; this.n = this.n + \"!\"; return v; } }\n"
+                "C c = C(); c.get(); c.get(); c.v = 10; c.n + to_string(c.v)",
+                "class C { int v = 1; } C a = C(); C b = a; b.v = 7; to_string(a.v) + to_string(b.v)",
+                "class C { int v = 1; } C a = C(); a.v = \"s\"; a.v",
+                "int twice(int v) { return v * 2; } int r = twice(4); twice(r)",
+                "int twice(int v) { return v * 2; } twice(\"s\")",
+                "string name(int v) { return v; } name(3)",
+                "class C { int v = 1; } C make() { return C(); } C m = make(); m.v",
+                "var d = 1; d = \"x\"; auto a = 2; a = 3; a",
+            };
+            for (const char* src : snippets) {
+                // twice each: the second run is the cache hit (re-checked after class registration)
+                for (int pass = 0; pass < 2; ++pass) {
+                    check_eq(outcome(*off, src), outcome(*on, src), std::string("proofs on/off diverge on: ") + src);
+                }
+            }
+            check_true(on->type_proofs());
+            check_false(off->type_proofs());
+        });
+
+        test("proof_consumers_retype_on_reload_assigns_never_errors", [this]() {
+            // Ruling (2): field proofs armed before a reload that retypes the fields miss on
+            // the shape epoch, and the ladder converts/rejects exactly as the unproven twin.
+            auto on = make_engine();
+            auto off = make_engine();
+            off->type_proofs(false);
+            for (auto* e : {on.get(), off.get()}) {
+                e->add_variadic_function("to_string", [e](const std::vector<script_value>& args) -> script_value {
+                    return script_value(args.empty() ? std::string() : args[0].to_string(), e);
+                });
+            }
+            const char* v1 =
+                "class R { int f = 1; string g = \"a\";\n"
+                "  int set(int v) { f = v; this.f = v; g = \"s\"; return f; }\n"
+                "  string show() { return to_string(f) + \":\" + g + \":\" + this.g; } }\n"
+                "R r = R(); r.set(41); r.f = 42; r.show()";
+            const char* v2 =
+                "class R { string f = \"z\"; int g = 0;\n"
+                "  int set(int v) { f = v; this.f = v; g = 5; return v; }\n"
+                "  string show() { return f + \":\" + to_string(g) + \":\" + to_string(this.g); } }\n"
+                "r.show()";
+            const char* use = "r.set(7); r.f = 9; r.g = 3; r.show()";
+            const char* bad = "r.g = \"x\"; r.show()";
+            for (int pass = 0; pass < 3; ++pass) {   // first-execute -> stamped -> identical-reload hit
+                check_eq(outcome(*off, v1), outcome(*on, v1));
+                check_eq(outcome(*off, use), outcome(*on, use));
+            }
+            check_eq(outcome(*off, v2), outcome(*on, v2));
+            for (int pass = 0; pass < 3; ++pass) {
+                check_eq(outcome(*off, use), outcome(*on, use));
+                check_eq(outcome(*off, bad), outcome(*on, bad));
+            }
+            check_eq(std::string("VALUE 9:3:3"), outcome(*on, use));
+        });
+
         // ------------------------------------------------------------ fuzz corpus FP gate
 
         test("fuzz_corpus_false_positive_gate", [this]() {
@@ -838,6 +1124,80 @@ public:
             }
             check_gt(clean_programs, 0);
             check_eq(0, false_positives, first_report.empty() ? "no false positives" : first_report);
+        });
+
+        // ------------------------------------------------------------ proof differential gate
+
+        test("proof_differential_gate", [this]() {
+            // The byte-parallel contract (docs/static_checking.md "Proofs"): per generated
+            // program, each backend must produce identical segment results, printed output,
+            // error text and liveness with type_proofs on and off - four fresh engines with
+            // identical registrations per seed. Cross-backend agreement is the fuzz smoke
+            // suite's contract and is re-checked here modulo its known suppressions.
+            constexpr uint64_t k_seed_count = 200;
+            constexpr double k_budget_seconds = 0.1;
+            int compared_programs = 0;
+            int proof_divergences = 0;
+            int backend_divergences = 0;
+            std::string first_report;
+            auto same = [](const fuzz::run_outcome& a, const fuzz::run_outcome& b) {
+                return a.segment_results == b.segment_results && a.printed == b.printed && a.alive == b.alive;
+            };
+            auto diff_text = [](const fuzz::run_outcome& a, const char* la, const fuzz::run_outcome& b, const char* lb) {
+                std::string d;
+                const size_t n = std::min(a.segment_results.size(), b.segment_results.size());
+                for (size_t i = 0; i < n; ++i) {
+                    if (a.segment_results[i] != b.segment_results[i]) {
+                        d += "  segment " + std::to_string(i) + ":\n    " + la + ": " + a.segment_results[i] +
+                             "\n    " + lb + ": " + b.segment_results[i] + "\n";
+                    }
+                }
+                if (a.segment_results.size() != b.segment_results.size()) { d += "  segment count differs\n"; }
+                if (a.printed != b.printed) { d += "  printed output differs " + fuzz::first_difference(a.printed, b.printed) + "\n"; }
+                if (a.alive != b.alive) {
+                    d += std::string("  engine-alive-after: ") + la + "=" + (a.alive ? "yes" : "NO") +
+                         " " + lb + "=" + (b.alive ? "yes" : "NO") + "\n";
+                }
+                return d;
+            };
+            for (uint64_t seed = 0; seed < k_seed_count; ++seed) {
+                fuzz::program p = fuzz::generate_program(seed, 3);
+                fuzz::run_outcome runs[2][2];   // [backend: 0 interp, 1 vm][proofs: 0 off, 1 on]
+                bool budget = false;
+                for (int be = 0; be < 2 && !budget; ++be) {
+                    for (int pr = 0; pr < 2 && !budget; ++pr) {
+                        fuzz::run_config cfg;
+                        cfg.use_vm = be == 1;
+                        cfg.budget_seconds = k_budget_seconds;
+                        cfg.proofs = pr == 1;
+                        runs[be][pr] = fuzz::run_program(p, cfg);
+                        budget = runs[be][pr].budget_hit;
+                    }
+                }
+                if (budget) { continue; }   // wall-clock territory: never a finding
+                ++compared_programs;
+                for (int be = 0; be < 2; ++be) {
+                    if (same(runs[be][0], runs[be][1])) { continue; }
+                    ++proof_divergences;
+                    if (first_report.empty()) {
+                        first_report = "seed " + std::to_string(seed) + " on the " + (be ? "vm" : "interpreter") +
+                                       " differs between type_proofs off and on:\n" +
+                                       diff_text(runs[be][0], "proofs off", runs[be][1], "proofs on ") + p.joined();
+                    }
+                }
+                if (!same(runs[0][0], runs[1][0])) {
+                    const std::string d = diff_text(runs[0][0], "interp", runs[1][0], "vm    ");
+                    if (fuzz::match_suppression(p, d).empty()) {
+                        ++backend_divergences;
+                        if (first_report.empty()) {
+                            first_report = "seed " + std::to_string(seed) + " diverges between the backends (proofs off):\n" + d + p.joined();
+                        }
+                    }
+                }
+            }
+            check_gt(compared_programs, 0);
+            check_eq(0, proof_divergences, first_report.empty() ? "proofs on/off agree on both backends" : first_report);
+            check_eq(0, backend_divergences, first_report.empty() ? "backends agree" : first_report);
         });
     }
 };

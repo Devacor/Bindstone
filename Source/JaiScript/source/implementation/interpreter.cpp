@@ -13,6 +13,7 @@
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
+#include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
@@ -2635,6 +2636,7 @@ void interpreter::prepare_for_execution() {
     valueStack_.clear();
     returnValue_.reset();  // No need to create a value - value_or() will create it if needed
     hasReturnValue_ = false;
+    return_proven_ = false;
 
     // Clear coroutine state — unless re-entered from inside a RUNNING coroutine
     // (include/import, or a host callback calling execute() mid-resume): clearing
@@ -2712,6 +2714,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         script_valueStack saved_values;
         std::optional<script_value> saved_return;
         bool saved_has_return = false;
+        bool saved_return_proven = false;
         detail::member_scope_ctx saved_member_scope{};
 
         explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->execute_depth_ != 0) {
@@ -2723,6 +2726,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_.clear();
                 saved_return = std::move(self->returnValue_);
                 saved_has_return = self->hasReturnValue_;
+                saved_return_proven = self->return_proven_;
                 if (!self->pending_instance_env_) {
                     self->environment_ = self->get_global_environment();
                 }
@@ -2741,6 +2745,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_ = std::move(saved_values);
                 self->returnValue_ = std::move(saved_return);
                 self->hasReturnValue_ = saved_has_return;
+                self->return_proven_ = saved_return_proven;
                 self->member_scope_ = saved_member_scope;
             }
             --self->execute_depth_;
@@ -2749,6 +2754,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 
     script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
+    return_proven_ = false;
     captured_trace_.clear();
     trace_captured_ = false;
     top_level_node_ = nullptr;
@@ -2959,6 +2965,17 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         if (script_value* own = detail::own_scope_lookup(environment_.get(), member_scope_.floor, expr->symbol_id)) {
             push_value(own->deref());
             return checked_result<void>();
+        }
+        // Proven this-field read (docs/type_proofs_design.md I-I1): class object + shape
+        // epoch + present cell -> the cell copy the probe's field rung pushes; any miss
+        // runs the probe (which materializes defaults) unchanged
+        if (expr->proven_class && !parallel_worker_ &&
+            member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
+            if (script_value* cell = detail::proven_field_cell(*member_scope_.this_storage, expr->proven_class,
+                                                               expr->proven_epoch, expr->proven_slot, nullptr)) {
+                push_value(*cell);
+                return checked_result<void>();
+            }
         }
         auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                  member_scope_.statics, expr->symbol_id, /*want_methods*/ true);
@@ -5178,7 +5195,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Slot locals enforce their locked type like the environment path does
                         // (same-type fast guard keeps the hot store path call-free)
                         type_info_ptr slot_type = storage->get_type_info();
-                        if (slot_type && (slot_type->base_type != value.type() ||
+                        const bool proven_identity = expr->static_store_proof == proof_same_type && slot_type &&
+                                                     detail::same_type_payload(value, slot_type.get());
+                        if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
                                           slot_type->base_type == script_value_type::jai_object_type)) {
                             auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
                             if (!enforced) {
@@ -5208,6 +5227,39 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             bool member_wins = false;
             if (!identifier->global_qualified && member_scope_.active() &&
                 !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
+                // Proven this-field store (docs/type_proofs_design.md I-S3): the implicit-this
+                // landing below with its conversion gated by the proof (KEEP BYTE-PARALLEL with
+                // vm_backend store_popped_value's proven lane)
+                if (identifier->proven_class && identifier->proven_field_write && !parallel_worker_ &&
+                    member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
+                    if (class_instance* inst = detail::proven_field_instance(*member_scope_.this_storage,
+                                                                             identifier->proven_class, identifier->proven_epoch)) {
+                        const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
+                        if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                            value = value.detached_for_store();
+                        }
+                        script_value incoming = is_lvalue_read ? clone_for_assignment(value) : std::move(value);
+                        if (expr->static_store_proof == proof_same_type && identifier->proven_field_type &&
+                            detail::same_type_payload(incoming, identifier->proven_field_type)) {
+                            if (detail::retags_on_field_write(identifier->proven_field_type)) {
+                                incoming.set_type_info(type_info_ptr{identifier->proven_field_type});
+                            }
+                        } else {
+                            auto enforced = inst->enforce_field_write(identifier->symbol_id, std::move(incoming));
+                            if (!enforced) {
+                                return enforced.error_value();
+                            }
+                            incoming = std::move(enforced.value());
+                        }
+                        inst->field_slot_write(identifier->proven_slot, std::move(incoming));
+                        if (is_lvalue_read) {
+                            push_value(std::move(value));
+                        } else {
+                            push_value(inst->get_field(identifier->symbol_id));
+                        }
+                        return {};
+                    }
+                }
                 member_wins = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                          member_scope_.statics, identifier->symbol_id,
                                                          /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
@@ -5502,12 +5554,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         }
                     }
 
-                    // Enforce type compatibility
-                    auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
-                    if (!enforced) {
-                        return enforced.error_value();
+                    // Enforce type compatibility (a proven store whose payload guard holds is
+                    // the identity - docs/type_proofs_design.md I-S2)
+                    if (!(expr->static_store_proof == proof_same_type && target_type &&
+                          detail::same_type_payload(value, target_type.get()))) {
+                        auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
+                        if (!enforced) {
+                            return enforced.error_value();
+                        }
+                        value = std::move(enforced.value());
                     }
-                    value = std::move(enforced.value());
 
                     // Handle first assignment for uninitialized auto variables
                     if (!target_type) {
@@ -5758,6 +5814,33 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 is_unwinding_ = true;
                 push_value(make_value());
                 return {};
+            }
+
+            // Proven field store (docs/type_proofs_design.md I-M2): assign_member_value's field
+            // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's
+            // proven lane)
+            if (memberExpr->proven_class && memberExpr->proven_field_write && !parallel_worker_) {
+                if (class_instance* inst = detail::proven_field_instance(dereferenced, memberExpr->proven_class,
+                                                                         memberExpr->proven_epoch)) {
+                    const uint64_t member_id = memberExpr->member_id != UINT64_MAX
+                        ? memberExpr->member_id : string_symbolizer_->intern(memberExpr->member);
+                    script_value incoming = clone_for_assignment(value);
+                    if (expr->static_store_proof == proof_same_type && memberExpr->proven_field_type &&
+                        detail::same_type_payload(incoming, memberExpr->proven_field_type)) {
+                        if (detail::retags_on_field_write(memberExpr->proven_field_type)) {
+                            incoming.set_type_info(type_info_ptr{memberExpr->proven_field_type});
+                        }
+                    } else {
+                        auto enforced = inst->enforce_field_write(member_id, std::move(incoming));
+                        if (!enforced) {
+                            return enforced.error_value();
+                        }
+                        incoming = std::move(enforced.value());
+                    }
+                    inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
+                    push_value(std::move(value));
+                    return {};
+                }
             }
 
             JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value));
@@ -6401,7 +6484,8 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // type a uniform literal inferred for auto / array<auto>
             // Typed declarations convert their initializer exactly like assignment does
             // (int d = 4.7 truncates instead of storing a mistagged float payload)
-            if (decl->initializer) {
+            if (decl->initializer && !(decl->static_init_proof == proof_same_type &&
+                                       detail::same_type_payload(value, effective_decl_type.get()))) {
                 auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name);
                 if (!enforced) {
                     return enforced.error_value();
@@ -7207,7 +7291,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                         nullptr,
                         direct_ast->local_count);
                     method_call_override mctx{&def_env, &objectValue, cls_pin.get()};
-                    detail::call_site_context ctx{&expr->arguments};
+                    detail::call_site_context ctx{&expr->arguments, expr};
                     const detail::call_site_context* saved_ctx = pending_call_ctx_;
                     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
                     std::optional<checked_result<script_value>> callOutcome;
@@ -7321,7 +7405,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     const auto* callee_thunk = func.target<script_callable_thunk>();
     const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
         callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
-    detail::call_site_context ctx{&expr->arguments};
+    detail::call_site_context ctx{&expr->arguments, expr};
     const detail::call_site_context* saved_ctx = pending_call_ctx_;
     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
     std::optional<checked_result<script_value>> callOutcome;
@@ -7654,6 +7738,16 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     if (expr->null_safe && objectValue.is_null()) {
         push_value(make_value());  // push null
         return {};
+    }
+
+    // Proven field read (docs/type_proofs_design.md I-M1): class object + shape epoch +
+    // present cell -> the cell copy the field rung pushes; any miss runs the ladder
+    if (expr->proven_class && !parallel_worker_) {
+        if (script_value* cell = detail::proven_field_cell(objectValue, expr->proven_class, expr->proven_epoch,
+                                                           expr->proven_slot, nullptr)) {
+            push_value(*cell);
+            return {};
+        }
     }
 
     // Handle super:: member access specially
@@ -10332,6 +10426,7 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
                 }
                 returnValue_ = share_boxed_env_storage(*storage, engine_);
                 hasReturnValue_ = true;
+                return_proven_ = false;
                 return {};
             }
             if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
@@ -10343,6 +10438,7 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
                 }
                 returnValue_ = std::move(resolved.value());
                 hasReturnValue_ = true;
+                return_proven_ = false;
                 return {};
             }
             // Fall through: calls that already yield a reference pass; anything else
@@ -10357,6 +10453,7 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
     }
 
     hasReturnValue_ = true;
+    return_proven_ = stmt->value && stmt->static_return_proof == proof_same_type;
     return {};
 }
 
@@ -12627,6 +12724,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     const detail::call_site_context* call_ctx = pending_call_ctx_;
     pending_call_ctx_ = nullptr;
 
+    // Parse-time argument proofs belong to the ONE callee the site resolved to: body
+    // identity is the callee check (docs/type_proofs_design.md I-C1)
+    const uint8_t* arg_proofs = nullptr;
+    if (call_ctx && call_ctx->site && call_ctx->site->proven_callee_body == function.body.get() &&
+        call_ctx->site->static_arg_proofs.size() == function.parameters().size() &&
+        args.size() == function.parameters().size()) {
+        arg_proofs = call_ctx->site->static_arg_proofs.data();
+    }
+
     {
         size_t required_params = 0;
         for (const auto& p : function.parameters()) {
@@ -12757,7 +12863,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
     std::optional<script_value> previousReturn = returnValue_;
+    const bool previousReturnProven = return_proven_;
     hasReturnValue_ = false;
+    return_proven_ = false;
 
     // Helper lambda to cleanup and restore state
     auto cleanup = [&](bool clear_this = true) {
@@ -12784,6 +12892,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         release_environment(function_env, false);
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
+        return_proven_ = previousReturnProven;
     };
 
     // ============================================================
@@ -12871,7 +12980,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // Non-reference parameter - try to convert the argument to the parameter type if needed
             // (cleanup before propagating: an early return here would leak the callee frame/env)
             script_value converted_arg = make_value();
-            {
+            const bool untyped_param = !param.type || param.type->base_type == script_value_type::jai_any_type;
+            bool proven_identity = arg_proofs && arg_proofs[i] == proof_same_type;
+            if (proven_identity && param.type) {
+                const script_value& probe = arg.deref();   // try_convert_for_parameter's own deref order
+                proven_identity = untyped_param || detail::same_type_payload(probe, param.type.get());
+            }
+            if (proven_identity) {
+                // try_convert_for_parameter's identity returns: the arg itself, the derefed arg
+                // for exact-name objects (I-C1)
+                converted_arg = (!untyped_param && param.type->base_type == script_value_type::jai_object_type)
+                                ? script_value(arg.deref()) : script_value(arg);
+            } else {
                 auto convert_result = try_convert_for_parameter(arg, param.type);
                 if (!convert_result) {
                     cleanup();
@@ -12961,6 +13081,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
             coro_state.saved_return_value = std::move(returnValue_);
             coro_state.saved_has_return = hasReturnValue_;
+            coro_state.saved_return_proven = return_proven_;
             coro_state.saved_member_scope = member_scope_;
         }
         call_stack_.erase(call_stack_.begin() + frame_index, call_stack_.end());
@@ -12970,6 +13091,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         member_scope_ = previousScope;
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
+        return_proven_ = previousReturnProven;
         return result;
     }
 
@@ -13006,13 +13128,16 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 function.return_type->type_name != "auto" &&
                 function.return_type->base_type != script_value_type::jai_any_type) {
                 // cleanup before propagating: leaking hasReturnValue_/frame/env here poisons the
-                // rest of the run once the caller catches (vm pop_script_frame_core ordering)
-                auto convert_result = try_convert_for_parameter(result, function.return_type);
-                if (!convert_result) {
-                    cleanup();
-                    return convert_result.error_value();
+                // rest of the run once the caller catches (vm pop_script_frame_core ordering).
+                // A proven return whose payload guard holds is the identity (I-R1).
+                if (!(return_proven_ && detail::same_type_payload(result, function.return_type.get()))) {
+                    auto convert_result = try_convert_for_parameter(result, function.return_type);
+                    if (!convert_result) {
+                        cleanup();
+                        return convert_result.error_value();
+                    }
+                    result = std::move(convert_result.value());
                 }
-                result = std::move(convert_result.value());
             }
         }
     } else {
@@ -13452,12 +13577,14 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         auto caller_call_stack = std::move(call_stack_);
         auto caller_return_value = std::move(returnValue_);
         bool caller_has_return = hasReturnValue_;
+        const bool caller_return_proven = return_proven_;
         const detail::member_scope_ctx caller_member_scope = member_scope_;
 
         environment_ = state.saved_environment;
         call_stack_ = std::move(state.saved_call_stack);
         returnValue_ = std::move(state.saved_return_value);
         hasReturnValue_ = state.saved_has_return;
+        return_proven_ = state.saved_return_proven;
         member_scope_ = state.saved_member_scope;
 
         // The continuations are consumed LIFO (outermost first).
@@ -13511,6 +13638,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 state.saved_call_stack = std::move(call_stack_);
                 state.saved_return_value = std::move(returnValue_);
                 state.saved_has_return = hasReturnValue_;
+                state.saved_return_proven = return_proven_;
                 state.saved_member_scope = member_scope_;
                 handle.set_status(coroutine_handle::status::suspended);
             } else if (hasReturnValue_) {
@@ -13552,6 +13680,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         call_stack_ = std::move(caller_call_stack);
         returnValue_ = std::move(caller_return_value);
         hasReturnValue_ = caller_has_return;
+        return_proven_ = caller_return_proven;
         member_scope_ = caller_member_scope;
     }
 

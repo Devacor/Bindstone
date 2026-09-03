@@ -459,6 +459,7 @@ namespace jai {
         /// environment is the callee's previousEnv at bind time.
         struct call_site_context {
             const std::vector<expression_ptr>* arg_exprs = nullptr;
+            const call_expr* site = nullptr;   // parse-time argument proofs (static_arg_proofs / proven_callee_body)
         };
     }
 

@@ -2220,6 +2220,16 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
 
 // Helper for is_truthy() to check for to_bool() method on objects
 bool interpreter::object_to_bool_via_method(const script_value& value) {
+    // KEEP BYTE-PARALLEL with vm_backend::object_to_bool_via_method (class to_bool memo)
+    if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
+        auto* oh = h->get();
+        if (oh->is_class_instance_wrapper && oh->data) {
+            if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
+                cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+                return true;
+            }
+        }
+    }
     auto target = resolve_member_target(value);
     if (!target) {
         return true;  // Not a class object - treat as truthy

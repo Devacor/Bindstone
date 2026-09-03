@@ -1066,10 +1066,23 @@ namespace jai::vm {
             }
             return instance->find_field_value(sym);
         }
+        // Method-IC field-shadow guard: a field named like the method shadows it. The
+        // class-level answer is memoized at IC arm (mic_field_free, valid under the
+        // mic's method_epoch - every field-set mutation bumps it); only an instance that
+        // grew user fields at runtime re-asks has_field.
+        static bool mic_field_shadowed(const call_site& site, const class_instance& inst, uint64_t id) {
+            if (site.mic_field_free && !inst.has_user_overflow_fields()) { return false; }
+            return inst.has_field(id);
+        }
         void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
             if (!cached_global_env_ || cache_slot == SIZE_MAX) { return; }
             if (!f.locals || !f.locals->is_method) { return; }
             auto& cache = f.code->env_lookup_cache;
+            // env_lookup_cached sizes this vector on ITS fill path; a method body that
+            // only reads fields resolves at the member probe and never gets there
+            if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
+                cache.resize(f.code->code.size() * 3);
+            }
             if (cache.size() <= cache_slot) { return; }
             auto& entry = cache[cache_slot];
             entry.this_field_serial = env_symbolizer_->env_epoch();

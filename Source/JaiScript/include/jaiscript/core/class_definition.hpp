@@ -69,6 +69,12 @@ public:
     bool has_field(uint64_t id) const;
 
     bool has_field_value(uint64_t id) const { return find_field_value(id) != nullptr; }
+    // Runtime-added fields other than a hybrid's _cpp_object (a user field can shadow
+    // a method by name; the C++ object slot never can)
+    bool has_user_overflow_fields() const {
+        if (!overflow_fields_ || overflow_fields_->empty()) { return false; }
+        return overflow_fields_->size() != 1 || overflow_fields_->begin()->first != get_cpp_object_field_id();
+    }
 
     engine* get_engine() const { return engine_; }
 
@@ -458,6 +464,11 @@ public:
     // (call-arg windows); the vector overload forwards.
     checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const script_value* args, size_t argc) const;
     checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
+    // Same resolution, answered as a pointer to the class-owned handle (overload table
+    // or resolution cache): the in-loop call paths pin through the record instead of
+    // paying a shared_ptr copy per call
+    checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_ref(uint64_t name_id, const script_value* args, size_t argc) const;
+    const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const;
 
     // Single-overload probe for inline-cache fill: the lone overload for name_id, or
     // nullptr when the name has zero or multiple overloads.
@@ -494,6 +505,7 @@ public:
         }
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        bump_method_epoch();   // method ICs memoize the field-shadow answer per class
     }
 
     void add_field(const std::string& name) {
@@ -504,6 +516,7 @@ public:
         field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        bump_method_epoch();
     }
 
     // Declared field types (ruling 2026-07: typed fields enforce like locals). 'auto'
@@ -717,6 +730,18 @@ public:
         return false;
     }
 
+    // Truthiness probe memo (is_truthy on objects): does the chain define to_bool()?
+    // get_method's exact chain (defines_method); valid while method_epoch_ holds
+    bool may_define_to_bool() const {
+        if (to_bool_memo_epoch_ != method_epoch_) {
+            uint64_t id = 0;
+            if (auto eng = engine_) { id = eng->symbolize("to_bool"); }
+            may_define_to_bool_ = id == 0 || defines_method(id);
+            to_bool_memo_epoch_ = method_epoch_;
+        }
+        return may_define_to_bool_;
+    }
+
     script_value get_static_method(uint64_t id, bool throw_if_missing = true) const {
         auto it = static_methods_.find(id);
         if (it != static_methods_.end()) {
@@ -901,6 +926,19 @@ public:
     uint32_t field_slot_count() const {
         ensure_field_slots();
         return static_cast<uint32_t>(slot_to_field_.size());
+    }
+    // The class-level half of class_instance::has_field (declared anywhere in the
+    // chain, script or bound C++ base)
+    bool chain_declares_field(uint64_t id) const {
+        const auto& all_fields = get_all_field_defaults();
+        if (all_fields.find(id) != all_fields.end()) {
+            return true;
+        }
+        if (auto cpp_base = find_cpp_base_class()) {
+            const auto& cpp_fields = cpp_base->get_all_field_defaults();
+            return cpp_fields.find(id) != cpp_fields.end();
+        }
+        return false;
     }
 
     /// Class that DECLARED field `id` (own defaults first, then parents, then the C++
@@ -1667,6 +1705,8 @@ private:
     mutable bool field_slots_current_ = false;   // re-walk the chain on next query
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value null_field_value_;
+    mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
+    mutable bool may_define_to_bool_ = true;
 
     class_type class_type_;
     access_level default_access_ = access_level::public_access;
@@ -1741,6 +1781,7 @@ private:
         field_defaults_.clear();
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        bump_method_epoch();
         for (const auto& [id, value] : new_field_defaults) {
             if (value.get_engine() == nullptr && engine_ref) {
                 script_value value_with_engine(value);
@@ -2443,23 +2484,7 @@ inline bool class_instance::has_field(uint64_t id) const {
     if (find_field_value(id) != nullptr) {
         return true;
     }
-
-    if (class_def_) {
-        const auto& all_fields = class_def_->get_all_field_defaults();
-        if (all_fields.find(id) != all_fields.end()) {
-            return true;
-        }
-
-        auto cpp_base = class_def_->find_cpp_base_class();
-        if (cpp_base) {
-            const auto& cpp_fields = cpp_base->get_all_field_defaults();
-            if (cpp_fields.find(id) != cpp_fields.end()) {
-                return true;
-            }
-        }
-    }
-
-    return false;
+    return class_def_ && class_def_->chain_declares_field(id);
 }
 
 inline script_value class_instance::get_method(uint64_t id, bool throw_if_missing) const {

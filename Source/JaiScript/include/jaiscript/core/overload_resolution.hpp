@@ -36,10 +36,10 @@ inline bool arity_accepts(const std::vector<parameter>& params, size_t argc) {
 // Returns nullptr when no overload is viable for these arguments.
 // Span core (call-arg windows: the vm resolves against the caller's stack slice
 // without collecting a vector); the vector overload below forwards.
-inline std::shared_ptr<function_decl> pick_best_overload(
+inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
     const std::vector<std::shared_ptr<function_decl>>& overloads,
     const script_value* args, size_t argc) {
-    std::shared_ptr<function_decl> best_ast;
+    const std::shared_ptr<function_decl>* best_ast = nullptr;
     int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var
     size_t best_defaults_used = SIZE_MAX;
     size_t best_conversion_count = SIZE_MAX;
@@ -146,7 +146,7 @@ inline std::shared_ptr<function_decl> pick_best_overload(
             better = conversion_count < best_conversion_count;
         }
         if (better) {
-            best_ast = overload_ast;
+            best_ast = &overload_ast;
             best_score = score;
             best_defaults_used = defaults_used;
             best_conversion_count = conversion_count;
@@ -154,6 +154,13 @@ inline std::shared_ptr<function_decl> pick_best_overload(
     }
 
     return best_ast;
+}
+
+inline std::shared_ptr<function_decl> pick_best_overload(
+    const std::vector<std::shared_ptr<function_decl>>& overloads,
+    const script_value* args, size_t argc) {
+    const auto* best = pick_best_overload_ref(overloads, args, argc);
+    return best ? *best : nullptr;
 }
 
 inline std::shared_ptr<function_decl> pick_best_overload(
@@ -167,12 +174,12 @@ inline std::shared_ptr<function_decl> pick_best_overload(
 // there is more than one overload; written only when more than one overload exists
 // AND exactly one matches this arity (same-arity overloads depend on argument types).
 // Span core; the vector overload forwards (call-arg windows resolve on the stack slice).
-inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(
-    uint64_t name_id, const script_value* args, size_t argc) const {
+inline const std::shared_ptr<function_decl>* class_definition::resolve_method_overload_core(
+    uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const {
     auto it = method_overloads_.find(name_id);
     if (it == method_overloads_.end() || it->second.empty()) {
-        return checked_result<std::shared_ptr<function_decl>>(
-            make_error_code(runtime_error_code::member_not_found), "No method overloads found", name_id);
+        ec = make_error_code(runtime_error_code::member_not_found);
+        return nullptr;
     }
 
     const auto& overloads = it->second;
@@ -181,14 +188,14 @@ inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_
         overload_cache_key cache_key{name_id, argc};
         auto cache_it = overload_resolution_cache_.find(cache_key);
         if (cache_it != overload_resolution_cache_.end()) {
-            return cache_it->second;
+            return &cache_it->second;
         }
     }
 
-    auto best_ast = pick_best_overload(overloads, args, argc);
+    const auto* best_ast = pick_best_overload_ref(overloads, args, argc);
     if (!best_ast) {
-        return checked_result<std::shared_ptr<function_decl>>(
-            make_error_code(runtime_error_code::argument_count_mismatch), "No matching overload found", name_id);
+        ec = make_error_code(runtime_error_code::argument_count_mismatch);
+        return nullptr;
     }
 
     if (overloads.size() > 1) {
@@ -200,11 +207,35 @@ inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_
         }
         if (arity_match_count == 1) {
             overload_cache_key cache_key{name_id, argc};
-            overload_resolution_cache_[cache_key] = best_ast;
+            return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }
     }
 
     return best_ast;
+}
+
+inline checked_result<const std::shared_ptr<function_decl>*> class_definition::resolve_method_overload_ref(
+    uint64_t name_id, const script_value* args, size_t argc) const {
+    std::error_code ec;
+    const auto* best = resolve_method_overload_core(name_id, args, argc, ec);
+    if (best) {
+        return best;
+    }
+    return checked_result<const std::shared_ptr<function_decl>*>(ec,
+        ec == make_error_code(runtime_error_code::member_not_found) ? "No method overloads found" : "No matching overload found",
+        name_id);
+}
+
+inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(
+    uint64_t name_id, const script_value* args, size_t argc) const {
+    std::error_code ec;
+    const auto* best = resolve_method_overload_core(name_id, args, argc, ec);
+    if (best) {
+        return *best;
+    }
+    return checked_result<std::shared_ptr<function_decl>>(ec,
+        ec == make_error_code(runtime_error_code::member_not_found) ? "No method overloads found" : "No matching overload found",
+        name_id);
 }
 
 inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(

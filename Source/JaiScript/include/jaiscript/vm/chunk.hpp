@@ -102,6 +102,7 @@ namespace jai::vm {
         mutable const script_method_dispatch* mic_dispatch = nullptr;
         mutable std::shared_ptr<function_decl> mic_resolved;
         mutable bool mic_static = false;
+        mutable bool mic_field_free = false;   // no field in the class chain is named like the method
     };
 
     struct function_proto {

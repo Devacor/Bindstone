@@ -7,6 +7,17 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+namespace {
+// Strict (the default) rejects a typed mistake at load: the listing is the probe, empty
+// when the source loaded or failed for any other reason.
+std::string static_error_text(jai::engine& e, const char* src) {
+    try { e.execute(src); }
+    catch (const static_check_error& ex) { return ex.what(); }
+    catch (...) {}
+    return {};
+}
+}
+
 class exception_handling_tests : public suite {
 public:
     exception_handling_tests() : suite("Exception Handling") {}
@@ -304,12 +315,18 @@ public:
         });
 
         test("runtime_error_captures_nested_stack_trace", [this]() {
-            auto engine = make_engine();
             const char* src =
                 "auto inner() { return missingVar; }\n"  // line 1: undefined variable
                 "auto middle() { return inner(); }\n"     // line 2
                 "auto outer() { return middle(); }\n"     // line 3
                 "outer();\n";                             // line 4
+            // strict (default): the undeclared name is a load error - nothing ran, no trace
+            auto strict = make_engine();
+            check_true(static_error_text(*strict, src).find("use of undeclared identifier 'missingVar'") != std::string::npos);
+            check_true(strict->last_stack_trace().empty());
+            // warn: the runtime error unwinds through all three frames
+            auto engine = make_engine();
+            engine->static_checking(check_mode::warn);
             try { engine->execute(src); } catch (...) {}
             auto trace = engine->last_stack_trace();
             check_ge(trace.size(), (size_t)4);
@@ -317,6 +334,21 @@ public:
             check_eq(std::string("middle"), trace[1].function);
             check_eq(std::string("outer"), trace[2].function);
             check_eq((size_t)1, trace[0].line);
+            // strict admits a var-sourced runtime failure and captures the same trace shape
+            auto dynamic = make_engine();
+            const char* var_src =
+                "var v = \"s\";\n"                        // line 1
+                "auto inner() { int i = v; return i; }\n" // line 2: runtime conversion error
+                "auto middle() { return inner(); }\n"     // line 3
+                "auto outer() { return middle(); }\n"     // line 4
+                "outer();\n";                             // line 5
+            try { dynamic->execute(var_src); } catch (...) {}
+            auto trace2 = dynamic->last_stack_trace();
+            check_ge(trace2.size(), (size_t)4);
+            check_eq(std::string("inner"), trace2[0].function);
+            check_eq(std::string("middle"), trace2[1].function);
+            check_eq(std::string("outer"), trace2[2].function);
+            check_eq((size_t)2, trace2[0].line);
         });
 
         test("method_throw_captures_stack_trace", [this]() {
@@ -416,11 +448,27 @@ public:
         });
 
         // Regression: caught typed-return conversion error left the callee frame/env and
-        // hasReturnValue_ live - catch body truncated, post-try statements skipped
+        // hasReturnValue_ live - catch body truncated, post-try statements skipped. The
+        // literal typed mismatch is a strict load error (a strongly-typed value never reaches
+        // a mismatched typed slot at runtime); the recovery path is pinned under warn and,
+        // under strict, through a var-sourced value.
         test("caught_return_conversion_error_full_recovery", [this]() {
+            const char* typed = R"(
+                function bad() -> int { return "nope"; }
+                var log = "";
+                try { bad(); log += "no"; } catch (e) { log += "a"; log += "b"; }
+                log += "c";
+                log;
+            )";
+            auto strict = make_engine();
+            check_true(static_error_text(*strict, typed).find("cannot return 'string' from 'bad' declared to return 'int'") != std::string::npos);
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            check_eq(std::string("abc"), warn->execute(typed).as_string());
             auto engine = make_engine();
             script_value result = engine->execute(R"(
-                function bad() -> int { return "nope"; }
+                var v = "nope";
+                function bad() -> int { return v; }
                 var log = "";
                 try { bad(); log += "no"; } catch (e) { log += "a"; log += "b"; }
                 log += "c";
@@ -430,9 +478,24 @@ public:
         });
 
         test("caught_return_conversion_error_enclosing_typed_return", [this]() {
+            const char* typed = R"(
+                function bad() -> int { return "nope"; }
+                function outer() -> int {
+                    var seen = 0;
+                    try { bad(); } catch (e) { seen = 1; }
+                    return 7 + seen;
+                }
+                outer();
+            )";
+            auto strict = make_engine();
+            check_true(static_error_text(*strict, typed).find("cannot return 'string' from 'bad' declared to return 'int'") != std::string::npos);
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            check_eq((int64_t)8, warn->execute(typed).as_int());
             auto engine = make_engine();
             script_value result = engine->execute(R"(
-                function bad() -> int { return "nope"; }
+                var v = "nope";
+                function bad() -> int { return v; }
                 function outer() -> int {
                     var seen = 0;
                     try { bad(); } catch (e) { seen = 1; }
@@ -444,11 +507,25 @@ public:
         });
 
         test("caught_arg_conversion_error_full_recovery", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
+            const char* typed = R"(
                 function takes(int x) -> int { return x; }
                 var log = "";
                 try { takes([1, 2]); log += "no"; } catch (e) { log += "a"; }
+                log += "b";
+                log;
+            )";
+            auto strict = make_engine();
+            check_true(static_error_text(*strict, typed).find("argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'") != std::string::npos);
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            check_eq(std::string("ab"), warn->execute(typed).as_string());
+            check_eq((int64_t)3, warn->execute("takes(3);").as_int());
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                function takes(int x) -> int { return x; }
+                var arr = [1, 2];
+                var log = "";
+                try { takes(arr); log += "no"; } catch (e) { log += "a"; }
                 log += "b";
                 log;
             )");

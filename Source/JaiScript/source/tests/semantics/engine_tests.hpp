@@ -219,10 +219,21 @@ public:
         });
 
         test("jaibite_runtime_error_throws_on_execute", [this]() {
+            // strict (default): an undeclared name fails the check when the bite is created
             auto eng = make_engine();
-            auto bite = eng->jaibite("undefined_variable_xyz");
+            check_throws<jai::static_check_error>([&]() { eng->jaibite("undefined_variable_xyz"); },
+                "Undeclared identifiers fail the static check at jaibite creation");
+            // a var-sourced mismatch loads clean and throws at every execute
+            auto bite = eng->jaibite("var s = \"s\"; int i = s;");
+            check_true(bite.checked_clean());
             check_throws([&]() { bite.execute(); }, "Runtime errors should throw on execute");
             check_throws([&]() { bite.execute(); }, "And keep throwing on re-execute");
+            // warn: the original shape - created fine, the runtime error surfaces on execute
+            auto warn = make_engine();
+            warn->static_checking(jai::check_mode::warn);
+            auto undeclared = warn->jaibite("undefined_variable_xyz");
+            check_throws([&]() { undeclared.execute(); }, "Runtime errors should throw on execute");
+            check_throws([&]() { undeclared.execute(); }, "And keep throwing on re-execute");
         });
 
         test("jaibite_outlives_engine_safely", [this]() {

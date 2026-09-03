@@ -196,13 +196,15 @@ namespace jai {
         // load to set jaibite::registration_mismatch().
         uint64_t registration_fingerprint() const;
 
-        // === STATIC TYPE CHECKING (opt-in; docs/static_checking.md) ===
-        // Off by default (zero behavior change, one branch per parse-cache entry).
+        // === STATIC TYPE CHECKING (docs/static_checking.md) ===
+        // strict (the default): any error-severity diagnostic makes execute()/jaibite
+        //       creation/load throw static_check_error BEFORE anything runs; what() is the
+        //       full accumulated, location-sorted, deduplicated listing with source + carets.
+        //       A typed -> typed mismatch is therefore a load error; only a var-sourced
+        //       value can still fail at runtime, where try/catch sees it.
         // warn: diagnostics collected at parse-cache-entry creation, retrievable via
-        //       last_check_diagnostics(); execution proceeds.
-        // strict: any error-severity diagnostic makes execute()/jaibite creation/load
-        //       throw static_check_error BEFORE anything runs; what() is the full
-        //       accumulated, location-sorted, deduplicated listing with source + carets.
+        //       last_check_diagnostics(); execution proceeds with the runtime's own errors.
+        // off: zero behavior change (one branch per parse-cache entry).
         // Checks are amortized once per unique source (cached beside the parse) and
         // re-run when the registration surface changes.
         void static_checking(check_mode mode);

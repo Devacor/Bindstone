@@ -26,13 +26,22 @@ public:
         });
 
         test("auto_rejects_incompatible_type", [this]() {
+            const char* src = R"(
+                auto x = 5;
+                x = "hello";  // ERROR: string to int
+            )";
+            // strict (default): the locked auto is a typed local, the store is a load error
             auto eng = make_engine();
+            std::string text;
+            try { eng->execute(src); } catch (const static_check_error& e) { text = e.what(); }
+            check_true(text.find("cannot assign 'string' to 'x' declared 'int'") != std::string::npos,
+                "strict rejects the store before anything runs (got: " + text + ")");
+            // warn: the runtime's own rejection
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
             bool caught = false;
             try {
-                eng->execute(R"(
-                    auto x = 5;
-                    x = "hello";  // ERROR: string to int
-                )");
+                warn->execute(src);
             } catch (const std::exception& e) {
                 caught = true;
                 std::string msg = e.what();
@@ -40,6 +49,71 @@ public:
                       msg.find("Type mismatch") != std::string::npos);
             }
             check_eq(caught, true, "Should reject string assignment to int variable");
+            // strict admits a var-sourced store; the runtime still rejects it
+            auto dynamic = make_engine();
+            caught = false;
+            try {
+                dynamic->execute("auto x = 5; var s = \"hello\"; x = s;");
+            } catch (const static_check_error&) {
+            } catch (const std::exception& e) {
+                caught = true;
+                check_true(std::string(e.what()).find("Type mismatch") != std::string::npos);
+            }
+            check_eq(caught, true, "var-sourced string into a locked int raises at runtime");
+        });
+
+        test("extern_is_a_runtime_no_op_on_both_backends", [this]() {
+            auto eng = make_engine();
+            // typed, untyped and function externs run as nothing; the names resolve dynamically
+            auto r = eng->execute(R"(
+                extern int hp;
+                extern loose;
+                extern function host_fn;
+                class Game { int v = 3; }
+                extern shared_ptr<Game> G;
+                function total() -> int { return hp + G.v; }
+                var caught = "";
+                try { total(); } catch (e) { caught = e; }
+                caught
+            )");
+            check_eq(std::string("Undefined variable 'hp'"), r.as<std::string>());
+            eng->add_global("hp", script_value((int64_t)4, eng.get()));
+            eng->execute("var G = Game();");
+            check_eq((int64_t)7, eng->execute("total()").as_int());
+            // a typed extern is a checked receiver: the store below is rejected before anything runs
+            auto strict = make_engine();
+            std::string text;
+            try {
+                strict->execute("class Game { int v = 3; }\nextern Game H;\nfunction poke() { H.v = \"s\"; }");
+            } catch (const static_check_error& e) {
+                text = e.what();
+            }
+            check_true(text.find("cannot assign 'string' to field 'v'") != std::string::npos,
+                "typed extern flows into member checks (got: " + text + ")");
+        });
+
+        test("warn_mode_regions_keep_the_runtime_conversion_errors", [this]() {
+            // unit-level, statement-level and block-first: strict loads each, the runtime's own
+            // rejection is byte-identical to the warn engine's (both backends)
+            for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",
+                                    "int a = 1;\n[[warn_mode]] int x = \"s\";\nx",
+                                    "int a = 1;\n{ [[warn_mode]] a = 2; int x = \"s\"; }\na"}) {
+                auto eng = make_engine();
+                std::string text;
+                try {
+                    eng->execute(src);
+                } catch (const static_check_error& e) {
+                    text = std::string("STATIC ") + e.what();
+                } catch (const std::exception& e) {
+                    text = e.what();
+                }
+                check_true(text.find("Type mismatch") == 0, "runtime rejects the store (got: " + text + ")");
+                auto warn = make_engine();
+                warn->static_checking(check_mode::warn);
+                std::string warn_text;
+                try { warn->execute(src); } catch (const std::exception& e) { warn_text = e.what(); }
+                check_eq(text, warn_text);
+            }
         });
 
         test("auto_uninitialized_locks_on_first_assignment", [this]() {
@@ -1041,13 +1115,14 @@ public:
         // var (any-typed) targets keep the old dynamic behavior (int += 2.5 -> float 3.5).
         // Every test runs on BOTH backends and pins byte-identical output.
 
-        auto both = [](const char* src) {
+        auto both_in = [](check_mode mode, const char* src) {
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
                 e->execution_budget(0);
+                e->static_checking(mode);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
                 catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
@@ -1055,6 +1130,7 @@ public:
             }
             return std::make_pair(out[0], out[1]);
         };
+        auto both = [both_in](const char* src) { return both_in(check_mode::strict, src); };
         auto check_both = [this, both](const char* src, const std::string& expected, const char* what) {
             auto [i_out, v_out] = both(src);
             check_eq(expected, i_out, std::string("interp: ") + what);
@@ -1171,7 +1247,7 @@ public:
         // from_json. var fields stay dynamic; auto fields infer from the initialized value
         // then enforce.
 
-        test("typed_field_direct_assign_converts", [this, check_both, both]() {
+        test("typed_field_direct_assign_converts", [this, check_both, both, both_in]() {
             check_both(R"(
                 class C { int v = 0; }
                 auto c = C();
@@ -1190,15 +1266,33 @@ public:
                 c.s = 42;
                 c.s
             )", "42", "string field converts via to_string");
-            auto [i_out, v_out] = both(R"(
+            // a string literal into an int field: a strict load error; the locals-identical
+            // runtime text under warn and, under strict, for a var-sourced value
+            const char* typed_mismatch = R"(
                 class C { int v = 0; }
                 auto c = C();
                 c.v = "nope";
                 c.v
+            )";
+            auto [i_out, v_out] = both(typed_mismatch);
+            check_eq(i_out, v_out, "string-into-int field strict listing parity");
+            check_true(i_out.find("ERROR: static check failed") == 0 &&
+                i_out.find("cannot assign 'string' to field 'v' declared 'int'") != std::string::npos,
+                std::string("strict rejects the field store at load, got: ") + i_out);
+            auto [w_out, wv_out] = both_in(check_mode::warn, typed_mismatch);
+            check_eq(w_out, wv_out, "string-into-int field error parity");
+            check_true(w_out.find("ERROR") == 0 && w_out.find("Type mismatch in assignment") != std::string::npos,
+                std::string("locals-identical error text, got: ") + w_out);
+            auto [d_out, dv_out] = both(R"(
+                class C { int v = 0; }
+                auto c = C();
+                var s = "nope";
+                c.v = s;
+                c.v
             )");
-            check_eq(i_out, v_out, "string-into-int field error parity");
-            check_true(i_out.find("ERROR") == 0 && i_out.find("Type mismatch in assignment") != std::string::npos,
-                std::string("locals-identical error text, got: ") + i_out);
+            check_eq(d_out, dv_out, "var-sourced string-into-int field error parity");
+            check_true(d_out.find("ERROR") == 0 && d_out.find("Type mismatch in assignment") != std::string::npos,
+                std::string("var-sourced store keeps the runtime text under strict, got: ") + d_out);
         });
 
         test("typed_field_implicit_this_and_ctor_convert", [this, check_both, both]() {
@@ -1313,9 +1407,11 @@ public:
             check_true(i_out.find("ERROR") == 0, "inherited typed field rejects a string");
         });
 
-        test("typed_field_object_fields_keep_object_model", [this, check_both, both]() {
+        test("typed_field_object_fields_keep_object_model", [this, check_both, both, both_in]() {
             // Declared class-typed fields accept same class, subtypes, null, and shared_ptr
-            // wrappers (JaiScript objects travel as object OR shared_ptr over one holder)
+            // wrappers (JaiScript objects travel as object OR shared_ptr over one holder).
+            // A subtype member is reached through cast<T&> or a var receiver: the field's
+            // static class is S, and S has no 't' (exactly like C++).
             check_both(R"(
                 class S { int x = 1; }
                 class T : S { int t = 2; }
@@ -1324,22 +1420,224 @@ public:
                 h.p = S();
                 var a = h.p.x;
                 h.p = T();
-                var b = h.p.t;
+                var b = cast<T&>(h.p).t;
+                var hv = h.p;
+                var b2 = hv.t;
                 h.p = null;
                 var c2 = "n";
                 if (h.p == null) { c2 = "null"; }
-                to_string(a) + "|" + to_string(b) + "|" + c2
-            )", "1|2|null", "same class, subtype, and null accepted");
-            auto [i_out, v_out] = both(R"(
+                to_string(a) + "|" + to_string(b) + "|" + to_string(b2) + "|" + c2
+            )", "1|2|2|null", "same class, subtype (cast<T&> and var receiver), and null accepted");
+            const char* base_receiver = R"(
+                class S { int x = 1; }
+                class T : S { int t = 2; }
+                class H { S p = null; }
+                auto h = H();
+                h.p = T();
+                h.p.t
+            )";
+            auto [s_out, sv_out] = both(base_receiver);
+            check_eq(s_out, sv_out, "subtype member on the base-typed field: strict listing parity");
+            check_true(s_out.find("ERROR: static check failed") == 0 &&
+                s_out.find("no member 't' in class 'S'") != std::string::npos,
+                std::string("strict rejects the subtype member on the static base class, got: ") + s_out);
+            auto [w_out, wv_out] = both_in(check_mode::warn, base_receiver);
+            check_eq(std::string("2"), w_out, "warn: the dynamic object still answers");
+            check_eq(w_out, wv_out, "warn subtype-member parity");
+            const char* unrelated = R"(
                 class S { int x = 1; }
                 class B { int x = 1; }
                 class H { S p = null; }
                 auto h = H();
                 h.p = B();
                 h.p
-            )");
+            )";
+            auto [i_out, v_out] = both(unrelated);
             check_eq(i_out, v_out, "unrelated class rejection parity");
-            check_true(i_out.find("ERROR") == 0, "unrelated class rejected");
+            check_true(i_out.find("ERROR: static check failed") == 0 &&
+                i_out.find("cannot assign 'B' to field 'p' declared 'S'") != std::string::npos,
+                std::string("unrelated class rejected at load, got: ") + i_out);
+            auto [wu_out, wuv_out] = both_in(check_mode::warn, unrelated);
+            check_eq(wu_out, wuv_out, "warn unrelated class rejection parity");
+            check_true(wu_out.find("ERROR") == 0 && wu_out.find("static check failed") == std::string::npos,
+                std::string("warn: the runtime rejects the unrelated class, got: ") + wu_out);
+            auto [du_out, duv_out] = both(R"(
+                class S { int x = 1; }
+                class B { int x = 1; }
+                class H { S p = null; }
+                auto h = H();
+                var b = B();
+                h.p = b;
+                h.p
+            )");
+            check_eq(wu_out, du_out, "var-sourced unrelated class: the same runtime text under strict");
+            check_eq(du_out, duv_out, "var-sourced unrelated class rejection parity");
+        });
+
+        // strict vs warn at the typed boundary: a strongly-typed -> strongly-typed mismatch is
+        // a load error under strict and the runtime's conversion error under warn; a var-sourced
+        // value reaches the runtime in both modes; clean typed programs are mode-blind. Every
+        // row is byte-identical across backends.
+        test("strict_vs_warn_boundary", [this, both_in]() {
+            struct row { const char* src; const char* strict_needle; const char* warn_needle; };
+            const row typed_mismatches[] = {
+                {"int x = \"s\"; x",
+                 "cannot initialize 'x' declared 'int' with 'string'", "Type mismatch in assignment"},
+                {"function bad() -> int { return \"nope\"; } bad()",
+                 "cannot return 'string' from 'bad' declared to return 'int'", "Type mismatch: expected int but got string"},
+                {"function takes(int x) -> int { return x; } takes([1, 2])",
+                 "argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'", "Type mismatch: expected int but got array"},
+                {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } f(B())",
+                 "argument 1 of 'f': cannot pass 'B' to 'v' declared 'A'", "Type mismatch"},
+                {"class C { int v = 0; } auto c = C(); c.v = \"nope\"; c.v",
+                 "cannot assign 'string' to field 'v' declared 'int'", "Type mismatch in assignment"},
+                {"auto x = 5; x = \"hello\"; x",
+                 "cannot assign 'string' to 'x' declared 'int'", "Type mismatch in assignment"},
+                {"int x = 1; x += \"s\"; x",
+                 "cannot assign 'string' to 'x' declared 'int'", "Type mismatch"},
+            };
+            for (const row& r : typed_mismatches) {
+                auto [si, sv] = both_in(check_mode::strict, r.src);
+                check_eq(si, sv, std::string("strict listing parity: ") + r.src);
+                check_true(si.find("ERROR: static check failed") == 0 && si.find(r.strict_needle) != std::string::npos,
+                    std::string("strict load error: ") + r.src + " (got: " + si + ")");
+                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                check_eq(wi, wv, std::string("warn runtime text parity: ") + r.src);
+                check_true(wi.find("ERROR: ") == 0 && wi.find("static check failed") == std::string::npos &&
+                    wi.find(r.warn_needle) != std::string::npos,
+                    std::string("warn runtime error: ") + r.src + " (got: " + wi + ")");
+            }
+            struct var_row { const char* src; const char* needle; };
+            const var_row var_sourced[] = {
+                {"var s = \"s\"; int x = s; x", "Type mismatch in assignment"},
+                {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Type mismatch: expected int but got"},
+                {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Type mismatch: expected int but got"},
+                {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } var b = B(); f(b)", "Type mismatch"},
+                {"class C { int v = 0; } auto c = C(); var s = \"nope\"; c.v = s; c.v", "Type mismatch in assignment"},
+                {"auto x = 5; var s = \"hello\"; x = s; x", "Type mismatch in assignment"},
+                {"var caught = \"\"; var s = \"s\"; try { int x = s; } catch (e) { caught = e; } caught", "Type mismatch in assignment"},
+            };
+            for (const var_row& r : var_sourced) {
+                auto [si, sv] = both_in(check_mode::strict, r.src);
+                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                check_eq(si, sv, std::string("var-sourced strict parity: ") + r.src);
+                check_eq(si, wi, std::string("var-sourced: strict and warn agree: ") + r.src);
+                check_eq(wi, wv, std::string("var-sourced warn parity: ") + r.src);
+                check_true(si.find("static check failed") == std::string::npos && si.find(r.needle) != std::string::npos,
+                    std::string("var-sourced runtime text: ") + r.src + " (got: " + si + ")");
+            }
+            const char* last_var = var_sourced[6].src;
+            check_eq(std::string("Type mismatch in assignment"), both_in(check_mode::strict, last_var).first,
+                "the var-sourced runtime error is catchable in script under strict");
+            struct clean_row { const char* src; const char* expected; };
+            const clean_row clean[] = {
+                {"int x = 4.7; x", "4"},
+                {"string s = 42; s", "42"},
+                {"float f = 2; type_of(f) + \":\" + to_string(f)", "float:2.000000"},
+                {"class S { int x = 1; } class T : S { int t = 2; } function f(S s) -> int { return s.x; } f(T())", "1"},
+                {"function twice(int v) -> int { return v * 2; } twice(21)", "42"},
+                {"class C { int v = 0; } auto c = C(); c.v = 4.7; type_of(c.v) + \":\" + to_string(c.v)", "int:4"},
+                {"class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; } auto h = H(); h.p = T(); cast<T&>(h.p).t", "2"},
+            };
+            for (const clean_row& r : clean) {
+                auto [si, sv] = both_in(check_mode::strict, r.src);
+                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                check_eq(std::string(r.expected), si, std::string("clean under strict: ") + r.src);
+                check_eq(si, sv, std::string("clean strict parity: ") + r.src);
+                check_eq(si, wi, std::string("clean: strict and warn agree: ") + r.src);
+                check_eq(wi, wv, std::string("clean warn parity: ") + r.src);
+            }
+        });
+
+        // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e) (docs/grammar.md, detail/cast_kernel.hpp):
+        // every row is byte-identical on both backends under the strict default
+        const std::string cast_prelude =
+            "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; } "
+            "auto h = H(); h.p = T(); ";
+        auto with_prelude = [cast_prelude](const char* tail) { return cast_prelude + tail; };
+
+        test("cast_value_reference_and_shared_forms", [this, check_both, with_prelude]() {
+            check_both(with_prelude("cast<T&>(h.p).t").c_str(), "2", "reference form reads the subtype member");
+            check_both(with_prelude("cast<T&>(h.p).t = 5; var d = h.p; to_string(d.t)").c_str(), "5", "reference form writes through");
+            check_both(with_prelude("T tv = cast<T>(h.p); tv.t = 9; var d = h.p; to_string(d.t) + \",\" + to_string(tv.t)").c_str(), "2,9", "value form is an independent copy");
+            check_both(with_prelude("shared_ptr<T> th = cast<shared_ptr<T>>(h.p); th.t = 11; var d = h.p; to_string(d.t)").c_str(), "11", "shared_ptr form shares the instance");
+            check_both(with_prelude("auto& r = cast<T&>(h.p); r.t = 21; cast<T&>(h.p).t").c_str(), "21", "auto& aliases the cast reference");
+            check_both(with_prelude("T tmp = T(); auto& r = cast<T&>(tmp); r.t = 33; to_string(tmp.t)").c_str(), "33", "identifier operand binds the variable");
+            check_both(with_prelude("cast<T&>(T()).t").c_str(), "2", "temporary operand is pinned");
+            check_both(with_prelude("array<S> arr = [T(), T()]; cast<T&>(arr[1]).t = 44; var e = arr[1]; to_string(e.t)").c_str(), "44", "subscript operand aliases the element");
+            check_both(with_prelude("shared_ptr<T> sp = new T(); T v = cast<T>(sp); v.t = 8; to_string(sp.t)").c_str(), "2", "value form deep-copies a handle");
+        });
+
+        test("cast_upcast_and_null", [this, check_both, with_prelude]() {
+            check_both(with_prelude("S up = cast<S>(T()); to_string(up.x)").c_str(), "1", "upcast by value");
+            check_both(with_prelude("cast<S&>(h.p).x").c_str(), "1", "upcast by reference");
+            check_both(with_prelude("shared_ptr<S> sh = cast<shared_ptr<S>>(h.p); to_string(sh.x)").c_str(), "1", "upcast handle");
+            check_both("class T { int t = 2; } var n = null; to_string(cast<T>(n) == null) + \",\" + to_string(cast<shared_ptr<T>>(n) == null)", "true,true", "null passes the value and shared_ptr forms");
+            check_both("class T { int t = 2; } var n = null; var c = \"\"; try { cast<T&>(n).t; } catch (e) { c = e; } c", "Cannot cast 'null' to 'T&'", "null fails the reference form");
+        });
+
+        test("cast_failures_are_catchable_with_exact_text", [this, check_both, with_prelude]() {
+            check_both(with_prelude("var c = \"\"; try { var bad = cast<H>(h.p); } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'H'", "unrelated class, value form");
+            check_both(with_prelude("var c = \"\"; try { cast<H&>(h.p).p; } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'H&'", "unrelated class, reference form");
+            check_both(with_prelude("var c = \"\"; try { var bad = cast<shared_ptr<H>>(h.p); } catch (e) { c = e; } c").c_str(), "Cannot cast 'T' to 'shared_ptr<H>'", "unrelated class, shared_ptr form");
+            check_both("class T { int t = 2; } var v = 5; var c = \"\"; try { var bad = cast<T>(v); } catch (e) { c = e; } c", "Cannot cast 'int' to 'T'", "non-object into a class");
+            check_both("var v = \"abc\"; var c = \"\"; try { var bad = cast<int>(v); } catch (e) { c = e; } c", "Cannot cast 'string' to 'int'", "unconvertible primitive");
+            check_both(with_prelude("var c = \"\"; try { var ok = cast<T>(h.p); c = \"ran\"; } catch (e) { c = e; } c").c_str(), "ran", "admitted casts do not raise");
+        });
+
+        test("cast_primitive_conversions", [this, check_both]() {
+            check_both("var f = 2.7; to_string(cast<int>(f)) + \":\" + type_of(cast<int>(f))", "2:int", "float -> int truncates");
+            check_both("var i = 5; cast<string>(i) + \":\" + type_of(cast<string>(i))", "5:string", "int -> string");
+            check_both("var i = 1; to_string(cast<float>(i)) + \":\" + type_of(cast<float>(i))", "1.000000:float", "int -> float widens");
+            check_both("var z = 0; to_string(cast<bool>(z))", "false", "-> bool is truthiness");
+            check_both("int total = 0; var xs = [1.5, 2.5]; for (auto x : xs) { total += cast<int>(x); } to_string(total)", "3", "cast inside a typed compound store");
+            check_both("int n = 0; var v = 7.9; n = cast<int>(v); to_string(n)", "7", "cast<int> is a parse-proven typed store");
+        });
+
+        test("cast_char_rules", [this, check_both, both]() {
+            // char <-> int/float/string convert through the cast alone (docs/char_semantics.md
+            // "Casts"); plain assignment keeps refusing the pair
+            check_both("var ch = 'a'; to_string(cast<int>(ch)) + \":\" + type_of(cast<int>(ch))", "97:int", "char -> int is the code point");
+            check_both("to_string(cast<int>('\\xC3'))", "195", "char -> int is unsigned (0..255)");
+            check_both("var ch = 'a'; to_string(cast<float>(ch)) + \":\" + type_of(cast<float>(ch))", "97.000000:float", "char -> float is the code point widened");
+            check_both("var ch = 'a'; cast<string>(ch) + \":\" + type_of(cast<string>(ch))", "a:string", "char -> string is one text unit");
+            check_both("var ch = 'a'; to_string(cast<char>(ch)) + \":\" + type_of(cast<char>(ch))", "a:char", "char -> char is identity");
+            check_both("var i = 97; to_string(cast<char>(i)) + \":\" + type_of(cast<char>(i))", "a:char", "int -> char in range");
+            check_both("to_string(cast<char>(0) == '\\x00') + \",\" + to_string(cast<char>(255) == '\\xFF')", "true,true", "int -> char range ends");
+            check_both("var s = \"a\"; to_string(cast<char>(s)) + \":\" + type_of(cast<char>(s))", "a:char", "one-character string -> char");
+            check_both("to_string(cast<char>(cast<int>('z')) == 'z')", "true", "char -> int -> char round trip");
+            check_both("to_string(cast<char>(cast<string>('q')) == 'q')", "true", "char -> string -> char round trip");
+            check_both("to_string(cast<int>(cast<char>(200)))", "200", "int -> char -> int round trip");
+            check_both("char c = cast<char>(65); to_string(c) + \":\" + type_of(c)", "A:char", "cast<char> is a parse-proven typed store");
+            check_both("int code = cast<int>('a'); to_string(code)", "97", "cast<int> of a char into a typed local");
+            check_both("var i = 256; var c = \"\"; try { var bad = cast<char>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char'", "int above 255 fails");
+            check_both("var i = -1; var c = \"\"; try { var bad = cast<char>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char'", "negative int fails");
+            check_both("var s = \"ab\"; var c = \"\"; try { var bad = cast<char>(s); } catch (e) { c = e; } c", "Cannot cast 'string' to 'char'", "multi-character string fails");
+            check_both("var s = \"\"; var c = \"\"; try { var bad = cast<char>(s); } catch (e) { c = e; } c", "Cannot cast 'string' to 'char'", "empty string fails");
+            check_both("var b = true; var c = \"\"; try { var bad = cast<char>(b); } catch (e) { c = e; } c", "Cannot cast 'bool' to 'char'", "bool -> char stays refused");
+            check_both("var f = 66.5; var c = \"\"; try { var bad = cast<char>(f); } catch (e) { c = e; } c", "Cannot cast 'float' to 'char'", "float -> char stays refused");
+            check_both("var i = 97; var c = \"\"; try { cast<char&>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char&'", "reference form never converts");
+            check_both("var v = 65; var c = \"\"; try { char bad = v; } catch (e) { c = e; } c", "Type mismatch in assignment", "plain assignment still has no int -> char rule");
+            auto [si, sv] = both("char c = 65;");
+            check_eq(si, sv, "static rejection parity: char c = 65");
+            check(si.find("ERROR: ") == 0 && si.find("cannot initialize 'c' declared 'char' with 'int'") != std::string::npos,
+                  "char c = 65 is still rejected before anything runs: " + si);
+        });
+
+        test("cast_inside_method_on_field", [this, check_both]() {
+            check_both(R"(
+                class S { int x = 1; }
+                class T : S { int t = 2; }
+                class M {
+                    S field = null;
+                    M() { field = T(); }
+                    int peek() { return cast<T&>(field).t; }
+                    int poke() { cast<T&>(field).t = 77; return cast<T&>(this.field).t; }
+                    T copy() { return cast<T>(field); }
+                }
+                auto m = M();
+                to_string(m.peek()) + "," + to_string(m.poke()) + "," + to_string(m.copy().t)
+            )", "2,77,77", "field operand through the implicit and explicit receiver");
         });
 
         test("typed_field_set_field_cpp_api", [this]() {

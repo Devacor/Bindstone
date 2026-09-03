@@ -536,7 +536,8 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 }
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
-// jai asset format end to end. Run: BindstoneClient.exe -verifyassets
+// jai asset format end to end; scripts run under the strict static checker, so a typed
+// mistake in one script is that script's [FAIL]. Run: BindstoneClient.exe -verifyassets
 
 // Headless balance sample: Bindstone.exe -arena life,decay void,earth [seconds=150] [seed=1] [budget=8]
 // budget = spawns per building (-1 unlimited): bounded waves let the stronger side actually leak.
@@ -599,6 +600,7 @@ static int RunArena(const std::string& a_left, const std::string& a_right, doubl
 static int RunAssetVerification() {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
+	jaiEngine->static_checking(jai::check_mode::strict);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	static MV::TapDevice verifyMouse;
 	managers.services.connect(&verifyMouse);

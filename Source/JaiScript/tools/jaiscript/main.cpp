@@ -113,6 +113,7 @@ struct console_state {
 struct options {
 	std::string script;                    // empty = REPL
 	std::string backend = "vm";
+	std::string check = "strict";          // static checker mode (the engine default); warn = load anyway, report
 	double budget = 0.0;                   // seconds per execute; 0 = unlimited (runner default —
 	                                       // the ENGINE default is 1.0s, deliberately overridden:
 	                                       // long-running scripts are the user's business here)
@@ -139,6 +140,9 @@ void print_usage() {
 		"\n"
 		"options:\n"
 		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
+		"  --check=strict|warn|off\n"
+		"                        static checker mode (default strict: typed mistakes and undeclared\n"
+		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
 		"  --budget=N            execution budget in seconds per execute; overruns raise a script\n"
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
 		"                        the embedded-engine default of 1.0s is deliberately lifted here)\n"
@@ -195,6 +199,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
+		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
 		else if (a.rfind("--debug-port", 0) == 0) { opt.debug_port = static_cast<int>(std::stol(value_of("--debug-port"))); }
 		else if (a == "--version" || a == "-v") { std::printf("JaiScript %s\n", jai::version().c_str()); std::exit(0); }
@@ -213,6 +218,10 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 	if (opt.backend == "interpreter") { opt.backend = "interp"; }
 	if (opt.backend != "vm" && opt.backend != "interp") {
 		std::fprintf(stderr, "%s\n", con.red("unknown backend: " + opt.backend + " (use vm or interp)").c_str());
+		return 2;
+	}
+	if (opt.check != "strict" && opt.check != "warn" && opt.check != "off") {
+		std::fprintf(stderr, "%s\n", con.red("unknown check mode: " + opt.check + " (use strict, warn or off)").c_str());
 		return 2;
 	}
 	if (opt.watch && opt.script.empty()) {
@@ -984,6 +993,7 @@ bool spill_file(const std::string& path, const std::string& content) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
+	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	if (engine_out) {
 		eng->set_output_stream(std::shared_ptr<std::ostream>(engine_out, [](std::ostream*) {}));
@@ -1091,6 +1101,15 @@ int result_to_exit_code(const jai::script_value& result) {
 jai::script_value execute_script_file(jai::engine& eng, const fs::path& abs) {
 	std::string content = slurp_file(abs.string());
 	if (content.rfind("\xEF\xBB\xBF", 0) == 0) { content.erase(0, 3); }
+	if (eng.static_checking() == jai::check_mode::warn) {
+		try {
+			jai::check_report report = eng.check(content);
+			if (!report.diagnostics.empty()) {
+				std::fprintf(stderr, "jaiscript: static check (warn mode, running anyway):\n%s", report.format(content, abs.filename().string()).c_str());
+			}
+		} catch (const std::exception&) {
+		}
+	}
 	return eng.execute_file_source(abs.string(), content);
 }
 

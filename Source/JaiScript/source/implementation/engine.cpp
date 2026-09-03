@@ -619,11 +619,17 @@ struct engine::implementation {
         uint64_t size = 0;
     };
     std::unordered_map<std::string, import_record> import_cache;
+    std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
 
     // Source-string execution cache: re-executing identical source skips lex/parse
     // (both backends) and bytecode compilation (the vm fills the compiled slot), with
     // the same semantics as re-executing a jaibite. Bounded LRU; parse-affecting
     // registrations (template types, classes) bump the epoch and invalidate.
+    struct closure_stamp {
+        std::string path;
+        uint64_t mtime = 0;
+        uint64_t size = 0;
+    };
     struct script_cache_entry {
         std::vector<declaration_ptr> declarations;
         std::shared_ptr<void> compiled;
@@ -635,6 +641,13 @@ struct engine::implementation {
         uint64_t checked_epoch = 0;
         check_report check_result;
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
+        // Program closure (checked_report): gathered once per surface epoch, and again
+        // whenever a unit's (mtime, size) stamp moves or the program is failing.
+        uint64_t closure_epoch = UINT64_MAX;
+        bool closure_root = false;   // has literal top-level import/include paths
+        std::vector<closure_stamp> closure_stamps;
+        std::string closure_listing;                   // erroring units' listings, each against its own source + path
+        std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
     };
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
@@ -658,22 +671,133 @@ struct engine::implementation {
     };
     std::unordered_map<literal_key, std::shared_ptr<script_cache_entry>, literal_key_hash> literal_script_cache;
 
-    // Static type checking (opt-in; off = zero cost beyond one branch at cache entry).
+    // Static type checking (strict by default; off = zero cost beyond one branch at cache entry).
     // check_surface_epoch_ moves on every registration the checker can see
     // (functions, globals, classes, template types), invalidating cached check results
     // without touching the parse cache.
-    check_mode static_check_mode_ = check_mode::off;
+    check_mode static_check_mode_ = check_mode::strict;
     check_report last_check_;
     uint64_t check_surface_epoch_ = 0;
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
     bool type_proofs_ = true;
     proof_stats last_proof_stats_;
 
-    // The ONE cached checker entry point, mode-independent: diagnostics when wanted (and
-    // stale), proofs whenever the entry's stamps disagree with the switch/surface epoch
-    // (stamp on, clear off). A trusted jaibite entry (checked, epoch current) never
-    // re-collects diagnostics here; its proofs still stamp.
-    const check_report& checked_report(engine& self, script_cache_entry& entry, bool want_diagnostics) {
+    // Program closure (docs/static_checking.md "Programs"): a unit with literal top-level
+    // import/include paths is checked together with every unit those paths reach, before
+    // any of them runs. The union of their top-level names lives for the engine's lifetime
+    // and rides every check as extra_globals - a superset never makes a false error, and a
+    // leaf re-checked alone after a hot edit still knows its program. program_classes_ carries
+    // the same units' class declarations (a subclass resolves a parent another unit declares).
+    std::unordered_set<std::string> program_names_;
+    detail::program_class_map program_classes_;
+    struct closure_unit {
+        std::string path;   // resolved spelling: the key the unit later executes under
+        std::string source;
+        std::shared_ptr<script_cache_entry> entry;
+    };
+    // The root's closure findings, republished by every checked_report: the strict throw
+    // text and the diagnostics folded into the caller-visible report.
+    std::string program_check_listing_;
+    std::vector<check_diagnostic> program_check_diags_;
+
+    static void literal_unit_paths(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::import_decl) {
+                auto* imp = static_cast<const import_decl*>(d.get());
+                if (!imp->path_expr) { out.push_back(imp->path); }
+            } else if (d->get_type() == node_type::include_decl) {
+                auto* inc = static_cast<const include_decl*>(d.get());
+                if (!inc->path_expr) { out.push_back(inc->path); }
+            }
+        }
+    }
+
+    // The parse-cache entry for (sourcePath, content): a hit, a fresh jaibite sibling, or a
+    // fresh parse stored under that key. Throws parse_error. sibling/siblingFresh tell the
+    // caller whether to rewrite the sibling afterwards.
+    std::shared_ptr<script_cache_entry> acquire_entry(engine& self, const std::string& content, const std::string& sourcePath,
+                                                      std::filesystem::path& sibling, bool& siblingFresh) {
+        sibling.clear();
+        siblingFresh = false;
+        if (jaibite_cache_enabled && sourcePath != "<script>") {
+            sibling = jaibite_sibling_path(sourcePath);
+            siblingFresh = !sibling.empty() && jaibite_sibling_fresh(sibling, sourcePath);
+        }
+        auto cached = find_cached_script(sourcePath, content);
+        if (!cached && siblingFresh) {
+            // Fresh sibling: skip the parse entirely. Corrupt data or a fingerprint
+            // mismatch falls back to the parse below (and the sibling is rewritten).
+            cached = try_load_jaibite_entry(self, sibling, sourcePath, content);
+            if (!cached) { siblingFresh = false; }
+        }
+        if (!cached) {
+            lexer lex(content, &string_symbolizer_, registeredTemplateTypes, sourcePath);
+            auto tokens = lex.tokenize();
+            parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
+            auto parse_result = prs.parse();
+            if (!parse_result) {
+                throw parse_error(self.format_error(parse_result));
+            }
+            cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
+        }
+        return cached;
+    }
+
+    // Depth-first in source order; a unit the runtime cannot resolve, read or parse is
+    // skipped here and reported by the runtime exactly as before, when it executes. Every
+    // resolved unit leaves a stamp (taken before the read, so a later edit shows as newer).
+    void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
+                               std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps) {
+        for (const auto& path : paths) {
+            closure_unit unit;
+            try {
+                auto resolved = resolve_include_path(path, &self);
+                if (!resolved || !visited.insert(resolved.value()).second) { continue; }
+                unit.path = std::move(resolved.value());
+                closure_stamp stamp{unit.path, 0, 0};
+                stat_mtime_size(unit.path, stamp.mtime, stamp.size);
+                stamps.push_back(std::move(stamp));
+                std::ifstream file(unit.path);
+                if (!file.is_open()) { continue; }
+                std::stringstream buffer;
+                buffer << file.rdbuf();
+                unit.source = buffer.str();
+                std::filesystem::path sibling;
+                bool siblingFresh = false;
+                unit.entry = acquire_entry(self, unit.source, unit.path, sibling, siblingFresh);
+            } catch (...) {
+                continue;
+            }
+            std::vector<std::string> nested;
+            literal_unit_paths(unit.entry->declarations, nested);
+            detail::collect_unit_names(unit.entry->declarations, program_names_);
+            detail::collect_unit_classes(unit.entry->declarations, program_classes_);
+            out.push_back(std::move(unit));
+            collect_closure_units(self, nested, visited, out, stamps);
+        }
+    }
+
+    // A gather is due once per surface epoch, then whenever a unit's stamp moved or the
+    // program is failing - a fix in any file, or a missing file appearing, is seen on the
+    // next run without waiting for the epoch.
+    bool closure_due(const script_cache_entry& entry) const {
+        if (entry.closure_epoch != check_surface_epoch_) { return true; }
+        if (!entry.closure_root) { return false; }
+        if (!entry.closure_listing.empty() || entry.check_result.has_errors()) { return true; }
+        for (const auto& s : entry.closure_stamps) {
+            uint64_t mtime = 0, size = 0;
+            stat_mtime_size(s.path, mtime, size);
+            if (mtime != s.mtime || size != s.size) { return true; }
+        }
+        return false;
+    }
+
+    // One entry's check: diagnostics when wanted (and stale), proofs whenever the entry's
+    // stamps disagree with the switch/surface epoch (stamp on, clear off). A trusted
+    // jaibite entry (checked, epoch current) never re-collects diagnostics; its proofs
+    // still stamp.
+    void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
         const bool need_proofs = entry.proof_epoch != want_proof_epoch;
@@ -682,6 +806,8 @@ struct engine::implementation {
             o.diagnostics = need_check;
             o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
             o.stats = &last_proof_stats_;
+            o.program_names = &program_names_;
+            o.program_classes = &program_classes_;
             check_report r = detail::run_static_check(self, entry.declarations, nullptr, o);
             if (need_check) {
                 entry.check_result = std::move(r);
@@ -690,7 +816,71 @@ struct engine::implementation {
             }
             entry.proof_epoch = want_proof_epoch;
         }
+    }
+
+    // The ONE cached checker entry point, mode-independent. A root with literal imports
+    // gathers its closure when due (names first, so the root's own check already knows
+    // them; the root's verdict is re-derived because the union may have moved), then
+    // checks every closure unit whose entry is stale so the unit's later execute through
+    // import finds it checked. The findings live on the root entry and are republished
+    // on every call, gathered or not.
+    const check_report& checked_report(engine& self, script_cache_entry& entry, bool want_diagnostics) {
+        if (want_diagnostics && closure_due(entry)) {
+            std::vector<std::string> roots;
+            literal_unit_paths(entry.declarations, roots);
+            entry.closure_root = !roots.empty();
+            entry.closure_stamps.clear();
+            entry.closure_listing.clear();
+            entry.closure_diags.clear();
+            std::vector<closure_unit> closure;
+            if (entry.closure_root) {
+                detail::collect_unit_names(entry.declarations, program_names_);
+                detail::collect_unit_classes(entry.declarations, program_classes_);
+                std::unordered_set<std::string> visited;
+                collect_closure_units(self, roots, visited, closure, entry.closure_stamps);
+                entry.checked = false;
+            }
+            entry.closure_epoch = check_surface_epoch_;
+            check_entry(self, entry, true);
+            for (const auto& unit : closure) {
+                check_entry(self, *unit.entry, true);
+                const check_report& r = unit.entry->check_result;
+                if (r.diagnostics.empty()) { continue; }
+                if (r.has_errors()) { entry.closure_listing += r.format(unit.source, unit.path); }
+                for (const auto& d : r.diagnostics) {
+                    entry.closure_diags.push_back({d.severity, 0, 0,
+                        unit.path + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
+                        d.related_line, d.related_column, d.strict_region});
+                }
+            }
+        } else {
+            check_entry(self, entry, want_diagnostics);
+        }
+        program_check_listing_ = entry.closure_listing;
+        program_check_diags_ = entry.closure_diags;
         return entry.check_result;
+    }
+
+    // What a caller sees: the root's diagnostics followed by the closure's (line/column 0,
+    // the location travels in the message - the snippet belongs to another source).
+    check_report program_report(const check_report& root) const {
+        check_report r = root;
+        r.diagnostics.insert(r.diagnostics.end(), program_check_diags_.begin(), program_check_diags_.end());
+        return r;
+    }
+
+    // Strict gates every error; warn gates only the ones a [[strict_mode]] region raised.
+    bool gates(const check_report& r) const {
+        return static_check_mode_ == check_mode::strict ? r.has_errors() : r.has_strict_errors();
+    }
+
+    // The tail every checked execute shares: publish last_check_, gate with the root listing
+    // followed by each closure unit's own.
+    void gate_checked(const check_report& root, std::string_view source) {
+        last_check_ = program_report(root);
+        if (gates(last_check_)) {
+            throw static_check_error("static check failed:\n" + root.format(source) + program_check_listing_);
+        }
     }
 
     // Per-call check with host instance variables: diagnostics only, never touches the
@@ -701,6 +891,8 @@ struct engine::implementation {
         for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
         detail::check_options o;
         o.proofs = detail::check_options::proofs_t::leave;
+        o.program_names = &program_names_;
+        o.program_classes = &program_classes_;
         return detail::run_static_check(self, entry.declarations, &extra, o);
     }
 
@@ -714,12 +906,9 @@ struct engine::implementation {
         const check_report& rep = checked_report(self, entry, static_check_mode_ != check_mode::off);
         if (static_check_mode_ != check_mode::off) {
             if (instanceVars.empty()) {
-                last_check_ = rep;
+                gate_checked(rep, source);
             } else {
-                last_check_ = check_with_instance_vars(self, entry, instanceVars);
-            }
-            if (static_check_mode_ == check_mode::strict && last_check_.has_errors()) {
-                throw static_check_error("static check failed:\n" + last_check_.format(std::string(source)));
+                gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
             }
         }
         return self.execute_parsed(entry.declarations, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars);
@@ -1455,44 +1644,16 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Prepare backend for new execution
         backend()->prepare_for_execution();
 
-        // Jaibite disk cache scope for this call — real file paths only ("<script>" is
-        // the raw-content sentinel; string executes never touch disk). engine.hpp doc.
+        // Identical source re-executes through its cached parse (and, on the vm, its
+        // cached compiled chunk) — same semantics as re-executing a jaibite. Keyed on
+        // (sourcePath, content): the same text under two paths gets two ASTs, each
+        // stamped with its own filename (breakpoints/traces stay distinct). The jaibite
+        // sibling is real-file-path only ("<script>" is the raw-content sentinel; string
+        // executes never touch disk — engine.hpp doc). A parse failure surfaces as
+        // parse_error carrying the interned detail (file:line:col + message per error).
         std::filesystem::path sibling;
         bool siblingFresh = false;
-        if (impl->jaibite_cache_enabled && sourcePath != "<script>") {
-            sibling = implementation::jaibite_sibling_path(sourcePath);
-            siblingFresh = !sibling.empty() && implementation::jaibite_sibling_fresh(sibling, sourcePath);
-        }
-
-        // Identical source re-executes through its cached parse (and, on the vm,
-        // its cached compiled chunk) — same semantics as re-executing a jaibite.
-        // Keyed on (sourcePath, content): the same text under two paths gets two
-        // ASTs, each stamped with its own filename (breakpoints/traces stay distinct).
-        auto cached = impl->find_cached_script(sourcePath, scriptContent);
-        if (!cached && siblingFresh) {
-            // Fresh sibling: skip the parse entirely. Corrupt data or a fingerprint
-            // mismatch falls back to the parse below (and the sibling is rewritten).
-            // Feeds the SAME parse-entry pipeline, so the static-check hook and the
-            // vm's lazy chunk compile are untouched.
-            cached = impl->try_load_jaibite_entry(*this, sibling, sourcePath, scriptContent);
-            if (!cached) {
-                siblingFresh = false;
-            }
-        }
-        if (!cached) {
-            lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes, sourcePath);
-            auto tokens = lexer.tokenize();
-            parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
-            auto parse_result = parser.parse();
-
-            // Convert checked_result to exception at API boundary. format_error resolves
-            // the interned detail (file:line:col + message, one line per collected error)
-            // instead of the bare category string the error_code carries.
-            if (!parse_result) {
-                throw parse_error(format_error(parse_result));
-            }
-            cached = impl->store_cached_script(sourcePath, scriptContent, std::move(parse_result.value()));
-        }
+        auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, sibling, siblingFresh);
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
@@ -1500,14 +1661,11 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
         if (impl->static_check_mode_ != check_mode::off) {
             if (instanceVars.empty()) {
-                impl->last_check_ = rep;
+                impl->gate_checked(rep, scriptContent);
             } else {
                 // host-supplied instance variables are per-call: check fresh with those
                 // names defined instead of caching a result that depends on them
-                impl->last_check_ = impl->check_with_instance_vars(*this, *cached, instanceVars);
-            }
-            if (impl->static_check_mode_ == check_mode::strict && impl->last_check_.has_errors()) {
-                throw static_check_error("static check failed:\n" + impl->last_check_.format(scriptContent));
+                impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent);
             }
         }
 
@@ -1600,6 +1758,8 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.diagnostics = need_check;
         o.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
         o.stats = &impl->last_proof_stats_;
+        o.program_names = &impl->program_names_;
+        o.program_classes = &impl->program_classes_;
         check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
         if (need_check) {
             bite.check_report_ = std::move(r);
@@ -1610,7 +1770,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
     }
     if (impl->static_check_mode_ == check_mode::off) { return; }
     impl->last_check_ = bite.check_report_;
-    if (impl->static_check_mode_ == check_mode::strict && bite.check_report_.has_errors()) {
+    if (impl->gates(bite.check_report_)) {
         throw static_check_error("static check failed:\n" +
                                  bite.check_report_.format(source ? std::string_view(*source) : std::string_view{}));
     }
@@ -1716,7 +1876,7 @@ check_report engine::check(const std::string& scriptContent) {
         }
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
     }
-    return impl->checked_report(*this, *cached, true);
+    return impl->program_report(impl->checked_report(*this, *cached, true));
 }
 
 bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
@@ -2949,6 +3109,15 @@ script_value engine::execute_import(const std::string& resolved_path) {
     }
     
     if (should_import) {
+        if (!impl->importing_.insert(resolved_path).second) {
+            return make_null();
+        }
+        struct importing_scope {
+            std::unordered_set<std::string>& set;
+            const std::string& path;
+            ~importing_scope() { set.erase(path); }
+        } scope{impl->importing_, resolved_path};
+
         // Read and execute the file
         std::ifstream file(resolved_path);
         if (!file.is_open()) {

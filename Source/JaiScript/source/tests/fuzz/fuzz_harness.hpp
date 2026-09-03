@@ -154,6 +154,7 @@ namespace jai::fuzz {
 		auto eng = jai::engine::make();
 		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
 		eng->type_proofs(cfg.proofs);
+		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
 
@@ -494,6 +495,7 @@ namespace jai::fuzz {
 		os << "\tfor (bool use_vm : {false, true}) {\n";
 		os << "\t\tauto e = jai::engine::make();\n";
 		os << "\t\tif (use_vm) { e->set_backend(jai::backend_type::vm); }\n";
+		os << "\t\te->static_checking(jai::check_mode::warn);\n";
 		os << "\t\te->execution_budget(0);\n";
 		for (size_t i = 0; i < p.segments.size(); ++i) {
 			os << "\t\ttry { out[idx] += e->execute(R\"__jai(\n" << p.segments[i] << ")__jai\").to_string(); }\n";

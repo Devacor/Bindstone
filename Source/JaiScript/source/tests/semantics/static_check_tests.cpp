@@ -1,6 +1,6 @@
-// Opt-in static type checking (docs/static_checking.md): mode API, the type-ladder
-// rule table, accumulation/recovery/cap, strict gating (throws before anything runs),
-// warn retrieval, hot-reload + registration-epoch re-checks, jaibite stamping, and a
+// Static type checking (docs/static_checking.md; strict by default): mode API, the
+// type-ladder rule table, accumulation/recovery/cap, strict gating (throws before anything
+// runs), warn retrieval, hot-reload + registration-epoch re-checks, jaibite stamping, and a
 // generator-corpus false-positive gate (false positives are the feature's death).
 
 #include <jaiscript/testing/foundry.hpp>
@@ -13,6 +13,8 @@
 #include "fuzz/fuzz_harness.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -30,6 +32,13 @@ size_t error_count(const check_report& r) { return r.error_count(); }
 size_t warning_count(const check_report& r) {
     return r.diagnostics.size() - r.error_count();
 }
+using dlevel = check_diagnostic::level;
+bool has_diag(const check_report& r, dlevel severity, std::string_view text) {
+    for (const auto& d : r.diagnostics) {
+        if (d.severity == severity && d.message.find(text) != std::string::npos) { return true; }
+    }
+    return false;
+}
 
 // Proof differential helper: one line per outcome, error text included verbatim.
 std::string outcome(jai::engine& e, const std::string& src) {
@@ -43,6 +52,25 @@ std::string outcome(jai::engine& e, const std::string& src) {
 uint64_t shape_epoch(jai::engine& e, const std::string& cls) {
     auto def = e.get_class_registry().find_script_class(cls);
     return def ? def->field_shape_epoch() : 0;
+}
+
+// Program-closure fixtures: one temp directory per test, added as the engine's include path.
+std::filesystem::path closure_dir(const std::string& name) {
+    auto dir = std::filesystem::temp_directory_path() / ("jai_closure_" + name);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+void write_unit(const std::filesystem::path& dir, const std::string& file, const std::string& content) {
+    std::ofstream out(dir / file, std::ios::binary | std::ios::trunc);
+    out << content;
+}
+
+std::shared_ptr<jai::engine> program_engine(const std::filesystem::path& dir) {
+    auto e = make_engine();
+    e->jaibite_cache(false);
+    e->add_include_path(dir.string());
+    return e;
 }
 
 } // namespace
@@ -77,31 +105,40 @@ public:
             check_eq((size_t)0, quiet.diagnostics.size());
         });
 
-        test("off_by_default_and_mode_roundtrip", [this]() {
+        test("strict_by_default_and_mode_roundtrip", [this]() {
             auto e = make_engine();
+            check_true(e->static_checking() == check_mode::strict);
+            e->static_checking(check_mode::off);
             check_true(e->static_checking() == check_mode::off);
             e->static_checking(check_mode::warn);
             check_true(e->static_checking() == check_mode::warn);
             e->static_checking(check_mode::strict);
             check_true(e->static_checking() == check_mode::strict);
-            e->static_checking(check_mode::off);
         });
 
         test("off_mode_zero_behavior_change_battery", [this]() {
-            // Scripts that the checker WOULD flag must run byte-identically under off.
+            // Under off the runtime alone decides: conversions run, a typed mismatch
+            // raises the runtime's own error at the store, and no diagnostics are collected.
             auto e = make_engine();
-            check_true(e->static_checking() == check_mode::off);
+            e->static_checking(check_mode::off);
             check_eq((int64_t)4, e->execute("int x = 4.7; x").as_int());
             check_eq(std::string("42"), e->execute("string s = 42; s").as<std::string>());
             check_eq(true, e->execute("bool b = \"x\"; b").as<bool>());
             check_eq((int64_t)7, e->execute("var v = 5; v = \"s\"; 7").as_int());
             check_eq((int64_t)10, e->execute("function ten() { return 10; } ten()").as_int());
+            std::string text;
+            try { e->execute("function bad() -> int { return \"nope\"; } bad();"); }
+            catch (const static_check_error&) { text = "static_check_error"; }
+            catch (const std::exception& ex) { text = ex.what(); }
+            check_true(text.find("Type mismatch: expected int but got string") != std::string::npos,
+                "off: the runtime's text, never the checker's (got: " + text + ")");
             // and no diagnostics were collected anywhere
             check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size());
         });
 
         test("check_is_independent_of_mode", [this]() {
-            auto e = make_engine();   // off
+            auto e = make_engine();
+            e->static_checking(check_mode::off);   // check() reports even where execution never would
             auto report = e->check("int x = \"hello\";");
             check_eq((size_t)1, error_count(report));
             check_eq((size_t)1, report.diagnostics[0].line);
@@ -195,11 +232,16 @@ public:
             check_eq((size_t)0, error_count(e->check("print(\"hi\");")));   // registered surface visible
         });
 
-        test("includes_downgrade_undeclared_to_warning", [this]() {
+        test("dynamic_include_keeps_undeclared_lenient_literal_does_not", [this]() {
             auto e = make_engine();
-            auto r = e->check("include \"somewhere.jai\"\nzzz_maybe_included();");
-            check_eq((size_t)0, error_count(r));
-            check_ge(warning_count(r), (size_t)1);
+            // a dynamic path can define anything: warning severity
+            auto dyn = e->check("var p = \"somewhere.jai\";\nimport(p);\nzzz_maybe_included();");
+            check_eq((size_t)0, error_count(dyn));
+            check_ge(warning_count(dyn), (size_t)1);
+            // a literal path is the program closure's: an unresolvable one contributes no names
+            auto lit = e->check("include \"somewhere_missing.jai\"\nzzz_maybe_included();");
+            check_eq((size_t)1, error_count(lit));
+            check_true(lit.diagnostics[0].message.find("zzz_maybe_included") != std::string::npos);
         });
 
         test("forward_references_resolve", [this]() {
@@ -511,6 +553,7 @@ public:
 
             // mismatched registration surface: stamp NOT trusted (off mode: stays unchecked)
             auto e2 = make_engine();
+            e2->static_checking(check_mode::off);
             e2->add_function("extra_reg_fn_zz", [](script_int v) -> script_int { return v; });
             auto loaded2 = e2->jaibite_load_bytes(bytes);
             check_true(loaded2.registration_mismatch());
@@ -534,11 +577,38 @@ public:
         });
 
         test("jaibite_execute_checks_lazily", [this]() {
+            const char* bad = "int bad = \"s\";";
+            // strict (default): checked at creation, the listing names the typed mismatch
+            auto strict = make_engine();
+            std::string text;
+            try { strict->jaibite(bad); } catch (const static_check_error& ex) { text = ex.what(); }
+            check_true(text.find("cannot initialize 'bad' declared 'int' with 'string'") != std::string::npos,
+                "strict creation rejects the typed mismatch (got: " + text + ")");
+            // off: created unchecked; the first strict execute checks it
             auto e = make_engine();
-            auto bite = e->jaibite("int bad = \"s\";");   // off: created unchecked
+            e->static_checking(check_mode::off);
+            auto bite = e->jaibite(bad);
             check_false(bite.checked_clean());
             e->static_checking(check_mode::strict);
-            check_throws([&]() { e->execute(bite); });    // checked at first strict execute
+            check_throws<static_check_error>([&]() { e->execute(bite); });
+            // warn: created with diagnostics; execute reaches the runtime's own error
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            auto flagged = warn->jaibite(bad);
+            check_true(flagged.check_diagnostics().has_errors());
+            text.clear();
+            try { flagged.execute(); }
+            catch (const static_check_error&) { text = "static_check_error"; }
+            catch (const std::exception& ex) { text = ex.what(); }
+            check_true(text.find("Type mismatch in assignment") != std::string::npos,
+                "warn executes into the runtime error (got: " + text + ")");
+            // strict admits the var-sourced twin; the same runtime error fires at execute
+            auto var_bite = strict->jaibite("var s = \"s\"; int bad = s;");
+            check_true(var_bite.checked_clean());
+            text.clear();
+            try { var_bite.execute(); } catch (const std::exception& ex) { text = ex.what(); }
+            check_true(text.find("Type mismatch in assignment") != std::string::npos,
+                "var-sourced store keeps the runtime text under strict (got: " + text + ")");
         });
 
         // ------------------------------------------------------------ misc surface
@@ -812,7 +882,7 @@ public:
         test("proofs_stamp_in_off_mode_with_counters", [this]() {
             // check mode off: no diagnostics anywhere, yet the proof pass stamps
             auto e = make_engine();
-            check_true(e->static_checking() == check_mode::off);
+            e->static_checking(check_mode::off);
             const std::string src =
                 "int a = 1; a = 2; string s = \"x\"; s = s + \"y\";\n"
                 "int twice(int v) { return v * 2; }\n"
@@ -830,6 +900,7 @@ public:
 
             // the twin with proofs off runs the same source with zero stamps and equal output
             auto off = make_engine();
+            off->static_checking(check_mode::off);
             off->type_proofs(false);
             check_eq((int64_t)4, off->execute(src).as_int());
             const proof_stats& none = off->last_proof_stats();
@@ -950,7 +1021,8 @@ public:
         });
 
         test("proof_jaibite_paths_restamp_without_touching_diagnostics", [this]() {
-            auto e = make_engine();   // off
+            auto e = make_engine();
+            e->static_checking(check_mode::off);
             auto bite = e->jaibite("int a = 5; int b = a; b");
             check_eq((uint32_t)2, e->last_proof_stats().decls, "proof pass at creation under off");
             check_false(bite.checked_clean());   // diagnostics untouched under off
@@ -1075,6 +1147,7 @@ public:
             for (uint64_t seed = 0; seed < k_seed_count; ++seed) {
                 fuzz::program p = fuzz::generate_program(seed, 3);
                 auto eng = make_engine();
+                eng->static_checking(check_mode::warn);   // strict would abort flagged programs before they can prove they run clean
                 eng->execution_budget(k_budget_seconds);
                 eng->memory_cap(64 * 1024 * 1024);
                 jai::engine* raw = eng.get();
@@ -1198,6 +1271,550 @@ public:
             check_gt(compared_programs, 0);
             check_eq(0, proof_divergences, first_report.empty() ? "proofs on/off agree on both backends" : first_report);
             check_eq(0, backend_divergences, first_report.empty() ? "backends agree" : first_report);
+        });
+
+        // ------------------------------------------------------------ cast<T>(e)
+
+        test("cast_types_certain_and_reference_receivers_resolve_members", [this]() {
+            auto e = make_engine();
+            e->static_checking(check_mode::strict);
+            const std::string prelude =
+                "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
+                "auto h = H(); h.p = T();\n";
+            // a subtype member on a certain base-typed receiver is the error; cast<T&> is the fix
+            bool threw = false;
+            try { e->execute(prelude + "h.p.t;"); } catch (const static_check_error&) { threw = true; }
+            check_true(threw, "subtype member on a certain base receiver is a strict error");
+            check_eq((int64_t)2, e->execute(prelude + "cast<T&>(h.p).t").as_int());
+            check_eq((int64_t)2, e->execute(prelude + "T tv = cast<T>(h.p); tv.t").as_int());
+            check_eq((int64_t)2, e->execute(prelude + "shared_ptr<T> th = cast<shared_ptr<T>>(h.p); th.t").as_int());
+            // the cast's class is certain: a missing member on it is still an error
+            threw = false;
+            std::string message;
+            try { e->execute(prelude + "cast<T&>(h.p).zzz;"); } catch (const static_check_error& err) { threw = true; message = err.what(); }
+            check_true(threw, "unknown member on a cast reference");
+            check_true(message.find("no member 'zzz' in class 'T'") != std::string::npos);
+            threw = false;
+            try { e->execute(prelude + "T tv = cast<T>(h.p); tv.zzz;"); } catch (const static_check_error&) { threw = true; }
+            check_true(threw, "unknown member on a cast value");
+        });
+
+        test("cast_unknown_type_is_a_check_error_and_a_runtime_error_under_warn", [this]() {
+            auto e = make_engine();
+            e->static_checking(check_mode::strict);
+            bool threw = false;
+            std::string message;
+            try { e->execute("var v = 1; cast<Nope>(v);"); } catch (const static_check_error& err) { threw = true; message = err.what(); }
+            check_true(threw);
+            check_true(message.find("unknown type in cast: 'Nope'") != std::string::npos);
+            // warn keeps the runtime verdict: the operand's class is simply not the target
+            auto w = make_engine();
+            w->static_checking(check_mode::warn);
+            check_eq(std::string("Cannot cast 'int' to 'Nope'"),
+                     w->execute("var v = 1; var c = \"\"; try { cast<Nope>(v); } catch (e) { c = e; } c").to_string());
+            check_true(w->last_check_diagnostics().has_errors());
+        });
+
+        test("cast_value_is_a_proof_source_reference_is_not", [this]() {
+            const std::string prelude =
+                "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
+                "auto h = H(); h.p = T();\n";
+            auto e = make_engine();
+            check_eq((int64_t)2, e->execute(prelude + "T tv = cast<T>(h.p); tv.t").as_int());
+            check_ge(e->last_proof_stats().decls, (uint32_t)1, "T tv = cast<T>(h.p) proves same_type");
+            auto r = make_engine();
+            check_eq((int64_t)2, r->execute(prelude + "auto& tr = cast<T&>(h.p); tr.t").as_int());
+            check_eq((uint32_t)0, r->last_proof_stats().decls, "a reference never proves");
+        });
+
+        // ------------------------------------------------------------ programs (closure checking)
+
+        test("program_closure_forward_reference_across_units", [this]() {
+            auto dir = closure_dir("fwd");
+            write_unit(dir, "fwd_a.jai", "function read_g() -> int { return G.v; }\n");
+            write_unit(dir, "fwd_b.jai", "class Game { int v = 7; }\nvar G = Game();\n");
+            auto e = program_engine(dir);
+            check_eq((int64_t)7, e->execute("import \"fwd_a.jai\";\nimport \"fwd_b.jai\";\nread_g()").as_int());
+            check_eq((size_t)0, error_count(e->check("import \"fwd_a.jai\";\nimport \"fwd_b.jai\";\nread_g()")));
+            // the same leaf on its own, with nothing declaring G, is the genuine error
+            auto alone = make_engine();
+            check_eq((size_t)1, error_count(alone->check("function read_g() -> int { return G.v; }")));
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_leaf_error_fails_the_root_before_anything_runs", [this]() {
+            auto dir = closure_dir("leaf_err");
+            write_unit(dir, "leaf_err.jai", "function f() -> int { return zzz_missing + 1; }\n");
+            auto e = program_engine(dir);
+            std::string what;
+            try {
+                e->execute("import \"leaf_err.jai\";\n1");
+            } catch (const static_check_error& ex) {
+                what = ex.what();
+            }
+            check_true(what.find("static check failed") != std::string::npos, "root throws static_check_error");
+            check_true(what.find("leaf_err.jai") != std::string::npos, "listing names the leaf's file");
+            check_true(what.find("use of undeclared identifier 'zzz_missing'") != std::string::npos);
+            check_true(what.find("return zzz_missing + 1") != std::string::npos, "snippet comes from the leaf's source");
+            check_false(e->has_function("f"), "nothing ran");
+            // the report engine::check returns folds the closure's diagnostics in, path-qualified
+            auto r = e->check("import \"leaf_err.jai\";\n1");
+            check_eq((size_t)1, error_count(r));
+            check_eq((size_t)0, r.diagnostics[0].line);
+            check_true(r.diagnostics[0].message.find("leaf_err.jai:1:") != std::string::npos);
+            check_true(r.diagnostics[0].message.find("zzz_missing") != std::string::npos);
+            // warn mode runs it
+            auto w = program_engine(dir);
+            w->static_checking(check_mode::warn);
+            w->execute("import \"leaf_err.jai\";\n1");
+            check_true(w->has_function("f"));
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_survives_leaf_hot_edit", [this]() {
+            auto dir = closure_dir("hot_edit");
+            write_unit(dir, "hot_a.jai", "function read_g() -> int { return G.v; }\n");
+            write_unit(dir, "hot_b.jai", "class Game { int v = 7; }\nvar G = Game();\n");
+            auto e = program_engine(dir);
+            e->set_import_behavior(engine::import_behavior::always);
+            const std::string root = "import \"hot_a.jai\";\nimport \"hot_b.jai\";\nread_g()";
+            check_eq((int64_t)7, e->execute(root).as_int());
+            write_unit(dir, "hot_a.jai", "function read_g() -> int { return G.v * 10; }\n");
+            check_eq((int64_t)70, e->execute(root).as_int());
+            write_unit(dir, "hot_a.jai", "function read_g() -> int { return G.v * 100; }\n");
+            check_eq((int64_t)700, e->execute(root).as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_name_memory_outlives_the_closure", [this]() {
+            auto dir = closure_dir("memory");
+            write_unit(dir, "mem_x.jai", "function x_fn() -> int { return y_fn(); }\nthrow \"stop before y\";\n");
+            write_unit(dir, "mem_y.jai", "function y_fn() -> int { return 1; }\n");
+            auto e = program_engine(dir);
+            check_throws([&]() { e->execute("import \"mem_x.jai\";\nimport \"mem_y.jai\";\n"); });
+            check_false(e->has_function("y_fn"), "the program stopped before y ran");
+            // a unit checked on its own still knows the program's names...
+            check_eq((size_t)0, error_count(e->check("function q() -> int { return y_fn(); }")));
+            // ...where an engine that never saw the program does not
+            check_eq((size_t)1, error_count(make_engine()->check("function q() -> int { return y_fn(); }")));
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_cycle_checks_and_executes", [this]() {
+            auto dir = closure_dir("cycle");
+            write_unit(dir, "cyc_a.jai", "import \"cyc_b.jai\";\nfunction from_a() -> int { return from_b() + 1; }\n");
+            write_unit(dir, "cyc_b.jai", "import \"cyc_a.jai\";\nfunction from_b() -> int { return 41; }\n");
+            auto e = program_engine(dir);
+            check_eq((size_t)0, error_count(e->check("import \"cyc_a.jai\";\nfrom_a()")));
+            check_eq((int64_t)42, e->execute("import \"cyc_a.jai\";\nfrom_a()").as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_stamps_proofs_in_units", [this]() {
+            auto dir = closure_dir("proofs");
+            write_unit(dir, "typed_unit.jai",
+                "int a = 1; a = 2;\nint twice(int v) { return v * 2; }\nint r = twice(a);\n");
+            auto e = program_engine(dir);
+            e->execute("import \"typed_unit.jai\";\n");
+            const proof_stats& st = e->last_proof_stats();
+            check_ge(st.decls, (uint32_t)2, "the unit's typed decls prove");
+            check_ge(st.stores, (uint32_t)1, "the unit's same-type store proves");
+            check_eq((uint32_t)1, st.calls, "the unit's single-overload call is proven");
+            check_eq((int64_t)4, e->execute("r").as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        // ------------------------------------------------------------ programs (class tables across units)
+
+        test("program_closure_subclass_resolves_parent_declared_in_another_unit", [this]() {
+            auto dir = closure_dir("xunit_parent");
+            write_unit(dir, "xp_a.jai", "class A { int hp = 3; int bonus() { return 2; } }\n");
+            auto e = program_engine(dir);
+            // bare inherited field + method inside the subclass's method
+            const std::string root = "import \"xp_a.jai\";\nclass B : A { int tick() { return hp + bonus(); } }\nB().tick()";
+            auto r = e->check(root);
+            check_eq((size_t)0, error_count(r), r.format(root));
+            check_eq((int64_t)5, e->execute(root).as_int());
+            // this.x, a receiver typed as the subclass, and a receiver typed as the parent
+            const std::string root2 = "import \"xp_a.jai\";\nclass B : A { int tick() { return this.hp + this.bonus(); } }\n"
+                                      "B b = B();\nA a = b;\nb.hp + b.bonus() + b.tick() + a.hp";
+            auto r2 = e->check(root2);
+            check_eq((size_t)0, error_count(r2), r2.format(root2));
+            check_eq((int64_t)13, e->execute(root2).as_int());
+            // and a genuine miss on the same receivers is still the error the same-unit case reports
+            auto miss = e->check("import \"xp_a.jai\";\nclass B : A { int tick() { return this.zzz_nope; } }\nB b = B();\nb.zzz_nope2");
+            check_eq((size_t)2, error_count(miss));
+            check_true(has_diag(miss, dlevel::error, "no member 'zzz_nope' in class 'B'"));
+            check_true(has_diag(miss, dlevel::error, "no member 'zzz_nope2' in class 'B'"));
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_three_unit_class_chain", [this]() {
+            auto dir = closure_dir("xunit_chain");
+            write_unit(dir, "ch_a.jai", "class A { int a = 1; }\n");
+            write_unit(dir, "ch_b.jai", "import \"ch_a.jai\";\nclass B : A { int b = 2; int ab() { return a + b; } }\n");
+            write_unit(dir, "ch_c.jai", "import \"ch_b.jai\";\nclass C : B { int c = 4; int sum() { return a + b + c + ab(); } }\n");
+            auto e = program_engine(dir);
+            const std::string root = "import \"ch_c.jai\";\nclass D : C { int d = 8; int all() { return a + b + c + d + sum(); } }\nD().all()";
+            auto r = e->check(root);
+            check_eq((size_t)0, error_count(r), r.format(root));
+            check_eq((int64_t)25, e->execute(root).as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_chain_ends_in_a_cpp_class", [this]() {
+            // the creature shape: script leaf -> script kind (another unit) -> C++ base (dynamic_binder)
+            auto dir = closure_dir("xunit_cpp");
+            write_unit(dir, "cpp_kind.jai", "class Kind : ProbeObject { int t = 1; Kind() : super() {} int twice() { return doubled(); } }\n");
+            auto e = program_engine(dir);
+            dynamic_binder<probe_object>(*e, "ProbeObject")
+                .constructor<>()
+                .method("doubled", &probe_object::doubled)
+                .property("value", &probe_object::value)
+                .build();
+            const std::string root = "import \"cpp_kind.jai\";\n"
+                                     "class W : Kind { W() : super() {} int tick() { return doubled() + twice() + t; } }\n"
+                                     "W w = W();\nw.value = 5;\nw.tick() + w.doubled() + w.t + w.value";
+            auto r = e->check(root);
+            check_eq((size_t)0, error_count(r), r.format(root));
+            check_eq((int64_t)37, e->execute(root).as_int());
+            // a bare C++ property resolves through the chain too
+            auto prop = e->check("import \"cpp_kind.jai\";\nclass W : Kind { W() : super() {} int v() { return value; } }");
+            check_eq((size_t)0, error_count(prop), prop.format());
+            // a miss below the C++ base is still certain (closed binder surface)
+            auto miss = e->check("import \"cpp_kind.jai\";\nclass W : Kind { int tick() { return zzz_nope; } }");
+            check_eq((size_t)1, error_count(miss));
+            check_true(has_diag(miss, dlevel::error, "use of undeclared identifier 'zzz_nope'"));
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_typed_mismatch_against_cross_unit_parent_is_the_same_error", [this]() {
+            auto dir = closure_dir("xunit_mismatch");
+            const std::string a_src = "class A { int hp = 3; int bonus() { return 2; } }\n";
+            write_unit(dir, "xm_a.jai", a_src);
+            struct row { const char* body; const char* text; };
+            const row rows[] = {
+                {"class B : A { void f() { hp = \"s\"; } }", "cannot assign 'string' to field 'hp' declared 'int'"},
+                {"class B : A { void f() { this.hp = \"s\"; } }", "cannot assign 'string' to field 'hp' declared 'int'"},
+                {"class B : A { }\nB b = B();\nb.hp = \"s\";", "cannot assign 'string' to field 'hp' declared 'int'"},
+                {"class B : A { int f() { return bonus(\"x\"); } }", "'bonus' expects 0 argument(s), got 1"},
+                {"class B : A { }\nB b = B();\nb.bonus(1, 2);", "'bonus' expects 0 argument(s), got 2"},
+            };
+            for (const auto& rw : rows) {
+                auto cross = program_engine(dir)->check("import \"xm_a.jai\";\n" + std::string(rw.body));
+                auto same = make_engine()->check(a_src + rw.body);
+                check_eq((size_t)1, error_count(cross), rw.body);
+                check_eq((size_t)1, error_count(same), rw.body);
+                check_eq(same.diagnostics[0].message, cross.diagnostics[0].message);
+                check_true(cross.diagnostics[0].message.find(rw.text) != std::string::npos, rw.text);
+                // the same-unit report points at the declaration; the cross-unit one cannot (it is in another file)
+                check_true(same.diagnostics[0].related_line != 0, "same-unit related location");
+                check_eq((size_t)0, cross.diagnostics[0].related_line, "cross-unit related location");
+                // strict gates the load with that text
+                std::string what;
+                try { program_engine(dir)->execute("import \"xm_a.jai\";\n" + std::string(rw.body)); }
+                catch (const static_check_error& ex) { what = ex.what(); }
+                check_true(what.find(rw.text) != std::string::npos, what);
+            }
+            std::filesystem::remove_all(dir);
+        });
+
+        test("program_closure_unknown_parent_keeps_bare_names_lenient", [this]() {
+            // a parent nowhere - not this unit, not the program, not registered - can define anything
+            auto e = make_engine();
+            auto ext = e->check("extern MysteryKind;\nclass W : MysteryKind { int tick() { hp = 1; return hp + bonus(); } }\n"
+                                "class X : W { int t2() { return [this]() { return hp; }(); } }");
+            check_eq((size_t)0, error_count(ext), ext.format());
+            check_eq((size_t)0, warning_count(ext), ext.format());
+            auto inc = e->check("include \"nowhere_base.jai\"\nclass Sub : MysteryBase { int tick() { return hp + bonus(); } }");
+            check_eq((size_t)0, error_count(inc), inc.format());
+            // a known chain is still checked
+            auto known = e->check("class K { int hp = 1; }\nclass W : K { int tick() { return hp + zzz_nope; } }");
+            check_eq((size_t)1, error_count(known));
+            check_true(has_diag(known, dlevel::error, "use of undeclared identifier 'zzz_nope'"));
+        });
+
+        test("program_closure_cross_unit_parent_proofs_wait_for_registration", [this]() {
+            auto dir = closure_dir("xunit_proofs");
+            write_unit(dir, "pf_a.jai", "class A { int hp = 3; }\n");
+            write_unit(dir, "pf_b.jai", "class B : A { int tick() { int x = hp; return hp; } }\n");   // no includes: proof gates open
+            const std::string root = "import \"pf_a.jai\";\nimport \"pf_b.jai\";\nB().tick()";
+            for (bool proofs : {true, false}) {
+                auto e = program_engine(dir);
+                e->type_proofs(proofs);
+                check_eq((int64_t)3, e->execute(root).as_int());
+                check_eq((int64_t)3, e->execute(root).as_int());
+            }
+            // last_proof_stats() is the last unit checked: pf_b.jai. Its FIRST check knows A only
+            // through the program table - nothing proves. The same two classes in one unit prove
+            // the decl and the return on their first check.
+            auto e = program_engine(dir);
+            check_eq((size_t)0, error_count(e->check(root)));
+            const proof_stats first = e->last_proof_stats();
+            check_eq((uint32_t)0, first.decls, "cross-unit first check: no decl proof");
+            check_eq((uint32_t)0, first.returns, "cross-unit first check: no return proof");
+            check_eq((uint32_t)0, first.members, "cross-unit first check: no field proof");
+            auto one = make_engine();
+            check_eq((size_t)0, error_count(one->check("class A { int hp = 3; }\nclass B : A { int tick() { int x = hp; return hp; } }\nB().tick()")));
+            check_ge(one->last_proof_stats().decls, (uint32_t)1, "same-unit first check proves the decl");
+            check_ge(one->last_proof_stats().returns, (uint32_t)1, "same-unit first check proves the return");
+            // once the units have run, the re-check sees registered classes: proofs land like a same-unit second check
+            check_eq((int64_t)3, e->execute(root).as_int());
+            check_eq((int64_t)3, e->execute(root).as_int());
+            const proof_stats later = e->last_proof_stats();
+            check_ge(later.decls, (uint32_t)1, "registered: decl proof");
+            check_ge(later.returns, (uint32_t)1, "registered: return proof");
+            check_ge(later.members, (uint32_t)1, "registered: field proof");
+            std::filesystem::remove_all(dir);
+        });
+
+        // ------------------------------------------------------------ escape hatches
+
+        test("extern_declares_a_name_the_host_registers_later", [this]() {
+            auto e = make_engine();
+            e->execute("extern foo;\nfunction use_foo() -> int { return foo + 1; }");
+            e->add_global("foo", script_value((int64_t)41, e.get()));
+            check_eq((int64_t)42, e->execute("use_foo()").as_int());
+            // the same unit without the extern is the genuine error
+            auto alone = make_engine();
+            auto r = alone->check("function use_foo() -> int { return foo + 1; }");
+            check_eq((size_t)1, error_count(r));
+            check_true(r.diagnostics[0].message.find("use of undeclared identifier 'foo'") != std::string::npos);
+        });
+
+        test("extern_typed_checks_members_and_proves_stores", [this]() {
+            auto e = make_engine();
+            auto r = e->check("class Game { int v = 1; }\nextern Game G;\nfunction bad() -> int { return G.missing; }");
+            check_eq((size_t)1, error_count(r));
+            check_true(r.diagnostics[0].message.find("no member 'missing'") != std::string::npos,
+                "typed extern receiver resolves members (got: " + r.diagnostics[0].message + ")");
+            check_eq((size_t)0, error_count(e->check("class Game { int v = 1; }\nextern shared_ptr<Game> G;\nfunction ok() -> int { return G.v; }")));
+            // a same-type store through a typed extern proves; the untyped form stays dynamic
+            auto p = make_engine();
+            p->execute("extern int counter;\nfunction bump() { counter = 7; }");
+            check_ge(p->last_proof_stats().stores, (uint32_t)1, "typed extern store proves");
+            p->add_global("counter", script_value((int64_t)0, p.get()));
+            p->execute("bump()");
+            check_eq((int64_t)7, p->execute("counter").as_int());
+            auto d = make_engine();
+            d->execute("extern loose;\nfunction set_loose() { loose = 7; }");
+            check_eq((uint32_t)0, d->last_proof_stats().stores, "untyped extern store is unproven");
+            check_eq((size_t)0, error_count(d->check("extern loose;\nfunction f() { loose = \"any\"; loose = 1.5; }")));
+        });
+
+        test("extern_typed_proofs_stay_guarded_against_a_mismatching_host_value", [this]() {
+            // the host binds a string where the unit declared int: proofs on and off must agree
+            const char* src = "extern int hp;\nfunction read_hp() -> int { return hp; }\nfunction set_hp() { hp = 5; }\n"
+                              "var a = 0; try { a = read_hp(); } catch (ex) { a = -1; }\n"
+                              "set_hp();\nhp";
+            std::string with_proofs, without_proofs;
+            for (bool proofs : { true, false }) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                e->add_global("hp", script_value(std::string("full"), e.get()));
+                (proofs ? with_proofs : without_proofs) = outcome(*e, src);
+            }
+            check_eq(without_proofs, with_proofs);
+            check_eq(std::string("VALUE 5"), with_proofs);
+        });
+
+        test("extern_function_allows_unchecked_calls", [this]() {
+            auto e = make_engine();
+            check_eq((size_t)0, error_count(e->check("extern function f;\nfunction g() -> int { return f(1, 2); }")));
+            e->execute("extern function f;\nfunction g() -> int { return f(1, 2); }");
+            e->add_function("f", [](script_int a, script_int b) { return a + b; });
+            check_eq((int64_t)3, e->execute("g()").as_int());
+            // extern names ride the program closure like any declared global
+            auto dir = closure_dir("extern_leaf");
+            write_unit(dir, "extern_decl.jai", "extern function host_fn;\n");
+            write_unit(dir, "extern_use.jai", "function call_host() -> int { return host_fn(20); }\n");
+            auto p = program_engine(dir);
+            check_eq((size_t)0, error_count(p->check("import \"extern_use.jai\";\nimport \"extern_decl.jai\";\n1")));
+            p->add_function("host_fn", [](script_int a) { return a + 1; });
+            check_eq((int64_t)21, p->execute("import \"extern_use.jai\";\nimport \"extern_decl.jai\";\ncall_host()").as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("extern_still_missing_raises_the_runtime_undefined_error", [this]() {
+            auto e = make_engine();
+            e->execute("extern ghost;\nfunction touch() -> int { return ghost; }");
+            check_true(outcome(*e, "touch()").rfind("ERROR Undefined variable 'ghost'", 0) == 0, outcome(*e, "touch()"));
+            std::string top = outcome(*e, "extern int ghost;\nghost + 1");
+            check_true(top.rfind("ERROR Undefined variable 'ghost'", 0) == 0, top);
+            auto f = make_engine();
+            std::string call = outcome(*f, "extern function host_fn;\nhost_fn(1)");
+            check_true(call.rfind("ERROR Undefined variable 'host_fn'", 0) == 0, call);
+        });
+
+        test("extern_in_a_shared_leaf_declares_an_optional_siblings_names", [this]() {
+            // A leaf every root imports calls into a module only SOME roots import, behind a
+            // runtime flag: the single-player program never declares those names, so the leaf
+            // says so; where the sibling really defines them the extern is a no-op.
+            auto dir = closure_dir("optional_sibling");
+            write_unit(dir, "game.jai", "var NET_GAME = false;\n");
+            write_unit(dir, "net.jai", "import \"game.jai\";\nvar NET_FRAGS = 7;\nfunction np_hit(int d) -> int { return d + NET_FRAGS; }\nfunction np_start() { NET_GAME = true; }\n");
+            const std::string leaf = "import \"game.jai\";\nfunction hit(int d) -> int { if (NET_GAME) { return np_hit(d); } return d; }\n";
+            write_unit(dir, "things.jai", leaf);
+            const std::string single = "import \"things.jai\";\nhit(1)";
+            const std::string netplay = "import \"things.jai\";\nimport \"net.jai\";\nnp_start();\nhit(1)";
+            auto bare = program_engine(dir);
+            check_eq((size_t)1, error_count(bare->check(single)), "the single-player program never declares np_hit");
+            check_throws([&]() { bare->execute(single); });
+            check_eq((size_t)0, error_count(program_engine(dir)->check(netplay)));
+            write_unit(dir, "things.jai", "extern function np_hit;\n" + leaf);
+            auto sp = program_engine(dir);
+            check_eq((size_t)0, error_count(sp->check(single)));
+            check_eq((int64_t)1, sp->execute(single).as_int());
+            auto np = program_engine(dir);
+            check_eq((size_t)0, error_count(np->check(netplay)));
+            check_eq((int64_t)8, np->execute(netplay).as_int(), "the extern is a no-op where net.jai defines np_hit");
+            std::filesystem::remove_all(dir);
+        });
+
+        // ------------------------------------------ [[warn_mode]] / [[strict_mode]]
+
+        test("warn_mode_unit_downgrades_errors_and_keeps_the_runtime", [this]() {
+            auto e = make_engine();
+            auto r = e->check("[[warn_mode]];\nint x = \"s\";\nfunction f() -> int { return zzz_missing; }");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)2, warning_count(r));
+            check_true(r.format().find("warning: cannot initialize 'x' declared 'int' with 'string'") != std::string::npos);
+            // strict loads it; the runtime keeps its conversion error (both backends)
+            std::string what = outcome(*e, "[[warn_mode]];\nint x = \"s\";\nx");
+            check_true(what.find("ERROR Type mismatch") == 0, "runtime rejection survives (got: " + what + ")");
+            check_false(what.find("static check failed") != std::string::npos);
+            // without the attribute the same unit fails the static gate
+            std::string strict = outcome(*make_engine(), "int x = \"s\";\nx");
+            check_true(strict.find("ERROR static check failed") == 0, "got: " + strict);
+            // no trailing ';' and a leading comment are both fine; a dangling attribute covers nothing
+            check_eq((size_t)0, error_count(make_engine()->check("// legacy unit\n[[warn_mode]]\nint x = \"s\";")));
+            check_eq((size_t)0, error_count(make_engine()->check("int y = 1;\n[[warn_mode]];")));
+            // unit-scoped: a warn_mode leaf does not fail the program it belongs to
+            auto dir = closure_dir("warn_leaf");
+            write_unit(dir, "warn_leaf.jai", "[[warn_mode]];\nfunction leaf_f() -> int { return zzz_nope; }\n");
+            auto p = program_engine(dir);
+            check_eq((size_t)0, error_count(p->check("import \"warn_leaf.jai\";\n1")));
+            check_eq((int64_t)1, p->execute("import \"warn_leaf.jai\";\n1").as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("statement_attribute_covers_one_statement", [this]() {
+            auto r = make_engine()->check("int x = 5;\n[[warn_mode]] y = 5;\nz = 5;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_eq((size_t)1, warning_count(r), r.format());
+            check_true(has_diag(r, dlevel::warning, "undeclared identifier 'y'"), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'z'"), r.format());
+            // two attributed statements in a row
+            r = make_engine()->check("int x = 1;\n[[warn_mode]] y = 5;\n[[warn_mode]] z = 5;\nw = 5;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_eq((size_t)2, warning_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'w'"), r.format());
+            // an if body without braces is a statement position too
+            r = make_engine()->check("int x = 1;\nif (x > 0) [[warn_mode]] y = 5;\nz = 5;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::warning, "undeclared identifier 'y'"), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'z'"), r.format());
+            // the statement's whole subtree, a nested block included
+            r = make_engine()->check("int x = 1;\n[[warn_mode]] if (x > 0) { y = 5; }\nz = 5;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::warning, "undeclared identifier 'y'"), r.format());
+        });
+
+        test("block_first_attribute_covers_the_block", [this]() {
+            auto r = make_engine()->check("int x = 1;\n{ [[warn_mode]] y = 5; z = 5; }");
+            check_eq((size_t)0, error_count(r), r.format());
+            check_eq((size_t)2, warning_count(r), r.format());
+            // the mode reverts after the block
+            r = make_engine()->check("int x = 1;\n{ [[warn_mode]] y = 5; z = 5; }\nw = 5;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'w'"), r.format());
+            // function body and while body; innermost wins inside the warn block
+            r = make_engine()->check("function f() { [[warn_mode]] y = 5; z = 5; [[strict_mode]] q = 5; }\nwhile (false) { [[warn_mode]] w = 1; }");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_eq((size_t)3, warning_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'q'"), r.format());
+            // a block-level region flows into nested lambda bodies
+            r = make_engine()->check("function f() { [[warn_mode]] g([](){ x = 5; }); }");
+            check_eq((size_t)0, error_count(r), r.format());
+            check_eq((size_t)2, warning_count(r), r.format());
+        });
+
+        test("statement_attribute_stops_at_lambda_bodies", [this]() {
+            // the call site is lenient; the lambda body keeps the enclosing (strict) mode
+            auto r = make_engine()->check("function f() { int k = 1;\n[[warn_mode]] self.spawnOnNetwork([](){ x = 5; }); }");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::warning, "undeclared identifier 'self'"), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'x'"), r.format());
+            // block-first inside the lambda demotes its body only; the outer call is still checked
+            r = make_engine()->check("function f() { int k = 1;\nself.spawnOnNetwork([](){ [[warn_mode]] x = 5; }); }");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'self'"), r.format());
+            check_true(has_diag(r, dlevel::warning, "undeclared identifier 'x'"), r.format());
+            // a nested named function body keeps the enclosing mode the same way
+            r = make_engine()->check("int k = 1;\n[[warn_mode]] function h() { x = 5; }\nh();");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "undeclared identifier 'x'"), r.format());
+            // an undeclared callee in a warn region is callable with an unknown result: no proof
+            r = make_engine()->check("int k = 1;\n[[warn_mode]] int v = mystery(1);\nstring s = v;");
+            check_eq((size_t)0, error_count(r), r.format());
+        });
+
+        test("innermost_wins_and_strict_mode_gates_under_warn", [this]() {
+            // strict inside a warn unit re-arms
+            std::string what = outcome(*make_engine(), "[[warn_mode]];\nint ok = \"s\";\n[[strict_mode]] int q = \"s\";\nq");
+            check_true(what.find("ERROR static check failed") == 0, "got: " + what);
+            check_true(what.find("error: cannot initialize 'q'") != std::string::npos, what);
+            check_true(what.find("warning: cannot initialize 'ok'") != std::string::npos, what);
+            // a strict_mode unit gates even when the engine mode is warn
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            std::string plain = outcome(*warn, "int q = \"s\";\nq");
+            check_true(plain.find("ERROR Type mismatch") == 0, "warn engine runs into the runtime error (got: " + plain + ")");
+            check_true(warn->last_check_diagnostics().has_errors());
+            check_false(warn->last_check_diagnostics().has_strict_errors());
+            std::string gated = outcome(*warn, "[[strict_mode]];\nint q = \"s\";\nq");
+            check_true(gated.find("ERROR static check failed") == 0, "got: " + gated);
+            check_true(warn->last_check_diagnostics().has_strict_errors());
+            // only the strict region gates: a statement-level strict_mode in a warn engine
+            std::string partial = outcome(*warn, "int a = \"s\";\n[[strict_mode]] int b = \"s\";\nb");
+            check_true(partial.find("ERROR static check failed") == 0, "got: " + partial);
+            std::string free = outcome(*warn, "int a = \"s\";\n[[warn_mode]] int b = \"s\";\nb");
+            check_true(free.find("ERROR Type mismatch") == 0, "got: " + free);
+            // jaibite creation gates the same way
+            check_throws<static_check_error>([&]() { warn->jaibite("[[strict_mode]];\nint q = \"s\";"); });
+            check_false(warn->jaibite("int q = \"s\";").checked_clean());
+        });
+
+        test("off_mode_ignores_attributes", [this]() {
+            auto e = make_engine();
+            e->static_checking(check_mode::off);
+            std::string what = outcome(*e, "[[strict_mode]];\nint q = \"s\";\nq");
+            check_true(what.find("ERROR Type mismatch") == 0, "got: " + what);
+            check_true(e->last_check_diagnostics().diagnostics.empty());
+            check_eq((int64_t)5, e->execute("[[warn_mode]];\nint x = 5;\n[[strict_mode]] int y = x;\n{ [[warn_mode]] y = 5; }\ny").as_int());
+            check_true(e->last_check_diagnostics().diagnostics.empty());
+        });
+
+        test("unknown_attribute_is_a_parse_error", [this]() {
+            auto e = make_engine();
+            std::string what;
+            try {
+                e->execute("[[bogus]];\nint x = 1;");
+            } catch (const parse_error& ex) {
+                what = ex.what();
+            }
+            check_true(what.find("unknown attribute 'bogus'") != std::string::npos, "got: " + what);
+            what.clear();
+            try {
+                e->execute("int x = 1;\n[[bogus]] x = 2;");
+            } catch (const parse_error& ex) {
+                what = ex.what();
+            }
+            check_true(what.find("unknown attribute 'bogus'") != std::string::npos, "got: " + what);
+            // [[ in expression position is still a nested array literal
+            check_eq((int64_t)2, e->execute("var m = [[1, 2], [3]];\nm[0][1]").as_int());
+            check_eq((int64_t)1, e->execute("[[warn_mode]];\nint x = 1;\nx").as_int());
+            check_eq((int64_t)1, e->execute("[[strict_mode]]\nint z = 1;\nz").as_int());
         });
     }
 };

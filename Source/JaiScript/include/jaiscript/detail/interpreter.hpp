@@ -388,6 +388,7 @@ namespace jai {
         checked_result<void> visit_this_expr(this_expr* expr) override;
         checked_result<void> visit_super_expr(super_expr* expr) override;
         checked_result<void> visit_throw_expr(throw_expr* expr) override;
+        checked_result<void> visit_cast_expr(cast_expr* expr) override;
         checked_result<void> visit_yield_expr(yield_expr* expr);
 
         // statement visitors
@@ -419,6 +420,7 @@ namespace jai {
         checked_result<void> visit_import_decl(import_decl* decl) override;
         checked_result<void> visit_enum_decl(enum_decl* decl) override;
         checked_result<void> visit_destructuring_decl(destructuring_decl* decl) override;
+        checked_result<void> visit_extern_decl(extern_decl* decl) override;
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }

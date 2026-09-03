@@ -111,6 +111,7 @@ namespace jai::vm {
         void compile_call(const std::shared_ptr<call_expr>& expr);
         void compile_member(const std::shared_ptr<member_expr>& expr);
         void compile_new(const std::shared_ptr<new_expr>& expr);
+        void compile_cast(const std::shared_ptr<cast_expr>& expr);
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);
         void compile_variable_decl(const std::shared_ptr<variable_decl>& decl);
         void compile_function_decl(const std::shared_ptr<function_decl>& decl);

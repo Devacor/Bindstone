@@ -1126,6 +1126,7 @@ public:
     void add_derived_class(std::weak_ptr<class_definition> derived) {
         derived_classes_.push_back(derived);
     }
+    const std::vector<std::weak_ptr<class_definition>>& derived_classes() const { return derived_classes_; }
 
     void set_cpp_base_class(std::shared_ptr<class_definition> cpp_base) {
         if (cpp_base_class_ != cpp_base) { bump_field_shape_epoch(); }

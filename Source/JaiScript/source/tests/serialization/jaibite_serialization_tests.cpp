@@ -248,6 +248,78 @@ public:
             )");
         });
 
+        test("roundtrip_cast_expressions", [this, check_roundtrip]() {
+            check_roundtrip(R"(
+                class S { int x = 1; }
+                class T : S { int t = 2; }
+                class H { S p = null; }
+                auto h = H();
+                h.p = T();
+                cast<T&>(h.p).t = 5;
+                T tv = cast<T>(h.p);
+                tv.t = 9;
+                shared_ptr<T> th = cast<shared_ptr<T>>(h.p);
+                th.t += 1;
+                T tmp = T();
+                auto& r = cast<T&>(tmp);
+                r.t = 3;
+                var f = 2.7;
+                var c = "";
+                try { var bad = cast<H>(h.p); } catch (e) { c = e; }
+                to_string(cast<T&>(h.p).t) + "|" + to_string(tv.t) + "|" + to_string(tmp.t) + "|" + to_string(cast<int>(f)) + "|" + cast<string>(42) + "|" + c;
+            )");
+        });
+
+        test("roundtrip_extern_and_check_mode_attributes", [this, check_roundtrip]() {
+            check_roundtrip(R"([[warn_mode]];
+                extern function host_fn;
+                extern int host_int;
+                extern loose;
+                class Game { int v = 3; }
+                extern shared_ptr<Game> G;
+                function use_all() -> int { return host_int + G.v; }
+                var caught = "";
+                try { use_all(); } catch (e) { caught = e; }
+                var c2 = "";
+                try { host_fn(1); } catch (e) { c2 = e; }
+                int y = 4;
+                { [[strict_mode]] int z = y + 1; y = z; }
+                if (y > 0) [[warn_mode]] y = y + 1;
+                [[strict_mode]] y = y * 2;
+                function bump() { [[warn_mode]] y = y + 1; }
+                bump();
+                caught + "|" + c2 + "|" + to_string(y);
+            )");
+            // statement::check_mode_attr arrived with format version 11 (right after the 4-byte magic)
+            using namespace jaibite_test_detail;
+            auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
+            check_eq((int)11, (int)bytes[4], "jaibite format version");
+            // a loaded bite carries the attributes: a warn region's errors stay warnings on the
+            // loading engine's own check, and the runtime raises
+            for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",
+                                    "int a = 1;\n[[warn_mode]] int x = \"s\";\nx",
+                                    "int a = 1;\n{ [[warn_mode]] a = 2; int x = \"s\"; }\na"}) {
+                auto save_engine = fresh_engine(false, {});
+                auto saved = save_engine->jaibite(src).save_bytes();
+                auto load_engine = fresh_engine(false, {});
+                auto loaded = load_engine->jaibite_load_bytes(saved);
+                check_true(loaded.valid());
+                check_false(load_engine->last_check_diagnostics().has_errors());
+                run_output out = run_once(loaded);
+                check_true(out.threw);
+                check_true(out.error.find("Type mismatch") == 0, "got: " + out.error);
+            }
+            // a strict region survives the trip too: it gates a warn-mode loading engine
+            auto off_saver = fresh_engine(false, {});
+            off_saver->static_checking(check_mode::off);
+            auto strict_bytes = off_saver->jaibite("int a = 1;\n[[strict_mode]] int x = \"s\";\nx").save_bytes();
+            auto warn_loader = fresh_engine(false, {});
+            warn_loader->static_checking(check_mode::warn);
+            check_throws<static_check_error>([&]() { warn_loader->jaibite_load_bytes(strict_bytes); });
+            auto plain_bytes = off_saver->jaibite("int a = 1;\nint x = \"s\";\nx").save_bytes();
+            check_true(warn_loader->jaibite_load_bytes(plain_bytes).valid());
+        });
+
         // Symbol IDs are per-engine and order-dependent: pre-warming the loader's interner
         // and registering classes in a different order guarantees IDs differ, proving the
         // string-table relocation actually rewrites them.
@@ -445,11 +517,22 @@ public:
             check_true(a->registration_fingerprint() != b->registration_fingerprint());
 
             // The failure scenario: save with the zero-arg fn, load into an engine
-            // without it -> the advisory flag now fires (load itself never hard-fails)
+            // without it -> the advisory flag fires. A mismatched bite is re-checked at
+            // load against THIS engine's surface: under warn the load never hard-fails
+            // and the missing function is a diagnostic; under strict (the default) the
+            // load throws before anything runs.
             auto bytes = a->jaibite("zero_arg_probe();").save_bytes();
             auto bare = fresh_engine(false, {});
+            bare->static_checking(check_mode::warn);
             auto loaded = bare->jaibite_load_bytes(bytes);
             check_true(loaded.registration_mismatch());
+            check_true(loaded.check_diagnostics().has_errors());
+            auto strict_bare = fresh_engine(false, {});
+            std::string text;
+            try { strict_bare->jaibite_load_bytes(bytes); }
+            catch (const static_check_error& ex) { text = ex.what(); }
+            check_true(text.find("use of undeclared identifier 'zero_arg_probe'") != std::string::npos,
+                "strict load re-checks against this engine's surface (got: " + text + ")");
         });
     }
 };

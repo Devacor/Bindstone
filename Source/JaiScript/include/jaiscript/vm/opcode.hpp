@@ -144,6 +144,11 @@ namespace jai::vm {
                             // variable_decl: the subscript read lands straight in the decl
                             // (scalar slot fast path; push + op_decl_var replay otherwise)
 
+        op_cast,            // a=node index (cast_expr), b=detail::cast_operand_mode (0 pops the
+                            // evaluated operand, 1 binds the identifier operand by reference with
+                            // c=symbol index, 2 resolves the member-final chain via the shared
+                            // kernel); pushes the cast result
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -286,6 +291,7 @@ namespace jai::vm {
             case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_probe_callee: return "PROBE_CALLEE";
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
+            case opcode::op_cast: return "CAST";
             case opcode::op_error: return "ERROR";
             case opcode::op_parallel_for: return "PARALLEL_FOR";
             case opcode::op_binary_fused_decl: return "BINARY_FUSED_DECL";

@@ -8,6 +8,7 @@
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
@@ -4098,6 +4099,15 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
 }
 
 checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
+    // Non-lvalue targets fail before ANY evaluation (the vm rejects them at compile time)
+    {
+        const node_type target_kind = expr->target->get_type();
+        if (target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
+            !(target_kind == node_type::binary_expr &&
+              static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket)) {
+            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
+        }
+    }
 
     // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
@@ -4710,6 +4720,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // First, get the current value of the property
             JAISCRIPT_TRY(dispatch_expr(memberExpr));
             script_value currentValue = pop_value().deref();
+            if (is_unwinding_) {
+                // Target read raised: surface it, not the ++/-- gate's error on the placeholder
+                push_value(make_value());
+                return {};
+            }
             script_value postfix_old = expr->postfix_old_result ? currentValue : make_value();
             if (expr->incdec_desugar) {
                 const size_t ci = currentValue.raw_storage_index();
@@ -4977,6 +4992,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // First, evaluate the target expression to get current value
             JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
             script_value currentValue = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
             script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
             if (expr->incdec_desugar) {
                 // ++/-- gate: numeric targets only, the identifier path's exact error
@@ -5799,6 +5818,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Regular member assignment - evaluate the object
             JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
             script_value objectValue = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
 
             // Dereference if it's a reference (e.g., from array[index])
             script_value dereferenced = objectValue.deref();
@@ -5864,6 +5887,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 lvalue_target_context_ = false;
                 JAISCRIPT_TRY(target_eval);
                 script_value target_ref = pop_value();
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
                 
                 // Check if we got a reference
                 if (target_ref.is_reference()) {
@@ -7730,6 +7757,10 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Evaluate the object expression
     JAISCRIPT_TRY(dispatch_expr(expr->object.get()));
     script_value objectValue = pop_value();
+    if (is_unwinding_) {
+        push_value(make_value());
+        return {};
+    }
 
     // Dereference if needed - subscript access returns references
     objectValue = objectValue.deref();
@@ -8257,6 +8288,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             } else if (e->get_type() == node_type::include_expr) {
                 auto* ie = static_cast<include_expr*>(e);
                 if (ie->path_expr) find_identifiers(ie->path_expr.get());
+            } else if (e->get_type() == node_type::cast_expr) {
+                find_identifiers(static_cast<cast_expr*>(e)->operand.get());
             }
             // Add more expression types as needed
         };
@@ -8480,6 +8513,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             case node_type::include_expr:
                 if (static_cast<include_expr*>(e)->path_expr)
                     collect_outer_slots_expr(static_cast<include_expr*>(e)->path_expr.get());
+                break;
+            case node_type::cast_expr:
+                collect_outer_slots_expr(static_cast<cast_expr*>(e)->operand.get());
                 break;
             default: break;
             }
@@ -9310,6 +9346,100 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     // Push 'this' onto the stack - visit_member_expr will handle the parent lookup
     // when it detects that the object expression is a super_expr
     push_value(std::move(this_value));
+    return {};
+}
+
+// cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): operand shape, class verdict and
+// class-target outcomes come from detail/cast_kernel.hpp; primitive/container targets
+// convert through the assignment table. KEEP BYTE-PARALLEL with vm_backend::exec_cast.
+checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) {
+    script_value operand;
+    switch (detail::cast_operand_mode_of(expr)) {
+        case detail::cast_operand_mode::identifier: {
+            // The ref-decl identifier arm: slot-first, then env
+            auto* ident = static_cast<identifier_expr*>(expr->operand.get());
+            const uint64_t targetSymbolId = string_symbolizer_->intern(ident->name);
+            script_value* targetPtr = resolve_local_or_env(ident->slot_index, targetSymbolId, ident->global_qualified);
+            if (!targetPtr) {
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
+            }
+            if (targetPtr->is_reference()) {
+                auto aliased = decl_ref_alias(*targetPtr, engine_);
+                if (!aliased) {
+                    return aliased.error_value();
+                }
+                operand = std::move(aliased.value());
+            } else {
+                operand = share_boxed_env_storage(*targetPtr, engine_);
+            }
+            break;
+        }
+        case detail::cast_operand_mode::lvalue_chain: {
+            auto resolved = detail::resolve_ref_lvalue(expr->operand.get(),
+                detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+                environment_.get(), engine_, string_symbolizer_);
+            if (!resolved) {
+                if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+                    return resolved.error_value();
+                }
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+            }
+            operand = std::move(resolved.value());
+            break;
+        }
+        case detail::cast_operand_mode::value:
+            JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
+            operand = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
+            break;
+    }
+
+    if (expr->by_reference) {
+        auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, string_symbolizer_);
+        if (!out) {
+            return out.error_value();
+        }
+        push_value(std::move(out.value()));
+        return {};
+    }
+
+    const bool lvalue_source = operand.is_reference() || detail::cast_lvalue_source(expr->operand.get());
+    if (operand.is_reference()) {
+        script_value derefed = operand.deref();
+        operand = std::move(derefed);
+    }
+    if (detail::cast_target_is_class(*expr->target)) {
+        auto out = detail::cast_class_value(std::move(operand), *expr, lvalue_source, engine_, string_symbolizer_);
+        if (!out) {
+            return out.error_value();
+        }
+        push_value(std::move(out.value()));
+        return {};
+    }
+    if (detail::cast_char_rule_applies(operand, *expr->target)) {
+        auto out = detail::cast_char_value(operand, *expr, engine_, string_symbolizer_);
+        if (!out) {
+            return out.error_value();
+        }
+        script_value converted = std::move(out.value());
+        converted.set_type_info(expr->target);
+        push_value(std::move(converted));
+        return {};
+    }
+    if (lvalue_source) {
+        script_value copy = clone_for_assignment(operand);
+        operand = std::move(copy);
+    }
+    auto enforced = enforce_type_compatibility(operand, expr->target, "cast");
+    if (!enforced) {
+        return detail::cast_error<void>(operand, *expr, string_symbolizer_);
+    }
+    script_value out = std::move(enforced.value());
+    out.set_type_info(expr->target);
+    push_value(std::move(out));
     return {};
 }
 
@@ -13822,6 +13952,10 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
     return {};
 }
 
+checked_result<void> interpreter::visit_extern_decl(extern_decl*) {
+    return {};
+}
+
 checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* decl) {
     JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
     script_value source = pop_value();
@@ -13888,6 +14022,8 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
             return visit_throw_expr(static_cast<throw_expr*>(expr));
         case node_type::yield_expr:
             return visit_yield_expr(static_cast<yield_expr*>(expr));
+        case node_type::cast_expr:
+            return visit_cast_expr(static_cast<cast_expr*>(expr));
         default:
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                 "Unknown expression type in dispatch_expr");
@@ -13995,6 +14131,8 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
             return visit_enum_decl(static_cast<enum_decl*>(decl));
         case node_type::destructuring_decl:
             return visit_destructuring_decl(static_cast<destructuring_decl*>(decl));
+        case node_type::extern_decl:
+            return visit_extern_decl(static_cast<extern_decl*>(decl));
         case node_type::statement_decl:
             return dispatch_stmt(static_cast<statement_decl*>(decl)->statement.get());
         default:

@@ -4,6 +4,7 @@
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/transient_read.hpp>
 #include <cassert>
 #include <functional>
@@ -177,6 +178,10 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
+			case opcode::op_cast:
+				// value forms never touch the env; the reference arms resolve storage through it
+				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
+				break;
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
@@ -282,6 +287,9 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) return false;
 				break;
 			}
+			case opcode::op_cast:
+				if (ins.b != 0) return false;   // reference arms box/alias env storage like ref decls
+				break;
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
@@ -684,6 +692,8 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 		return;
 	case node_type::enum_decl:
 		emit(opcode::op_enum_decl, add_node(decl));
+		return;
+	case node_type::extern_decl:
 		return;
 	case node_type::include_decl: {
 		auto* inc = static_cast<include_decl*>(decl.get());
@@ -1514,6 +1524,9 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	case node_type::new_expr:
 		compile_new(std::static_pointer_cast<new_expr>(expr));
 		return;
+	case node_type::cast_expr:
+		compile_cast(std::static_pointer_cast<cast_expr>(expr));
+		return;
 	case node_type::include_expr: {
 		// Expression-position include: same op_include as the statement form, minus the
 		// trailing op_pop — the included file's result IS the expression value
@@ -2257,6 +2270,24 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 		compile_expression(arg);
 	}
 	emit(opcode::op_new, add_node(expr), static_cast<uint32_t>(expr->arguments.size()));
+}
+
+// Operand shape decided by the shared kernel (the interpreter takes the same branch at
+// visit time): value forms evaluate the operand onto the stack, the reference arms hand
+// exec_cast the node and resolve storage there.
+void vm_compiler::compile_cast(const std::shared_ptr<cast_expr>& expr) {
+	const auto mode = detail::cast_operand_mode_of(expr.get());
+	uint32_t sym = k_invalid_u32;
+	if (mode == detail::cast_operand_mode::identifier) {
+		auto* ident = static_cast<identifier_expr*>(expr->operand.get());
+		if (ident->symbol_id == UINT64_MAX) {
+			ident->symbol_id = symbolizer_->intern(ident->name);
+		}
+		sym = add_symbol(ident->symbol_id);
+	} else if (mode == detail::cast_operand_mode::value) {
+		compile_expression(expr->operand);
+	}
+	emit(opcode::op_cast, add_node(expr), static_cast<uint32_t>(mode), sym);
 }
 
 void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {

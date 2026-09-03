@@ -53,6 +53,28 @@ Both directions of the char↔int door are open:
 
 There is still **no implicit int→char**: `type_of('a' + 1) == "int"`.
 
+## Casts
+
+`cast<T>(e)` (grammar.md, "cast expressions") is the explicit spelling of the char↔int door
+and the only conversion path: the assignment table has no char row, so `char c = 65` and
+`int x = 'c'` stay type mismatches (strict static checking rejects the literal forms before
+anything runs). The cast kernel carries four char rules, byte-identical on both backends:
+
+| cast | result |
+|---|---|
+| `cast<int>(c)` | the promoted code point, `0..255` — `cast<int>('a') == 97`, `cast<int>('\xC3') == 195` |
+| `cast<float>(c)` | the same code point widened — `cast<float>('a') == 97.0` |
+| `cast<string>(c)` | the one-character string — `cast<string>('a') == "a"` |
+| `cast<char>(e)` | an int in `0..255` (`cast<char>(97) == 'a'`) or a string of exactly one character (`cast<char>("a") == 'a'`) |
+
+Anything else raises the catchable cast text: `cast<char>(256)` / `cast<char>(-1)` →
+`Cannot cast 'int' to 'char'`, `cast<char>("ab")` / `cast<char>("")` → `Cannot cast 'string'
+to 'char'`, and bool/float never cast to char. The reference form `cast<char&>(i)` never
+converts (a reference keeps its referent's type). Round trips are exact —
+`cast<char>(cast<int>('z')) == 'z'` — and `cast<char>(n)` is a parse-proven typed store
+(`char c = cast<char>(65);`). `to_char(n)` remains the stdlib function form of the same
+range-checked int→char rule.
+
 ## What deliberately does NOT change (additive contract)
 
 - **`char + string` / `string + char` concatenate as text.** Promotion only fires when
@@ -67,6 +89,7 @@ There is still **no implicit int→char**: `type_of('a' + 1) == "int"`.
 
 ```cpp
 var b = s[i] + 0;                            // byte value of a char, 0..255
+var b2 = cast<int>(s[i]);                    // the same, spelled as a cast
 var d = s[i] - '0';                          // ASCII digit
 var word = (s[i] + 0) | ((s[i+1] + 0) << 8); // little-endian u16
 if (s[i] == 0x1A) { ... }                    // byte sentinel test — just works now
@@ -74,8 +97,7 @@ out += to_char(len & 0xFF);                  // write a computed byte
 var magic = "\x50\x4B\x03\x04";              // literal byte sequences in source
 ```
 
-Still deferred: `char(n)` cast *syntax* (needs new parser surface; `to_char` covers the
-semantics), `s.byte(i)` garnish (`s[i] + 0` covers it), a stdlib `utf8(cp)`, unary
+Still deferred: `s.byte(i)` garnish (`s[i] + 0` covers it), a stdlib `utf8(cp)`, unary
 `-c`/`~c` (binary `0 - c` / `c ^ 0xFF` work), and the packed byte buffer
 (`bytes`/`array<byte>` storage lane) — the real answer for big formats, parked with the
 lanes work it belongs to.
@@ -96,6 +118,10 @@ ref_lvalue.hpp parity-by-construction pattern:
 - lexer: `\xNN` in `scan_string`/`scan_char` (`hex_digit_value`, exactly two digits);
   jaibite format version bumped v2→v3 per the bump-on-any-parse-change contract.
 - stdlib: `to_char` registered beside `type_of` (stdlib/io.hpp).
+- casts: `include/jaiscript/detail/cast_kernel.hpp` (`cast_char_rule_applies` +
+  `cast_char_value`), consumed verbatim by `interpreter::visit_cast_expr` and
+  `vm_backend::exec_cast` ahead of the assignment table; rows in the Strong Types cast
+  battery (`cast_char_rules`, `strong_types_tests.cpp`).
 - static checker: `binary_result` types char as numeric under arithmetic/bitwise/spaceship.
 - tests: `"Char Promotion"` suite (19 tests) in
   `source/tests/language/review_regression_tests.cpp`; the reversed pin is documented in

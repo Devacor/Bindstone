@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 8;   // 8: assignment_expr carries postfix_old_result (++/-- desugar)
+    inline constexpr uint32_t k_jaibite_version = 11;   // 11: statement::check_mode_attr (10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -209,6 +209,7 @@ namespace jai::detail {
             if (depth_ > k_jaibite_max_depth) jaibite_fail("AST nesting too deep");
             u8(uint8_t(n->get_type()));
             location(n->location);
+            if (n->get_type() >= node_type::expression_stmt) u8(static_cast<const statement*>(n)->check_mode_attr);
             switch (n->get_type()) {
                 case node_type::literal_expr: {
                     auto* e = static_cast<const literal_expr*>(n);
@@ -337,6 +338,14 @@ namespace jai::detail {
                     auto* e = static_cast<const yield_expr*>(n);
                     type(e->result_type);
                     node(e->value.get());
+                    break;
+                }
+                case node_type::cast_expr: {
+                    auto* e = static_cast<const cast_expr*>(n);
+                    type(e->result_type);
+                    type(e->target);
+                    u8(e->by_reference ? 1 : 0);
+                    node(e->operand.get());
                     break;
                 }
                 case node_type::expression_stmt: {
@@ -508,6 +517,14 @@ namespace jai::detail {
                     auto* d = static_cast<const import_decl*>(n);
                     str(d->path);
                     node(d->path_expr.get());
+                    break;
+                }
+                case node_type::extern_decl: {
+                    auto* d = static_cast<const extern_decl*>(n);
+                    str(d->name);
+                    symbol(d->name_id, UINT64_MAX);
+                    flag(d->is_function);
+                    type(d->type);
                     break;
                 }
                 case node_type::enum_decl: {
@@ -781,6 +798,7 @@ namespace jai::detail {
             ++depth_;
             if (depth_ > k_jaibite_max_depth) jaibite_fail("AST nesting too deep");
             source_location loc = location();
+            const uint8_t check_mode_attr = tag >= uint8_t(node_type::expression_stmt) ? u8() : 0;
             ast_node_ptr result;
             switch (static_cast<node_type>(tag)) {
                 case node_type::literal_expr: {
@@ -960,6 +978,15 @@ namespace jai::detail {
                 case node_type::yield_expr: {
                     auto rt = type();
                     auto e = std::make_shared<yield_expr>(loc, expr_opt());
+                    e->result_type = rt;
+                    result = e;
+                    break;
+                }
+                case node_type::cast_expr: {
+                    auto rt = type();
+                    auto target = type();
+                    const bool by_reference = u8() != 0;
+                    auto e = std::make_shared<cast_expr>(loc, target, by_reference, expr_req());
                     e->result_type = rt;
                     result = e;
                     break;
@@ -1175,6 +1202,14 @@ namespace jai::detail {
                     result = d;
                     break;
                 }
+                case node_type::extern_decl: {
+                    std::string_view name = view();
+                    uint64_t nid = symbol(UINT64_MAX);
+                    bool is_function = flag();
+                    type_info_ptr t = type();
+                    result = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
+                    break;
+                }
                 case node_type::enum_decl: {
                     std::string_view name = view();
                     uint64_t nid = symbol(UINT64_MAX);
@@ -1214,6 +1249,7 @@ namespace jai::detail {
                 default:
                     jaibite_fail("corrupt node tag " + std::to_string(int(tag)));
             }
+            if (check_mode_attr && result) static_cast<statement*>(result.get())->check_mode_attr = check_mode_attr;
             --depth_;
             return result;
         }

@@ -82,6 +82,10 @@ world per save); because of that, the DAP listener is off in watch mode.
 
 ```
 --backend=vm|interp   execution backend (default vm)
+--check=strict|warn|off
+                      static checker mode (default strict: typed mistakes and undeclared
+                      names fail the load; warn loads anyway and lists them on stderr;
+                      off skips the walk's diagnostics)
 --budget=N            execution budget in seconds per execute (default 0 = unlimited;
                       the embedded-engine default of 1.0s is deliberately lifted —
                       long loops are the user's business in a runner)

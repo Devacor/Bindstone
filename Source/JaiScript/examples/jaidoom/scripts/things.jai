@@ -10,6 +10,16 @@ import "vid.jai";
 import "tex.jai";
 import "sound.jai";
 
+// netplay.jai hooks behind NET_GAME: extern-declared so programs that never import netplay.jai still check
+extern function np_ghost_hit_mobj;
+extern function np_drop_announce;
+extern function np_boom_announce;
+extern function np_proj_announce;
+extern function np_expl_announce;
+extern array<float> NP_TGT_X;
+extern array<float> NP_TGT_Y;
+extern array<int> NP_TGT_MOBJ;
+
 // sprite lump tables: key "XXXXFR" (4-char name + frame letter + rotation 0-8)
 var SPR_LUMP = {};
 var SPR_FLIP = {};

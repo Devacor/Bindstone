@@ -176,7 +176,14 @@
         },
         {
           "name": "storage.modifier.jaiscript",
-          "match": "\\b(const|static|override|public|private|protected|new|import|include)\\b"
+          "match": "\\b(const|static|override|public|private|protected|new|cast|import|include|extern)\\b"
+        },
+        {
+          "name": "meta.attribute.jaiscript",
+          "match": "\\[\\[\\s*(warn_mode|strict_mode)\\s*\\]\\]",
+          "captures": {
+            "1": { "name": "storage.modifier.attribute.jaiscript" }
+          }
         },
         {
           "name": "storage.type.jaiscript",

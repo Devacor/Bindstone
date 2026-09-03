@@ -13,8 +13,8 @@ serialization. This reference is regenerated from the shipped lexer/parser (`det
 Exactly the lexer's keyword table (`lexer::keywords_` in `lexer.cpp`):
 
 ```
-array auto bool break case catch char class const continue coroutine
-default else enum fallthrough false float for function if import
+array auto bool break case cast catch char class const continue coroutine
+default else enum extern fallthrough false float for function if import
 include int map namespace new null nullptr override private public
 return shared_ptr static string super switch this throw true try var
 void weak_ptr while yield
@@ -25,10 +25,17 @@ Notes:
 - `new T(args)` is **pure sugar for `shared_ptr<T>(args)` construction** — the
   reference-semantics opt-in (see "new expressions" below). Plain value-semantics
   construction stays `Type(args)` / `Type{args}`.
+- `cast<T>(e)` / `cast<T&>(e)` / `cast<shared_ptr<T>>(e)` is the explicit typed-boundary
+  spelling (see "cast expressions" below).
 - `const` is accepted only where documented below (range-`for` bindings). It does not apply to
   parameters or general variable declarations.
 - A leading `#` before `include`/`import` is skipped by the lexer, so `#include "x"` and
   `include "x"` are identical.
+- `extern` declares a name defined outside the program to the static checker (see "extern
+  declarations" below); it is a no-op at run time.
+- `[[warn_mode]]` / `[[strict_mode]]` before a statement set the static checker's mode for a
+  unit (first declaration of a file), a block (first statement of a block) or that one statement
+  (see "check-mode attributes" below); both backends run them as nothing.
 
 ### Operators
 
@@ -161,10 +168,12 @@ declaration = classDeclaration
             | enumDeclaration
             | includeDirective
             | importDirective
+            | externDeclaration
             | functionDeclaration
             | variableDeclaration
             | destructuringDeclaration
             | statement
+            | checkModeAttribute declaration       // see "check-mode attributes"
 
 // Class declarations
 classDeclaration = "class" IDENTIFIER (":" classBaseList)? "{" classMember* "}" ";"?
@@ -238,6 +247,22 @@ enumDeclaration = "enum" IDENTIFIER "{" IDENTIFIER ("," IDENTIFIER)* "}"
 includeDirective = "#"? "include" (STRING_LITERAL | "<" path ">" | "(" expression ")") ";"?
 importDirective  = "#"? "import"  (STRING_LITERAL | "<" path ">" | "(" expression ")") ";"?
 
+// extern declarations: a name defined outside the program (a host-registered global or
+// function, another engine, a later dynamic definition). The static checker counts the name
+// as declared - typed: that type (members checked, proofs flow); "function": a callable of
+// unknown signature (calls unchecked); bare: var. Both backends run it as a no-op; the name
+// resolves dynamically as before, and a still-missing name raises the ordinary
+// "Undefined variable" error when used.
+externDeclaration = "extern" ("function" | type)? IDENTIFIER ";"
+
+// check-mode attributes (static checker only; both backends run them as nothing). Before a
+// statement: covers that statement's own subtree (a nested function/lambda body keeps the
+// enclosing mode). As the FIRST statement of a block or the FIRST declaration of a file:
+// covers the whole block / unit, nested bodies included. Innermost wins; the engine's mode
+// is the default. Any other name is a parse error; "[[" in expression position opens a
+// nested array literal.
+checkModeAttribute = "[[" ("warn_mode" | "strict_mode") "]]" ";"?
+
 type = primitiveType
      | IDENTIFIER ("<" type ("," type)* ">")?   // User-defined (optionally templated) type
      | "array" "<" type ">"
@@ -263,6 +288,7 @@ statement = expressionStatement
           | continueStatement
           | tryStatement
           | variableDeclaration
+          | checkModeAttribute statement
 
 expressionStatement = expression ";"     // includes throw/yield — both are expressions
 
@@ -349,6 +375,7 @@ primaryExpression = literal
                   | "this"
                   | "super"
                   | newExpression
+                  | castExpression
                   | includeExpression
                   | "(" expression ")"
                   | lambdaExpression
@@ -362,6 +389,19 @@ newExpression = "new" type ( "(" argumentList? ")" | "{" argumentList? "}" )
 // include in expression position evaluates to the included file's result value
 // (its last top-level expression — exactly what engine::execute returns for it)
 includeExpression = "include" (STRING_LITERAL | "<" path ">" | "(" expression ")")
+
+// cast<T>(e) yields the value `T tmp = e;` would hold: for a class T an object whose class is
+// T or derives from T becomes a VALUE copy tagged T; primitives take the assignment
+// conversion table (cast<int>(2.7) == 2, cast<string>(5) == "5"). cast<T&>(e) is a reference
+// to the SAME object (no copy) - member reads and stores go through (cast<T&>(h.p).t = 5).
+// cast<shared_ptr<T>>(e) is a shared_ptr<T> handle sharing the object. A class mismatch raises
+// the catchable "Cannot cast 'X' to 'T'"; null passes the value and shared_ptr forms and fails
+// the reference form. The type is anything a declaration accepts (auto/var/void excluded).
+// Char converts only here (assignment has no char row): cast<int>(c)/cast<float>(c) are the
+// code point 0..255, cast<string>(c) the one-character string, cast<char>(e) takes an int in
+// 0..255 or a one-character string and raises "Cannot cast 'int' to 'char'" /
+// "Cannot cast 'string' to 'char'" otherwise.
+castExpression = "cast" "<" type "&"? ">" "(" expression ")"
 
 literal = INTEGER_LITERAL
         | FLOAT_LITERAL
@@ -896,3 +936,16 @@ string healthLevel = health > 75 ? "healthy" :
     rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)") —
     the constrained-but-dynamic middle ground has no use case, and `var` meaning
     something different inside angle brackets would muddy the ladder (Dev ruling 2026-07).
+17. **`cast` is the typed boundary**: `cast<T>(e)` is exactly `T tmp = e;` (a value copy
+    for classes, the assignment conversion table for primitives), `cast<T&>(e)` is a
+    reference to the same object built with the `auto& r = e` machinery (owner-pinned;
+    an identifier operand shares the variable's cell, a temporary is pinned by the holder),
+    and `cast<shared_ptr<T>>(e)` shares like `shared_ptr<T> h = e;`. Upcasts always pass;
+    an unrelated class raises `Cannot cast 'X' to 'T'` (catchable) where X is the object's
+    DYNAMIC class; under strict static checking a subtype member on a base-typed receiver
+    is a compile error and `cast<T&>(recv).member` is the spelled fix. One shared kernel
+    (`detail/cast_kernel.hpp`) gives both backends the same verdict and text. Char converts
+    only through the cast: `cast<int>(c)` / `cast<float>(c)` are the code point (0..255),
+    `cast<string>(c)` the one-character string, `cast<char>(e)` takes an int in 0..255 or a
+    one-character string and raises `Cannot cast 'int' to 'char'` / `Cannot cast 'string' to
+    'char'` otherwise; `char c = 65` stays a type mismatch (docs/char_semantics.md "Casts").

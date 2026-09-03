@@ -1037,6 +1037,18 @@ public:
             bite->execute();
         }, 300);
 
+        benchmark("Method field writes: 1000 x (a = i; b = a + i) (x20)", [this]() {
+            // bare field stores inside a method body (the creature-state shape)
+            if (!bite) {
+                test_engine->execute(R"(
+                    class BW { int a = 0; int b = 0; int run() { for (auto k = 0; k < 20; ++k) { for (auto i = 0; i < 1000; ++i) { a = i; b = a + i; } } return a + b; } }
+                    BW bw_obj = BW();
+                )");
+                bite = test_engine->jaibite(R"(if (bw_obj.run() != 2997) { throw "field write mismatch"; })");
+            }
+            bite->execute();
+        }, 300);
+
         benchmark("Instance creation: 200 x Vec2(float, float) (x20)", [this]() {
             // construction protocol: create_instance + init/method envs + literal stamps + in-loop ctor body
             if (!bite) {

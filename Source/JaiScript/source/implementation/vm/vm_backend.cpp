@@ -3388,6 +3388,42 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		}
 	}
 
+	// Store-side this-field IC (bare method-field writes - ctor bodies, creature
+	// state): the cell, the declared type and the no-setter fact come from the site
+	// entry; the store itself is enforce_field_write + set_field_unchecked on that
+	// cell, texts included (KEEP BYTE-PARALLEL with the this-field landing below).
+	if (!(ins.c & store_flag_global_only) && f.locals && !f.top_level) {
+		type_info* ic_declared = nullptr;
+		if (script_value* cell = this_field_store_probe(f, f.ip * 3, ic_declared)) {
+			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+				value = value.detached_for_store();
+			}
+			script_value incoming = rhs_lvalue ? clone_for_assignment(value) : std::move(value);
+			type_info_ptr declared{ic_declared};
+			if (!declared) {
+				type_info_ptr tag = !cell->is_reference() ? cell->get_type_info() : nullptr;
+				if (tag && tag->base_type != script_value_type::jai_any_type &&
+				    tag->base_type != script_value_type::jai_null_type) {
+					declared = tag;
+				}
+			}
+			if (declared && declared->base_type != script_value_type::jai_any_type) {
+				auto converted = detail::try_convert_field_value(incoming, declared, engine_);
+				if (!converted) {
+					return raise_(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", declared->id);
+				}
+				incoming = std::move(*converted);
+			}
+			if (cell->is_reference()) {
+				cell->deref() = incoming;
+			} else {
+				*cell = incoming;
+			}
+			stack_.push_back(rhs_lvalue ? std::move(value) : script_value(*cell));
+			return {};
+		}
+	}
+
 	// Member scope: a member (field, static, or method - shadowing is by NAME)
 	// outranks anything past the function's own scopes, so an env hit that could
 	// only be a global yields to the kind-aware member path below.
@@ -3767,6 +3803,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 							instance->set_field_unchecked(sym, enforced.value());
 							value = instance->get_field(sym);
 						}
+						this_field_store_arm(f, f.ip * 3, instance.get(), sym);
 						assigned_to_member = true;
 					}
 				} else {

@@ -878,6 +878,17 @@ void vm_compiler::compile_block(block_stmt* block) {
 }
 
 void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps) {
+	if (cond->get_type() == node_type::unary_expr) {
+		auto* u = static_cast<unary_expr*>(cond.get());
+		if (u->op.type == token_type::bang) {
+			// `!e` in branch position: branch on e's truthiness directly - the same
+			// is_truthy the unary consulted, minus one op and one bool
+			compile_expression(u->operand);
+			false_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32,
+			                           expression_returns_bool(u->operand.get()) ? 1u : 0u));
+			return;
+		}
+	}
 	if (cond->get_type() == node_type::binary_expr) {
 		auto* b = static_cast<binary_expr*>(cond.get());
 		if (b->op.type == token_type::ampersand_ampersand) {

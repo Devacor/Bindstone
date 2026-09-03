@@ -1580,6 +1580,94 @@ public:
             check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
         });
 
+        test("null_compare_battery", [check_quad]() {
+            // Null compares (`x == null` / `x != null`) on both backends: every row is the
+            // exact pre-lane output of both backends. The vm branch lane answers a null
+            // operand from storage (handle_equal's verdict); weak_ptr, cpp-bound and
+            // operator-overloaded engines keep the general path
+            const std::string P = "class N { int a = 1; shared_ptr<N> next; N other; } class E { int v = 0; bool operator==(E o) { return true; } bool operator!=(E o) { return true; } } class L { shared_ptr<L> left; int f() { if (left == null) { return 1; } return 2; } int g() { if (left != null) { return 1; } return 2; } } auto n = N(); auto e = E(); auto l = L(); var v; int i = 5; float fl = 1.5; string s = \"s\"; char c = 'c'; bool b = true; array<var> arr = [1]; map<string,int> m = {\"a\": 1}; function fn() { return 1; } auto sp = shared_ptr<N>(); weak_ptr<N> w = sp; ";
+            auto q = [&](const char* tail) { return P + tail; };
+            check_quad(q("n == null").c_str(), "false", "object vs null");
+            check_quad(q("n != null").c_str(), "true", "object != null");
+            check_quad(q("n.next == null").c_str(), "true", "unset shared_ptr field");
+            check_quad(q("n.other == null").c_str(), "true", "typed-null object field");
+            check_quad(q("null == null").c_str(), "true", "null == null");
+            check_quad(q("null != null").c_str(), "false", "null != null");
+            check_quad(q("v == null").c_str(), "true", "unset var");
+            check_quad(q("i == null").c_str(), "false", "int vs null");
+            check_quad(q("fl != null").c_str(), "true", "float != null");
+            check_quad(q("s == null").c_str(), "false", "string vs null");
+            check_quad(q("c == null").c_str(), "false", "char vs null (no promotion)");
+            check_quad(q("b != null").c_str(), "true", "bool != null");
+            check_quad(q("arr == null").c_str(), "false", "array vs null");
+            check_quad(q("m != null").c_str(), "true", "map != null");
+            check_quad(q("fn == null").c_str(), "false", "function vs null");
+            check_quad(q("e == null").c_str(), "false", "class operator== is NOT consulted for a null operand");
+            check_quad(q("e != null").c_str(), "true", "class operator!= is NOT consulted for a null operand");
+            check_quad(q("null == e").c_str(), "false", "null on the left");
+            check_quad(q("l.f()").c_str(), "1", "method body: if (field == null) - the branch lane");
+            check_quad(q("l.g()").c_str(), "2", "method body: if (field != null)");
+            check_quad(q("l.left = shared_ptr<L>(); l.f()").c_str(), "2", "set shared_ptr field: == null false");
+            check_quad(q("l.left = shared_ptr<L>(); l.g()").c_str(), "1", "set shared_ptr field: != null true");
+            check_quad(q("sp == null").c_str(), "false", "live shared_ptr");
+            check_quad(q("w == null").c_str(), "false", "weak_ptr to a live object (general path)");
+            check_quad(q("w != null").c_str(), "true", "live weak_ptr != null");
+            check_quad(q("sp = null; w == null").c_str(), "true", "expired weak_ptr reads as null");
+            check_quad(q("sp = null; w != null").c_str(), "false", "expired weak_ptr != null");
+            check_quad(q("n.next = shared_ptr<N>(); n.next == null").c_str(), "false", "assigned shared_ptr field");
+            check_quad(q("n.next = shared_ptr<N>(); n.next != null").c_str(), "true", "assigned shared_ptr field != null");
+            check_quad(q("array<var> xs = [N(), null, N()]; int cnt = 0; for (auto x : xs) { if (x != null) { cnt += 1; } } cnt").c_str(), "2", "loop guard != null over mixed elements");
+            check_quad(q("array<var> xs = [N(), null, N()]; int cnt = 0; for (auto x : xs) { if (x == null) { cnt += 1; } } cnt").c_str(), "1", "loop guard == null over mixed elements");
+            check_quad(q("bool bb = (n == null); bb").c_str(), "false", "value position (binary, not the branch lane)");
+            check_quad(q("bool bc = (n.next != null); bc").c_str(), "false", "value position on an unset field");
+            check_quad(q("string r = \"\"; try { throw \"boom\"; } catch (err) { r = to_string(err == null) + \",\" + to_string(n == null); } r").c_str(), "false,false", "inside a catch (catch-var gate keeps the general path)");
+            check_quad(q("(null == null) == true").c_str(), "true", "nested compare");
+        });
+
+        test("null_compare_defers_to_global_operator_overload", [this]() {
+            // A host-registered global `==` latches the custom-binary-op gate: the vm lane
+            // must step aside so the overload sees `obj == null` exactly like the interpreter
+            std::string out[2];
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                e->add_function("==", [](const jai::script_value&, const jai::script_value&) { return true; });
+                out[use_vm ? 1 : 0] = e->execute("class N { int a = 1; } auto n = N(); int hits = 0; if (n == null) { hits += 1; } if (null == null) { hits += 10; } to_string(hits) + \",\" + to_string(n == null)").to_string();
+            }
+            check_eq(out[0], out[1], "backends agree under a global == overload");
+        });
+
+        test("truthiness_battery", [check_quad]() {
+            // Object truthiness (`if (x)` / `if (!x)` / ternary) on both backends: rows are
+            // the exact pre-change outputs. A class with no to_bool() anywhere in its chain
+            // answers from a class-level memo; `!e` in branch position compiles to an
+            // inverted jump on the vm (same is_truthy, one op fewer)
+            const std::string P = "class T { int a = 1; } class B { int a = 1; bool to_bool() { return a > 5; } } class D : B { int b = 2; } class Q { bool to_bool() { throw \"qbang\"; } } auto t = T(); auto b = B(); auto d = D(); auto sp = shared_ptr<T>(); shared_ptr<T> e; var v; int i0 = 0; float f0 = 0.0; string s0 = \"\"; array<var> a0 = []; auto qq = Q(); ";
+            auto q = [&](const char* tail) { return P + tail; };
+            check_quad(q("t ? 1 : 2").c_str(), "1", "plain object is truthy");
+            check_quad(q("!t").c_str(), "false", "!object");
+            check_quad(q("b ? 1 : 2").c_str(), "2", "to_bool() decides (false)");
+            check_quad(q("!b").c_str(), "true", "!object with to_bool() false");
+            check_quad(q("b.a = 9; b ? 1 : 2").c_str(), "1", "to_bool() decides (true)");
+            check_quad(q("b.a = 9; !b").c_str(), "false", "!object with to_bool() true");
+            check_quad(q("d ? 1 : 2").c_str(), "2", "inherited to_bool() (parent chain)");
+            check_quad(q("!d").c_str(), "true", "!derived with inherited to_bool()");
+            check_quad(q("sp ? 1 : 2").c_str(), "1", "live shared_ptr is truthy");
+            check_quad(q("!sp").c_str(), "false", "!live shared_ptr");
+            check_quad(q("e ? 1 : 2").c_str(), "2", "unset shared_ptr is falsy");
+            check_quad(q("!e").c_str(), "true", "!unset shared_ptr");
+            check_quad(q("v ? 1 : 2").c_str(), "2", "unset var is falsy");
+            check_quad(q("!v").c_str(), "true", "!unset var");
+            check_quad(q("int r = 0; if (t) { r += 1; } if (!t) { r += 10; } if (!e) { r += 100; } if (e) { r += 1000; } if (!b) { r += 10000; } r").c_str(), "10101", "if guards: object, !object, !unset shared_ptr, unset shared_ptr, !to_bool object");
+            check_quad(q("int w = 0; while (!e) { w += 1; e = shared_ptr<T>(); } w").c_str(), "1", "while (!ptr) exits once assigned");
+            check_quad(q("to_string(!i0) + \",\" + to_string(!f0) + \",\" + to_string(!s0) + \",\" + to_string(!a0) + \",\" + to_string(!'c') + \",\" + to_string(!true) + \",\" + to_string(!null)").c_str(), "true,true,true,true,false,false,true", "!primitive value forms");
+            check_quad(q("int r2 = 0; if (!i0) { r2 += 1; } if (!f0) { r2 += 2; } if (!s0) { r2 += 4; } if (!a0) { r2 += 8; } if (!'c') { r2 += 16; } if (!null) { r2 += 32; } if (!(t && e)) { r2 += 64; } if (!t || !e) { r2 += 128; } r2").c_str(), "239", "if (!x) over every primitive kind, && and || operands");
+            check_quad(q("string msg = \"none\"; try { if (!qq) { msg = \"neg\"; } else { msg = \"pos\"; } } catch (err) { msg = err; } msg").c_str(), "qbang", "a throwing to_bool() under if (!x) propagates");
+            check_quad(q("string msg = \"none\"; try { if (qq) { msg = \"pos2\"; } else { msg = \"neg2\"; } } catch (err) { msg = err; } msg").c_str(), "qbang", "a throwing to_bool() under if (x) propagates");
+            check_quad(q("class H { bool to_bool() { return false; } } auto h = H(); int r3 = 0; if (!h) { r3 += 1; } if (h) { r3 += 2; } r3").c_str(), "1", "class declared after the battery prefix: memo per class");
+        });
+
         test("increment_targets_battery", [check_quad, check_quad_error]() {
             // Dev ruling 2026-09-02: ++/-- work on every lvalue, not only identifiers. Non-
             // identifier targets desugar at parse time to `+= 1` / `-= 1` (the compound

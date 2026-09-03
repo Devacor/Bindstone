@@ -1167,6 +1167,18 @@ script_value vm_backend::make_bound_method_thunk(const script_value& this_val, s
 }
 
 bool vm_backend::object_to_bool_via_method(const script_value& value) {
+	// Class memo: no to_bool() in the chain => truthy, no target resolve / method
+	// probe per test. Extended non-script wrappers keep the resolve (it re-points the
+	// handle at the script layer as a side effect). KEEP BYTE-PARALLEL with the interpreter.
+	if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
+		auto* oh = h->get();
+		if (oh->is_class_instance_wrapper && oh->data) {
+			if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
+			    cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+				return true;
+			}
+		}
+	}
 	auto target = resolve_member_target(value);
 	if (!target) {
 		return true;
@@ -4975,6 +4987,30 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 				f.ip = truthy ? f.ip + 1 : ins.a;
 				return {};
 			}
+			// Null-compare lane (`x == null` / `x != null`, the BST/gameplay guard shape):
+			// handle_equal answers a null operand from storage alone - null equals null and
+			// nothing else does (a transparent wrapper unwraps to a NON-null value or stays
+			// itself, so an object side never reads as null; class operator== is consulted
+			// only after that verdict). Kept on the general path: weak_ptr (expiry answer),
+			// cpp-bound (null-semantic pointers) and raw-invalid. The custom-binary-op latch
+			// guards the global `==` overload consult that precedes handle_equal.
+			if ((op == token_type::equal_equal || op == token_type::bang_equal) && !has_custom_binary_ops_ &&
+			    (li == script_value::TYPEID_NULL || ri == script_value::TYPEID_NULL)) {
+				int verdict = -1;
+				switch (li == script_value::TYPEID_NULL ? ri : li) {
+				case script_value::TYPEID_NULL: verdict = 1; break;
+				case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
+				case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR: case script_value::TYPEID_ARRAY:
+				case script_value::TYPEID_MAP: case script_value::TYPEID_FUNCTION: case script_value::TYPEID_OBJECT:
+					verdict = 0; break;
+				default: break;
+				}
+				if (verdict >= 0) {
+					const bool truthy = (op == token_type::equal_equal) == (verdict == 1);
+					f.ip = truthy ? f.ip + 1 : ins.a;
+					return {};
+				}
+			}
 		}
 	}
 
@@ -7124,16 +7160,16 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			const auto* dispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 			if (dispatch && dispatch->eng == engine_) {
 				const size_t slice_base = stack_.size() - argc;
-				auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id,
+				auto resolved = dispatch->cls->resolve_method_overload_ref(dispatch->name_id,
 					stack_.data() + slice_base, argc);
-				if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+				if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
 #ifdef JAISCRIPT_VM_PROFILE
 					cfs_probe_.bucket = 1;
 #endif
 					script_value method_val = *bthunk->payload.bound_dispatch;
 					script_value receiver = *bthunk->payload.this_obj;
 					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
-					                                  resolved.value(), &receiver, slice_base,
+					                                  *resolved.value(), &receiver, slice_base,
 					                                  slice_base, argc, site);
 				}
 			}
@@ -7401,13 +7437,13 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 			    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
 				const auto* mdispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 				if (mdispatch && mdispatch->eng == engine_) {
-					auto resolved = mdispatch->cls->resolve_method_overload(mdispatch->name_id,
+					auto resolved = mdispatch->cls->resolve_method_overload_ref(mdispatch->name_id,
 						stack_.data() + args_base, argc);
-					if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+					if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
 						script_value method_val = *bthunk->payload.bound_dispatch;
 						script_value receiver = *bthunk->payload.this_obj;
 						return enter_script_method_sliced(f, std::move(method_val), *mdispatch,
-						                                  resolved.value(), &receiver, args_base - 1,
+						                                  *resolved.value(), &receiver, args_base - 1,
 						                                  args_base, argc, site);
 					}
 				}
@@ -9173,7 +9209,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						// unpinned falls to the vector path below for the identical verdict
 					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
 					           cd->method_epoch() == site.mic_epoch &&
-					           !inst->has_field(member->member_id)) {
+					           !mic_field_shadowed(site, *inst, member->member_id)) {
 #ifdef JAISCRIPT_VM_PROFILE
 						++profile_slice_gate_[1];   // mic guard passed
 #endif
@@ -9183,12 +9219,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							                                  site.mic_resolved, nullptr, args_base - 1,
 							                                  args_base, argc, site);
 						}
-						auto resolved = site.mic_dispatch->cls->resolve_method_overload(
+						auto resolved = site.mic_dispatch->cls->resolve_method_overload_ref(
 							site.mic_dispatch->name_id, stack_.data() + args_base, argc);
-						if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+						if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
 							script_value method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
-							                                  resolved.value(), nullptr, args_base - 1,
+							                                  *resolved.value(), nullptr, args_base - 1,
 							                                  args_base, argc, site);
 						}
 						// resolution declined (arg types): the vector ladder reports identically
@@ -9343,7 +9379,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
 				if (inst->get_class_definition() == site.mic_cd &&
 				    site.mic_cd->method_epoch() == site.mic_epoch &&
-				    !inst->has_field(member->member_id)) {
+				    !mic_field_shadowed(site, *inst, member->member_id)) {
 					if (site.mic_static) {
 						script_value method_val = site.mic_method;
 #ifdef JAISCRIPT_VM_PROFILE
@@ -9432,6 +9468,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 									    dispatch->cls->single_method_overload(dispatch->name_id)) {
 										site.mic_cd = target.instance->get_class_definition();
 										site.mic_epoch = site.mic_cd->method_epoch();
+										site.mic_field_free = !site.mic_cd->chain_declares_field(member->member_id) &&
+										                      site.mic_cd->field_slot(member->member_id) == class_definition::k_no_field_slot;
 										site.mic_method = method_val;
 										site.mic_dispatch = site.mic_method.as_function().target<script_method_dispatch>();
 										site.mic_resolved = resolved.value();
@@ -12735,7 +12773,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 
 	op_status bound{};
 	try {
-		bound = bind_parameters(ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
+		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -12749,7 +12787,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	// Conversions during binding push and pop above the args, so the slice is intact
 	assert(stack_.size() == args_base + argc);
 	{
-		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
+		const size_t window_slots = std::max(rec.ast_pin->local_count, static_cast<size_t>(body_chunk->local_count));
 		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	}
 	switch_to_ = &rec.f;

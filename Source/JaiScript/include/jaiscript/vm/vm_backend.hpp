@@ -1037,6 +1037,18 @@ namespace jai::vm {
                                          : environment_->get_value_ptr(symbol_id);
         }
 
+        // Env-lazy method frames (the common all-public case) resolve with the current
+        // env AS the scope floor: own_scope_lookup walks zero envs, so no env variable can
+        // shadow a field regardless of the engine-wide serial - class identity + slot are
+        // the whole proof. Eager frames keep the serial (their scope env sits below the
+        // floor and may define). Loop scopes churning the serial (top-level loop bodies,
+        // constructions) no longer starve lazy methods' field caches.
+        bool lazy_frame_no_own_scopes(frame& f) {
+            ensure_frame_member_scope(f, environment_.get());
+            return f.locals && frame_scope_state(f) == detail::member_scope_state::instance &&
+                   f.locals->scope_floor == environment_.get();
+        }
+
         // This-field IC probe (bare method-field reads, the BST/gameplay heat): the
         // site's entry carries a serial-guarded WALK-MISS PROOF — while the engine-wide
         // env serial is unchanged since a full walk missed here, no env cell anywhere
@@ -1051,7 +1063,8 @@ namespace jai::vm {
             auto& cache = f.code->env_lookup_cache;
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
-            if (entry.this_field_serial != env_symbolizer_->env_epoch()) { return nullptr; }
+            if (entry.this_field_serial == 0) { return nullptr; }
+            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             // Raw extraction (get_class_instance's exact ladder minus its handle
@@ -1089,15 +1102,58 @@ namespace jai::vm {
             if (cache.size() <= cache_slot) { return; }
             auto& entry = cache[cache_slot];
             entry.this_field_serial = env_symbolizer_->env_epoch();
+            class_definition* cd = instance ? instance->get_class_definition() : nullptr;
+            // Re-arm after serial churn (eager frames, constructions): the class's id->slot
+            // mapping is append-only, so a same-class re-arm keeps slot and store facts
+            if (cd && entry.this_field_class == static_cast<const void*>(cd)) { return; }
             entry.this_field_class = nullptr;
             entry.this_field_slot = 0xFFFFFFFFu;
-            if (class_definition* cd = instance ? instance->get_class_definition() : nullptr) {
+            entry.this_store_state = 0;
+            if (cd) {
                 const uint32_t slot = cd->field_slot(sym);
                 if (slot != class_definition::k_no_field_slot) {
                     entry.this_field_class = cd;
                     entry.this_field_slot = slot;
                 }
             }
+        }
+        // Store-side this-field IC (bare method-field writes): the read proof plus the
+        // arm-time facts of the store landing. Returns the live cell, or null for the ladder.
+        script_value* this_field_store_probe(frame& f, size_t cache_slot, type_info*& declared_out) {
+            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return nullptr; }
+            if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
+            auto& cache = f.code->env_lookup_cache;
+            if (cache.size() <= cache_slot) { return nullptr; }
+            const auto& entry = cache[cache_slot];
+            if (entry.this_store_state != 1) { return nullptr; }
+            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
+            script_value& this_val = f.locals->get_this();
+            if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
+            auto* oh = this_val.unchecked_get_object_storage().get();
+            if (!oh || !oh->is_class_instance_wrapper) { return nullptr; }
+            auto* instance = static_cast<class_instance*>(oh->data.get());
+            if (!instance) { return nullptr; }
+            class_definition* cd = instance->get_class_definition();
+            if (!cd || entry.this_field_class != static_cast<const void*>(cd) ||
+                entry.this_store_epoch != cd->method_epoch()) { return nullptr; }
+            script_value* cell = instance->field_slot_value(entry.this_field_slot);
+            if (!cell) { return nullptr; }
+            declared_out = entry.this_store_type;
+            return cell;
+        }
+        void this_field_store_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
+            this_field_ic_arm(f, cache_slot, instance, sym);
+            if (!cached_global_env_ || cache_slot == SIZE_MAX || !f.locals || !f.locals->is_method) { return; }
+            auto& cache = f.code->env_lookup_cache;
+            if (cache.size() <= cache_slot) { return; }
+            auto& entry = cache[cache_slot];
+            class_definition* cd = instance ? instance->get_class_definition() : nullptr;
+            if (!cd || entry.this_field_class != static_cast<const void*>(cd)) { return; }
+            if (entry.this_store_state == 1 && entry.this_store_epoch == cd->method_epoch()) { return; }   // facts still valid
+            if (auto cpp_base = cd->find_cpp_base_class(); cpp_base && cpp_base->get_property_setter_id(sym) != 0) { return; }
+            entry.this_store_type = cd->get_field_declared_type(sym).get();
+            entry.this_store_epoch = cd->method_epoch();
+            entry.this_store_state = 1;
         }
 
         // Frame-twin of environment::get_value_ptr's method-kind fallback (receiver

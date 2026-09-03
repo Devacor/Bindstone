@@ -199,6 +199,13 @@ namespace jai::vm {
         uint64_t this_field_serial = 0;
         const void* this_field_class = nullptr;
         uint32_t this_field_slot = 0xFFFFFFFFu;
+        // Store twin (bare method-field WRITES): the same serial + class proof names the
+        // cell; the arm banks what the store landing needs on top - no C++ property
+        // setter for the id, the declared type (null = auto: infer from the cell's tag) -
+        // under the class's method_epoch (declared types are replaced wholesale on reload)
+        uint8_t this_store_state = 0;   // 0 unarmed, 1 armed
+        uint64_t this_store_epoch = 0;
+        type_info* this_store_type = nullptr;
     };
 
     // op_compound_fused: `target op= <rhs>` in one dispatch. Binary mode: rhs_proto indexes

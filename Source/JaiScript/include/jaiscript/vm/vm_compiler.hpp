@@ -104,7 +104,7 @@ namespace jai::vm {
         // on the collected jumps — the caller patches them to the else/exit target.
         void compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps);
 
-        void compile_identifier_load(identifier_expr* ident);
+        void compile_identifier_load(const expression_ptr& expr);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);
         void compile_unary(const std::shared_ptr<unary_expr>& expr);
         void compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement);
@@ -139,6 +139,12 @@ namespace jai::vm {
         uint32_t identifier_slot_operand(identifier_expr* ident) const;
         bool symbol_is_env_only(uint64_t symbol_id) const;
         fused_operand make_fused_operand(const expression* e);
+        // Node-owning spelling: an env-resolved plain identifier also pins its node
+        // (fused_operand::ident_node) so field proofs stay live across re-stamps
+        fused_operand make_fused_operand(const expression_ptr& e);
+        // chunk::ident_nodes[ip] = the identifier's node when it resolves through the env
+        // (fields are never slotted); slotted identifiers leave no entry
+        void note_ident_node(size_t ip, const expression_ptr& ident);
 
         static uint32_t binary_shape(binary_expr* expr);
     };

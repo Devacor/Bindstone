@@ -101,6 +101,91 @@ conversions). Enforced by `static_check_tests.cpp::fuzz_corpus_false_positive_ga
 differential-fuzzer generator seeds; any program that executes cleanly must check clean.
 Grow that seed count before loosening any lenient rule.
 
+## Proofs
+
+The same walk that produces diagnostics also produces **proofs**: annotations on AST nodes
+saying "the conversion this site would run is the identity" (`assignment_expr::
+static_store_proof`, `variable_decl::static_init_proof`, `call_expr::static_arg_proofs` +
+`proven_callee_body`, `return_stmt::static_return_proof`) or "this receiver's field lives in
+slot N of class object C at field-shape epoch E" (`member_expr` / `identifier_expr`
+`proven_class`/`proven_slot`/`proven_epoch`/`proven_field_type`/`proven_field_write`).
+`binary_expr::static_operand_class` is an annotation only. Both backends consume proofs
+behind TOTAL runtime guards (`detail/type_proofs.hpp`: `same_type_payload`,
+`proven_field_instance`/`proven_field_cell`): a proof selects a lane, the guard makes the
+lane sound, and a guard miss runs the existing code byte for byte. There is therefore no
+program whose value, printed output, error text or `type_of` differs between
+`engine::type_proofs(true)` (the default) and `type_proofs(false)`.
+
+**Certain types** — a proof is stamped only from a certain static type on BOTH sides: a
+concrete `int`/`float`/`bool`/`char`/`string`, or a class known to the checker (in-script or
+engine-registered) reached as a value object with the SAME interned spelling on both sides.
+Everything the rule table treats leniently is uncertain by construction: `var`, `auto`
+without an initializer, reference declarations and by-reference parameters, `shared_ptr<T>`
+/ `weak_ptr<T>` handles, containers (`array<T>`, `map<K,V>` — container enforcement is not
+the identity), engine globals (their type is read off a value tag, never a declaration),
+includes, callable variables, mixed ternaries, `this`/`super`. The certain set is the
+complement of the lenient rows, so the false-positive contract above doubles as the
+proof-soundness contract.
+
+**Field proofs** need a class object: the receiver's certain class must be registered with
+the engine, its whole chain script-only (no C++ base, never `extend`ed), all-public, and the
+member a declared instance field with the synthesized accessors (no custom `_get_`/`_set_`,
+no method of the same name, not a static, not `_cpp_object`, not a shared_ptr builtin name,
+not a global-tier name). Bare-name field proofs additionally require a method/ctor body or a
+`[this]` lambda (not a static method, not a `: super(...)` argument list, no includes). A unit
+that declares its own classes gets its field proofs on its SECOND check: registration moves
+the surface, the cached entry re-checks, and identical reloads afterwards keep the stamps.
+Writes are proven only for scalar/string/object/`var` fields.
+
+**Calls** are proven only against exactly one same-script overload with exact arity — no
+defaults in play, no reference parameters, not a coroutine, no includes — and the stamp
+names the callee's body so a different function bound to the same name at runtime simply
+misses.
+
+**Hot reload** — every field proof carries `class_definition::field_shape_epoch()`, which
+moves on field-set, declared-type, parent-chain, access-label and accessor changes (and on
+every non-identical reload) but NOT on an identical reload. A retyped field therefore
+misses its proof and converts or resets through the existing migration/enforcement paths;
+a proof never produces an error the unproven path would not. Class registration and
+non-identical redefinition also move the checker's surface epoch, so cached entries
+re-stamp at their next execute.
+
+**Switch** — `engine::type_proofs(bool)`, default on. Off: the pass does not run for fresh
+entries, and cached entries/jaibites already carrying proofs are stripped at their next
+execute, so an engine toggled off is observationally the old engine. `engine::last_proof_stats()`
+counts the stamps of the most recent pass (stores/decls/args/returns/members/calls) for tests.
+Proofs are never serialized: a loaded jaibite re-derives them like the parser marking passes.
+
+**Bytecode carriers** — the vm reads decl, call, member and bare-identifier proofs off the
+AST node at execution time (a chunk pins the nodes it consumes, so a re-stamp reaches code
+compiled earlier), while store and return proofs ride instruction flags that freeze when
+the chunk compiles. A store/return proof that appears on a later re-check therefore
+benefits only chunks compiled afterwards; a proof that disappears leaves a bit the guard
+turns into a plain skip. Method bodies compile at their first call, so a class whose unit
+is executed before its methods run carries its field-store proofs in bytecode; a unit that
+defines and immediately calls its own class compiles those bodies before its second check
+and keeps the node-borne read/write lanes only.
+
+**Not proven** — conversions (int→float widening, bool/string coercions, null→object,
+derived→base, ctor conversions), containers and typed maps, compound assignment and the
+`++`/`--` desugars, `store_through` references, static fields, `super.f`, `?.` receivers,
+engine globals, `_cpp_object`, hybrid (C++-base) and `extend`ed classes, transparent
+wrappers, callable locals, engine functions, `new_expr`, coroutine callees, defaulted or
+by-reference parameters, native-entry/coroutine/fiber return epilogues, worker (parallel)
+frames, and `binary_expr::static_operand_class` (annotation only). All of these run the
+existing code with proofs on or off.
+
+**Differential gate** — the contract is pinned four ways: `static_check_tests.cpp::
+proof_differential_gate` runs 200 generator seeds on {interpreter, vm} × {proofs on, off}
+(fresh engines, identical registrations) and requires identical segment results, printed
+output, error text and liveness per backend; `strong_types_tests.cpp::proof_*` batteries run
+every certain kind through stores/decls/args/returns/field reads+writes on the same four
+lanes and pin the values, with `last_proof_stats()` proving the lanes are reachable;
+`hot_reload_correctness_tests.cpp::proof_*` arm field proofs and then retype, drop, hide,
+re-parent, hybridize or `extend` the class against a `type_proofs(false)` twin; and
+`jaiscript_fuzz --no-proofs` (plus the fuzz smoke suite's no-proofs band) keeps the
+interpreter-vs-vm differential green in both proof states.
+
 ## jaibite
 
 A bite created under warn/strict is checked at creation (strict throws there);
@@ -110,13 +195,19 @@ ignore it). On load the stamp is trusted ONLY when the registration fingerprint 
 the saving engine's; otherwise the bite loads unchecked and, under warn/strict, is
 re-checked at load against THIS engine's surface (strict throws on errors). A bite is
 checked once — registrations after that don't re-trigger; re-create the bite to re-check.
+Proofs are independent of that: they stamp at creation/load/execute in every mode and
+re-stamp whenever the surface epoch or the proof switch moved, while the diagnostics stay
+checked-once.
 
 ## Cost
 
-Zero when off (one branch at cache-entry creation). When on, one AST walk per unique
-source, cached beside the parse; re-run only when the registration surface epoch moves
-(`add_function`/`add_global`/`add_class`/`register_template_type`). Executes with host
-instance variables check fresh per call (the name set is per-call). Walk cost is
+One AST walk per unique source per surface epoch, in every mode, cached beside the parse
+(the proof pass rides it; diagnostics are collected only under warn/strict). Re-run only
+when the registration surface epoch moves (`add_function`/`add_global`/`add_class`/
+`register_template_type`, script-class first definition and non-identical redefinition) or
+the proof switch flips. `type_proofs(false)` under `off` restores zero walks (one branch at
+cache-entry creation). Executes with host instance variables check fresh per call (the name
+set is per-call; that per-call walk never touches the cached stamps). Walk cost is
 parse-order (same tree, no allocation-heavy state).
 
 ## Shadowing warnings (2026-07)

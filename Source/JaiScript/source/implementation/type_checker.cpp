@@ -87,6 +87,11 @@ struct ctype {
     };
     kind_t kind = unknown;
     std::string_view cls{};   // object_k / class_ref_k / enum_ref_k
+    // Proof pass only: the interned type_info this ctype came from (null = kind only), and
+    // whether the kind was read off a runtime value tag rather than a declaration (engine
+    // globals) - tentative kinds propagate through operators and are never proof sources.
+    const type_info* ti = nullptr;
+    bool tentative = false;
 
     bool is_unknown() const { return kind == unknown; }
     static ctype make(kind_t k) { return ctype{k, {}}; }
@@ -115,26 +120,32 @@ ctype ctype_from_type_info(const type_info* ti) {
     if (!ti) {
         return {};
     }
+    ctype t;
     switch (ti->base_type) {
         case script_value_type::jai_any_type: return {};
-        case script_value_type::jai_null_type: return ctype::make(ctype::null_k);
-        case script_value_type::jai_int_type: return ctype::make(ctype::int_k);
-        case script_value_type::jai_float_type: return ctype::make(ctype::float_k);
-        case script_value_type::jai_string_type: return ctype::make(ctype::string_k);
-        case script_value_type::jai_char_type: return ctype::make(ctype::char_k);
-        case script_value_type::jai_bool_type: return ctype::make(ctype::bool_k);
-        case script_value_type::jai_array_type: return ctype::make(ctype::array_k);
-        case script_value_type::jai_map_type: return ctype::make(ctype::map_k);
-        case script_value_type::jai_function_type: return ctype::make(ctype::function_k);
+        case script_value_type::jai_null_type: t = ctype::make(ctype::null_k); break;
+        case script_value_type::jai_int_type: t = ctype::make(ctype::int_k); break;
+        case script_value_type::jai_float_type: t = ctype::make(ctype::float_k); break;
+        case script_value_type::jai_string_type: t = ctype::make(ctype::string_k); break;
+        case script_value_type::jai_char_type: t = ctype::make(ctype::char_k); break;
+        case script_value_type::jai_bool_type: t = ctype::make(ctype::bool_k); break;
+        case script_value_type::jai_array_type: t = ctype::make(ctype::array_k); break;
+        case script_value_type::jai_map_type: t = ctype::make(ctype::map_k); break;
+        case script_value_type::jai_function_type: t = ctype::make(ctype::function_k); break;
         case script_value_type::jai_object_type:
         case script_value_type::jai_shared_ptr_type:
-            // shared_ptr<T> carries T's name; member access resolves identically
-            return ti->type_name.empty() ? ctype{} : ctype::object(ti->type_name);
+            // shared_ptr<T> carries T's name; member access resolves identically (ti keeps
+            // the base_type, so the proof pass still tells value object from handle)
+            if (ti->type_name.empty()) { return {}; }
+            t = ctype::object(ti->type_name);
+            break;
         case script_value_type::jai_reference_type:
             return ctype_from_type_info(ti->type_params.empty() ? nullptr : ti->type_params[0].get());
         default:
             return {};   // weak_ptr, cpp_bound, invalid: lenient
     }
+    t.ti = ti;
+    return t;
 }
 
 bool is_numeric(ctype::kind_t k) { return k == ctype::int_k || k == ctype::float_k; }
@@ -142,7 +153,7 @@ bool is_numeric(ctype::kind_t k) { return k == ctype::int_k || k == ctype::float
 bool is_numeric_or_char(ctype::kind_t k) { return is_numeric(k) || k == ctype::char_k; }
 
 // Result type of `l op r` (token base ops). Anything uncertain -> unknown.
-ctype binary_result(const ctype& l, token_type op, const ctype& r) {
+ctype binary_result_kind(const ctype& l, token_type op, const ctype& r) {
     switch (op) {
         case token_type::less:
         case token_type::greater:
@@ -181,6 +192,12 @@ ctype binary_result(const ctype& l, token_type op, const ctype& r) {
     }
 }
 
+ctype binary_result(const ctype& l, token_type op, const ctype& r) {
+    ctype out = binary_result_kind(l, op, r);
+    out.tentative = l.tentative || r.tentative;
+    return out;
+}
+
 token_type compound_base_op(token_type op) {
     switch (op) {
         case token_type::plus_equal: return token_type::plus;
@@ -197,8 +214,8 @@ token_type compound_base_op(token_type op) {
 class static_checker {
 public:
     static_checker(engine& eng, const std::vector<declaration_ptr>& decls,
-                   const std::vector<std::string>* extra_globals)
-        : eng_(eng), decls_(decls) {
+                   const std::vector<std::string>* extra_globals, const check_options& opts)
+        : eng_(eng), decls_(decls), proofs_(opts.proofs), collect_diagnostics_(opts.diagnostics), stats_out_(opts.stats) {
         if (extra_globals) {
             for (const auto& n : *extra_globals) {
                 extra_globals_.insert(n);
@@ -215,6 +232,7 @@ public:
         }
         scopes_.pop_back();
 
+        if (stats_out_) { *stats_out_ = counts_; }
         check_report report;
         report.capped = capped_;
         report.diagnostics = std::move(diags_);
@@ -240,6 +258,14 @@ private:
 
     engine& eng_;
     const std::vector<declaration_ptr>& decls_;
+
+    // Proof pass (docs/type_proofs_design.md): independent of diagnostics - a stamp never
+    // depends on a diag() having fired, and diag() is a no-op when diagnostics are off.
+    using proof_mode = check_options::proofs_t;
+    proof_mode proofs_ = proof_mode::stamp;
+    bool collect_diagnostics_ = true;
+    proof_stats* stats_out_ = nullptr;
+    proof_stats counts_{};
 
     std::vector<check_diagnostic> diags_;
     std::unordered_set<std::string> seen_;   // "line:col:message" dedupe keys
@@ -300,6 +326,8 @@ private:
         // or [this]-capturing lambda). Plain [=]/[&] lambdas cannot - no field-shadow
         // warnings inside them.
         bool sees_fields = false;
+        bool is_static_method = false;
+        bool in_ctor_initializers = false;   // : super(...)/this(...) args run before fields exist
         // Names this body resolved through the global tier so far (shadow shape D:
         // "declaration shadows a global used earlier in the same scope chain").
         std::unordered_set<std::string_view> globals_used;
@@ -312,6 +340,7 @@ private:
 
     void diag(diag_level severity, const source_location& loc, std::string message,
               size_t related_line = 0, size_t related_column = 0) {
+        if (!collect_diagnostics_) { return; }
         if (diags_.size() >= k_check_diagnostic_cap) {
             capped_ = true;
             return;
@@ -549,7 +578,9 @@ private:
         if (v.is_cpp_bound() || v.is_reference()) {
             return {};   // write-through bindings convert on their own terms
         }
-        return ctype_from_type_info(v.get_type_info());
+        ctype t = ctype_from_type_info(v.get_type_info());
+        t.tentative = true;   // value-tag derived (a later redeclaration retags): never a proof source
+        return t;
     }
 
     // -------------------------------------------------------------- class lookups
@@ -661,6 +692,150 @@ private:
         }
         miss.certain = closed;   // cpp classes: member definitely absent; others stay open
         return miss;
+    }
+
+    // -------------------------------------------------------------- type proofs
+    // docs/type_proofs_design.md. Every rule writes its node field on EVERY visit (a stamp
+    // or the no-proof default), so a re-check can add or drop proofs but never leaves a
+    // stale one the pass no longer derives.
+
+    bool stamping() const { return proofs_ == proof_mode::stamp; }
+
+    template <class F, class V>
+    void stamp(F& field, V value, V def) {
+        if (proofs_ == proof_mode::stamp) { field = static_cast<F>(value); }
+        else if (proofs_ == proof_mode::clear) { field = static_cast<F>(def); }
+    }
+
+    // Proof certainty: the payload guard (detail::same_type_payload) is TOTAL for these kinds -
+    // every dynamic value the site can hold is either the identity case or falls to the ladder.
+    bool known_class(std::string_view name) { return classes_.count(name) || engine_class(name) != nullptr; }
+    static bool certain_scalar(const ctype& t) {
+        return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k ||
+                                t.kind == ctype::char_k || t.kind == ctype::string_k);
+    }
+    bool certain_object(const ctype& t) {
+        return !t.tentative && t.kind == ctype::object_k && t.ti &&
+               t.ti->base_type == script_value_type::jai_object_type && !t.ti->type_name.empty() && known_class(t.cls);
+    }
+    bool certain(const ctype& t) { return certain_scalar(t) || certain_object(t); }
+    // same_type: certain on both sides, identical kind, and for objects the SAME interned spelling.
+    bool same_type(const ctype& target, const ctype& rhs) {
+        if (!certain(target) || !certain(rhs) || target.kind != rhs.kind) { return false; }
+        return target.kind != ctype::object_k || target.ti == rhs.ti;
+    }
+    // Constructor-call result: the parser's interned object spelling for `name`.
+    ctype object_of(std::string_view name) {
+        ctype t = ctype::object(name);
+        t.ti = eng_.get_type_info_object(std::string(name));
+        return t;
+    }
+    static uint8_t operand_class_of(const ctype& l, const ctype& r) {
+        if (l.tentative || r.tentative) { return operand_class_unknown; }
+        const bool li = l.kind == ctype::int_k, lf = l.kind == ctype::float_k;
+        const bool ri = r.kind == ctype::int_k, rf = r.kind == ctype::float_k;
+        if (li && ri) { return operand_class_int_int; }
+        if (lf && rf) { return operand_class_float_float; }
+        if (li && rf) { return operand_class_int_float; }
+        if (lf && ri) { return operand_class_float_int; }
+        if (l.kind == ctype::string_k && r.kind == ctype::string_k) { return operand_class_string_string; }
+        if (l.kind == ctype::bool_k && r.kind == ctype::bool_k) { return operand_class_bool_bool; }
+        return operand_class_unknown;
+    }
+
+    // Bare names reach this-fields here: method/ctor body or [this] lambda, not a static
+    // method, not a ctor initializer list, no includes (which can define anything).
+    bool bare_field_context() const {
+        return class_ctx_ && !fn_stack_.empty() && fn_stack_.back().sees_fields &&
+               !fn_stack_.back().is_static_method && !fn_stack_.back().in_ctor_initializers && !has_includes_;
+    }
+
+    struct field_proof { class_definition* cd; uint32_t slot; uint64_t epoch; type_info* declared; bool write_ok; };
+    static constexpr std::string_view k_no_proof_names[] = {"same_as", "reset", "use_count", "unique", "cpp_ref_count"};
+
+    // Chain closed = every ancestor is a script class visible to the engine, none carries a C++ base.
+    bool script_chain_closed(const class_definition& cd, int depth = 0) {
+        if (depth > 32 || !cd.is_script_class() || cd.find_cpp_base_class() || cd.extended_ever()) { return false; }
+        for (const auto& p : cd.get_parent_classes()) {
+            if (!p || !script_chain_closed(*p, depth + 1)) { return false; }
+        }
+        return true;
+    }
+
+    std::optional<field_proof> resolve_field_proof(std::string_view cls, std::string_view member, const member_hit& hit) {
+        if (!stamping() || !hit.found || hit.methods) { return std::nullopt; }
+        if (hit.field && hit.field->is_static) { return std::nullopt; }                 // statics live in class storage
+        if (member == class_constants::CPP_OBJECT_FIELD) { return std::nullopt; }
+        for (auto n : k_no_proof_names) { if (member == n) { return std::nullopt; } }   // builtin-shadow names
+        if (global_tier_name(member)) { return std::nullopt; }
+        auto def = engine_class(cls);                                                   // null on a same-unit class's FIRST check
+        if (!def || def->chain_has_nonpublic() || !script_chain_closed(*def)) { return std::nullopt; }
+        const uint64_t id = eng_.symbolize(member);
+        if (!def->get_method(id, false).is_invalid()) { return std::nullopt; }         // method with the field's name: ladder decides
+        if (def->find_field_declaring_class(id) == nullptr) { return std::nullopt; }
+        const uint32_t slot = def->field_slot(id);
+        if (slot == class_definition::k_no_field_slot) { return std::nullopt; }
+        const uint64_t getter_id = eng_.get_symbolizer()->get_getter_id_with_view(id).first;
+        if (!def->is_auto_accessor(getter_id) && !def->get_method(getter_id, false).is_invalid()) { return std::nullopt; }   // custom _get_
+        const uint64_t setter_id = eng_.get_symbolizer()->get_setter_id_with_view(id).first;
+        const bool custom_setter = !def->is_auto_accessor(setter_id) && !def->get_method(setter_id, false).is_invalid();
+        type_info* declared = def->get_field_declared_type(id).get();
+        if (hit.field && hit.field->type.get() != declared) { return std::nullopt; }   // class also declared in THIS unit: spellings must agree (interned pointers)
+        bool write_ok = !custom_setter;
+        if (declared) {
+            switch (declared->base_type) {
+                case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+                case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_object_type:
+                case script_value_type::jai_any_type: break;
+                default: write_ok = false;   // array/map/shared_ptr/weak_ptr/reference/function fields: reads only
+            }
+        }
+        return field_proof{def.get(), slot, def->field_shape_epoch(), declared, write_ok};
+    }
+
+    template <class N> void stamp_field(N* n, const std::optional<field_proof>& p) {
+        stamp(n->proven_class, p ? p->cd : nullptr, static_cast<class_definition*>(nullptr));
+        stamp(n->proven_slot, p ? p->slot : uint32_t(UINT32_MAX), uint32_t(UINT32_MAX));
+        stamp(n->proven_epoch, p ? p->epoch : uint64_t(0), uint64_t(0));
+        stamp(n->proven_field_type, p ? p->declared : nullptr, static_cast<type_info*>(nullptr));
+        stamp(n->proven_field_write, p ? p->write_ok : false, false);
+        if (p && stamping()) { ++counts_.members; }
+    }
+
+    // Field store: plain `=` whose RHS static type IS the field's declared type.
+    bool field_store_same_type(const std::optional<field_proof>& p, token_type op, const ctype& rhs) {
+        return op == token_type::equal && p && p->declared && same_type(ctype_from_type_info(p->declared), rhs);
+    }
+
+    // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
+    // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
+    void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args) {
+        if (proofs_ == proof_mode::leave) { return; }
+        const size_t n = c->arguments.size();
+        const function_decl* fn = nullptr;
+        if (stamping() && !has_includes_ && ov && ov->size() == 1) {
+            fn = (*ov)[0];
+            auto [lo, hi] = arity_range(fn);
+            bool ok = fn->body && !fn->is_coroutine && lo == n && hi == n && args.size() == n;
+            for (const auto& p : fn->parameters) { if (p.is_reference) { ok = false; } }
+            if (!ok) { fn = nullptr; }
+        }
+        if (!fn) {
+            c->static_arg_proofs.clear();
+            c->proven_callee_body = nullptr;
+            return;
+        }
+        c->static_arg_proofs.assign(n, proof_none);
+        for (size_t i = 0; i < n; ++i) {
+            const parameter& p = fn->parameters[i];
+            const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
+            if (untyped || same_type(ctype_from_type_info(p.type.get()), args[i])) {
+                c->static_arg_proofs[i] = proof_same_type;
+                ++counts_.args;
+            }
+        }
+        c->proven_callee_body = fn->body.get();
+        ++counts_.calls;
     }
 
     // -------------------------------------------------------------- assignability
@@ -918,8 +1093,10 @@ private:
                 ctype l = infer(b->left.get());
                 ctype r = infer(b->right.get());
                 if (b->op.type == token_type::left_bracket) {
+                    stamp(b->static_operand_class, operand_class_unknown, operand_class_unknown);
                     return {};   // subscript: element types stay lenient
                 }
+                stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
                 return binary_result(l, b->op.type, r);
             }
             case node_type::unary_expr: {
@@ -970,7 +1147,11 @@ private:
                 infer(t->condition.get());
                 ctype a = infer(t->then_expression.get());
                 ctype b = infer(t->else_expression.get());
-                if (a.kind == b.kind && a.cls == b.cls) { return a; }
+                if (a.kind == b.kind && a.cls == b.cls) {
+                    if (a.ti != b.ti) { a.ti = nullptr; }   // two spellings (value vs handle) are not one certain type
+                    a.tentative = a.tentative || b.tentative;
+                    return a;
+                }
                 if (!a.is_unknown() && !b.is_unknown()) {
                     last_mixed_ternary_ = {e, a, b};
                 }
@@ -1009,6 +1190,13 @@ private:
     }
 
     ctype infer_identifier(identifier_expr* id) {
+        std::optional<field_proof> fp;
+        ctype t = infer_identifier_impl(id, fp);
+        stamp_field(id, fp);
+        return t;
+    }
+
+    ctype infer_identifier_impl(identifier_expr* id, std::optional<field_proof>& fp) {
         size_t scope_index = 0;
         if (var_entry* local = find_local(id->name, &scope_index)) {
             if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
@@ -1031,6 +1219,7 @@ private:
                 // both is flow-order-ambiguous to a static walk (a global declared later
                 // in the source steals the read at call time) - stay unknown.
                 if (global_tier_name(id->name)) { return {}; }
+                if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
                 if (hit.methods) { return ctype::make(ctype::function_k); }
                 if (hit.field && hit.field->type) { return ctype_from_type_info(hit.field->type.get()); }
                 return {};
@@ -1053,8 +1242,20 @@ private:
         return {};
     }
 
-    ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr) {
+    ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr,
+                       ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
+                       std::optional<field_proof>* proof_out = nullptr) {
+        std::optional<field_proof> fp;
+        ctype t = infer_member_impl(m, writing, typed_field_out, recv_out, hit_out, fp);
+        stamp_field(m, fp);
+        if (proof_out) { *proof_out = fp; }
+        return t;
+    }
+
+    ctype infer_member_impl(member_expr* m, bool writing, const variable_decl** typed_field_out,
+                            ctype* recv_out, member_hit* hit_out, std::optional<field_proof>& fp) {
         ctype recv = infer(m->object.get());
+        if (recv_out) { *recv_out = recv; }
         if (recv.is_unknown() || recv.kind == ctype::map_k || recv.kind == ctype::array_k ||
             recv.kind == ctype::string_k || recv.kind == ctype::function_k || recv.kind == ctype::null_k ||
             recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||
@@ -1076,8 +1277,13 @@ private:
         bool want_static = (recv.kind == ctype::class_ref_k);
         std::string_view cls = recv.cls;
         member_hit hit = lookup_member(cls, m->member, want_static);
+        if (hit_out) { *hit_out = hit; }
         if (hit.found) {
             if (typed_field_out && hit.field && hit.field->type) { *typed_field_out = hit.field; }
+            if (recv.kind == ctype::object_k && !m->null_safe && !m->is_static &&
+                m->object->get_type() != node_type::super_expr) {
+                fp = resolve_field_proof(cls, m->member, hit);
+            }
             if (hit.methods) { return ctype::make(ctype::function_k); }
             if (hit.field && hit.field->type) { return ctype_from_type_info(hit.field->type.get()); }
             return {};
@@ -1100,7 +1306,13 @@ private:
         std::vector<ctype> args;
         args.reserve(c->arguments.size());
         for (auto& a : c->arguments) { args.push_back(infer(a.get())); }
+        const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
+        ctype t = infer_call_impl(c, args, ov);
+        stamp_call_proofs(c, ov, args);
+        return t;
+    }
 
+    ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
         expression* callee = c->callee.get();
         if (callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(callee);
@@ -1115,23 +1327,28 @@ private:
                     // Bare calls prefer the GLOBAL function when one exists (audited
                     // resolution order); flow order decides which one runs - lenient.
                     if (global_tier_name(id->name)) { return {}; }
-                    if (hit.methods) { return check_script_overloads(id->name, *hit.methods, args, c->location).result; }
+                    if (hit.methods) {
+                        ov = hit.methods;
+                        return check_script_overloads(id->name, *hit.methods, args, c->location).result;
+                    }
                     return {};
                 }
             }
             if (auto it = functions_.find(id->name); it != functions_.end()) {
                 note_global_use(id->name);
+                ov = &it->second;
                 return check_script_overloads(id->name, it->second, args, c->location).result;
             }
             if (auto it = classes_.find(id->name); it != classes_.end()) {
                 check_ctor_call(id->name, it->second, args, c->location);
-                return ctype::object(id->name);
+                ov = &it->second.ctors;
+                return object_of(id->name);
             }
             if (enums_.count(id->name)) { return {}; }
             std::string name(id->name);
             if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
             if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
-                return ctype::object(id->name);   // registered class ctor: args lenient
+                return object_of(id->name);   // registered class ctor: args lenient
             }
             if (eng_.has_function(name)) {
                 note_global_use(id->name);
@@ -1152,6 +1369,7 @@ private:
                 member_hit hit = lookup_member(recv.cls, m->member, want_static);
                 if (hit.found) {
                     if (hit.methods) {
+                        ov = hit.methods;
                         return check_script_overloads(m->member, *hit.methods, args, c->location).result;
                     }
                     return {};
@@ -1180,6 +1398,14 @@ private:
     // -------------------------------------------------------------- assignment
 
     ctype infer_assignment(assignment_expr* a) {
+        uint8_t store_proof = proof_none;
+        ctype t = infer_assignment_impl(a, store_proof);
+        stamp(a->static_store_proof, store_proof, proof_none);
+        if (store_proof != proof_none && stamping()) { ++counts_.stores; }
+        return t;
+    }
+
+    ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
         ctype rhs = infer(a->value.get());
         bool compound = (a->op.type != token_type::equal);
         token_type base_op = compound_base_op(a->op.type);
@@ -1187,20 +1413,25 @@ private:
         expression* target = a->target.get();
         if (target->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(target);
+            std::optional<field_proof> fp;
+            auto done = [&](ctype t) { stamp_field(id, fp); return t; };
             size_t scope_index = 0;
             if (var_entry* local = find_local(id->name, &scope_index)) {
                 if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
-                if (local->dynamic) { return rhs; }
+                if (local->dynamic) { return done(rhs); }
                 check_store(rhs, compound, base_op, local->type, local->display,
                             "'" + std::string(id->name) + "'", a->location, local->line, local->column);
-                return local->type;
+                if (!compound && same_type(local->type, rhs)) { store_proof = proof_same_type; }
+                return done(local->type);
             }
             if (class_ctx_) {
                 member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
                 if (hit.found) {
                     // Writes resolve through the global tier before fields too (audited
                     // order) - a name that is both is flow-order-ambiguous: stay lenient.
-                    if (global_tier_name(id->name)) { return rhs; }
+                    if (global_tier_name(id->name)) { return done(rhs); }
+                    if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
+                    if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
                     if (hit.field && hit.field->type) {
                         ctype ft = ctype_from_type_info(hit.field->type.get());
                         if (!ft.is_unknown()) {
@@ -1208,16 +1439,16 @@ private:
                                         "field '" + std::string(id->name) + "'", a->location,
                                         hit.field->location.line, hit.field->location.column);
                         }
-                        return ft;
+                        return done(ft);
                     }
-                    return {};
+                    return done({});
                 }
             }
             std::string name(id->name);
-            if (extra_globals_.count(name)) { note_global_use(id->name); return rhs; }
+            if (extra_globals_.count(name)) { note_global_use(id->name); return done(rhs); }
             if (functions_.count(id->name) || classes_.count(id->name) || enums_.count(id->name) ||
                 namespaces_.count(id->name)) {
-                return rhs;
+                return done(rhs);
             }
             if (eng_.has_variable(name)) {
                 note_global_use(id->name);
@@ -1226,17 +1457,19 @@ private:
                     check_store(rhs, compound, base_op, gt, ctype_name(gt),
                                 "'" + std::string(id->name) + "'", a->location, 0, 0);
                 }
-                return gt;
+                return done(gt);   // engine globals: never proven (S3)
             }
             if (eng_.has_function(name) || engine_knows_name(name) || all_names_.count(id->name)) {
-                return rhs;
+                return done(rhs);
             }
             undeclared(id->location, id->name);
-            return rhs;
+            return done(rhs);
         }
         if (target->get_type() == node_type::member_expr) {
             const variable_decl* typed_field = nullptr;
-            infer_member(static_cast<member_expr*>(target), /*writing=*/true, &typed_field);
+            std::optional<field_proof> fp;
+            infer_member(static_cast<member_expr*>(target), /*writing=*/true, &typed_field, nullptr, nullptr, &fp);
+            if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
             if (typed_field && typed_field->type) {
                 ctype ft = ctype_from_type_info(typed_field->type.get());
                 if (!ft.is_unknown()) {
@@ -1384,12 +1617,20 @@ private:
     }
 
     void check_return(return_stmt* r) {
+        uint8_t proof = proof_none;
+        check_return_impl(r, proof);
+        stamp(r->static_return_proof, proof, proof_none);
+        if (proof != proof_none && stamping()) { ++counts_.returns; }
+    }
+
+    void check_return_impl(return_stmt* r, uint8_t& proof) {
         ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
         if (fn_stack_.empty()) { return; }
         const fn_ctx& fn = fn_stack_.back();
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
         ctype ret = ctype_from_type_info(fn.ret);
         if (ret.is_unknown()) { return; }
+        if (r->value && !r->binds_reference && ret.kind != ctype::null_k && same_type(ret, value)) { proof = proof_same_type; }
         if (ret.kind == ctype::null_k) {
             if (r->value && value.kind != ctype::null_k && !value.is_unknown()) {
                 diag(diag_level::error, r->location, "cannot return a value from '" + std::string(fn.name) +
@@ -1512,13 +1753,22 @@ private:
             }
             warn_shadow("local", decl->name, decl->location);
             scopes_.back().emplace(decl->name, std::move(entry));
+            stamp(decl->static_init_proof, proof_none, proof_none);
             return;
         }
+        uint8_t init_proof = proof_none;
         if (decl->type) {
             entry.declared = decl->type.get();
             entry.display = decl->type->canonical_name();
             entry.type = ctype_from_type_info(decl->type.get());
             entry.dynamic = decl->type->base_type == script_value_type::jai_any_type || is_reference_decl;
+            const bool plain_kind = decl->type->base_type != script_value_type::jai_shared_ptr_type &&
+                                    decl->type->base_type != script_value_type::jai_weak_ptr_type &&
+                                    decl->type->base_type != script_value_type::jai_reference_type &&
+                                    decl->type->base_type != script_value_type::jai_any_type;
+            if (has_init && !entry.dynamic && !is_reference_decl && plain_kind && same_type(entry.type, init)) {
+                init_proof = proof_same_type;
+            }
             if (has_init && !entry.dynamic && !entry.type.is_unknown() && !assignable(init, entry.type)) {
                 diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
                      "' declared '" + entry.display + "' with '" + ctype_name(init) + "'");
@@ -1546,6 +1796,8 @@ private:
             // checker can't see branch order, so it stays dynamic (documented leniency)
             entry.dynamic = true;
         }
+        stamp(decl->static_init_proof, init_proof, proof_none);
+        if (init_proof != proof_none && stamping()) { ++counts_.decls; }
         warn_shadow("local", decl->name, decl->location);
         scopes_.back().emplace(decl->name, std::move(entry));
     }
@@ -1558,14 +1810,17 @@ private:
         fn_ctx ctx{fn->return_type.get(), fn->is_coroutine, fn->name,
                    fn->location.line, fn->location.column};
         ctx.sees_fields = class_ctx_ != nullptr;
+        ctx.is_static_method = fn->is_static;
         // Constructor params shadowing the field they initialize (C(int hp) { this.hp = hp; })
         // is the established idiom - no field-shadow warnings on ctor params.
         bool is_ctor = class_ctx_ && fn->name == class_ctx_name_;
         fn_stack_.push_back(std::move(ctx));
         define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor);
+        fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
             for (const auto& arg : init.arguments) { infer(arg.get()); }
         }
+        fn_stack_.back().in_ctor_initializers = false;
         if (fn->body) {
             for (auto& d : fn->body->declarations) { walk_decl(d.get()); }
         }
@@ -1976,8 +2231,8 @@ void static_checker::collect_names_expr(const expression* e) {
 } // namespace
 
 check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
-                              const std::vector<std::string>* extra_globals) {
-    return static_checker(eng, decls, extra_globals).run();
+                              const std::vector<std::string>* extra_globals, check_options opts) {
+    return static_checker(eng, decls, extra_globals, opts).run();
 }
 
 } // namespace detail

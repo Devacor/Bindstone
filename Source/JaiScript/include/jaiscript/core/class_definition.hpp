@@ -325,6 +325,20 @@ public:
         }
     }
 
+    // Field-shape epoch (type proofs): moves only when a field proof's facts can change - field
+    // set, declared types, resolution chain, access labels, custom accessors. Unlike
+    // method_epoch it does NOT move on an identical reload. Propagates to derived like
+    // bump_method_epoch (same engine-lifetime/no-ABA contract).
+    uint64_t field_shape_epoch() const { return field_shape_epoch_; }
+    void bump_field_shape_epoch() {
+        ++field_shape_epoch_;
+        for (auto& weak_derived : derived_classes_) {
+            if (auto derived = weak_derived.lock()) {
+                derived->bump_field_shape_epoch();
+            }
+        }
+    }
+
     type_info_ptr get_type_info() const { return type_info_; }
 
     void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
@@ -346,6 +360,7 @@ public:
             auto_accessor_ids_.insert(name_id);
         } else {
             auto_accessor_ids_.erase(name_id);
+            bump_field_shape_epoch();   // a custom _get_/_set_ or a field-named method changes the field ladder
         }
         bump_method_epoch();
     }
@@ -531,6 +546,7 @@ public:
         }
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        bump_field_shape_epoch();
         bump_method_epoch();   // method ICs memoize the field-shadow answer per class
     }
 
@@ -542,6 +558,7 @@ public:
         field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
+        bump_field_shape_epoch();
         bump_method_epoch();
     }
 
@@ -569,6 +586,7 @@ public:
             }
         }
         field_declared_types_ = std::move(new_types);
+        if (changed) { bump_field_shape_epoch(); }   // declared type changed => epoch moved (proof guards)
         if (changed && mark_changes) {
             declared_types_dirty_ = true;
         }
@@ -987,6 +1005,7 @@ public:
     }
 
     void set_parent(std::shared_ptr<class_definition> parent) {
+        const bool chain_changed = parent_classes_.size() != (parent ? 1u : 0u) || (parent && parent_classes_[0] != parent);
         parent_classes_.clear();
         if (parent) {
             parent_classes_.push_back(parent);
@@ -998,6 +1017,7 @@ public:
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
         refresh_access_chain_flag();
+        if (chain_changed) { bump_field_shape_epoch(); }
         bump_method_epoch();   // resolution chain changed
     }
 
@@ -1024,12 +1044,14 @@ public:
             has_property_getters_ = true;
         }
         refresh_access_chain_flag();
+        bump_field_shape_epoch();
         bump_method_epoch();   // resolution chain changed
 
         return true;
     }
 
     [[nodiscard]] bool set_parents(const std::vector<std::shared_ptr<class_definition>>& parents) {
+        const bool chain_changed = parent_classes_ != parents;   // every (re)definition rewires; identical reloads must not move the shape epoch
         parent_classes_ = parents;
         field_defaults_cache_valid_ = false;
         field_slots_current_ = false;
@@ -1048,6 +1070,7 @@ public:
             }
         }
         refresh_access_chain_flag();
+        if (chain_changed) { bump_field_shape_epoch(); }
         bump_method_epoch();   // resolution chain changed
 
         return true;
@@ -1105,6 +1128,7 @@ public:
     }
 
     void set_cpp_base_class(std::shared_ptr<class_definition> cpp_base) {
+        if (cpp_base_class_ != cpp_base) { bump_field_shape_epoch(); }
         cpp_base_class_ = cpp_base;
         if (cpp_base && cpp_base->has_property_getters()) {
             has_property_getters_ = true;
@@ -1145,6 +1169,7 @@ public:
 
     void register_property_setter(uint64_t field_id, uint64_t setter_id) {
         property_setter_ids_[field_id] = setter_id;
+        bump_field_shape_epoch();
     }
 
     uint64_t get_property_setter_id(uint64_t field_id) const {
@@ -1296,6 +1321,7 @@ public:
     // class (re)definition and parent wiring, propagated down through derived_classes_,
     // so the common all-public case costs one bool load per member access.
     void set_nonpublic_members(std::unordered_map<uint64_t, access_level> members) {
+        if (nonpublic_members_ != members) { bump_field_shape_epoch(); }   // labels reapply on every (re)definition
         nonpublic_members_ = std::move(members);
         refresh_access_chain_flag();
         bump_method_epoch();   // inline caches stamp a needs-access-check flag at fill
@@ -1548,6 +1574,8 @@ public:
         methods_ = new_methods;
         static_methods_ = new_static_methods;
         bump_method_epoch();   // dispatchers replaced: per-site inline caches must refill
+        bump_field_shape_epoch();
+        if (engine_ref) { engine_ref->note_class_shape_change(); }
 
         recompute_property_getters(new_methods, engine_ref);
 
@@ -1748,6 +1776,8 @@ private:
 
     // See method_epoch(): per-call-site inline-cache validity stamp
     uint64_t method_epoch_ = 1;
+    // See field_shape_epoch(): field-proof validity stamp
+    uint64_t field_shape_epoch_ = 1;
 
     // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_
     // matches method_epoch_. mutable: create_instance is the hot mint path.

@@ -73,16 +73,39 @@ namespace jai {
         explicit static_check_error(const std::string& message) : std::runtime_error(message) {}
     };
 
+    // Stamp counters from one proof pass (engine::last_proof_stats): nodes that received a
+    // proof, by kind. Independent of diagnostics; all zero after a clearing pass.
+    struct proof_stats {
+        uint32_t stores = 0;    // assignment_expr::static_store_proof
+        uint32_t decls = 0;     // variable_decl::static_init_proof
+        uint32_t args = 0;      // call_expr::static_arg_proofs entries == proof_same_type
+        uint32_t returns = 0;   // return_stmt::static_return_proof
+        uint32_t members = 0;   // member_expr / identifier_expr field proofs
+        uint32_t calls = 0;     // call_expr nodes with a proven callee body
+    };
+
     namespace detail {
 
         inline constexpr size_t k_check_diagnostic_cap = 100;
+
+        // One checker walk does two independent jobs: diagnostics (off -> the report stays
+        // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
+        // reset every proof field, leave = never touch them, e.g. the per-call instance-
+        // variable check that must not disturb the cached entry's stamps).
+        struct check_options {
+            bool diagnostics = true;
+            enum class proofs_t : uint8_t { leave, stamp, clear };
+            proofs_t proofs = proofs_t::stamp;
+            proof_stats* stats = nullptr;   // filled by stamp/clear passes when given
+        };
 
         // AST-level static check against `eng`'s current registration surface.
         // extra_globals: names the host defines for this execution (instance variables).
         // Diagnostics come back location-sorted and deduplicated, capped at
         // k_check_diagnostic_cap. Mode-independent — callers decide what to do with it.
         check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
-                                      const std::vector<std::string>* extra_globals = nullptr);
+                                      const std::vector<std::string>* extra_globals = nullptr,
+                                      check_options opts = {});
 
     } // namespace detail
 

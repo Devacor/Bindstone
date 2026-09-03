@@ -5,6 +5,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/vm/disassembler.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <algorithm>
 #include <limits>
 #include <fstream>
 #include <filesystem>
@@ -3830,6 +3831,195 @@ public:
 			)");
 			check_eq(i1, v1, "container-before-index order parity under reassigning overloads");
 			check(i1.rfind("20:", 0) == 0, "read indexed the pre-reassignment array");
+		});
+
+		// ---- parse-time type proofs, vm consumers (docs/type_proofs_design.md section 6) ----
+		test("proof_vm_lanes_equal_with_proofs_on_and_off", [this]() {
+			// Every vm lane (V-S1/S2/S3, V-D1, V-C1, V-R1 in all three return forms, V-M1/M2,
+			// V-I1 plain + fused operand) against a proofs-off twin, three passes: first
+			// execute -> field proofs stamped -> identical-reload hit; plus mismatching
+			// stores that must take the ladder behind a stamped/frozen proof.
+			auto on = vm_engine();
+			auto off = vm_engine();
+			off->type_proofs(false);
+			jai::stdlib::register_all(on);
+			jai::stdlib::register_all(off);
+			auto outcome = [](jai::engine& e, const char* src) -> std::string {
+				try { return "VALUE " + e.execute(src).to_string(); }
+				catch (const std::exception& ex) { return std::string("ERROR ") + ex.what(); }
+			};
+			const char* unit =
+				"class P {\n"
+				"  int hp = 10; float x = 1.5; string tag = \"p\"; bool alive = true; char c = 'a';\n"
+				"  int tick(int d) {\n"
+				"    hp = hp - d; this.hp = this.hp + 1; int local = hp;\n"
+				"    x = x * 2.0; tag = tag + \"!\"; alive = !alive; c = 'b';\n"
+				"    for (int i = 0; i < hp; i = i + 1) { local = local + i; }\n"
+				"    local += hp; return local; }\n"
+				"  int sum(int a, int b) { return a + b; }\n"
+				"  int viaCall(int v) { return sum(v, hp); }\n"
+				"  string label(string s) { string out = s + tag; return out; } }\n"
+				"int helper(int v, string s) { return v + 1; }\n"
+				"P p = P(); int r = p.tick(3); r = r + p.viaCall(2); string t = p.label(\"L\");\n"
+				"int k = helper(r, t); p.hp = k; p.x = 0.5;\n"
+				"to_string(r) + \":\" + to_string(k) + \":\" + to_string(p.hp) + \":\" + type_of(p.x) + \":\" + p.tag + \":\" + to_string(p.alive) + \":\" + to_string(p.c)";
+			const char* use = "r = p.tick(1); p.hp = r; to_string(p.hp) + \":\" + type_of(p.hp) + \":\" + t + \":\" + to_string(p.viaCall(1))";
+			const char* mismatch = "p.hp = 2.5; r = 7.5; to_string(p.hp) + \":\" + type_of(r) + \":\" + to_string(r)";
+			std::string first;
+			for (int pass = 0; pass < 3; ++pass) {
+				const std::string got = outcome(*on, unit);
+				check_eq(outcome(*off, unit), got, "unit pass " + std::to_string(pass));
+				if (pass == 0) { first = got; } else { check_eq(first, got); }
+				check_eq(outcome(*off, use), outcome(*on, use), "use pass " + std::to_string(pass));
+				check_eq(outcome(*off, mismatch), outcome(*on, mismatch), "mismatch pass " + std::to_string(pass));
+			}
+			check(first.rfind("VALUE ", 0) == 0, "the battery runs to a value: " + first);
+
+			// Module pattern: the class unit runs twice BEFORE its first use, so its method
+			// bodies carry field proofs when their chunks first compile (the store flags
+			// freeze with the same_type bits set) and the users' first check sees the
+			// engine class; covers the string/bool slot stores and the object return too.
+			const char* cls =
+				"class Q {\n"
+				"  int f = 10; string tag = \"q\"; bool alive = true;\n"
+				"  int tick(int d) {\n"
+				"    f = f - d; this.f = this.f + 1; int local = f;\n"
+				"    tag = tag + \"!\"; string out = tag; out = out + \"?\";\n"
+				"    bool ok = alive; ok = !ok; alive = ok;\n"
+				"    return sum(local, f); }\n"
+				"  int sum(int a, int b) { return a + b; }\n"
+				"  int get() { return f; }\n"
+				"  Q dup() { Q q = Q(); q.f = f; q.tag = tag; return q; } }";
+			const char* users =
+				"Q q = Q(); int r2 = q.tick(3); Q d = q.dup(); d.f = r2; d.tag = q.tag;\n"
+				"to_string(r2) + \":\" + to_string(q.f) + \":\" + to_string(d.f) + \":\" + d.tag + \":\" + to_string(q.alive) + \":\" + to_string(q.dup().f) + \":\" + to_string(q.get())";
+			const char* users_mismatch = "q.f = 2.5; q.tag = 7; d.tag = q.tag; to_string(q.f) + \":\" + to_string(d.f)";
+			// three: first execute -> stamped then full-path first redefinition -> re-stamped
+			for (int pass = 0; pass < 3; ++pass) {
+				check_eq(outcome(*off, cls), outcome(*on, cls), "cls pass " + std::to_string(pass));
+			}
+			std::string module_first;
+			for (int pass = 0; pass < 3; ++pass) {
+				const std::string got = outcome(*on, users);
+				check_eq(outcome(*off, users), got, "users pass " + std::to_string(pass));
+				if (pass == 0) { module_first = got; } else { check_eq(module_first, got); }
+				check_eq(outcome(*off, users_mismatch), outcome(*on, users_mismatch), "users_mismatch pass " + std::to_string(pass));
+			}
+			check_eq(std::string("VALUE 16:8:16:q!:false:8:8"), module_first);
+		});
+
+		test("proof_carriers_survive_recompile_and_frozen_flags", [this]() {
+			// Instruction-borne proof bits (store_flag_same_type, return bits) freeze at first
+			// compile; the cached chunk is reused across type_proofs toggles and across a
+			// callee retype that makes a frozen same_type store meet a string payload - the
+			// payload guards keep every outcome equal to the never-toggled twins.
+			auto outcome = [](jai::engine& e, const char* src) -> std::string {
+				try { return "VALUE " + e.execute(src).to_string(); }
+				catch (const std::exception& ex) { return std::string("ERROR ") + ex.what(); }
+			};
+			auto off_then_on = vm_engine();
+			off_then_on->type_proofs(false);
+			auto on_then_off = vm_engine();
+			auto ref_off = vm_engine();
+			ref_off->type_proofs(false);
+			auto ref_on = vm_engine();
+			const char* defs = "int f(int n) { int m = n * 2; return m; }\nint g(int a, int b) { return a + b; }\nint x = 0; float y = 1.5;";
+			const char* use = "x = f(3); x = g(x, 4); x = x + 1; y = y * 2.0; x = 2.5; to_string(x) + \":\" + type_of(x) + \":\" + to_string(y)";
+			const char* retype = "string f(int n) { return \"s\"; }";
+			for (auto* e : {off_then_on.get(), on_then_off.get(), ref_off.get(), ref_on.get()}) {
+				jai::stdlib::register_all(*e);
+				check(outcome(*e, defs).rfind("VALUE", 0) == 0, "defs run clean");
+			}
+			const std::string expect = outcome(*ref_off, use);
+			check(expect.rfind("VALUE ", 0) == 0, expect);
+			check_eq(expect, outcome(*ref_on, use));
+			check_eq(expect, outcome(*off_then_on, use));   // chunk compiled without proof bits
+			check_eq(expect, outcome(*on_then_off, use));   // chunk compiled with proof bits
+			off_then_on->type_proofs(true);
+			on_then_off->type_proofs(false);
+			for (int pass = 0; pass < 2; ++pass) {
+				check_eq(outcome(*ref_off, use), outcome(*off_then_on, use), "off->on reuse");
+				check_eq(outcome(*ref_on, use), outcome(*on_then_off, use), "on->off reuse");
+			}
+			for (auto* e : {off_then_on.get(), on_then_off.get(), ref_off.get(), ref_on.get()}) {
+				(void)outcome(*e, retype);
+			}
+			for (int pass = 0; pass < 2; ++pass) {
+				const std::string after = outcome(*ref_off, use);
+				check_eq(after, outcome(*ref_on, use), "retype twin");
+				check_eq(after, outcome(*off_then_on, use), "retype off->on");
+				check_eq(after, outcome(*on_then_off, use), "retype on->off");
+			}
+		});
+
+		test("proof_ident_nodes_and_call_node_fill", [this]() {
+			// Carrier fill: env-resolved identifiers pin their node per ip (top level, and a
+			// global read inside a body - as a plain load AND as a fused operand); slotted
+			// params/locals leave none; call sites pin their call_expr.
+			auto e = vm_engine();
+			auto* symbolizer = e->get_symbolizer();
+			std::string script = "var g = 1; int f(int n) { int m = n + g; return h(m, g); } g = g + 1; f(g);";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			jai::vm::vm_compiler compiler(symbolizer);
+			auto program = compiler.compile_program(parse_result.value());
+			check_true(program != nullptr);
+			auto name_of = [](const jai::vm::chunk& c, uint32_t n) -> std::string {
+				if (n == jai::vm::k_invalid_u32) return "";
+				const auto* node = c.nodes[n].get();
+				return node->get_type() == node_type::identifier_expr
+					? std::string(static_cast<const identifier_expr*>(node)->name) : std::string("<not-ident>");
+			};
+			auto table_names = [&](const jai::vm::chunk& c) {
+				std::vector<std::string> out;
+				for (uint32_t n : c.ident_nodes) { if (n != jai::vm::k_invalid_u32) out.push_back(name_of(c, n)); }
+				return out;
+			};
+			auto operand_names = [&](const jai::vm::chunk& c) {
+				std::vector<std::string> out;
+				for (const auto& fp : c.fused_binary_protos) {
+					if (fp.left.ident_node != jai::vm::k_invalid_u32) out.push_back(name_of(c, fp.left.ident_node));
+					if (fp.right.ident_node != jai::vm::k_invalid_u32) out.push_back(name_of(c, fp.right.ident_node));
+				}
+				return out;
+			};
+			auto count = [](const std::vector<std::string>& v, const char* s) {
+				return std::count(v.begin(), v.end(), std::string(s));
+			};
+			auto pinned_call = [](const jai::vm::chunk& c) {
+				bool any = false;
+				for (const auto& site : c.call_sites) {
+					if (site.call_node == jai::vm::k_invalid_u32) continue;
+					if (c.nodes[site.call_node]->get_type() != node_type::call_expr) return false;
+					any = true;
+				}
+				return any;
+			};
+			check_true(program->ident_nodes.size() <= program->code.size(), "table never outgrows code");
+			const auto top = table_names(*program);
+			check_true(count(top, "g") >= 2, "top-level store + arg load of g pinned");
+			check_true(count(top, "<not-ident>") == 0);
+			check_true(pinned_call(*program), "top-level call site pins its call_expr");
+
+			std::shared_ptr<function_decl> fn;
+			for (const auto& d : parse_result.value()) {
+				if (d->get_type() == node_type::function_decl) { fn = std::static_pointer_cast<function_decl>(d); }
+			}
+			check_true(fn != nullptr, "function_decl found");
+			auto body = compiler.compile_callable(fn->name, fn->parameters, fn->body, fn->local_count);
+			check_true(body != nullptr);
+			const auto body_table = table_names(*body);
+			const auto body_operands = operand_names(*body);
+			check_true(count(body_table, "g") == 1, "plain load of the global inside the body pinned");
+			check_true(count(body_operands, "g") == 1, "fused operand read of the global pinned");
+			check_true(count(body_table, "n") == 0 && count(body_table, "m") == 0 &&
+			           count(body_operands, "n") == 0 && count(body_operands, "m") == 0,
+			           "slotted param/local leave no entry");
+			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
 	}
 };

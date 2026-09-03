@@ -215,6 +215,19 @@ namespace jai {
         // Diagnostics from the most recent checked execute()/jaibite path (warn/strict).
         const check_report& last_check_diagnostics() const;
 
+        // === PARSE-TIME TYPE PROOFS (docs/type_proofs_design.md) ===
+        // On by default. The checker's proof pass runs in EVERY check mode (one walk per
+        // unique source per surface epoch, cached beside the parse; diagnostics are still
+        // collected only under warn/strict) and stamps same-type / field proofs onto AST
+        // nodes; both backends consume them behind total runtime guards, so results never
+        // depend on this switch. Off: fresh entries stay unproven and already-stamped cached
+        // entries are stripped at their next execute (jaibites likewise at their next
+        // execute). Proofs are never serialized - a loaded jaibite re-derives them.
+        void type_proofs(bool on);
+        bool type_proofs() const;
+        // Stamp counters from the most recent proof pass (tests assert proofs happened).
+        const proof_stats& last_proof_stats() const;
+
         // Host-function surface for the static checker: per-overload arity (SIZE_MAX =
         // variadic) + C++ parameter signature (empty = untyped legacy binding). Returns
         // false when the name has no registered C++ function entry.
@@ -778,6 +791,11 @@ namespace jai {
         // per-class epochs cannot see containment.
         uint64_t class_definition_epoch() const;
         void bump_class_definition_epoch();
+
+        // Script-class SHAPE change (first definition, non-identical redefinition): the static
+        // checker's surface moved, cached entries re-check (and re-stamp proofs) at their next
+        // execute. Identical reloads must NOT call this.
+        void note_class_shape_change();
 
         // === TYPE INFO INTERNING ===
         // Get or create type_info for basic types (fast O(1) access for common types)

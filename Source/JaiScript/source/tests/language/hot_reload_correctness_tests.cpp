@@ -3,6 +3,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -478,6 +479,240 @@ public:
             check_eq((int64_t)4, eng->execute("at.g(2);").as_int());
             check_eq((int64_t)4, eng->execute("at.g(2);").as_int());     // hot on int
             check_eq((int64_t)4, eng->execute("at.g(2.4);").as_int());   // float converts, same site
+        });
+
+        // ---- parse-time type proofs across reloads (docs/type_proofs_design.md ruling 2) ----
+        // Field proofs armed by three executes (first execute -> stamped -> identical-reload
+        // hit) must miss safely once a reload changes the field's facts: every step compares a
+        // type_proofs(false) twin on the same backend, never a literal alone.
+        struct proof_twins { std::shared_ptr<engine> on, off; };
+        auto make_twins = []() {
+            proof_twins t{make_engine(), make_engine()};
+            t.off->type_proofs(false);
+            jai::stdlib::register_all(t.on);
+            jai::stdlib::register_all(t.off);
+            return t;
+        };
+        auto outcome = [](engine& e, const std::string& src) -> std::string {
+            try { return "VALUE " + e.execute(src).to_string(); }
+            catch (const std::exception& ex) { return std::string("ERROR ") + ex.what(); }
+        };
+        auto step = [this, outcome](proof_twins& t, const std::string& src, const std::string& what) {
+            const std::string on = outcome(*t.on, src);
+            check_eq(outcome(*t.off, src), on, what);
+            return on;
+        };
+        auto arm = [step](proof_twins& t, const std::string& unit, const std::string& use) {
+            for (int pass = 0; pass < 3; ++pass) {
+                step(t, unit, "arming unit pass " + std::to_string(pass));
+                step(t, use, "arming use pass " + std::to_string(pass));
+            }
+        };
+        const std::string show_int = "  string show() { return to_string(f) + \":\" + to_string(this.f) + \":\" + type_of(f); } }";
+        const std::string v1_int =
+            "class R { int f = 1;\n"
+            "  int set(int v) { f = v; this.f = v; return f; }\n" + show_int + "\n"
+            "R r = R(); r.set(41); r.f = 42; r.show()";
+        const std::string use_int = "r.set(7); r.f = 9; r.show()";
+        const std::string v2_string =
+            "class R { string f = \"z\";\n"
+            "  int set(int v) { f = v; this.f = v; return v; }\n"
+            "  string show() { return f + \":\" + this.f + \":\" + type_of(f); } }";
+        const std::string v2_var =
+            "class R { var f = 0;\n"
+            "  var set(var v) { f = v; this.f = v; return f; }\n" + show_int;
+        const std::string v2_private =
+            "class R {\n private: int f = 1;\n public:\n"
+            "  int set(int v) { f = v; this.f = v; return f; }\n" + show_int;
+
+        test("proof_field_retype_int_to_string_assigns", [this, step, arm, make_twins, v1_int, use_int, v2_string]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, v2_string, "reload int -> string");
+            check_eq(std::string("VALUE 9:9:string"), step(t, "r.show()", "live value converted"));
+            check_eq(std::string("VALUE 7:7:string"), step(t, "r.set(7); r.show()", "int stores convert through the ladder"));
+            check_eq(std::string("VALUE 9:9:string"), step(t, use_int, "the armed use source converts"));
+            check_eq(std::string("VALUE 5:5:string"), step(t, "r.f = 5; r.show()", "member store converts"));
+            step(t, v1_int, "the armed unit reloads the class back to int");
+            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "use after reloading back"));
+        });
+
+        test("proof_field_retype_float_to_int_truncates", [this, step, arm, make_twins]() {
+            auto t = make_twins();
+            const std::string v1 =
+                "class R { float f = 1.5;\n"
+                "  float set(float v) { f = v; this.f = v; return f; }\n"
+                "  string show() { return to_string(f) + \":\" + to_string(this.f) + \":\" + type_of(f); } }\n"
+                "R r = R(); r.set(4.5); r.f = 6.75; r.show()";
+            const std::string use = "r.set(7.5); r.f = 9.25; r.show()";
+            arm(t, v1, use);
+            step(t, "class R { int f = 0;\n"
+                    "  int set(float v) { f = v; this.f = v; return f; }\n"
+                    "  string show() { return to_string(f) + \":\" + to_string(this.f) + \":\" + type_of(f); } }", "reload float -> int");
+            check_eq(std::string("VALUE 9:9:int"), step(t, "r.show()", "live value truncated"));
+            check_eq(std::string("VALUE 7:7:int"), step(t, "r.set(7.5); r.show()", "float stores truncate through the ladder"));
+            check_eq(std::string("VALUE 9:9:int"), step(t, use, "the armed use source truncates"));
+        });
+
+        test("proof_field_retype_string_to_int_resets_default", [this, step, arm, make_twins]() {
+            auto t = make_twins();
+            const std::string v1 =
+                "class R { string f = \"a\";\n"
+                "  string set(string v) { f = v; this.f = v; return f; }\n"
+                "  string show() { return f + \":\" + this.f + \":\" + type_of(f); } }\n"
+                "R r = R(); r.set(\"x\"); r.f = \"hello\"; r.show()";
+            const std::string use = "r.set(\"k\"); r.f = \"hello\"; r.show()";
+            arm(t, v1, use);
+            step(t, "class R { int f = 5;\n"
+                    "  int set(int v) { f = v; this.f = v; return f; }\n"
+                    "  string show() { return to_string(f) + \":\" + to_string(this.f) + \":\" + type_of(f); } }", "reload string -> int");
+            check_eq(std::string("VALUE 5:5:int"), step(t, "r.show()", "unconvertible value adopts the new default"));
+            const std::string armed = step(t, use, "the armed use pushes strings into the int field");
+            check(armed.rfind("ERROR", 0) == 0, "raises identically on both twins: " + armed);
+            check_eq(std::string("VALUE 9:9:int"), step(t, "r.set(9); r.show()", "int stores land"));
+            const std::string bad = step(t, "r.f = \"nope\"; r.show()", "string into the retyped int field");
+            check(bad.rfind("ERROR", 0) == 0, "raises identically on both twins: " + bad);
+        });
+
+        test("proof_field_retype_int_to_var_accepts_anything", [this, step, arm, make_twins, v1_int, use_int, v2_var]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, v2_var, "reload int -> var");
+            check_eq(std::string("VALUE 9:9:int"), step(t, "r.show()", "value kept"));
+            check_eq(std::string("VALUE s:s:string"), step(t, "r.set(\"s\"); r.show()", "var field takes a string"));
+            check_eq(std::string("VALUE 2.500000:2.500000:float"), step(t, "r.f = 2.5; r.show()", "var field takes a float"));
+            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
+        });
+
+        test("proof_field_removed_then_read_errors_like_unproven", [this, step, arm, make_twins, v1_int, use_int]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, "class R { int g = 0; int set(int v) { g = v; return g; } string show() { return to_string(g); } }", "reload drops f");
+            const std::string read = step(t, "r.f", "removed field read");
+            check(read.rfind("ERROR", 0) == 0, "removed field read raises identically: " + read);
+            step(t, "r.f = 3; r.show()", "removed field write");
+            step(t, use_int, "the armed use source against the shrunken class");
+            check_eq(std::string("VALUE 9"), step(t, "r.set(9); r.show()", "surviving method works"));
+            step(t, "class R { int g = 0; int set(int v) { f = v; return g; } string show() { return to_string(g); } }", "reload keeps a body naming the dropped field");
+            step(t, "r.set(4); r.show()", "bare write to the dropped field");
+        });
+
+        test("proof_field_gains_custom_getter_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            // established contract (script_class_tests): a same-class _get_ never shadows a
+            // declared field; the reload still moves the shape epoch, so the armed proofs miss
+            // and the ladder answers the same way on both twins
+            step(t, "class R { int f = 1;\n  int _get_f() { return f * 10; }\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload adds _get_f");
+            check_eq(std::string("VALUE 9"), step(t, "to_string(r.f)", "declared field wins over the reload's getter"));
+            check_eq(std::string("VALUE 9:9:int"), step(t, "r.show()", "bare reads"));
+            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
+        });
+
+        test("proof_field_gains_custom_setter_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, "class R { int f = 1; int log = 0;\n  void _set_f(int v) { log = log + 1; }\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload adds _set_f");
+            check_eq(std::string("VALUE 3:0"), step(t, "r.f = 3; to_string(r.f) + \":\" + to_string(r.log)", "declared field store stays raw"));
+            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
+            check_eq(std::string("VALUE 0"), step(t, "to_string(r.log)", "the setter never fired"));
+        });
+
+        test("proof_field_access_label_change_on_reload", [this, step, arm, make_twins, v1_int, use_int, v2_private]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, v2_private, "reload makes f private");
+            const std::string denied = step(t, "r.f", "private field read from outside");
+            check(denied.rfind("ERROR", 0) == 0, "access error identical on both twins: " + denied);
+            const std::string denied_write = step(t, "r.f = 3", "private field write from outside");
+            check(denied_write.rfind("ERROR", 0) == 0, "access error identical on both twins: " + denied_write);
+            check_eq(std::string("VALUE 6:6:int"), step(t, "r.set(6); r.show()", "methods still reach the field"));
+            const std::string armed = step(t, use_int, "the armed use source hits the access wall");
+            check(armed.rfind("ERROR", 0) == 0, "armed member store denied identically: " + armed);
+        });
+
+        test("proof_base_reload_invalidates_derived_proofs", [this, step, arm, make_twins]() {
+            auto t = make_twins();
+            const std::string v1 =
+                "class B { int bv = 1; }\n"
+                "class D : B { int dv = 2;\n"
+                "  int set(int v) { bv = v; this.bv = v; dv = v; return dv; }\n"
+                "  string show() { return to_string(bv) + \":\" + to_string(this.bv) + \":\" + to_string(dv) + \":\" + type_of(bv); } }\n"
+                "D d = D(); d.set(5); d.show()";
+            const std::string use = "d.set(7); d.bv = 8; d.show()";
+            arm(t, v1, use);
+            step(t, "class B { string bv = \"s\"; int extra = 3; }", "base reload retypes bv and gains a field");
+            check_eq(std::string("VALUE 8:8:7:string"), step(t, "d.show()", "inherited value converted on the derived instance"));
+            check_eq(std::string("VALUE 8:8:7:string"), step(t, use, "armed derived stores convert"));
+            check_eq(std::string("VALUE 3"), step(t, "to_string(d.extra)", "base gained a field"));
+            const std::string as_int = step(t, "class E : B { int get() { return bv; } } E e = E(); e.get()", "a derived body returning the string field as int");
+            check(as_int.rfind("ERROR", 0) == 0, "raises identically on both twins: " + as_int);
+            step(t, "class B { int bv = 1; }", "base back to int");
+            check_eq(std::string("VALUE 1"), step(t, "to_string(e.get())", "unconvertible string adopts the int default"));
+            check_eq(std::string("VALUE 8:8:7:int"), step(t, use, "armed derived stores enforce int again"));
+        });
+
+        test("proof_class_gains_base_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, "class Base0 { int z = 9; }\nclass R : Base0 { int f = 1;\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload gives R a base");
+            step(t, "r.show()", "existing instance under the new chain");
+            step(t, "to_string(r.z)", "inherited field on the migrated instance");
+            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
+            check_eq(std::string("VALUE 3:3:int"), step(t, "R n = R(); n.set(2); n.f = 3; n.show()", "fresh instance"));
+        });
+
+        test("proof_class_becomes_open_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
+            // a C++ base makes the chain open to the proof pass; instances armed under the
+            // closed class keep answering like the twin
+            auto t = make_twins();
+            for (auto* e : {t.on.get(), t.off.get()}) {
+                dynamic_binder<ReloadCppBase>(*e, "ReloadCppBase")
+                    .constructor<int>()
+                    .method("payload_value", &ReloadCppBase::payload_value)
+                    .build();
+            }
+            arm(t, v1_int, use_int);
+            step(t, "class R : ReloadCppBase { int f = 1; R() : super(0) {}\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload gives R a C++ base");
+            step(t, "r.show()", "pre-reload instance under the hybrid class");
+            step(t, use_int, "the armed use source under the hybrid class");
+            check_eq(std::string("VALUE 3:3:int"), step(t, "R h = R(); h.set(2); h.f = 3; h.show()", "fresh hybrid instance"));
+            check_eq(std::string("VALUE 5:5:int"), step(t, "h.set(4); h.f = 5; h.show()", "hybrid stores"));
+        });
+
+        test("proof_same_source_reexecute_vm_chunk_reuse", [this, step, arm, make_twins, v1_int, use_int, v2_string, v2_var, v2_private]() {
+            // ONE use string executed again and again (the vm reuses its compiled chunk)
+            // while the class reloads underneath it
+            auto t = make_twins();
+            arm(t, v1_int, use_int);
+            step(t, v2_string, "reload -> string");
+            for (int pass = 0; pass < 3; ++pass) { check_eq(std::string("VALUE 9:9:string"), step(t, use_int, "reused use after the string retype " + std::to_string(pass))); }
+            step(t, v1_int, "reload -> int");
+            for (int pass = 0; pass < 3; ++pass) { check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "reused use after reloading back " + std::to_string(pass))); }
+            step(t, v2_var, "reload -> var");
+            for (int pass = 0; pass < 2; ++pass) { check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "reused use after the var retype " + std::to_string(pass))); }
+            step(t, v2_private, "reload -> private");
+            for (int pass = 0; pass < 2; ++pass) {
+                const std::string denied = step(t, use_int, "reused use against the access wall " + std::to_string(pass));
+                check(denied.rfind("ERROR", 0) == 0, "denied identically: " + denied);
+            }
+        });
+
+        test("proof_extend_reclass_misses", [this, step, arm, make_twins]() {
+            // extend(obj, Class) re-classes the instance in place: the class pointer guard
+            // misses and the ladder resolves against the new class on both twins
+            auto t = make_twins();
+            const std::string v1 =
+                "class Pt { int a = 1;\n"
+                "  int set(int v) { a = v; this.a = v; return a; }\n"
+                "  string show() { return to_string(a) + \":\" + to_string(this.a); } }\n"
+                "class Pt3 : Pt { int b = 2; Pt3() : super() {} }\n"
+                "Pt p = Pt(); p.set(5); p.show()";
+            const std::string use = "p.set(6); p.a = 7; p.show()";
+            arm(t, v1, use);
+            step(t, "extend(p, Pt3); p.show() + \":\" + to_string(p.b)", "re-classed in place");
+            check_eq(std::string("VALUE 7:7"), step(t, use, "the armed use source on the re-classed receiver"));
+            step(t, "p.b = 9; p.set(1); p.show() + \":\" + to_string(p.b)", "stores after the re-class");
         });
     }
 };

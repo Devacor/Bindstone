@@ -44,7 +44,7 @@ namespace jai::vm {
         op_loop_back,       // a=target; execution-budget check on the back edge
 
         op_call,            // a=argc, b=call site index; pops args+callee, pushes result
-        op_return,          // a=has value (pops it)
+        op_return,          // a=has value (pops it), b=return_stmt::static_return_proof
         op_implicit_return, // pops value into the program result (deref'd)
 
         op_scope_push,      // push a child environment
@@ -60,7 +60,7 @@ namespace jai::vm {
         op_null_guard,      // a=target; if top derefs to null, replace top with null and jump
         op_get_member,      // a=node index (member_expr); pops object, pushes member/bound method
         op_get_static,      // a=node index (member_expr with ::); pushes static member
-        op_set_member,      // a=node index; stack [value, object] -> pushes value
+        op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value
         op_member_compound, // a=node index, c=compound kind; stack [current, rhs, object] -> pushes result
         op_call_method,     // a=argc, b=call site (member_node/receiver_symbol); stack [object, args...]
@@ -97,7 +97,7 @@ namespace jai::vm {
 
         op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
                             // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)
-        op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
+        op_return_binary,   // a=token_type, b=operand shape, c=static_return_proof: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
         op_probe_callee,    // a=site index, b=argc: resolve the identifier callee at the
@@ -152,6 +152,8 @@ namespace jai::vm {
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
     inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
                                                          // (locals/captures/member scope all skipped)
+    inline constexpr uint32_t load_flag_return_proven = 4; // op_return_ident only: return_stmt::static_return_proof
+                                                         // (frozen at compile; return_with_result's payload guard keeps it sound)
 
     // op_store c flags
     inline constexpr uint32_t store_flag_rhs_lvalue = 1; // RHS was identifier/member/subscript
@@ -164,6 +166,9 @@ namespace jai::vm {
                                                          // exec_store may skip type enforcement after
                                                          // its runtime type-tag guard confirms
     inline constexpr uint32_t store_flag_global_only = 16; // ::name store target (global env only)
+    inline constexpr uint32_t store_flag_same_type = 32; // assignment_expr::static_store_proof == proof_same_type
+                                                         // (frozen at compile; exec skips enforcement only behind
+                                                         // detail::same_type_payload, so a stale bit costs the skip)
 
     // op_compound_store c layout: low 3 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0x7;

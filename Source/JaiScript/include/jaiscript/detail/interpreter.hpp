@@ -124,6 +124,7 @@ namespace jai {
         std::vector<call_frame> saved_call_stack;
         std::optional<script_value> saved_return_value;
         bool saved_has_return = false;
+        bool saved_return_proven = false;
         // The yield-point member scope rides the suspension exactly like the env
         // chain (call_function's yield path skips cleanup, so the ordinary
         // save/restore never runs for a suspending body).
@@ -682,6 +683,9 @@ namespace jai {
         // Return value storage for global scope returns
         std::optional<script_value> returnValue_;  // Use optional to avoid needing default constructor
         bool hasReturnValue_ = false;
+        // The pending return came from a `return` stamped proof_same_type (call_function's
+        // epilogue may skip the identity conversion behind detail::same_type_payload)
+        bool return_proven_ = false;
 
         // Control flow flags (for break/continue without exception overhead)
         bool hasBreakRequest_ = false;
@@ -1211,6 +1215,7 @@ namespace jai {
             hasYieldRequest_ = false;
             returnValue_.reset();
             hasReturnValue_ = false;
+            return_proven_ = false;
             pending_call_ctx_ = nullptr;
             external_ctx_stack_.clear();
             execution_budget(budget);

@@ -634,6 +634,7 @@ struct engine::implementation {
         bool checked = false;
         uint64_t checked_epoch = 0;
         check_report check_result;
+        uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
     };
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
@@ -664,14 +665,43 @@ struct engine::implementation {
     check_mode static_check_mode_ = check_mode::off;
     check_report last_check_;
     uint64_t check_surface_epoch_ = 0;
+    // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
+    bool type_proofs_ = true;
+    proof_stats last_proof_stats_;
 
-    const check_report& checked_report(engine& self, script_cache_entry& entry) {
-        if (!entry.checked || entry.checked_epoch != check_surface_epoch_) {
-            entry.check_result = detail::run_static_check(self, entry.declarations, nullptr);
-            entry.checked = true;
-            entry.checked_epoch = check_surface_epoch_;
+    // The ONE cached checker entry point, mode-independent: diagnostics when wanted (and
+    // stale), proofs whenever the entry's stamps disagree with the switch/surface epoch
+    // (stamp on, clear off). A trusted jaibite entry (checked, epoch current) never
+    // re-collects diagnostics here; its proofs still stamp.
+    const check_report& checked_report(engine& self, script_cache_entry& entry, bool want_diagnostics) {
+        const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
+        const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
+        const bool need_proofs = entry.proof_epoch != want_proof_epoch;
+        if (need_check || need_proofs) {
+            detail::check_options o;
+            o.diagnostics = need_check;
+            o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+            o.stats = &last_proof_stats_;
+            check_report r = detail::run_static_check(self, entry.declarations, nullptr, o);
+            if (need_check) {
+                entry.check_result = std::move(r);
+                entry.checked = true;
+                entry.checked_epoch = check_surface_epoch_;
+            }
+            entry.proof_epoch = want_proof_epoch;
         }
         return entry.check_result;
+    }
+
+    // Per-call check with host instance variables: diagnostics only, never touches the
+    // entry's stamps (proofs_t::leave).
+    check_report check_with_instance_vars(engine& self, const script_cache_entry& entry, const instance_variables& instanceVars) {
+        std::vector<std::string> extra;
+        extra.reserve(instanceVars.size());
+        for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
+        detail::check_options o;
+        o.proofs = detail::check_options::proofs_t::leave;
+        return detail::run_static_check(self, entry.declarations, &extra, o);
     }
 
     // The one cache-hit execution tail (execute_file fast lane + the literal lane):
@@ -681,14 +711,12 @@ struct engine::implementation {
         has_executed_ = true;
         self.backend()->prepare_for_execution();
         entry.last_used = ++script_cache_clock;
+        const check_report& rep = checked_report(self, entry, static_check_mode_ != check_mode::off);
         if (static_check_mode_ != check_mode::off) {
             if (instanceVars.empty()) {
-                last_check_ = checked_report(self, entry);
+                last_check_ = rep;
             } else {
-                std::vector<std::string> extra;
-                extra.reserve(instanceVars.size());
-                for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
-                last_check_ = detail::run_static_check(self, entry.declarations, &extra);
+                last_check_ = check_with_instance_vars(self, entry, instanceVars);
             }
             if (static_check_mode_ == check_mode::strict && last_check_.has_errors()) {
                 throw static_check_error("static check failed:\n" + last_check_.format(std::string(source)));
@@ -1468,16 +1496,15 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
+        // Runs in every mode (the proof pass rides it); diagnostics surface under warn/strict.
+        const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
         if (impl->static_check_mode_ != check_mode::off) {
             if (instanceVars.empty()) {
-                impl->last_check_ = impl->checked_report(*this, *cached);
+                impl->last_check_ = rep;
             } else {
                 // host-supplied instance variables are per-call: check fresh with those
                 // names defined instead of caching a result that depends on them
-                std::vector<std::string> extra;
-                extra.reserve(instanceVars.size());
-                for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
-                impl->last_check_ = detail::run_static_check(*this, cached->declarations, &extra);
+                impl->last_check_ = impl->check_with_instance_vars(*this, *cached, instanceVars);
             }
             if (impl->static_check_mode_ == check_mode::strict && impl->last_check_.has_errors()) {
                 throw static_check_error("static check failed:\n" + impl->last_check_.format(scriptContent));
@@ -1555,20 +1582,33 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
         throw parse_error(format_error(parse_result));
     }
     jai::jaibite bite(weak_from_this(), std::move(parse_result.value()));
-    if (impl->static_check_mode_ != check_mode::off) {
-        check_bite(bite, &scriptContent);
-    }
+    check_bite(bite, &scriptContent);
     return bite;
 }
 
-// Static-check a bite once and gate under strict. Source is only available at
-// creation time (loaded bites format their listing without snippets).
+// Static-check a bite once (warn/strict only - a bite is checked once, diagnostics never
+// re-trigger) and gate under strict; the proof pass re-stamps whenever the switch or the
+// surface epoch moved, in every mode. Source is only available at creation time (loaded
+// bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
-    if (bite.check_state_ == jaibite::check_state::unchecked) {
-        bite.check_report_ = detail::run_static_check(*this, bite.declarations_, nullptr);
-        bite.check_state_ = bite.check_report_.has_errors()
-            ? jaibite::check_state::flagged : jaibite::check_state::clean;
+    const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
+    const bool need_check = impl->static_check_mode_ != check_mode::off &&
+                            bite.check_state_ == jaibite::check_state::unchecked;
+    const bool need_proofs = bite.proof_epoch_ != want_proof_epoch;
+    if (need_check || need_proofs) {
+        detail::check_options o;
+        o.diagnostics = need_check;
+        o.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+        o.stats = &impl->last_proof_stats_;
+        check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
+        if (need_check) {
+            bite.check_report_ = std::move(r);
+            bite.check_state_ = bite.check_report_.has_errors()
+                ? jaibite::check_state::flagged : jaibite::check_state::clean;
+        }
+        bite.proof_epoch_ = want_proof_epoch;
     }
+    if (impl->static_check_mode_ == check_mode::off) { return; }
     impl->last_check_ = bite.check_report_;
     if (impl->static_check_mode_ == check_mode::strict && bite.check_report_.has_errors()) {
         throw static_check_error("static check failed:\n" +
@@ -1578,9 +1618,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
 
 script_value engine::execute(jai::jaibite& bite) {
     impl->has_executed_ = true;
-    if (impl->static_check_mode_ != check_mode::off) {
-        check_bite(bite, nullptr);   // no-op if already checked at creation/load
-    }
+    check_bite(bite, nullptr);   // diagnostics once (warn/strict); proofs re-stamp on surface moves
     backend()->prepare_for_execution();
     return execute_parsed(bite.declarations_, bite.compiled_, nullptr);
 }
@@ -1638,9 +1676,7 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size) {
     if ((flags & detail::k_jaibite_flag_checked_clean) && !bite.registration_mismatch_) {
         bite.check_state_ = jaibite::check_state::clean;
     }
-    if (impl->static_check_mode_ != check_mode::off) {
-        check_bite(bite, nullptr);
-    }
+    check_bite(bite, nullptr);
     return bite;
 }
 
@@ -1650,6 +1686,18 @@ void engine::static_checking(check_mode mode) {
 
 check_mode engine::static_checking() const {
     return impl->static_check_mode_;
+}
+
+void engine::type_proofs(bool on) {
+    impl->type_proofs_ = on;   // the next checked_report/check_bite re-runs with stamp or clear
+}
+
+bool engine::type_proofs() const {
+    return impl->type_proofs_;
+}
+
+const proof_stats& engine::last_proof_stats() const {
+    return impl->last_proof_stats_;
 }
 
 const check_report& engine::last_check_diagnostics() const {
@@ -1668,7 +1716,7 @@ check_report engine::check(const std::string& scriptContent) {
         }
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
     }
-    return impl->checked_report(*this, *cached);
+    return impl->checked_report(*this, *cached, true);
 }
 
 bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
@@ -2573,6 +2621,10 @@ uint64_t engine::class_definition_epoch() const {
 
 void engine::bump_class_definition_epoch() {
     ++impl->class_definition_epoch_;
+}
+
+void engine::note_class_shape_change() {
+    ++impl->check_surface_epoch_;
 }
 
 bool engine::throw_on_overflow() const {

@@ -273,6 +273,10 @@ engine stays usable", not by `check_throws`.
 - Coroutines: `coroutine`/`yield`, drivable by range-`for`.
 - stdlib: `print`, `to_string`, `type_of`, `to_json`/`from_json` (full-precision floats via
   `std::to_chars`).
+- **Parse-time type proofs** (`docs/static_checking.md` "Proofs"): the static checker's walk runs
+  in every mode and stamps same-type/field proofs on AST nodes; both backends consume them behind
+  total runtime guards (`detail/type_proofs.hpp`), so `engine::type_proofs(false)` is
+  observationally identical (gates: `proof_differential_gate`, `jaiscript_fuzz --no-proofs`).
 
 ```jaiscript
 class Cat { int a = 0; Cat(int v) { a = v; } }
@@ -305,7 +309,9 @@ BENCHMARKS, green on interpreter AND vm. VM-perf branch highlights: in-loop VM c
 `f(arr[i])`) via the shared kernel `detail/ref_lvalue.hpp` (verbatim in both backends), and
 the thin-value fold — `script_value` is now 32 bytes with permanent static_assert gates.
 The invariants that make all this hold are in `docs/invariants.md`; read it before touching
-value layout, strong_ptr, raw-index dispatch, or the vm run loop.
+value layout, strong_ptr, raw-index dispatch, or the vm run loop. Parse-time type proofs are
+consumed by both backends (proofs on/off byte-identical; strong-types + hot-reload batteries
+and the fuzz differential gate pin it).
 
 **Workflow:** edit → build Debug (`--target jaiscript_tests`) → run suite → fix → final Release
 pass. Reproduce a bug as a foundry test first, confirm it's red, then fix to green.

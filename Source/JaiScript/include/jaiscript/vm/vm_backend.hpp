@@ -10,6 +10,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
+#include <jaiscript/detail/type_proofs.hpp>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -778,7 +779,9 @@ namespace jai::vm {
         // Shared return epilogue (classification switch + pop + result push); the
         // return superinstructions feed it a result they resolved without the stack
         // round trip. KEEP the exact order: convert while the callee frame is live.
-        op_status return_with_result(frame*& fp, script_value result);
+        // proven = the return site's static_return_proof (V-R1): the deref-only route is
+        // taken only when detail::same_type_payload confirms the conversion is the identity
+        op_status return_with_result(frame*& fp, script_value result, bool proven = false);
         // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
@@ -808,7 +811,17 @@ namespace jai::vm {
                                              frame& callee, chunk& body_chunk,
                                              const std::shared_ptr<environment>& caller_env,
                                              const call_site* site, frame* caller_frame,
-                                             chunk* caller_code);
+                                             chunk* caller_code,
+                                             const uint8_t* arg_proofs = nullptr);
+        // V-C1: the call site's per-argument same_type proofs, valid only when the site's
+        // call_expr was proven against THIS callee body with THIS arity (null otherwise)
+        const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,
+                                       const block_stmt* body, size_t nparams, size_t argc) const {
+            if (!site || !caller_code || site->call_node == k_invalid_u32 || argc != nparams) { return nullptr; }
+            const auto* ce = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
+            if (ce->proven_callee_body != body || ce->static_arg_proofs.size() != nparams) { return nullptr; }
+            return ce->static_arg_proofs.data();
+        }
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
@@ -1004,6 +1017,22 @@ namespace jai::vm {
             return f.locals ? static_cast<detail::member_scope_state>(f.locals->scope_state)
                             : detail::member_scope_state::none;
         }
+        // The env-resolved identifier node pinned for the executing ip (chunk::ident_nodes),
+        // null when the instruction has none
+        const identifier_expr* ident_node_at(const frame& f) const {
+            const chunk& code = *f.code;
+            if (code.ident_nodes.size() <= f.ip) { return nullptr; }
+            return ident_node_of(code, code.ident_nodes[f.ip]);
+        }
+        static const identifier_expr* ident_node_of(const chunk& code, uint32_t node) {
+            return node == k_invalid_u32 ? nullptr : static_cast<const identifier_expr*>(code.nodes[node].get());
+        }
+        // Proven-field receiver for a bare identifier in an instance-method frame: main
+        // engine only (workers keep their deref-on-read walls), never a static frame
+        bool bare_field_proof_frame(const frame& f) const {
+            return cached_global_env_ && f.locals && f.locals->scope_this &&
+                   frame_scope_state(f) == detail::member_scope_state::instance;
+        }
         bool frame_scope_active(const frame& f) const {
             const auto s = frame_scope_state(f);
             return s == detail::member_scope_state::instance ||
@@ -1015,9 +1044,18 @@ namespace jai::vm {
         // floor, then fields/statics, then (post-member-miss) the per-site cache and
         // the definition/global chain. A member METHOD answers nullptr - it shadows,
         // and only value/callee sites mint.
-        script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot) {
+        script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot,
+                                              const identifier_expr* idn = nullptr) {
             if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, symbol_id)) {
                 return own;
+            }
+            // V-I1 (pointer form): the proven field cell IS the probe's value_ptr; a miss
+            // (class/epoch/absent cell) runs the probe, which materializes as today
+            if (idn && idn->proven_class && bare_field_proof_frame(f)) {
+                if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
+                                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
+                    return cell;
+                }
             }
             auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
                                                   f.locals->scope_static, symbol_id, /*want_methods*/ false);

@@ -13,6 +13,7 @@
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
+#include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
 
@@ -3210,6 +3211,17 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 				stack_.push_back(own->deref());
 				return {};
 			}
+			// V-I1 proven bare field read: class + shape-epoch guard on the receiver, present
+			// cell (== the probe's *member.value_ptr copy); a miss falls to the probe below
+			if (bare_field_proof_frame(f)) {
+				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class) {
+					if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
+					                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
+						stack_.push_back(*cell);
+						return {};
+					}
+				}
+			}
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
@@ -3367,7 +3379,10 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)
 			type_info_ptr slot_type = storage->get_type_info();
-			if (slot_type && (slot_type->base_type != value.type() ||
+			// V-S1: a same_type proof whose payload guard holds makes enforcement the identity
+			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
+			                             detail::same_type_payload(value, slot_type.get());
+			if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
 			                  slot_type->base_type == script_value_type::jai_object_type)) {
 				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
 				if (!enforced) {
@@ -3432,6 +3447,33 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f) &&
 		    !detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
+			// V-S3 proven bare this-field store: == the this-field landing below with the
+			// conversion gated by the proof (KEEP BYTE-PARALLEL with interpreter I-S3)
+			if (bare_field_proof_frame(f)) {
+				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class && idn->proven_field_write) {
+					if (class_instance* inst = detail::proven_field_instance(*f.locals->scope_this, idn->proven_class, idn->proven_epoch)) {
+						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+							value = value.detached_for_store();
+						}
+						script_value incoming = rhs_lvalue ? clone_for_assignment(value) : std::move(value);
+						if ((ins.c & store_flag_same_type) && idn->proven_field_type &&
+						    detail::same_type_payload(incoming, idn->proven_field_type)) {
+							if (detail::retags_on_field_write(idn->proven_field_type)) {
+								incoming.set_type_info(type_info_ptr{idn->proven_field_type});
+							}
+						} else {
+							auto enforced = inst->enforce_field_write(sym, std::move(incoming));
+							if (!enforced) {
+								return raise_from(enforced);
+							}
+							incoming = std::move(enforced).value();
+						}
+						inst->field_slot_write(idn->proven_slot, std::move(incoming));
+						stack_.push_back(rhs_lvalue ? std::move(value) : script_value(inst->get_field(sym)));
+						return {};
+					}
+				}
+			}
 			member_wins = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym,
 			                                         /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
@@ -3723,11 +3765,15 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			}
 		}
 
-		auto enforced = enforce_type_compatibility(std::move(value), target_type);
-		if (!enforced) {
-			return raise_from(enforced);
+		// V-S2: same_type proof + payload guard = identity conversion
+		if (!((ins.c & store_flag_same_type) && target_type &&
+		      detail::same_type_payload(value, target_type.get()))) {
+			auto enforced = enforce_type_compatibility(std::move(value), target_type);
+			if (!enforced) {
+				return raise_from(enforced);
+			}
+			value = std::move(enforced.value());
 		}
-		value = std::move(enforced.value());
 
 		// var targets keep a shared_ptr-tagged rhs's marker (decl parity, Dev ruling
 		// 2026-07; flattening to 'any' would silently detach the handle at the copy)
@@ -4554,6 +4600,16 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
 				return &own->deref();
 			}
+			if (operand.ident_node != k_invalid_u32 && bare_field_proof_frame(f)) {
+				const identifier_expr* idn = ident_node_of(*f.code, operand.ident_node);
+				if (idn->proven_class) {
+					if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
+					                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
+						scratch.emplace(*cell);   // V-I1: == the probe's scratch copy of *member.value_ptr
+						return &scratch.value();
+					}
+				}
+			}
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
@@ -4972,7 +5028,8 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f)) {
-			return member_scope_env_lookup(f, f.code->symbols[operand.symbol], cache_slot);
+			return member_scope_env_lookup(f, f.code->symbols[operand.symbol], cache_slot,
+			                               ident_node_of(*f.code, operand.ident_node));
 		}
 	}
 	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
@@ -6915,7 +6972,8 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		// Exception: a 'var' decl keeps a shared_ptr-tagged initializer's marker —
 		// `var p = new P()` IS `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the
 		// reference-semantics tag must survive the decl instead of flattening to 'any'
-		if (has_init) {
+		if (has_init && !(decl->static_init_proof == proof_same_type &&
+		                  detail::same_type_payload(value, effective_decl_type.get()))) {   // V-D1
 			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type);
 			if (!enforced) {
 				return raise_from(enforced);
@@ -7343,7 +7401,8 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc));
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7386,7 +7445,8 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
-		                        environment_, site, &rec.f, rec.f.code);
+		                        environment_, site, &rec.f, rec.f.code,
+		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc));
 	} catch (...) {
 		frames_.pop_back();
 		throw;
@@ -8792,6 +8852,15 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	// non-cacheable sites off the probes. A hit pushes the RAW cell copy (reference
 	// fields stay references, the ladder's field spelling); an absent cell falls to
 	// the ladder for chain-default materialization and errors.
+	// V-M1 proven field read: node-borne class + shape-epoch guard, present cell (== the
+	// member_ic hit's raw cell copy); a miss falls to the IC / ladder below
+	if (expr->proven_class && cached_global_env_) {
+		if (script_value* cell = detail::proven_field_cell(object, expr->proven_class, expr->proven_epoch,
+		                                                   expr->proven_slot, nullptr)) {
+			stack_.push_back(*cell);
+			return {};
+		}
+	}
 	if (cached_global_env_) {
 		script_value& objd = object.deref();
 		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
@@ -8920,6 +8989,28 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
+	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
+	if (member->proven_class && member->proven_field_write && cached_global_env_) {
+		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch)) {
+			script_value incoming = clone_for_assignment(value);
+			if (ins.b == proof_same_type && member->proven_field_type &&
+			    detail::same_type_payload(incoming, member->proven_field_type)) {
+				if (detail::retags_on_field_write(member->proven_field_type)) {
+					incoming.set_type_info(type_info_ptr{member->proven_field_type});
+				}
+			} else {
+				auto enforced = inst->enforce_field_write(member->member_id, std::move(incoming));
+				if (!enforced) {
+					return raise_from(enforced);
+				}
+				incoming = std::move(enforced).value();
+			}
+			inst->field_slot_write(member->proven_slot, std::move(incoming));
+			stack_.push_back(std::move(value));
+			return {};
+		}
+	}
 	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
 	// {class, slot} skips the resolve ladder AND the synthesized setter closure —
 	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
@@ -12628,7 +12719,8 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc));
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -12851,7 +12943,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	op_status bound{};
 	try {
 		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc));
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -13006,7 +13099,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()));
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -13127,10 +13221,10 @@ op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction&
 	if (ins.a) {
 		stack_.pop_back();
 	}
-	return return_with_result(fp, std::move(result));
+	return return_with_result(fp, std::move(result), ins.b != 0);
 }
 
-op_status vm_backend::return_with_result(frame*& fp, script_value result) {
+op_status vm_backend::return_with_result(frame*& fp, script_value result, bool proven) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_p0 = __rdtsc();
 	++profile_call_ret_count_;
@@ -13171,6 +13265,13 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 			break;
 		default:   // ref / check: full route
 			break;
+	}
+	// V-R1: a proven return whose payload guard holds is the identity - the deref-only
+	// route yields exactly what convert_return_value's identity try_convert would
+	if (!deref_only && proven && rec.return_type &&
+	    rec.return_type->base_type != script_value_type::jai_reference_type) {
+		const script_value& probe = result.is_reference() ? result.deref() : result;
+		deref_only = detail::same_type_payload(probe, rec.return_type.get());
 	}
 	if (deref_only) {
 		if (result.is_reference()) {
@@ -13222,10 +13323,11 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	operand.slot = ins.a;
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
+	operand.ident_node = f.code->ident_nodes.size() > f.ip ? f.code->ident_nodes[f.ip] : k_invalid_u32;
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	return return_with_result(fp, script_value(*resolved));
+	return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) != 0);
 }
 
 op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
@@ -13233,6 +13335,7 @@ op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& in
 	operand.slot = ins.a;
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
+	operand.ident_node = f.code->ident_nodes.size() > f.ip ? f.code->ident_nodes[f.ip] : k_invalid_u32;
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
@@ -13262,7 +13365,7 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 			if (!*fast) {
 				return raise_from(*fast);
 			}
-			return return_with_result(fp, std::move(fast->value()));
+			return return_with_result(fp, std::move(fast->value()), ins.c != 0);
 		}
 	}
 
@@ -13276,7 +13379,7 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
-	return return_with_result(fp, std::move(result.value()));
+	return return_with_result(fp, std::move(result.value()), ins.c != 0);
 }
 
 op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
@@ -13508,7 +13611,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  frame& callee, chunk& body_chunk,
                                                  const std::shared_ptr<environment>& caller_env,
                                                  const call_site* site, frame* caller_frame,
-                                                 chunk* caller_code) {
+                                                 chunk* caller_code, const uint8_t* arg_proofs) {
 	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
 	// primitive argument is ALREADY its own slot - the bind copy is elided outright
@@ -13763,11 +13866,26 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				}
 			}
 
-			auto converted_result = try_convert_for_parameter(arg_shield, param.type);
-			if (!converted_result) {
-				return raise_from(converted_result);
+			// V-C1: a proven identity bind takes try_convert_for_parameter's identity returns
+			// (the arg itself; the derefed arg for exact-name objects), dereferencing exactly
+			// where it does (typed params only) (KEEP BYTE-PARALLEL with interpreter I-C1)
+			script_value converted_arg = make_null();
+			const bool untyped = !param.type || param.type->base_type == script_value_type::jai_any_type;
+			bool proven_identity = arg_proofs && arg_proofs[i] == proof_same_type;
+			if (proven_identity && param.type) {
+				const script_value& probe = arg_shield.deref();
+				proven_identity = untyped || detail::same_type_payload(probe, param.type.get());
 			}
-			script_value converted_arg = std::move(converted_result.value());
+			if (proven_identity) {
+				converted_arg = (!untyped && param.type->base_type == script_value_type::jai_object_type)
+				                ? script_value(arg_shield.deref()) : script_value(arg_shield);
+			} else {
+				auto converted_result = try_convert_for_parameter(arg_shield, param.type);
+				if (!converted_result) {
+					return raise_from(converted_result);
+				}
+				converted_arg = std::move(converted_result.value());
+			}
 
 			// Element-read args arrive as reference wrappers - probe the referent
 			// (deref() returns *this for plain values) so the shared_ptr marker is
@@ -13899,7 +14017,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
-	                                   previousEnv, site, caller_frame, caller_code);
+	                                   previousEnv, site, caller_frame, caller_code,
+	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()));
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

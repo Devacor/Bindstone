@@ -4,24 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jaibite: Parse Once, Ship Precompiled — JaiScript Embedding</title>
+<meta name="description" content="Parse once, ship precompiled: engine-bound script handles that skip straight to execution, and what the version stamp guarantees.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="jaibite: Parse Once, Ship Precompiled — JaiScript Embedding">
+<meta property="og:description" content="Parse once, ship precompiled: engine-bound script handles that skip straight to execution, and what the version stamp guarantees.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active" aria-current="page">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li class="current"><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></aside>
-<main class="content">
-<article class="chapter"><h1 id="jaibite-parse-once-run-many-ship-jaibite"><code>jaibite</code>: Parse Once, Run Many, Ship <code>.jaibite</code><a class="hlink" href="#jaibite-parse-once-run-many-ship-jaibite" aria-label="link">&#8203;</a></h1>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li class="current"><a href="../embedding/04-jaibite.html" aria-current="page">jaibite: Parse Once, Ship Precompiled</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
+<article class="chapter"><h1 id="jaibite-parse-once-ship-precompiled"><code>jaibite</code>: Parse Once, Ship Precompiled<a class="hlink" href="#jaibite-parse-once-ship-precompiled" aria-label="link">&#8203;</a></h1>
 <p>A <code>jai::jaibite</code> (<code>include/jaiscript/core/jaibite.hpp</code>) is an engine-bound, pre-parsed
 script handle: <code>engine-&gt;jaibite(source)</code> lexes and parses <strong>once</strong>; every
 <code>bite.execute()</code> after that skips straight to execution. On the VM backend the bite also
@@ -29,28 +39,31 @@ caches its compiled bytecode chunk, so re-execution is pure dispatch. It buys yo
 scripts you run repeatedly stop paying the parse, and shipped games boot from precompiled bites
 instead of source — usually without you managing a single file, because the engine maintains the
 disk cache for you (below).</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/bite.cpp — compiled and run against the real lib
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
 eng-&gt;add_function(&quot;host_bonus&quot;, [](jai::script_int base) -&gt; jai::script_int { return base + 100; });
 eng-&gt;execute(&quot;var acc = 0;&quot;);
 
-jai::jaibite bite = eng-&gt;jaibite(&quot;acc = host_bonus(acc); acc&quot;);   // parse ONCE (throws parse_error here)
+jai::jaibite bite = eng-&gt;jaibite(&quot;acc = host_bonus(acc); acc&quot;);   // parse + check ONCE (both throw here)
 bite.execute();          // 100
 bite.execute();          // 200 — engine state persists across runs
 eng-&gt;execute(bite);      // 300 — equivalent engine-side form</code></pre></div>
-<p>Verified output: <code>run1: 100</code>, <code>run2: 200</code>, <code>run3: 300</code>.</p>
+<p>Output: <code>run1: 100</code>, <code>run2: 200</code>, <code>run3: 300</code>.</p>
 <p>Semantics are guaranteed identical to <code>execute(string)</code>: both routes funnel through the same
 private execution pipeline, so the pre-parsed path can never drift semantically. Everything that
 works across repeated <code>execute()</code> calls — state persistence, class redefinition, try/catch,
-coroutine handles — works identically across repeated <code>bite.execute()</code> runs, and is pinned
-by tests on both backends.</p>
+coroutine handles — works identically across repeated <code>bite.execute()</code> runs. Both backends
+behave identically here; the test suite holds them to it.</p>
 <p>The rules:</p>
 <ul><li><strong>The one rule: never share a live <code>jaibite</code> across engines.</strong> A bite carries
 interned symbol IDs that are specific to the engine that parsed it. To move a script between engines
 (or processes, or machines) go through <code>save()</code>/<code>jaibite_load()</code> — the save/load
 path relocates every symbol into the loading engine. Everything else about bites is convenience;
 this rule is the contract.</li>
-<li>Parse errors throw at <code>jaibite()</code> creation; runtime errors throw at <code>execute()</code> —
-so a bite in hand is always syntactically valid.</li>
+<li><strong>A bite in hand has already passed the front end.</strong> Parse errors throw at
+<code>jaibite()</code> creation, and so do static-check errors — checking is strict by default, so
+<code>jaibite()</code> throws <code>jai::static_check_error</code> at creation exactly like
+<code>execute()</code> does (<a href="06-static-checking.html">Static Checking</a>). Runtime errors throw
+at <code>execute()</code>.</li>
 <li>If the owning engine has been destroyed, <code>bite.execute()</code> throws
 <code>script_exception</code> rather than crashing.</li>
 <li><code>bite.valid()</code> — false for a default-constructed/empty bite.</li></ul>
@@ -83,7 +96,7 @@ per engine with <code>eng-&gt;jaibite_cache(false)</code>.</li></ul>
 <p>The cache stores the parsed AST, so it is backend-agnostic: both backends skip the parse, and the VM
 reuses its lazily compiled chunk in-memory as always. The whole matrix — a fresh sibling loading
 while the source is unparseable, equal-mtime staleness, corrupt fallback and rewrite, fingerprint
-mismatch, unwritable siblings — is pinned by tests on both backends.</p>
+mismatch, unwritable siblings — is covered by the test suite.</p>
 <h2 id="save-load-shipping-jaibite">Shipping <code>.jaibite</code> by hand<a class="hlink" href="#save-load-shipping-jaibite" aria-label="link">&#8203;</a></h2>
 <p>When you want explicit control — pack files, downloadable content, a bake step — save and load
 bites yourself. The canonical extension is <code>jai::k_jaibite_extension</code> (<code>.jaibite</code>);
@@ -96,7 +109,7 @@ jai::stdlib::register_all(other);
 other-&gt;add_function(&quot;host_bonus&quot;, ...);
 auto loaded = other-&gt;jaibite_load_bytes(bytes);   // or other-&gt;jaibite_load(path)
 loaded.execute();</code></pre></div>
-<p>Verified: a bite saved from one engine (107 bytes for the demo script) loads into a fresh engine and
+<p>A bite saved from one engine (107 bytes for the demo script) loads into a fresh engine and
 runs — using the <em>loading</em> engine&#x27;s registrations (a <code>host_bonus</code> returning +7 there
 produced <code>7</code>).</p>
 <p>What is serialized is the <strong>parsed AST, never the compiled chunk</strong> — a loaded bite
@@ -105,6 +118,12 @@ loading engine</strong>, which is exactly why one <code>.jaibite</code> file ser
 bites serve only their own. <code>save_bytes()</code> exists specifically for host VFS/pack-file routing.
 <code>jaibite_load*</code> throws <code>jai::runtime_error</code> on a missing file, bad format, version
 mismatch, or corrupt data.</p>
+<p>The format is <strong>versioned</strong> — currently <strong>11</strong> — and the number moves whenever the
+parser gains a node, so a bite is readable only by builds that share its format version. An explicit
+<code>jaibite_load*</code> of an older file throws (<code>unsupported format version 9 (expected 11)</code>);
+a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical
+rule: ship bites from the same build you ship the engine from, and never hand-carry a
+<code>.jaibite</code> across versions.</p>
 <p>The guarantee behind all of this is differential: for every script shape (functions, defaults, ref
 params, classes with inheritance and statics, lambdas with captures, coroutines, containers,
 try/catch, uncaught-throw error text, registered C++ types), a fresh-parsed bite and a
@@ -122,19 +141,31 @@ loading engine and sets <code>bite.registration_mismatch()</code> on difference.
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bare = jai::engine::make();                  // no host_bonus registered
 jai::stdlib::register_all(bare);
 auto risky = bare-&gt;jaibite_load_bytes(bytes);
-risky.registration_mismatch();                    // true   (verified)
+risky.registration_mismatch();                    // true
 risky.execute();                                  // throws &quot;Undefined variable &#x27;host_bonus&#x27;&quot;</code></pre></div>
 <h2 id="checked-clean-stamp-static-checking-integration">Checked-clean stamp (static checking integration)<a class="hlink" href="#checked-clean-stamp-static-checking-integration" aria-label="link">&#8203;</a></h2>
-<p>When static checking is active (see <a href="06-static-checking.html">Static Checking</a>), a bite
-created or executed under warn/strict carries its diagnostics:</p>
+<p>Checking is on by default, so this applies to every bite you make unless you opted down. Under
+<strong>strict</strong>, <code>jaibite()</code> throws <code>jai::static_check_error</code> at creation — the
+same gate <code>execute()</code> passes through. Under <strong>warn</strong> the report rides the bite
+instead (see <a href="06-static-checking.html">Static Checking</a>):</p>
 <ul><li><code>bite.checked_clean()</code> — checked, no error-severity diagnostics.</li><li><code>bite.check_diagnostics()</code> — the <code>check_report</code>.</li><li><code>save()</code> stamps a checked-clean bit beside the fingerprint, so a bake step&#x27;s strict
 check travels with the file.</li><li>On load the stamp is <strong>trusted only when the registration fingerprint matches</strong> the
 saving engine; otherwise the bite loads unchecked and is re-checked against the loading engine&#x27;s
 surface on the strict/warn path (strict throws at load on errors).</li><li>A bite is checked <strong>once</strong> — registrations arriving later don&#x27;t re-trigger;
-re-create the bite to re-check.</li></ul><nav class="prevnext"><a class="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
+re-create the bite to re-check. Parse-time type proofs (fast-path annotations the checker stamps on the
+AST — nothing you configure; see <a href="06-static-checking.html#proofs">Static Checking, Proofs</a>) are
+independent of the stamp: a loaded bite re-derives them, in every mode.</li>
+<li id="the-stamp-is-per-file">The stamp is <strong>per file, not per program</strong>. A leaf that checked clean inside one program
+(<a href="06-static-checking.html#programs">its names declared by a sibling unit</a>) loads from its stamped
+sibling without a re-check when a <em>different</em> program reaches it — so a name that program never
+declares surfaces at run time as the ordinary <code>Undefined variable</code>, not at load. Edit the source or
+delete the sibling to force a fresh check.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" rel="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

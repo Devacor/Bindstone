@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Types That Fail Early &mdash; JaiScript Guide</title>
+<meta name="description" content="What fails at load and what waits for run time, how to read a diagnostic, cast&lt;T&gt; as the explicit boundary, extern, and the [[warn_mode]] / [[strict_mode]] attributes.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Types That Fail Early &mdash; JaiScript Guide">
+<meta property="og:description" content="What fails at load and what waits for run time, how to read a diagnostic, cast&lt;T&gt; as the explicit boundary, extern, and the [[warn_mode]] / [[strict_mode]] attributes.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<div class="header-tools">
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li class="current"><a href="../guide/13-strict-checking.html" aria-current="page">Types That Fail Early: strict checking</a><ol class="page-toc" data-page-toc></ol></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
+<article class="chapter"><h1 id="types-that-fail-early">Types That Fail Early<a class="hlink" href="#types-that-fail-early" aria-label="link">&#8203;</a></h1>
+<p>You have met the checker on every page of this guide, usually as a sentence that began &quot;under strict&quot;. This chapter is the whole story in one place: what it catches before a script runs, what it deliberately leaves to the runtime, how to read what it prints, and the four spellings that let you talk back to it &mdash; <code>cast&lt;T&gt;</code>, <code>extern</code>, <code>[[warn_mode]]</code> and <code>[[strict_mode]]</code>.</p>
+<p>The one-sentence version: <strong>the checker is on, in strict mode, by default</strong>. A typed mistake it can see fails the load, before a single statement runs. A mistake it cannot see raises at run time, where <code>try</code>/<code>catch</code> sees it. Nothing is opt-in; <code>var</code> is the opt-out.</p>
+<h2 id="two-kinds-of-mistake">Two kinds of mistake<a class="hlink" href="#two-kinds-of-mistake" aria-label="link">&#8203;</a></h2>
+<p>Start with the smallest possible program that gets a type wrong:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+print(&quot;before&quot;);
+x = &quot;oops&quot;;
+print(&quot;after&quot;);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+    x = &quot;oops&quot;;
+       ^</code></pre></div>
+<p>Nothing ran. <code>before</code> never printed. The checker saw a string literal flowing into a slot declared <code>int</code>, and under strict that is a <strong>load error</strong>: the load fails, the whole listing is the error text, and the engine is untouched. On the C++ side <code>execute()</code> throws <code>jai::static_check_error</code>; the standalone runner prints the listing and exits 1.</p>
+<p>Now the same mistake, hidden behind <code>var</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+var v = &quot;oops&quot;;                    // var: the checker has no idea what this holds
+try { x = v; } catch (e) { print(&quot;caught: {}&quot;, e); }
+print(&quot;x is still {}&quot;, x);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot assign string to &#x27;x&#x27; (declared int)
+x is still 5</code></pre></div>
+<p>This one loaded and ran. <code>var</code> holds anything, so the checker has no idea what <code>v</code> is and says nothing. The store still fails, at run time, through the same conversion table the checker was reasoning about, with a catchable error that names the slot. <code>x</code> keeps its old value.</p>
+<p>That is the whole split. <strong>What the checker can see</strong> &mdash; literals, typed locals and parameters, typed returns, typed fields, calls to functions defined in the same program, members of a class it knows &mdash; fails the load. <strong>What it cannot see</strong> &mdash; anything <code>var</code>-sourced, container elements, callables held in variables, values that arrive from the host &mdash; raises at run time, catchable, and byte-identical on both backends. Every &quot;raises&quot; in the earlier chapters is the second kind.</p>
+<h2 id="reading-a-diagnostic">Reading a diagnostic<a class="hlink" href="#reading-a-diagnostic" aria-label="link">&#8203;</a></h2>
+<p>A listing is compiler-shaped, one entry per problem, and every entry has the same three lines:</p>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">script:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+    x = &quot;oops&quot;;
+       ^</code></pre></div>
+<ul><li><code>script:3:4</code> &mdash; line and column of the offending expression. For a file reached through <code>import</code> or <code>include</code> the resolved path replaces <code>script</code> (<a href="10-modules.html#what-the-checker-sees-across-files">Modules</a>); the runner names the file when it loads anyway (warn mode) and says <code>script</code> when the load fails.</li>
+<li><code>error</code> or <code>warning</code> &mdash; the severity. Errors gate the load under strict; warnings never gate, in any mode.</li>
+<li>The message, in the checker&#x27;s voice: lower-case, names quoted, types bare, and <code>(declared at L:C)</code> pointing at the declaration it is holding you to.</li>
+<li>The source line and a caret under the column.</li></ul>
+<p>Several problems come out together, sorted by location and deduplicated, so you fix a file in one pass rather than one error per attempt. An erroring expression assumes its declared type from then on, so one bad line produces one diagnostic, not a cascade. The listing caps at 100. Here is one with both severities in it:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
+    int hp = 3;
+    int poke() { int hp = 1; return hp; }   // shadows the field: a warning
+}
+Creature c = Creature();
+c.hp = &quot;full&quot;;                              // a type error: this one gates the load</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:3:22: warning: local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 2:9)
+        int poke() { int hp = 1; return hp; }   // shadows the field: a warning
+                         ^
+script:6:7: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)
+    c.hp = &quot;full&quot;;                              // a type error: this one gates the load
+          ^</code></pre></div>
+<p>The shadowing warning would not have stopped the load on its own; the field store did. (Shadowing warnings are covered in <a href="07-classes.html">Classes</a>; the runner prints warnings when a load fails or when you pass <code>--check=warn</code>, and a host reads them from <code>engine-&gt;last_check_diagnostics()</code>.)</p>
+<h2 id="what-the-checker-sees">What the checker sees<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h2>
+<p>The rules, in the order you are likely to trip over them. Each is a load error under strict.</p>
+<div class="tablewrap"><table><thead><tr><th>Site</th><th>Checked</th><th>Example message</th></tr></thead><tbody><tr><td>Declarations and <code>=</code></td><td>the value against the declared type, through the <a href="02-type-ladder.html">one conversion table</a>; compound assigns as <code>x = T(x op rhs)</code></td><td><code>cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27;</code></td></tr><tr><td>Field and static stores</td><td>against the field&#x27;s declared type, from outside (<code>c.hp = v</code>) and inside (bare <code>hp = v</code>)</td><td><code>cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27;</code></td></tr><tr><td>Calls to same-program functions, methods and constructors</td><td>arity (defaults counted) and each argument&#x27;s assignability; with overloads, an error only when none fits</td><td><code>&#x27;fib&#x27; expects 1 argument(s), got 2</code></td></tr><tr><td>Returns</td><td>the value against the declared return type; a value from a <code>void</code> function</td><td><code>cannot return &#x27;string&#x27; from &#x27;label&#x27; declared to return &#x27;int&#x27;</code></td></tr><tr><td>Members on a known class</td><td>reads and writes of a member the class does not declare, including a member only a subtype declares</td><td><code>no member &#x27;range&#x27; in class &#x27;Unit&#x27;</code></td></tr><tr><td>Identifiers</td><td>every name must be declared somewhere: scopes, the class, the file (forward references are fine), the program, <code>extern</code>, or the host&#x27;s registrations</td><td><code>use of undeclared identifier &#x27;totl&#x27;</code></td></tr><tr><td>Enum values</td><td>membership</td><td><code>no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27;</code></td></tr><tr><td>Host (C++) functions</td><td>arity across overloads, and an argument only when the mismatch is certain (a string into a numeric parameter)</td><td><code>&#x27;to_char&#x27; expects 1 argument(s), got 2</code>, <code>no overload of &#x27;to_char&#x27; accepts these argument types</code></td></tr><tr><td>Casts</td><td><code>T</code> must name a type; the operand is never checked against it (that is the runtime&#x27;s verdict)</td><td><code>unknown type in cast: &#x27;Nope&#x27;</code></td></tr></tbody></table></div>
+<p>Two of these deserve a closer look, because the fix is not obvious the first time. A call with the wrong shape:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+print(&quot;{}&quot;, fib(10, 2));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:23: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
+    print(&quot;{}&quot;, fib(10, 2));
+                          ^</code></pre></div>
+<p>The checker knows <code>fib</code>&#x27;s signature because <code>fib</code> is defined in the same program. Put the function in a variable and the knowledge is gone &mdash; a callable held in a variable is unchecked, and the same two mistakes become run-time errors:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+var f = fib;                                   // a callable in a variable: unchecked
+try { f(10, 2); } catch (e) { print(&quot;caught: {}&quot;, e); }
+try { f(&quot;ten&quot;); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: &#x27;fib&#x27; expects 1 argument, got 2
+caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;fib&#x27; (declared int)</code></pre></div>
+<p>And a member that only a subtype declares, read through a base-typed receiver:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
+class Archer : Unit { int range = 6; }
+Unit u = Archer();
+print(&quot;{}&quot;, u.range);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:4:15: error: no member &#x27;range&#x27; in class &#x27;Unit&#x27; (declared at 1:7)
+    print(&quot;{}&quot;, u.range);
+                  ^</code></pre></div>
+<p>This is C++&#x27;s rule too: <code>u</code> is declared <code>Unit</code>, and a <code>Unit</code> has no <code>range</code>, whatever it holds tonight. There are two fixes. <code>cast&lt;Archer&amp;&gt;(u)</code> is a reference to the same object, seen as an <code>Archer</code>, and reads and writes go through it; a <code>var</code> receiver drops the question to run time:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
+class Archer : Unit { int range = 6; }
+Unit u = Archer();
+print(&quot;range = {}&quot;, cast&lt;Archer&amp;&gt;(u).range);   // a reference to the same object, as an Archer
+cast&lt;Archer&amp;&gt;(u).range = 9;                    // writes go through
+print(&quot;range = {}&quot;, cast&lt;Archer&amp;&gt;(u).range);
+var loose = u;                                 // or drop to var: checked at run time instead
+print(&quot;range = {}&quot;, loose.range);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">range = 6
+range = 9
+range = 9</code></pre></div>
+<h2 id="the-promise">The promise: a clean program is never rejected<a class="hlink" href="#the-promise" aria-label="link">&#8203;</a></h2>
+<p>A checker that guesses is worse than no checker, because you stop reading it. So this one is held to a contract: <strong>a program that runs clean and does not genuinely violate a declared type produces zero errors.</strong> Wherever it is not certain, it is silent, and the runtime&#x27;s own checks take over. A regression gate runs two hundred generated programs through both paths and fails if anything that executes cleanly draws an error.</p>
+<p>The other side of that promise is a list of places where a mistake waits for run time rather than failing the load. Knowing it saves you from expecting a diagnostic that will never come:</p>
+<ul><li><code>var</code>, and everything computed from it. <code>auto</code> without an initializer, or with a <code>null</code> one (the type locks at the first real store, which the checker cannot see).</li>
+<li>References and handles as <em>store</em> targets: <code>T&amp;</code> declarations, <code>auto&amp;</code> loop variables, by-reference parameters, <code>shared_ptr&lt;T&gt;</code> and <code>weak_ptr&lt;T&gt;</code>. Member lookup <em>through</em> a typed handle or reference is still checked.</li>
+<li>Container elements and keys: <code>array&lt;T&gt;</code> / <code>map&lt;K,V&gt;</code> enforce at run time (<a href="09-containers-strings.html#typed-containers">Containers</a>), and the builtin container and string methods are lenient.</li>
+<li>Callables held in variables; host functions beyond arity and the certain primitive mismatches; C++-bound methods and properties reached through a script chain; engine globals (typed off the value, not a declaration).</li>
+<li>Files reached through a dynamic-path <code>import(expr)</code> / <code>include(expr)</code> (undeclared identifiers drop to warnings there), untyped <code>extern</code> names, a base class the program cannot find, and namespace paths at every depth.</li>
+<li>Accessor-bearing members whose <code>_get_x</code> / <code>_set_x</code> declaration is ambiguous (<a href="07-classes.html">Classes</a>).</li>
+<li>Coroutines: yield and return types are not checked, and calling one yields a handle typed as unknown.</li>
+<li>Mixed-branch ternaries, <code>this</code> and <code>super</code> used as values, classes mid-hot-reload (receivers that still carry the old shape), and anything passed to <code>extend(...)</code>.</li></ul>
+<p>Everything else &mdash; a concrete <code>int</code>, <code>float</code>, <code>bool</code>, <code>char</code>, <code>string</code>, or a class the checker knows, on both sides of a store &mdash; is certain, and certain mistakes fail the load.</p>
+<h2 id="one-conversion-table">One conversion table, at load and at run time<a class="hlink" href="#one-conversion-table" aria-label="link">&#8203;</a></h2>
+<p>The checker does not have a type system of its own. It runs the same conversion table the runtime runs &mdash; the one in <a href="02-type-ladder.html">The Type Ladder</a> &mdash; and it runs it for every typed slot: declarations, <code>=</code> and the compound forms, by-value parameters, returns, field stores and static stores. So a value the checker admits converts at run time, and a value it rejects would have failed there too. A chained conversion (<code>obj.to_int()</code> and then <code>C(int)</code>) is never implicit in either place.</p>
+<p>When the mistake does reach run time, the error names the slot it failed at. Two shapes worth recognizing: a return that fails <em>at the return statement</em>, and an argument that fails at the parameter:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function label(int n) -&gt; int {
+    var v = &quot;n=&quot; + to_string(n);               // var: the checker cannot see this string
+    return v;                                  // so the conversion runs at the return statement
+}
+try { label(3); } catch (e) { print(&quot;caught: {}&quot;, e); }
+function twice(int n) -&gt; int { return n * 2; }
+var f = twice;
+try { f(&quot;four&quot;); } catch (e) { print(&quot;caught: {}&quot;, e); }
+string s = 5;                                  // string accepts anything, via to_string
+int truncated = 2.9;                           // float to int truncates
+print(&quot;{} {}&quot;, s + &quot;!&quot;, truncated);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot return string from &#x27;label&#x27; (declared -&gt; int)
+caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;twice&#x27; (declared int)
+5! 2</code></pre></div>
+<p>The return conversion is part of the <code>return</code> statement, as in C++. A <code>try</code> around the <code>return</code> inside <code>label</code> would catch it there; uncaught, <code>label</code> is the top frame of the stack trace and the error surfaces in the caller, which is what happened above. The other texts in the family follow the same pattern: <code>Cannot initialize &#x27;x&#x27; (declared int) with string</code> for a declaration, <code>Cannot assign string to field &#x27;hp&#x27; of Stats (declared int)</code> and <code>... to static &#x27;s&#x27; of C ...</code> for fields, <code>Cannot store string in array&lt;int&gt;</code> at the element boundary.</p>
+<h2 id="casts"><code>cast&lt;T&gt;(e)</code>: the explicit boundary<a class="hlink" href="#casts" aria-label="link">&#8203;</a></h2>
+<p><code>cast</code> is a keyword, and it is how you say &quot;I know&quot; to the type system. It has three forms, and the difference between them is the difference between a copy, an alias and a share &mdash; the same three relationships <a href="03-value-semantics.html">Value Semantics</a> is about.</p>
+<ul><li><code>cast&lt;T&gt;(e)</code> yields what <code>T tmp = e;</code> would hold. For primitives that is the conversion table (<code>cast&lt;int&gt;(2.7)</code> is <code>2</code>, <code>cast&lt;string&gt;(5)</code> is <code>&quot;5&quot;</code>). For a class it is a <strong>copy</strong>, typed <code>T</code>, when <code>e</code>&#x27;s class is <code>T</code> or derives from it.</li>
+<li><code>cast&lt;T&amp;&gt;(e)</code> is a <strong>reference</strong> to the same object, seen as a <code>T</code>. Member reads and writes go through. This is the strict-mode fix for a subtype member on a base-typed receiver.</li>
+<li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing the instance.</li></ul>
+<p>Char converts <em>only</em> here: the assignment table has no char row, so <code>char c = 65</code> is a load error and <code>cast&lt;char&gt;(65)</code> is the spelling. <code>cast&lt;int&gt;(c)</code> and <code>cast&lt;float&gt;(c)</code> are the code point (0&ndash;255), <code>cast&lt;string&gt;(c)</code> the one-character string, and <code>cast&lt;char&gt;(e)</code> takes an int in range or a one-character string.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;{} {} {}&quot;, cast&lt;int&gt;(2.7), cast&lt;string&gt;(5) + &quot;!&quot;, cast&lt;float&gt;(3));
+print(&quot;{} {} {}&quot;, cast&lt;int&gt;(&#x27;a&#x27;), cast&lt;char&gt;(97), cast&lt;string&gt;(&#x27;a&#x27;) + &quot;b&quot;);
+class Unit { int hp = 10; }
+class Archer : Unit { int range = 6; }
+class Rock { int mass = 1; }
+var thing = Archer();
+Archer copy = cast&lt;Archer&gt;(thing);            // value form: a copy, typed Archer
+copy.range = 1;
+print(&quot;copy {} original {}&quot;, copy.range, thing.range);
+cast&lt;Archer&amp;&gt;(thing).range = 2;               // reference form: writes reach the original
+print(&quot;original now {}&quot;, thing.range);
+shared_ptr&lt;Unit&gt; shared = cast&lt;shared_ptr&lt;Unit&gt;&gt;(thing);   // handle form: shares the instance
+shared.hp = 99;
+print(&quot;through the handle: {}&quot;, thing.hp);
+try { cast&lt;Rock&gt;(thing); } catch (e) { print(&quot;caught: {}&quot;, e); }
+try { cast&lt;Archer&amp;&gt;(null); } catch (e) { print(&quot;caught: {}&quot;, e); }
+print(&quot;null passes the value form: {}&quot;, cast&lt;Archer&gt;(null) == null);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 5! 3.000000
+97 a ab
+copy 1 original 6
+original now 2
+through the handle: 99
+caught: Cannot cast &#x27;Archer&#x27; to &#x27;Rock&#x27;
+caught: Cannot cast &#x27;null&#x27; to &#x27;Archer&amp;&#x27;
+null passes the value form: true</code></pre></div>
+<p>A class mismatch raises the catchable <code>Cannot cast &#x27;X&#x27; to &#x27;T&#x27;</code>, where <code>X</code> is the object&#x27;s actual class. Null passes the value and handle forms (you get a typed null) and fails the reference form (there is nothing to refer to). Upcasts always pass. The operand is never checked statically against <code>T</code> &mdash; the cast <em>is</em> the boundary, and the verdict is the runtime&#x27;s.</p>
+<p>One warning to know about. The value form on a handle is legal, but it copies, and that is rarely what you meant when you had a <code>shared_ptr</code> in your hand. The checker says so &mdash; a warning, never a gate. Run under strict the file simply loads; this is the runner with <code>--check=warn</code>, which prints what it collected:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Archer { int range = 6; }
+shared_ptr&lt;Archer&gt; h = new Archer();
+Archer c = cast&lt;Archer&gt;(h);                   // legal, but it copies: the checker warns
+c.range = 1;
+print(&quot;copy {} handle {}&quot;, c.range, h.range);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output &middot; --check=warn</span><pre><code class="lang-output">jaiscript: static check (warn mode, running anyway):
+try.jai:3:12: warning: cast&lt;Archer&gt;(h) copies the instance - use cast&lt;Archer&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;Archer&gt;&gt;(h) to share it (declared at 2:20)
+    Archer c = cast&lt;Archer&gt;(h);                   // legal, but it copies: the checker warns
+               ^
+copy 1 handle 6</code></pre></div>
+<p>Take its advice: <code>cast&lt;Archer&amp;&gt;(h)</code> to alias, <code>cast&lt;shared_ptr&lt;Archer&gt;&gt;(h)</code> to share.</p>
+<h2 id="escape-hatches">Escape hatches: <code>extern</code> and the mode attributes<a class="hlink" href="#escape-hatches" aria-label="link">&#8203;</a></h2>
+<p>Two spellings tell the checker about what it cannot see, or should not gate on, without loosening anything else.</p>
+<h3 id="extern"><code>extern</code>: declare a name you do not define<a class="hlink" href="#extern" aria-label="link">&#8203;</a></h3>
+<p>Some names are real but not in your program: a global the host binds after load, a function the running instance registers, a value injected at run time. Without help the checker calls them undeclared. <code>extern</code> declares them, in three strengths:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function net_relay;          // a callable of unknown signature: calls are unchecked
+extern int tick_rate;               // typed: every use is checked as an int
+extern config;                      // untyped: behaves like var
+function on_packet(var p) { return net_relay(p, tick_rate, config); }
+print(&quot;loaded; on_packet waits for the host to register net_relay&quot;);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">loaded; on_packet waits for the host to register net_relay</code></pre></div>
+<p>Each form counts as a declaration, and the program&#x27;s pool carries it to every file. The typed form gives the name that type for real: member checks, stores and everything downstream are checked as for a declared variable, so this is a load error:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern int tick_rate;
+tick_rate = &quot;fast&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:12: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
+    tick_rate = &quot;fast&quot;;
+               ^</code></pre></div>
+<p>At run time the declaration is a no-op on both backends. The name resolves when it is used, exactly as it would have without the line, and a name still missing then raises the ordinary <code>Undefined variable &#x27;name&#x27;</code>. If the same program does define the name after all, the <code>extern</code> is inert and the definition wins &mdash; which makes it the right spelling for a shared file that calls into a module only some programs import (<a href="10-modules.html#three-escape-valves">Modules</a> has that shape).</p>
+<h3 id="mode-attributes"><code>[[warn_mode]]</code> and <code>[[strict_mode]]</code>: a region, not a switch<a class="hlink" href="#mode-attributes" aria-label="link">&#8203;</a></h3>
+<p>The attributes set the checker&#x27;s mode for a region of one file. In a warn region every error is reported as a warning (still collected, still visible to a host), and an undeclared identifier is accepted as unknown. In a strict region errors gate the load, even inside a warn region and even when the engine itself is in warn mode. They compose, innermost wins, and the engine&#x27;s mode is the default. An attribute leads one of three positions:</p>
+<ul><li><strong>One statement.</strong> Before any statement, it covers that statement&#x27;s own subtree, then the mode reverts. A nested function or lambda body is a new scope that keeps the <em>enclosing</em> mode: <code>[[warn_mode]] spawn([]() { x = 5; });</code> accepts <code>spawn</code>, but <code>x = 5</code> inside the lambda is still an error.</li>
+<li><strong>A block.</strong> As the first statement of a block &mdash; a function, method or lambda body, a loop body, a bare <code>{ }</code> &mdash; it covers the whole block, nested bodies included.</li>
+<li><strong>A unit.</strong> As the first declaration of a file (a leading comment is fine, the trailing <code>;</code> optional) it covers the whole file.</li></ul>
+<p>Statement position, with the revert made visible:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+[[warn_mode]] y = 5;               // covers this one statement: &#x27;y&#x27; is a warning
+z = 5;                             // the mode reverted: this one is an error</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:15: warning: use of undeclared identifier &#x27;y&#x27;
+    [[warn_mode]] y = 5;               // covers this one statement: &#x27;y&#x27; is a warning
+                  ^
+script:3:1: error: use of undeclared identifier &#x27;z&#x27;
+    z = 5;                             // the mode reverted: this one is an error
+    ^</code></pre></div>
+<p>Unit position, for a file whose hooks reach host names the checker cannot see. The load succeeds, the function waits for the host:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];                     // first declaration: the whole file reports warnings
+function on_debug_key() { return debug_overlay(1); }    // a host name the checker cannot see
+print(&quot;loaded; on_debug_key waits for the host&quot;);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">loaded; on_debug_key waits for the host</code></pre></div>
+<p>And <code>[[strict_mode]]</code> re-arming inside that same warn-mode unit &mdash; the block gates the load even though the file around it would not:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];
+function on_debug_key() { return debug_overlay(1); }
+[[strict_mode]] { int n = 1; n = &quot;one&quot;; }   // re-armed strict inside a warn unit: gates the load</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:34: warning: use of undeclared identifier &#x27;debug_overlay&#x27;
+    function on_debug_key() { return debug_overlay(1); }
+                                     ^
+script:3:33: error: cannot assign &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 3:23)
+    [[strict_mode]] { int n = 1; n = &quot;one&quot;; }   // re-armed strict inside a warn unit: gates the load
+                                    ^</code></pre></div>
+<p>The runtime never changes. Both backends treat an attribute as nothing, and a warn region&#x27;s type mistakes raise at run time exactly as they would with no checker at all (the <code>debug_overlay</code> call above would raise <code>Undefined variable</code> if it ran before the host registered it). A file&#x27;s mode says nothing about the files it imports, and a <code>[[warn_mode]]</code> leaf never fails its program. <code>warn_mode</code> and <code>strict_mode</code> are the only attribute names; anything else in <code>[[ ]]</code> is a parse error.</p>
+<p>Prefer <code>extern</code> when you know the name; it is precise and it keeps the rest of the file checked. Reach for <code>[[warn_mode]]</code> when a region is deliberately dynamic.</p>
+<h2 id="across-files">Across files<a class="hlink" href="#across-files" aria-label="link">&#8203;</a></h2>
+<p>Checking does not stop at the file boundary. A root file&#x27;s literal <code>import</code>s and <code>include</code>s are gathered before anything runs, the top-level names and class shapes of every file are pooled, and every file is checked against the pool &mdash; so a function in one file may use a global another file declares whatever the import order, and a mistake in any file fails the root&#x27;s load with a listing named by that file&#x27;s path. <a href="10-modules.html#what-the-checker-sees-across-files">Modules</a> walks through it with a two-file program.</p>
+<h2 id="modes">Modes: strict, warn, off<a class="hlink" href="#modes" aria-label="link">&#8203;</a></h2>
+<p>Strict is the default everywhere &mdash; the embedded engine and the standalone runner alike. The two other modes exist for tooling and for migration, not for everyday use:</p>
+<div class="tablewrap"><table><thead><tr><th>Mode</th><th>Errors</th><th>Warnings</th><th>Spelling</th></tr></thead><tbody><tr><td><strong>strict</strong> (default)</td><td>fail the load before anything runs</td><td>collected, never gate</td><td><code>--check=strict</code> / <code>engine-&gt;static_checking(check_mode::strict)</code></td></tr><tr><td>warn</td><td>collected; execution proceeds and the runtime&#x27;s own errors apply unchanged (a <code>[[strict_mode]]</code> region still gates)</td><td>collected</td><td><code>--check=warn</code> / <code>check_mode::warn</code></td></tr><tr><td>off</td><td colspan="2">no diagnostics at all; zero behavior change</td><td><code>--check=off</code> / <code>check_mode::off</code></td></tr></tbody></table></div>
+<p>Diagnostics themselves are mode-independent; mode only decides whether errors gate. A host that wants the listing without running anything calls <code>engine-&gt;check(source)</code> in any mode, and reads the last executed unit&#x27;s diagnostics from <code>engine-&gt;last_check_diagnostics()</code>. The C++ side of all this &mdash; the exception type, jaibite behavior, hot-reload re-checks &mdash; is in <a href="../embedding/06-static-checking.html">Static Checking</a> in the Embedding guide.</p>
+<h2 id="where-to-next">Where to next<a class="hlink" href="#where-to-next" aria-label="link">&#8203;</a></h2>
+<p>That completes the language tour. From here: <a href="../embedding/index.html">Embedding</a> covers the C++ side &mdash; running scripts, binding your classes with <code>dynamic_binder</code>, signals, safety rails, and the performance model; <a href="../examples/index.html">Examples</a> walks complete programs written in the language; and the <a href="../reference/index.html">Reference</a> is the everything-on-one-page lookup when you know what you&#x27;re looking for.</p>
+<nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/12-reflection.html"><span>&larr; previous</span>Reflection: reflect::</a><a class="next" rel="next" href="../embedding/01-embedding-quickstart.html"><span>next &middot; embedding &rarr;</span>Embedding Quickstart</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

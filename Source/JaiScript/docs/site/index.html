@@ -4,29 +4,40 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JaiScript — an embedded scripting language for C++ engines</title>
+<meta name="description" content="An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="JaiScript — an embedded scripting language for C++ engines">
+<meta property="og:description" content="An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
 
-<main class="content">
+<main class="content" id="main" tabindex="-1">
 <div class="hero">
   <h1 class="rainbow">JaiScript</h1>
   <p class="tagline">An embedded scripting language for C++ engines: C++-flavored syntax, script classes with
-  hot reload, coroutines, gradual typing — and <strong>two interchangeable backends kept at full behavioral
-  parity</strong>, so the semantics are enforced by implementations arguing with each other rather than a
-  document nobody reads.</p>
+  hot reload, coroutines, a three-rung type ladder (<code>int</code> / <code>auto</code> / <code>var</code>)
+  with a checker that is strict by default, and <strong>two interchangeable backends</strong> — a
+  tree-walking interpreter and a bytecode VM — kept at byte-for-byte parity by 2,400+ tests and a
+  differential fuzzer.</p>
   <p class="sub">every example on this site was executed on both backends before it was written down</p>
   <div class="hero-ctas">
     <a class="btn btn-primary" href="guide/01-hello.html">Read the guide</a>
@@ -36,21 +47,22 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 
 <div class="home-section">
-<h2>Two lines to hello</h2>
+<h2 id="two-lines-to-hello">Two lines to hello</h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
 e-&gt;execute("print(\"hello\");");</code></pre></div>
 
-<p>Yes, really two lines — a bare engine ships with a basic <code>print</code> built in. One more,
-<code>jai::stdlib::register_all(e);</code>, upgrades it to the formatted <code>{}</code> version and brings
-the full standard library (math, containers, JSON). It compiles as part of your project — a static lib plus
-headers, no global interpreter state anywhere. Bind a C++ class in a
-<a href="embedding/02-dynamic-binder.html">fluent chain</a> — one declaration makes a field reflected,
-script-visible, and serialized, host signals connecting straight to script — hand the script a budget
-and a memory cap, and iterate with hot reload:</p>
+<p>Yes, really two lines — a bare engine ships a basic <code>print</code>. One more,
+<code>jai::stdlib::register_all(e);</code>, adds the formatted <code>{}</code> <code>print</code> and the
+standard library (math, containers, JSON). It is a static lib plus headers, with no global interpreter state.</p>
 
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 0;          // enforced — assigning a string is an error
-auto name = "Jai";     // inferred, then enforced — locked to string
-var anything = 5;      // dynamic — the explicit, visible opt-out
+<p>The <a href="embedding/index.html">embedding chapters</a> take it from there: bind a C++ class in a
+<a href="embedding/02-dynamic-binder.html">fluent chain</a> (one declaration makes a field reflected,
+script-visible and serialized), connect host signals to script, give a script a budget and a memory cap,
+and hot-reload it. Every sample on this site assumes the stdlib is registered — the standalone runner does
+that for you, and the two-line host needs the <code>register_all</code> line first. Here is what the
+language itself looks like:</p>
+
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var anything = 5;            // dynamic — the explicit, visible opt-out
 anything = "now a string";   // fine; you asked for this
 
 class Hero {
@@ -64,16 +76,23 @@ h.heal(5);
 bump(h.hp);            // fields and elements bind by reference too
 print("hp = {}", h.hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 16</code></pre></div>
+
+<p>No host yet? The repository ships a standalone runner. Save the script above as <code>hello.jai</code> and
+run <code>jaiscript hello.jai</code> — strict checking and the VM backend are the defaults, <code>jaiscript</code>
+alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every save.
+<a href="guide/01-hello.html#try-it-from-a-terminal">Building the runner</a> is one CMake target;
+<a href="reference/index.html#command-line-runner">its flags</a> are on the reference page.</p>
 </div>
 
 <div class="home-section">
-<h2>The seven pillars</h2>
+<h2 id="the-seven-pillars">The seven pillars</h2>
 <div class="pillars">
   <div class="pillar"><h3><span class="pnum">01</span>The type ladder</h3>
     <p><code>int x</code> is enforced. <code>auto x</code> is inferred, then enforced. <code>var x</code> is
-    dynamic — a choice you can see in a diff, not a default you fall into. The optional static checker maps
-    onto it exactly: typed code gets compile-time errors, <code>var</code> opts out — like TypeScript's
-    <code>any</code>, but designed-in.</p>
+    dynamic — a choice you can see in a diff, not a default you fall into. The static checker — strict by
+    default — maps onto it exactly: typed code gets load-time errors before a statement runs, <code>var</code>
+    opts out (like TypeScript's <code>any</code>, but designed-in), and <code>warn</code> / <code>off</code>
+    are the opt-downs.</p>
     <p><a href="guide/02-type-ladder.html">The Type Ladder →</a></p></div>
   <div class="pillar"><h3><span class="pnum">02</span>Value semantics, references by declaration</h3>
     <p>Assignment, parameters, and returns copy. Nothing aliases at a distance; a function cannot mutate your
@@ -82,7 +101,7 @@ print("hp = {}", h.hp);</code></pre></div>
     <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
   <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one executable spec</h3>
     <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte — including error text —
-    enforced by 2,000+ tests run against both, plus a differential fuzzer that files a bug whenever they
+    enforced by 2,400+ tests run against both, plus a differential fuzzer that files a bug whenever they
     disagree. Semantics cannot rot silently.</p>
     <p><a href="embedding/03-backends.html">Backends →</a></p></div>
   <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
@@ -93,8 +112,9 @@ print("hp = {}", h.hp);</code></pre></div>
     <p><a href="embedding/01-embedding-quickstart.html">Quickstart →</a></p></div>
   <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
     <p>Redefine a class mid-session and live instances migrate: fields keep values, changed types convert
-    permissively, new fields take their initializers. The reload <em>always succeeds</em>, because iteration
-    speed is the point. The dungeon crawler reloads its own scripts mid-game on a keypress.</p>
+    permissively, new fields take their initializers. Migration never fails — a reload never bricks an
+    instance; a source that does not parse or check simply does not load, and the old class keeps running.
+    The dungeon crawler reloads its own scripts mid-game on a keypress.</p>
     <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
   <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
     <p>A script can only touch what the host registered — the
@@ -111,46 +131,52 @@ print("hp = {}", h.hp);</code></pre></div>
 </div>
 
 <div class="home-section">
-<h2>The receipts</h2>
+<h2 id="the-receipts">The receipts</h2>
 <div class="receipts">
-  <div class="receipt"><span class="big">2,000+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
+  <div class="receipt"><span class="big">2,400+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
   <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
-  <div class="receipt"><span class="big">~7,600 lines</span><span class="what">of pure JaiScript is a complete <a href="examples/index.html">DOOM</a> — shareware WAD to BSP renderer to status bar, comfortably inside the original's 35 Hz frame budget; a dungeon crawler and a 10-scene demoreel keep it company</span></div>
-  <div class="receipt"><span class="big">16 players</span><span class="what">JaiDOOM deathmatch and co-op over the network — the whole wire protocol is <a href="examples/index.html">script</a>, not C++</span></div>
-  <div class="receipt"><span class="big">strict mode</span><span class="what">optional static checking: compiler-style diagnostics with line/column before a single statement runs</span></div>
+  <div class="receipt"><span class="big">3 games</span><span class="what">ship in the repository: a <a href="examples/index.html#gloom">raycast shooter</a>, a <a href="examples/index.html#grubwell">dungeon crawler</a> and a 13-scene <a href="examples/index.html#demoreel">demoreel</a> — plus one demo we can describe but not ship: over 8,000 lines of pure JaiScript reimplementing <a href="examples/index.html#jaidoom">DOOM</a>, WAD parser to BSP renderer, 16-player netplay with the wire protocol in script, inside the original's 35 Hz budget (its assets are not ours to distribute)</span></div>
+  <div class="receipt"><span class="big">5 languages</span><span class="what">the raycast shooter reimplemented in Squirrel, Lua, ChaiScript and Python to one spec and one seeded RNG, each held to the JaiScript state hashes bit-exactly, so the <a href="examples/index.html#gloom">comparison</a> measures the runtimes and nothing else; the report is in the repository</span></div>
+  <div class="receipt"><span class="big">strict by default</span><span class="what">compiler-style diagnostics with line/column before a single statement runs; <code>warn</code> and <code>off</code> are one call away, per engine or per region (<code>[[warn_mode]]</code>)</span></div>
   <div class="receipt"><span class="big">measured</span><span class="what">hot-loop, call, boot, and per-feature costs are quantified on one page, under one protocol: <a href="embedding/11-performance.html">Performance</a></span></div>
 </div>
 </div>
 
 <div class="home-section">
-<h2>The honest tradeoffs</h2>
+<h2 id="the-honest-tradeoffs">The honest tradeoffs</h2>
 <ul class="tradeoffs">
   <li><strong>Copies cost.</strong> Value semantics means passing a big structure by value deep-copies it.
   The idiom is <code>&amp;</code> parameters for anything heavy — cheap by design. If you write Python-shaped
   code expecting reference semantics, your first hour will surprise you; read
   <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
-  <li><strong>Call-dense recursion is slower than Lua.</strong> Most game scripts are loop- and
-  method-shaped, where the gap is small to none; if your workload is deep non-tail recursion over tiny
-  frames, Lua wins that race (bare self tail calls reuse their frame on the VM and run at loop
-  speed, any depth). The head-to-head numbers live in <a href="embedding/11-performance.html">Performance</a>.</li>
+  <li><strong>Lua is faster where it counts for some workloads.</strong> The VM wins or ties statements,
+  containers, range-for, null checks and method dispatch; Lua keeps hot loops (~4&times;), call-dense
+  recursion (~4.5&times; on fib(15)) and per-pixel software rendering (GLOOM runs ~6&times; behind on the
+  reference machine). JaiScript's VM does reuse the frame for a bare self tail call, so tail recursion runs
+  at loop speed to any depth. The head-to-head numbers, one machine, one protocol:
+  <a href="embedding/11-performance.html">Performance</a>.</li>
   <li><strong>Two backends cost maintenance.</strong> That's the price of the executable spec, and shared
   semantic kernels keep the duplicated surface small.</li>
 </ul>
 </div>
 
 <div class="home-section">
-<h2>Who it's for</h2>
-<p>Teams embedding scripting in a C++ engine who want iteration speed (hot reload, script classes), safety
-rails on by default, types that scale from prototype (<code>var</code>) to production (<code>int</code> +
-strict checking) <em>within the same file</em>, and a language whose behavior is enforced by two
-implementations arguing with each other. It was built alongside a real engine (MutedVision / Bindstone),
-hardened by adversarial review and differential fuzzing, and dogfooded by building
-<a href="examples/index.html">real, playable things</a> in it.</p>
+<h2 id="who-its-for">Who it's for</h2>
+<p>Anyone embedding scripting in a C++ engine who wants iteration speed (hot reload, script classes), safety
+rails on by default, types that scale from prototype (<code>var</code>) to production (<code>int</code>,
+checked strictly) <em>within the same file</em>, and a language whose behavior is enforced by two
+implementations arguing with each other. It was built alongside a real 2D game engine, hardened by
+adversarial review and differential fuzzing, and dogfooded by building
+<a href="examples/index.html">real, playable things</a> in it. The <a href="https://github.com/Devacor/JaiScript">source</a>
+is MIT-licensed.</p>
 </div>
 
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>
 </body>

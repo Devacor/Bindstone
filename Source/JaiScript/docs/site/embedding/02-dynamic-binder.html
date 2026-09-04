@@ -4,25 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dynamic_binder: Binding C++ Classes — JaiScript Embedding</title>
+<meta name="description" content="One declaration makes a field reflected, script-visible and serialized - then the fluent binder chain, verb by verb.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="dynamic_binder: Binding C++ Classes — JaiScript Embedding">
+<meta property="og:description" content="One declaration makes a field reflected, script-visible and serialized - then the fluent binder chain, verb by verb.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active" aria-current="page">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li class="current"><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li class="current"><a href="../embedding/02-dynamic-binder.html" aria-current="page">dynamic_binder: Binding C++ Classes</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="dynamic-binder-binding-c-classes"><code>dynamic_binder</code>: Binding C++ Classes<a class="hlink" href="#dynamic-binder-binding-c-classes" aria-label="link">&#8203;</a></h1>
-<p><strong>One declaration, three superpowers.</strong> Declare a field once with <code>JAI_PROPERTY</code> and it is
+<p><strong>One declaration, three jobs.</strong> Declare a field once with <code>JAI_PROPERTY</code> and it is
 simultaneously <em>reflected</em> (C++ code can enumerate and edit it by name), <em>script-visible</em>
 (<code>obj.field</code> just works), and <em>serialized</em> (JSON and binary, from the same declaration —
 including polymorphic pointers and signal connections). This chapter walks one game class through all three,
@@ -99,12 +109,9 @@ engine you hand it:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 jai::stdlib::register_all(*eng);   // formatted print, containers, math, json
 jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call</code></pre></div>
-<p>This is the production shape, not a docs idealization: Bindstone registers <code>Building</code>,
-<code>Creature</code>, <code>Game</code> and company exactly this way (with a <code>MV::Services</code> context
-argument — <code>jai::registrar&lt;Building, MV::Services&gt;</code> — so bindings can reach engine services),
-and MutedVision's <code>Clickable</code> component declares six <code>JAI_SIGNAL_PROPERTY</code> members
-(<code>onPress</code>, <code>onAccept</code>, <code>onDrag</code>, …) whose script-connected handlers survive
-scene save/load.</p>
+<p>This is the shape a real engine uses: scene classes register through registrars with a services context
+as the second type argument (<code>jai::registrar&lt;Building, Services&gt;</code>) so bindings can reach
+engine services.</p>
 
 <h2 id="three-doors">Three doors, each an explicit opt-in<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h2>
 <p>The pieces above are a deliberate layering — a type's visibility widens only when you ask:</p>
@@ -123,8 +130,11 @@ the in-class pin when declared, else the bare class name, always matching the se
 <code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
 on its own, which is exactly what makes an empty engine a sandbox
 (<a href="05-safety-rails.html">Safety Rails</a>).</p>
-<p><strong>Timing.</strong> The static phase (declarations, schema entries, serialization identity, the
-registrar queue) completes at program start, touches no engine, and its cross-file order is irrelevant.
+<p><strong>Timing.</strong> One term first: a derived registration <em>auto-materializes</em> its
+<code>property_owner</code> base — registers it under its own name without you asking; a later explicit
+registration of that base <em>adopts</em> the same definition and renames it. The static phase (declarations,
+schema entries, serialization identity, the registrar queue) completes at program start, touches no engine,
+and its cross-file order is irrelevant.
 The runtime phase is host-sequenced: <code>make()</code> → <code>register_all</code> →
 <code>bind_registrar</code> (once per engine) → any explicit binders → run scripts. Inside that
 registration window, order never matters — registrars replay in arbitrary order, derived-before-base is
@@ -134,14 +144,14 @@ explicitly-bound type replaces its binding for future constructions, while exist
 shape they were built with). One contract is enforced, not assumed: <strong>an explicit registration
 cannot adopt an auto-materialized base while script instances of it are alive</strong> — that would
 change their type identity, so the binder throws at the registration site. In practice: finish
-registering before constructing, and treat bare auto-names as internal plumbing — pin a curated name
-(<code>JAI_PROPERTY_OWNER</code>) on anything scripts construct directly.</p>
+registering before constructing, and treat bare auto-names as internal plumbing — give anything scripts
+construct directly a fixed script name (<code>JAI_PROPERTY_OWNER</code>).</p>
 
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
-<p>Superpower one. No glue was written for <code>id</code>, <code>level</code>, <code>interval</code>, or
+<p>Job one: scripted. No glue was written for <code>id</code>, <code>level</code>, <code>interval</code>, or
 <code>onWave</code>, yet property access, method calls, and signal connection all read like the class was
 written in script:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto s = Spawner();
+<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">auto s = Spawner();
 s.level = 3;
 s.onWave.connect("hud", [=](int wave) -&gt; void {
     print("wave {} incoming", wave);
@@ -165,7 +175,7 @@ receivers:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto gate = std::make_shared&lt;Spawner&gt;();
 eng-&gt;add_global("gate", eng-&gt;make_object(gate));
 eng-&gt;execute("gate.id = \"east-gate\"; gate.level = 7;");
-// gate-&gt;id.get() == "east-gate", gate-&gt;level.get() == 7   (verified)
+// gate-&gt;id.get() == "east-gate", gate-&gt;level.get() == 7
 
 eng-&gt;execute(R"JAI(
     gate.onWave.connect("hud", [=](int wave) -&gt; void {
@@ -176,7 +186,7 @@ gate-&gt;spawn_wave();   // C++ emit -&gt; the script receiver runs</code></pre>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">gate wave 1</code></pre></div>
 <p>The observable property completes the loop in the other direction — script observes, C++ mutates, and the
 change notification crosses the boundary. Assignments from either side fire it; unchanged writes don't:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">gate.threat.on_change([=](int old_value, int new_value) -&gt; void {
+<div class="codeblock cb-jai" data-host="Spawner registration + gate global"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">gate.threat.on_change([=](int old_value, int new_value) -&gt; void {
     print("threat {} -&gt; {}", old_value, new_value);
 });</code></pre></div>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;threat = 5;                                    // C++ write
@@ -187,9 +197,16 @@ threat 5 -&gt; 7</code></pre></div>
 <code>add_global_ref</code> on a class instance wraps a <strong>non-owning</strong> alias (you guarantee the
 object outlives the engine). One engine serves one thread at a time — two engines on two threads need no
 locks, because nothing is global.</p>
+<p>Passing a bound property by reference follows the spelling: <code>gate.level</code> or, inside a method of
+a script class that derives <code>Spawner</code>, <code>this.level</code> handed to a <code>&amp;</code>
+parameter binds the property itself, so the callee's writes land in the C++ member. The bare name has no cell
+to alias: inside such a method a bare <code>level</code> reads and stores through the accessors like
+<code>this.level</code>, but <code>[=]</code> and <code>[&amp;]</code> both snapshot it, and <code>f(level)</code>
+into a <code>&amp;</code> parameter is the error <code>Cannot take reference of undefined variable</code>,
+exactly as for a method name.</p>
 
 <h2 id="reflected">Reflected<a class="hlink" href="#reflected" aria-label="link">&#8203;</a></h2>
-<p>Superpower two. The same declaration is a runtime reflection surface — this is what editor inspectors and
+<p>Job two: reflected. The same declaration is a runtime reflection surface — this is what editor inspectors and
 debug panels are built on. Walk every property by name, read typed values, and write through the property so
 observable change signals still fire:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;visit_reflected_properties([](const std::string&amp; name, jai::property_base* p) {
@@ -212,9 +229,11 @@ chain. Per-property metadata rides along — <code>value_type_id()</code> for th
 via <code>Spawner::schema()</code> / <code>Spawner::all_property_names()</code>.</p>
 
 <h2 id="serialized">Serialized<a class="hlink" href="#serialized" aria-label="link">&#8203;</a></h2>
-<p>Superpower three. No save/load methods were written. One call walks the same property manager the other two
-superpowers use — and notice what's inside the payload: the signal's named script receiver serialized
-<em>with the object</em>:</p>
+<p>Job three: serialized. No save/load methods were written. One call walks the same property manager the
+other two jobs use — and notice what's inside the payload: the signal's named script receiver serialized
+<em>with the object</em>. The outer two levels are the archive's root record: an empty <code>_type_</code>
+(every archived object opens with one; the root record has no name) and a <code>value0</code> slot holding
+the pointer you passed, with its <code>$id</code>; your object is the <code>$val</code>.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R"JAI(
     gate.onWave.connect("logger", "print(\"wave logged\");");   // named script-text receiver
 )JAI");
@@ -255,14 +274,14 @@ auto json = jai::to_json(*eng, gate);</code></pre></div>
 <p>Loading reconstructs the object <em>and re-arms the receiver</em>. Pass the engine as the load context so
 persisted script receivers attach to it and execute on the next emit:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto loaded = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, json, *eng);
-// loaded-&gt;id.get() == "east-gate", level 7, threat 9   (verified)
+// loaded-&gt;id.get() == "east-gate", level 7, threat 9
 loaded-&gt;spawn_wave();   // the receiver came back from the save file</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <p>Binary is the same declaration through a different archive — no second format to maintain, and this
 object's payload is 374 bytes instead of 492 characters of JSON:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector&lt;uint8_t&gt;
 auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes, *eng);
-again-&gt;spawn_wave();   // "wave logged" — receivers persist in binary too   (verified)</code></pre></div>
+again-&gt;spawn_wave();   // "wave logged" — receivers persist in binary too</code></pre></div>
 <p>Ship saves in binary, debug them in JSON, diff them in code review — one declaration serves all of it. The
 receiver rule is deliberate: <strong>named script-text receivers persist; function-object receivers (script
 lambdas and C++ callbacks) are runtime-only</strong> and are skipped, never errored on. Serialization depth —
@@ -273,7 +292,7 @@ versioning, migration hooks, <code>$ref</code> aliasing, custom archives — liv
 <p>Script classes can extend bound C++ classes — and because the C++ half of such an object is the
 <em>same live object</em> across reloads, iterating on the script half never resets engine state. Redefine the
 class with a new field mid-session:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
+<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
     SmartSpawner() : super() {}
 }
@@ -283,7 +302,7 @@ smart.aggression = 2;
 smart.spawn_wave();</code></pre></div>
 <p>Later, same session — a fresh <code>execute()</code> redefines the class with a new field, while
 <code>smart</code> is alive:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
+<div class="codeblock cb-jai" data-host="Spawner registration, same session as the block above"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
     int burst = 4;                  // new field takes its initializer
     SmartSpawner() : super() {}
@@ -315,7 +334,7 @@ types that aren't <code>property_owner</code>s. The classic value-type example:<
     .property("x", &amp;Vec2::x)
     .property("y", &amp;Vec2::y)
     .build();</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
+<div class="codeblock cb-jai" data-host="Vec2 binder chain"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
 print("length {}", v.length());
 var a = Vec2(1.0, 2.0) + Vec2(3.0, 4.0);
 print("sum ({}, {})", a.x, a.y);
@@ -368,7 +387,8 @@ see <a href="#signals-one-view-every-signature">the signals section</a>.</li>
 pairs; pass <code>nullptr</code> as the setter for read-only.</li>
 <li><code>.property(name, &amp;T::member, jai::skip_type_check)</code> — a property whose type isn't
 registered yet throws at registration time with a fix-it message; this tag acknowledges a deliberate circular
-dependency and skips the check.</li>
+dependency and skips the check. The classic case is self-reference: <code>class Node { std::shared_ptr&lt;Node&gt; next; }</code>
+binds <code>next</code> before <code>Node</code> itself is registered.</li>
 <li><code>.static_property(name, &amp;var)</code> / <code>.static_property(name, getter, setter)</code> —
 class-level values.</li>
 <li><code>.base_class&lt;Base&gt;()</code> — inheritance edge: methods and properties of the base become
@@ -399,25 +419,27 @@ movable, non-copyable.</li>
 <code>property_owner</code> is exposed by <code>auto_bind</code>; a plain <code>jai::signal&lt;Sig&gt;</code>
 or <code>signal_emitter&lt;Sig&gt;</code> member is exposed by one <code>.property("name",
 &amp;T::member)</code> line. Either way, script sees the same three-verb surface:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { ... });   // named function receiver
+<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { print("wave {}", wave); });   // named function receiver
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true
 s.onWave.disconnect("hud");</code></pre></div>
-<p>The machinery behind it is one class, not one per signature. Reading a signal member hands script an
-engine-wide <code>Signal</code> view over a type-erased operations table
-(<code>signal_script_ops</code>, <code>include/jaiscript/signals/signal_view.hpp</code>): three function
-pointers — connect, disconnect, connected — whose thunks instantiate at the binding site, where the
-emitter's concrete type is known. On the <code>auto_bind</code> path, <code>JAI_SIGNAL_PROPERTY</code>
-stamps its schema entry <code>is_signal</code> (<code>properties/property_schema.hpp</code>), and the
-binder turns that entry into a read-only property whose getter asks the live signal property for its
-erased table (<code>property_base::signal_ops</code>). That lookup is
-<code>find_reflected_property</code> — virtual, whole inheritance chain — so a signal declared on a
-<em>base</em> class connects through a <em>derived</em> registration in either registration order. That is
-MutedVision's everyday shape: <code>Clickable</code> declares <code>onAccept</code>, <code>Button</code>
-registers with <code>base_class</code> + <code>auto_bind</code>, and script connects on the button.
-Script-text receivers work through the same table — connecting text routes the binding engine into the
-emitter before the connect, so C++-side emits fire them regardless of how the object came to exist
-(constructed in script, made in C++, or loaded from a save).</p>
+<p>Script sees one generic <code>Signal</code> view for every signature — one class, not one per signature —
+and the lookup walks the whole inheritance chain, so a signal declared on a <em>base</em> class connects
+through a <em>derived</em> registration in either registration order: a <code>Pickup</code> base declares a
+signal, <code>HealthPickup</code> registers with <code>base_class</code> + <code>auto_bind</code>, and script
+connects on the derived object. Script-text receivers work the same way whether the object was constructed in
+script, made in C++, or loaded from a save.</p>
+<details><summary>How the view is built</summary>
+<p>Reading a signal member hands script an engine-wide <code>Signal</code> view over a type-erased operations
+table (<code>signal_script_ops</code>, <code>include/jaiscript/signals/signal_view.hpp</code>): three function
+pointers — connect, disconnect, connected — whose thunks instantiate at the binding site, where the emitter's
+concrete type is known. On the <code>auto_bind</code> path, <code>JAI_SIGNAL_PROPERTY</code> stamps its schema
+entry <code>is_signal</code> (<code>properties/property_schema.hpp</code>), and the binder turns that entry
+into a read-only property whose getter asks the live signal property for its erased table
+(<code>property_base::signal_ops</code>). That lookup is <code>find_reflected_property</code> — virtual, whole
+inheritance chain. Connecting text routes the binding engine into the emitter before the connect, so C++-side
+emits fire text receivers regardless of how the object came to exist.</p>
+</details>
 <p>A <em>typed</em> registration can sit on top of this: <code>jai::bind_signal_type&lt;Sig&gt;</code>
 registers a named class for one signature and takes precedence over the generic view at member reads.
 When to reach for it — named signal types, pre-registration, precedence — is covered in
@@ -432,8 +454,8 @@ the view see whatever parameter names the emitter's owner set in C++ (none, by d
 needs the emit arguments, connect a function receiver — its parameters bind positionally, no naming
 required.</li>
 </ul>
-<p>That is the binder&#x27;s half of the signal story. The user&#x27;s half — the owner/view idiom for firing
-signals from C++, receiver lifetime and <code>emit_while</code>, the two receiver forms, and observable
+<p>That is the binder&#x27;s half of the signal story. Your half as the host — firing signals from C++ with the
+owner/view idiom, receiver lifetime and <code>emit_while</code>, the two receiver forms, and observable
 properties — is <a href="10-signals-properties.html">Signals &amp; Observable Properties</a>.</p>
 
 <h2 id="inheritance-and-polymorphism">Inheritance and polymorphism<a class="hlink" href="#inheritance-and-polymorphism" aria-label="link">&#8203;</a></h2>
@@ -470,7 +492,7 @@ std::static_pointer_cast&lt;HealthPickup&gt;(loot)-&gt;healing = 40;
 
 auto lootJson = jai::to_json(*eng, loot);          // saved through the BASE pointer
 auto back = jai::from_json&lt;std::shared_ptr&lt;Pickup&gt;&gt;(*eng, lootJson);
-auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, healing == 40  (verified)</code></pre></div>
+auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, healing == 40</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
   "_type_": "",
   "value0":
@@ -489,7 +511,7 @@ map, no slicing. On the script side, the same edge gives upcasts and inherited d
 <code>shared_ptr&lt;Pickup&gt;</code> accepts a script-made <code>HealthPickup</code>, and base methods are
 callable on derived instances:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function("describe", [](std::shared_ptr&lt;Pickup&gt; p) { return p-&gt;name.get(); });</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var h = HealthPickup();
+<div class="codeblock cb-jai" data-host="Pickup / HealthPickup registration + describe"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var h = HealthPickup();
 h.name = "elixir";
 h.healing = 40;
 print("upcast: {} heals {}", describe(h), h.healing);
@@ -555,10 +577,13 @@ you at the named constructor — pass <code>"Pointi"</code> (or any script-legal
 names like <code>"Point&lt;int&gt;"</code> register the base template name with the parser
 automatically.</li>
 </ul>
-<nav class="prevnext"><a class="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>
+<nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" rel="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

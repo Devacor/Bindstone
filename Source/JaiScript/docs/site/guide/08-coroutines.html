@@ -4,25 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coroutines — JaiScript Guide</title>
+<meta name="description" content="Coroutines and yield: handles you resume, drivable by range-for, and the shapes that make multi-frame behavior easy to write.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Coroutines — JaiScript Guide">
+<meta property="og:description" content="Coroutines and yield: handles you resume, drivable by range-for, and the shapes that make multi-frame behavior easy to write.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li class="current"><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li class="current"><a href="../guide/08-coroutines.html" aria-current="page">Coroutines</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="coroutines">Coroutines<a class="hlink" href="#coroutines" aria-label="link">&#8203;</a></h1>
-<p>Declare with the <code>coroutine</code> keyword; calling one returns a <strong>handle</strong> instead of running the body. <code>handle.resume()</code> runs to the next <code>yield</code> (returning the yielded value), <code>handle.done()</code> reports completion, and a final <code>return</code> value is delivered by the last <code>resume()</code>. The interpreter implements them by continuation replay, the VM by fibers — behavior is identical. Coroutines turn stateful multi-frame behavior — AI, cutscenes, staged animations — into straight-line code that pauses where it yields.</p>
+<p>Declare with the <code>coroutine</code> keyword; calling one returns a <strong>coroutine handle</strong> instead of running the body. <code>handle.resume()</code> runs to the next <code>yield</code> (returning the yielded value), <code>handle.done()</code> reports completion, and a final <code>return</code> value is delivered by the last <code>resume()</code>. The interpreter implements them by continuation replay, the VM by fibers — behavior is identical. Coroutines turn stateful multi-frame behavior — AI, cutscenes, staged animations — into straight-line code that pauses where it yields.</p>
 <h2 id="yield-resume-done">yield / resume / done<a class="hlink" href="#yield-resume-done" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int counter() {
     yield 1;
@@ -41,6 +51,34 @@ done? false
 resume: 3
 done? true</code></pre></div>
 <p>Coroutines take parameters like any function, and <code>yield</code> works inside loops and conditionals. Side effects in a yield expression run exactly once, however the suspension is implemented underneath.</p>
+<h2 id="spellings">Spellings<a class="hlink" href="#spellings" aria-label="link">&#8203;</a></h2>
+<p><code>coroutine</code> is a prefix, and it goes in front of <em>every</em> function spelling from the <a href="../guide/06-functions.html#declaration-forms">Functions chapter</a> &mdash; return-type-first, trailing arrow, the <code>function</code> keyword, or nothing at all. Methods take the same forms, <code>static</code> ones included:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int a() { yield 1; }                 // return-type-first
+coroutine b() -&gt; int { yield 2; }              // trailing arrow
+coroutine function c() -&gt; auto { yield 3; }    // function keyword + arrow
+coroutine function d() { yield 4; }            // function keyword, inferred
+coroutine e() { yield 5; }                     // bare: no type, no keyword
+print(&quot;{} {} {} {} {}&quot;, a().resume(), b().resume(), c().resume(), d().resume(), e().resume());
+
+class Spawner {
+    int base = 10;
+    coroutine function waves(int n) { for (int i = 0; i &lt; n; ++i) { yield base + i; } }
+    coroutine int w2() { yield base * 2; }
+    coroutine w3() -&gt; int { yield base * 3; }
+    static coroutine int ticks() { yield 1; yield 2; }
+}
+auto s = Spawner();
+for (auto w : s.waves(3)) { print(&quot;wave {}&quot;, w); }
+print(&quot;{} {}&quot;, s.w2().resume(), s.w3().resume());
+auto t = Spawner::ticks();
+print(&quot;{} {}&quot;, t.resume(), t.resume());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 3 4 5
+wave 10
+wave 11
+wave 12
+20 30
+1 2</code></pre></div>
+<p>The type you write describes what the body <em>yields and returns</em> &mdash; it is never the type of the call, which is always a handle &mdash; and at run time only the final <code>return</code> converts to it (see the last sample in this chapter). There is no coroutine lambda, and a coroutine cannot return a reference; both are parse errors. Coroutines inside <code>namespace</code> bodies are not supported yet.</p>
 <h2 id="each-call-is-an-independent-instance">Each call is an independent instance<a class="hlink" href="#each-call-is-an-independent-instance" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int letters() { yield 1; yield 2; yield 3; }
 auto x = letters();
@@ -99,11 +137,20 @@ h.done();</code></pre></div>
 == result: false</code></pre></div>
 <p>The handle keeps the instance alive for as long as the coroutine is suspended.</p>
 <h2 id="rules-and-edges">Rules and edges<a class="hlink" href="#rules-and-edges" aria-label="link">&#8203;</a></h2>
-<ul><li><strong>Handles are reference-semantic</strong>: copying a handle &mdash; into a field, an array/map element, a by-value parameter, another variable &mdash; shares the ONE live coroutine; every alias sees the same <code>resume()</code>/<code>done()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). This is what lets an AI park its behavior coroutine in a field of its own game object and resume it every tick. Note the deliberate strong cycle when an instance&#x27;s field holds a handle of its <em>own</em> method (the handle pins the receiver): break it by re-assigning/nulling the field, exactly like any shared structure. <code>static coroutine</code> methods are rejected.</li><li>Handles resume correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame.</li><li>A failed resume marks only that handle done.</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (the old handle keeps the old body), and method coroutines survive field-changing reloads of their class.</li><li>The execution budget still applies during <code>resume()</code> — and budget errors skip catches inside coroutines too.</li></ul>
-<p>The final <code>return</code> through a typed coroutine converts to the declared type on delivery.</p><nav class="prevnext"><a class="prev" href="../guide/07-classes.html"><span>&larr; previous</span>Classes</a><a class="next" href="../guide/09-containers-strings.html"><span>next &rarr;</span>Containers &amp; Strings</a></nav></article>
+<ul><li><strong>Handles are reference-semantic</strong>: copying a handle &mdash; into a field, an array/map element, a by-value parameter, another variable &mdash; shares the ONE live coroutine; every alias sees the same <code>resume()</code>/<code>done()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). This is what lets an AI park its behavior coroutine in a field of its own game object and resume it every tick. Note the deliberate strong cycle when an instance&#x27;s field holds a handle of its <em>own</em> method (the handle pins the receiver): break it by re-assigning/nulling the field, exactly like any shared structure. <code>static</code> coroutine methods work the same way; the handle just carries no receiver.</li><li>Handles resume correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame.</li><li>A failed resume marks only that handle done.</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (the old handle keeps the old body), and method coroutines survive field-changing reloads of their class.</li><li>The execution budget still applies during <code>resume()</code> — and budget errors skip catches inside coroutines too.</li><li><strong>The checker stays out of the body&#x27;s way</strong>: yield and return types are not checked statically, and a coroutine call types as an unknown handle, so everything downstream of it is lenient.</li></ul>
+<p>The declared type still does its work at run time: the final <code>return</code> converts to it on delivery, while yielded values pass through as they are:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int g() { yield &quot;not checked&quot;; return 2.9; }
+auto h = g();
+print(h.resume());
+print(h.resume());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">not checked
+2</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/07-classes.html"><span>&larr; previous</span>Classes</a><a class="next" rel="next" href="../guide/09-containers-strings.html"><span>next &rarr;</span>Containers &amp; Strings</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

@@ -47,6 +47,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 int twice(int v) { return v * 2; }
 auto mul(int a, int b) { return a * b; }
 auto mul2(a, b) -&gt; int { return a * b; }
+auto mul3(auto a, auto b) { return a * b; }
+var mul4(var a, var b) { return a * b; }
 var pick(bool flag) { return flag ? 42 : &quot;none&quot;; }
 void hello(string who) { print(&quot;hello {}&quot;, who); }
 
@@ -78,6 +80,8 @@ coroutine int countdown(int from) { for (int i = from; i &gt; 0; i--) { yield i;
 
 print(twice(21));
 print(mul(4, 2) + mul2(3, 3));
+print(mul3(2, 5));
+print(mul4(2.5, 2));
 print(pick(true));
 print(pick(false));
 hello(&quot;jai&quot;);
@@ -91,6 +95,8 @@ Counter k = Counter(); k.add(4); print(k.add(1)); print(Counter::limit());
 for (auto v : countdown(3)) { print(v); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">42
 17
+10
+5.000000
 42
 none
 hello jai

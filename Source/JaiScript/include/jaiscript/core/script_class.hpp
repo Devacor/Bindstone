@@ -78,8 +78,10 @@ public:
                 }
             }
         } else if (!is_constructor && !is_destructor && !is_hot_reload) {
-            // Not marked as override (skip check for constructors/destructors and hot reload)
-            if (method_info.owner_class && method_info.owner_class.get() != this) {
+            // Not marked as override (skip check for constructors/destructors and hot reload);
+            // a base's SYNTHESIZED field accessor is invisible to shadowing
+            if (method_info.owner_class && method_info.owner_class.get() != this &&
+                !method_info.owner_class->owns_auto_accessor(name_id)) {
                 // Method exists in parent
                 if (method_info.metadata && method_info.metadata->is_virtual) {
                     // Parent method is virtual, MUST use override

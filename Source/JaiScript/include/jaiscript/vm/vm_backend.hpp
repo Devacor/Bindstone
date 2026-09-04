@@ -11,6 +11,7 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
+#include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -696,6 +697,7 @@ namespace jai::vm {
         uint64_t class_definition_type_id_ = 0;
         uint64_t hot_reload_migrate_id_ = 0;
         uint64_t pair_id_ = 0;
+        base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at init
 
         builtin_method_registries builtins_;
 
@@ -857,6 +859,7 @@ namespace jai::vm {
             class_definition* class_def = nullptr;
             explicit operator bool() const { return instance != nullptr || class_def != nullptr; }
             script_value method(uint64_t id) const;
+            script_value user_accessor(uint64_t id) const;   // nearest user _get_/_set_ (synthesized skipped); invalid when absent
             bool has_field(uint64_t id) const;
             const script_value& get_field(uint64_t id) const;
             const std::string& class_name() const;
@@ -1059,8 +1062,8 @@ namespace jai::vm {
             }
             auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
                                                   f.locals->scope_static, symbol_id, /*want_methods*/ false);
-            if (hit.value_ptr) {
-                return hit.value_ptr;
+            if (hit) {
+                return hit.value_ptr;   // a C++ property answers nullptr: a shadow, minted by value sites
             }
             if (detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
                                                 f.locals->scope_static, symbol_id)) {
@@ -1126,6 +1129,10 @@ namespace jai::vm {
         // grew user fields at runtime re-asks has_field.
         static bool mic_field_shadowed(const call_site& site, const class_instance& inst, uint64_t id) {
             if (site.mic_field_free && !inst.has_user_overflow_fields()) { return false; }
+            return inst.has_field(id);
+        }
+        static bool probe_field_shadowed(const call_site& site, const class_instance& inst, uint64_t id) {
+            if (site.probe_field_free && !inst.has_user_overflow_fields()) { return false; }
             return inst.has_field(id);
         }
         void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
@@ -1203,6 +1210,8 @@ namespace jai::vm {
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto instance = this_val.get_class_instance();
             if (!instance) { return nullptr; }
+            // A C++ property has no cell to alias (the interpreter's pointer form answers null too)
+            if (detail::cpp_property_getter_id(instance.get(), sym)) { return nullptr; }
             script_value& field_ref = instance->get_field(sym, false);
             if (!field_ref.is_invalid()) { return &field_ref; }
             if (auto class_def = instance->get_class_definition()) {
@@ -1213,6 +1222,7 @@ namespace jai::vm {
         op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out);
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
         op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
+        op_status store_static_target(frame& f, member_expr* member, const script_value& result);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare
         // sibling calls): call paths recover the payload (kind bound_method) and enter
@@ -1264,6 +1274,7 @@ namespace jai::vm {
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
         op_status exec_binary(frame& f, const vm_instruction& ins);
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
+        op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
         // addressing): op_binary_fused pushes, the _decl/_store variants land the
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
@@ -1327,6 +1338,8 @@ namespace jai::vm {
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)
         op_status exec_probe_callee(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
+        // Callee-first probe for member / computed callees (op_probe_member)
+        op_status exec_probe_member(frame& f, const vm_instruction& ins);
         op_status push_script_frame_pinned(frame& caller,
                                                const script_defined_function& function,
                                                strong_ptr<script_function> pin,

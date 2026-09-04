@@ -1499,9 +1499,9 @@ public:
         });
 
         test("field_read_ic_reload_at_hot_site", [this]() {
-            // vm GET_MEMBER site IC (chunk::member_ic) revalidates on method_epoch: a
-            // getter added by reload SHADOWS the field at an already-hot read site, and
-            // a removed field errors — identically on both backends.
+            // vm GET_MEMBER site IC (chunk::member_ic) revalidates on method_epoch: a user
+            // _get_x added by reload serves an already-hot read site, and a removed field
+            // errors — identically on both backends.
             std::array<std::string, 2> removed;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
@@ -1514,12 +1514,11 @@ public:
                 check_eq((int64_t)15, e->execute("hot()").as_int());
                 e->execute("p.x = 4;");
                 check_eq((int64_t)20, e->execute("hot()").as_int(), "hot site reads the live cell");
-                // Established contract (both backends): a script-defined _get_x does NOT
-                // shadow a PRESENT field — property getters are the C++ surface. The
-                // reload still bumps the epoch, so the hot site revalidates either way.
+                // A user _get_x owns the member: the reload bumps the epoch, the hot site
+                // revalidates and dispatches to the getter (both backends)
                 e->execute("class P { int x = 3; int _get_x() { return 100; } }");
-                check_eq((int64_t)20, e->execute("hot()").as_int(),
-                         use_vm ? "vm field wins at hot site across reload" : "interp field wins at hot site across reload");
+                check_eq((int64_t)500, e->execute("hot()").as_int(),
+                         use_vm ? "vm getter serves the hot site across reload" : "interp getter serves the hot site across reload");
                 e->execute("class P { int y = 1; }");
                 removed[use_vm ? 1 : 0] = e->execute(
                     "var msg = \"\"; try { var t = hot(); msg = \"ran\"; } catch (err) { msg = err; } msg").as<std::string>();
@@ -1566,9 +1565,9 @@ public:
 
         test("field_store_ic_reload_and_setter_shadow", [this]() {
             // Write-side twin of field_read_ic: the vm SET_MEMBER site IC revalidates on
-            // method_epoch — a CUSTOM _set_ added by reload must fire at an already-hot
-            // store site, typed-store conversion errors stay backend-identical, and the
-            // auto-setter (synthesized accessor) never blocks the slot path.
+            // method_epoch — a user _set_ added by reload fires at an already-hot store
+            // site (declared field or not), typed-store conversion errors stay
+            // backend-identical, and the synthesized setter never blocks the slot path.
             std::array<std::string, 2> badstore;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
@@ -1580,15 +1579,13 @@ public:
                 )");
                 e->execute("hot(10);");
                 check_eq((int64_t)14, e->execute("w.x").as_int(), "hot store site writes the cell");
-                // Established contract (both backends): the SYNTHESIZED accessor
-                // re-registers after user methods, so a script _set_x for a DECLARED
-                // field is unreachable — the store stays a raw field write. The reload
-                // still bumps the epoch, so the hot site revalidates either way.
+                // A user _set_x for a DECLARED field owns the store: the reload bumps the
+                // epoch and the hot site dispatches to the setter (both backends)
                 e->execute("class W { int x = 0; int log = 0; void _set_x(int v) { x = v; log = log + 1; } }");
                 e->execute("hot(20);");
-                check_eq((int64_t)24, e->execute("w.x").as_int(), "field store stays raw across reload");
-                check_eq((int64_t)0, e->execute("w.log").as_int(),
-                         use_vm ? "vm auto-accessor wins over user _set_x" : "interp auto-accessor wins over user _set_x");
+                check_eq((int64_t)24, e->execute("w.x").as_int(), "the setter's bare store lands");
+                check_eq((int64_t)5, e->execute("w.log").as_int(),
+                         use_vm ? "vm user _set_x fires at the hot site" : "interp user _set_x fires at the hot site");
                 // a custom setter for a NON-field name DOES fire (no auto competition,
                 // and the store site stays negative in the IC — no slot exists)
                 e->execute(R"(

@@ -180,6 +180,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_call_from_scratch:
 				out << " argc=" << ins.a << " site=" << ins.b;
 				break;
+			case opcode::op_probe_member:
+				out << " site=" << ins.a << " mode=" << ins.b;
+				break;
 			case opcode::op_return_ident:
 				out << " slot=" << static_cast<int32_t>(ins.a) << " sym=" << ins.b;
 				break;

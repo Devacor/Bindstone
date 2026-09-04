@@ -600,22 +600,22 @@ public:
         test("proof_field_gains_custom_getter_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
             auto t = make_twins();
             arm(t, v1_int, use_int);
-            // established contract (script_class_tests): a same-class _get_ never shadows a
-            // declared field; the reload still moves the shape epoch, so the armed proofs miss
-            // and the ladder answers the same way on both twins
+            // a user _get_f added by the reload owns member reads (r.f, this.f); bare f stays the
+            // field. The reload moves the shape epoch, so the armed proofs miss and the ladder
+            // answers the same way on both twins
             step(t, "class R { int f = 1;\n  int _get_f() { return f * 10; }\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload adds _get_f");
-            check_eq(std::string("VALUE 9"), step(t, "to_string(r.f)", "declared field wins over the reload's getter"));
-            check_eq(std::string("VALUE 9:9:int"), step(t, "r.show()", "bare reads"));
-            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
+            check_eq(std::string("VALUE 90"), step(t, "to_string(r.f)", "the reload's getter serves the member read"));
+            check_eq(std::string("VALUE 9:90:int"), step(t, "r.show()", "bare f is the field, this.f the getter"));
+            check_eq(std::string("VALUE 9:90:int"), step(t, use_int, "the armed use source"));
         });
 
         test("proof_field_gains_custom_setter_on_reload", [this, step, arm, make_twins, v1_int, use_int, show_int]() {
             auto t = make_twins();
             arm(t, v1_int, use_int);
             step(t, "class R { int f = 1; int log = 0;\n  void _set_f(int v) { log = log + 1; }\n  int set(int v) { f = v; this.f = v; return f; }\n" + show_int, "reload adds _set_f");
-            check_eq(std::string("VALUE 3:0"), step(t, "r.f = 3; to_string(r.f) + \":\" + to_string(r.log)", "declared field store stays raw"));
-            check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
-            check_eq(std::string("VALUE 0"), step(t, "to_string(r.log)", "the setter never fired"));
+            check_eq(std::string("VALUE 9:1"), step(t, "r.f = 3; to_string(r.f) + \":\" + to_string(r.log)", "the reload's setter owns the member store (it only logs)"));
+            check_eq(std::string("VALUE 7:7:int"), step(t, use_int, "bare f = v lands, this.f = v and r.f = 9 go to the setter"));
+            check_eq(std::string("VALUE 3"), step(t, "to_string(r.log)", "three member stores logged"));
         });
 
         test("proof_field_access_label_change_on_reload", [this, step, arm, make_twins, v1_int, use_int, v2_private]() {
@@ -713,6 +713,36 @@ public:
             step(t, "extend(p, Pt3); p.show() + \":\" + to_string(p.b)", "re-classed in place");
             check_eq(std::string("VALUE 7:7"), step(t, use, "the armed use source on the re-classed receiver"));
             step(t, "p.b = 9; p.set(1); p.show() + \":\" + to_string(p.b)", "stores after the re-class");
+        });
+
+        // ---- Static state under a retype (existing rules, pinned): the value survives
+        // verbatim (no initializer re-run, no conversion), the NEW declared type governs
+        // every later store, a dropped static disappears, a static NEW in the reload runs
+        // its initializer through the field table. ----
+        test("static_retype_on_reload_keeps_value_new_type_governs_stores", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto run = [&](const char* src) -> std::string {
+                try { return eng->execute(src).to_string(); }
+                catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+            };
+            run("function L(var x) { return x; } class R { static int s = 0; } R::s = 7;");
+            run("class R { static string s = \"init\"; }");
+            check_eq(std::string("7:int"), run("to_string(R::s) + \":\" + type_of(R::s)"), "value preserved verbatim, old type");
+            check_eq(std::string("9:string"), run("R::s = 9; R::s + \":\" + type_of(R::s)"), "the new declared type governs stores");
+            run("class R { static int s = 0; }");
+            check_eq(std::string("9:string"), run("to_string(R::s) + \":\" + type_of(R::s)"), "reload back preserves the string verbatim");
+            const std::string err = run("R::s = L(\"zz\");");
+            check_true(err.find("Type mismatch in assignment") != std::string::npos, "unconvertible store raises under the new type (got: " + err + ")");
+            check_eq(std::string("9:string"), run("to_string(R::s) + \":\" + type_of(R::s)"), "static untouched by the failed store");
+            check_eq(std::string("4:int"), run("R::s = 4; to_string(R::s) + \":\" + type_of(R::s)"), "int governs again");
+            run("class R { static int s = 0; }");
+            check_eq(std::string("4"), run("to_string(R::s)"), "identical redefinition keeps the value");
+            run("class R { static int s = 0; static float g = 3; }");
+            check_eq(std::string("float:3.000000"), run("type_of(R::g) + \":\" + to_string(R::g)"), "a static new in the reload converts its initializer");
+            check_eq(std::string("4"), run("to_string(R::s)"), "the existing static kept its value");
+            run("class R { static float g = 3; }");
+            check_true(run("R::s").find("ERROR") == 0, "a dropped static is gone");
         });
     }
 };

@@ -275,8 +275,22 @@ engine stays usable", not by `check_throws`.
   `cast<char>(97) == 'a'` range-checked 0..255, `cast<string>(c)`, `cast<char>("a")` for a
   one-character string; `char c = 65` still raises). Shared kernel `detail/cast_kernel.hpp`
   (`.jaibite` version 9 added the node).
+- **One conversion table for every typed slot** (`detail/typed_slot.hpp` +
+  `class_definition.hpp` `convert_for_typed_slot_core`): declaration, `=`, by-value parameter,
+  typed return and field store all run the assignment table (`docs/static_checking.md` rule
+  table) - `string` slots take anything, `bool` is truthiness, `int`/`float` take bool and
+  `to_int()`/`to_float()` objects, exactly ONE converting ctor (no chaining), the array/map
+  element boundary on every path; each site owns its rejection text.
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
+- **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
+  included) reads through the nearest USER `_get_x` in the class chain and stores through the
+  nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the
+  synthesized field accessors never shadow a user one in either direction of the chain, and a
+  child `_get_x` over a base field needs no `override`. A BARE `x` inside the chain's methods
+  is the backing field (accessor bodies do not recurse). Such a field is off every member fast
+  lane (vm member IC, field proofs — `class_definition::user_accessor`), is a non-lvalue to
+  references, and adding/removing an accessor on hot reload takes effect for existing instances.
 - Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,

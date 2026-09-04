@@ -38,21 +38,34 @@ related_line/column, strict_region}`); mode only decides whether errors gate exe
 (strict: every error; warn: only errors a `[[strict_mode]]` region raised - "Escape hatches").
 Warning severity never gates.
 
-## Rule table (mirrors `interpreter::enforce_type_compatibility`)
+## Rule table (mirrors `detail::convert_for_typed_slot` — the one table for declarations, assignment, parameters, returns and fields)
 
 | target | accepts | notes |
 |---|---|---|
-| `int` | int, float (truncates), bool | string/char/null/containers = error |
-| `float` | float, int, bool | |
+| `int` | int, float (truncates), bool, object with `to_int()` | string/char/null/containers = error |
+| `float` | float, int, bool, object with `to_float()` | |
 | `bool` | anything | truthy conversion |
-| `string` | anything | to_string conversion |
-| `char` | char only | `char c = 65` is a runtime error too |
-| `array` / `map` | array / map | element/key types NOT checked (lenient v1) |
-| object `C` | null; same class; derived→base; ctor conversion `C(src)`; on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
-| `shared_ptr` / `weak_ptr` / references / function slots | anything | lenient v1 |
+| `string` | anything | to_string conversion; objects use their `to_string()` when defined |
+| `char` | char, object with `to_char()` | `char c = 65` is a runtime error too (`cast<char>` is the spelling) |
+| `array` / `map` | array / map | element/key types NOT checked statically (lenient v1); the runtime element boundary runs on every path (`Cannot store 'string' in 'array<int>'`) |
+| object `C` | null (a typed null); same class; derived→base; a `shared_ptr<C or derived>` handle; ctor conversion `C(src)` through exactly ONE true 1-param ctor whose parameter takes `src` directly (no chaining, no `to_X()` on the way in); on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
+| `shared_ptr` / `weak_ptr` / references / function slots | anything | lenient v1; `null` stores a typed null on every path |
 | `var` | anything, forever | THE opt-out: a var-typed expression makes downstream types unknown (like TS `any`); unknown never errors |
 | `auto` + initializer | inferred, then enforced as that type | a `null` initializer leaves it dynamic — null carries no type; the runtime locks at the first non-null store |
 | `auto` without initializer | dynamic (unchecked) | runtime locks at first assignment; the checker can't see branch order, so it opts out — documented leniency |
+
+**One table.** By-value parameters, returns and field stores run exactly this table at run
+time (`detail::convert_for_typed_slot`), the array/map element boundary included, so a value
+the checker admits converts. A chained conversion (`TA -> TB -> TC`, `X.to_int() -> C(int)`)
+is never implicit; a converting constructor or `to_X()` that throws surfaces its own error.
+Each site keeps its rejection text: `Type mismatch in assignment` / `Incompatible class types`
+for declarations, `=` and fields, `Type mismatch: expected T but got S` / `Cannot convert S to
+C (no suitable single-argument constructor)` for parameters and returns, the container text
+for declarations, `=`, parameters and returns (a field store keeps `Type mismatch in assignment`).
+`S` is the value's own type (`string`, `null`, `array`, a class name), never a `var` tag. A
+return that fails converts at the `return` statement: the returning function is the top frame
+of the stack trace with the call site below it (lambdas, methods and resumed coroutines alike;
+a coroutine's frame sits above the resumer's), and the error still surfaces in the caller.
 
 **Compound assign** (Dev ruling 2026-07, settled): typed targets follow C++ rules —
 `x op= rhs` is `x = T(x op rhs)`, so `int x; x += 2.5` is fine (truncates) and
@@ -65,7 +78,7 @@ methods, inherited fields) all check against the declared type.
 
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
-  (same conversion table — note a `string` parameter accepts anything). Overloads: error
+  (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
   only if NO overload matches. Reference params are lenient.
 - host (C++) functions via `engine::host_function_signatures`: arity across overloads
   (variadic = anything), and per-arg only certainties (a known primitive with no builtin
@@ -107,7 +120,12 @@ engine-registered `class_definition` incl. `_get_`/`_set_` properties and static
 an unknown field/method is an error, reads and writes both (declared intent — the runtime
 tolerates dynamic field creation on writes). A member that only a SUBTYPE declares is an
 error on a receiver whose static class is certain, exactly like C++ — the fixes are a `var`
-receiver or `cast<T&>(expr).member`. Any unresolvable ancestor opens the class: silence.
+receiver or `cast<T&>(expr).member`. A member that a user `_get_x`/`_set_x` declares (same
+unit or registered, anywhere in the chain) is known with an unknown type: `expr.x` reads and
+writes are lenient and never proven; a bare `x` inside the class keeps the field's declared
+type. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
+compound forms check the store against the static's declared type (the runtime enforces the same
+table on every spelling). Any unresolvable ancestor opens the class: silence.
 Builtin container/string/map methods, subscripts, enum values (existence IS checked:
 `Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
 (`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
@@ -118,7 +136,11 @@ object receiver; a class method of the same name wins first.
 `cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. The operand
 is the explicit typed boundary and is never checked against `T` — the verdict is the runtime's
 (`Cannot cast 'X' to 'T'`, catchable). A `T` that names no class is an error
-(`unknown type in cast`).
+(`unknown type in cast`). A value-form class cast whose operand is statically a `shared_ptr<T>`
+handle or a declared reference draws a warning (never gates): `cast<C>(h) copies the instance -
+use cast<C&>(h) to alias it or cast<shared_ptr<C>>(h) to share it`; `cast<T&>`,
+`cast<shared_ptr<T>>`, primitive targets and `var`/unknown operands stay silent, and a `weak_ptr`
+operand is lenient here as everywhere (the runtime raises `Cannot cast 'weak_ptr' to 'T'`).
 
 Open surfaces (misses silent, hits still typed):
 - a class this unit declares that the engine already holds with a different instance or

@@ -90,6 +90,22 @@ namespace jai::detail {
 		return !declarer || !declarer->is_cpp_class();
 	}
 
+	// A field with a user _get_/_set_ anywhere in its chain is a computed property from the
+	// outside: an alias to the backing cell would bypass the accessor. A frozen symbolizer is
+	// a parallel region, whose workers never reach accessors (worker walls read the cell).
+	inline bool ref_field_has_user_accessor(const std::shared_ptr<class_instance>& instance, const member_expr* m,
+	                                        uint64_t member_id, string_symbolizer* symbolizer) {
+		const class_definition* class_def = instance->get_class_definition();
+		if (!class_def || !class_def->has_property_getters() || symbolizer->frozen()) {
+			return false;
+		}
+		if (m->getter_id == UINT64_MAX) {
+			m->getter_id = symbolizer->get_getter_id_with_view(member_id).first;
+		}
+		return class_def->user_accessor(m->getter_id) != nullptr ||
+		       class_def->user_accessor(symbolizer->get_setter_id_with_view(member_id).first) != nullptr;
+	}
+
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
 	// resolution must never throw). Returns a shallow copy of the dereferenced value.
 	inline checked_result<script_value> ref_checked_deref(const script_value& v) {
@@ -163,8 +179,9 @@ namespace jai::detail {
 	// and lazy-insert) whose declaring class is script-side (ref_field_is_script_backed:
 	// dynamic_binder .property() members pre-initialize a dead placeholder node whose
 	// truth lives in the C++ object). Script-class fields qualify - their synthesized
-	// accessors transparently wrap the node - while computed properties and C++
-	// .property() members keep the non-lvalue error. Field refs pin the instance,
+	// accessors transparently wrap the node - while computed properties (a user
+	// _get_/_set_ in the chain included) and C++ .property() members keep the
+	// non-lvalue error. Field refs pin the instance,
 	// element refs pin the vector; typed fields/elements carry their current tag as the
 	// assign-through constraint.
 	inline checked_result<script_value> resolve_ref_lvalue(const expression* arg, const caller_frame_view& caller,
@@ -301,7 +318,8 @@ namespace jai::detail {
 					}
 				}
 				script_value* field_value = instance->find_field_value(member_id);
-				if (!field_value || !ref_field_is_script_backed(instance, member_id)) {
+				if (!field_value || !ref_field_is_script_backed(instance, member_id) ||
+				    ref_field_has_user_accessor(instance, m, member_id, symbolizer)) {
 					return ref_non_lvalue_error();
 				}
 				if (is_final) {

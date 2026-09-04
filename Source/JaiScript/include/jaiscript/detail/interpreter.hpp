@@ -44,6 +44,7 @@
 // (Bindstone) translation units.
 
 #include "ast.hpp"
+#include "null_member_diagnostic.hpp"
 #include "string_symbolizer.hpp"
 #include "environment.hpp"
 #include "member_scope.hpp"
@@ -784,6 +785,7 @@ namespace jai {
         uint64_t done_id_;
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
+        base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at construction
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;
@@ -905,9 +907,9 @@ namespace jai {
         // Resolve variable: slot-based O(1) first, then the scope ladder. Inside a
         // member scope (detail/member_scope.hpp) the order is C++ unqualified lookup:
         // the function's own scopes, the class's members, then the definition/global
-        // chain. A member METHOD hit answers nullptr - it shadows (never fall past
-        // the class scope to a same-named global) but only value/callee sites mint,
-        // so pointer callers land on their existing miss paths.
+        // chain. A member METHOD or C++ PROPERTY hit answers nullptr - it shadows (never
+        // fall past the class scope to a same-named global) but only value/callee sites
+        // mint, so pointer callers land on their existing miss paths.
         [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id, bool global_only = false) noexcept {
             if (global_only) [[unlikely]] {
                 // ::name - GLOBAL env only (locals, captures, member scope all skipped)
@@ -931,8 +933,8 @@ namespace jai {
             }
             auto hit = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                   member_scope_.statics, symbol_id, /*want_methods*/ false);
-            if (hit.value_ptr) {
-                return hit.value_ptr;
+            if (hit) {
+                return hit.value_ptr;   // a C++ property answers nullptr: a shadow, minted by value sites
             }
             if (detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
                                                 member_scope_.statics, symbol_id)) {
@@ -940,17 +942,6 @@ namespace jai {
             }
             return member_scope_.floor ? member_scope_.floor->get_value_ptr(symbol_id)
                                        : environment_->get_value_ptr(symbol_id);
-        }
-
-        // Resolve variable with error on not found (avoids value copy vs environment_->get())
-        [[nodiscard]] JAI_FORCEINLINE checked_result<script_value*> resolve_variable_required(
-            size_t slot_index, uint64_t symbol_id, bool global_only = false) noexcept {
-            if (auto* ptr = resolve_local_or_env(slot_index, symbol_id, global_only)) {
-                return ptr;
-            }
-            return checked_result<script_value*>(
-                make_error_code(runtime_error_code::undefined_variable),
-                "Undefined variable '{0}'", symbol_id);
         }
 
         // Execution-budget check (see the public execution_budget API above)
@@ -1051,6 +1042,7 @@ namespace jai {
 
             explicit operator bool() const { return instance != nullptr || class_def != nullptr; }
             script_value method(uint64_t id) const;        // invalid value when absent
+            script_value user_accessor(uint64_t id) const; // nearest user _get_/_set_ (synthesized skipped); invalid when absent
             bool has_field(uint64_t id) const;
             const script_value& get_field(uint64_t id) const;
             const std::string& class_name() const;         // empty when unknown

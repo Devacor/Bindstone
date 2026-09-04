@@ -107,6 +107,11 @@ namespace jai::vm {
         mutable std::shared_ptr<function_decl> mic_resolved;
         mutable bool mic_static = false;
         mutable bool mic_field_free = false;   // no field in the class chain is named like the method
+        // op_probe_member memo for sites the mic never arms (multi-overload methods):
+        // "the lookup succeeds for this class at this method_epoch"; same gates as mic_*
+        mutable const class_definition* probe_cd = nullptr;
+        mutable uint64_t probe_epoch = 0;
+        mutable bool probe_field_free = false;
     };
 
     struct function_proto {

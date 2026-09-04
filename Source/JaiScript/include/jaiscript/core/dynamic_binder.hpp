@@ -815,6 +815,7 @@ private:
             }
             throw runtime_error("Engine no longer exists");
         });
+        class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
 
         // Only create setter for copy-assignable types
         if constexpr (std::is_copy_assignable_v<P>) {
@@ -922,6 +923,7 @@ public:
                 throw runtime_error("Engine no longer exists");
             }
         });
+        class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
 
         // Add setter method - use different implementations based on setter type
         if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {

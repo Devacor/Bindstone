@@ -385,7 +385,9 @@ across processes.
   `op_call_from_scratch`): the identifier callee resolves — including `not_a_function`, now
   aligned across backends — at the pre-args observation point into a pending register, with
   no value-stack materialization and no callee slot (semantics guards: `callee_first_*`
-  pins). Named remaining levers, each smaller: VM environment parking beyond the stage-3
+  pins); `op_probe_member` extends the probe to member and computed callees — emitted only
+  when an argument can raise or run code, one IC/memo compare on the hit path, the call op's
+  ladder unchanged. Named remaining levers, each smaller: VM environment parking beyond the stage-3
   lazy no-closure case, and a zero-arg direct-call fast path.
 - ~~**Single-operand compound fusion** (`sum += i`)~~ **LANDED (2191c59b)**: bare
   identifier/const RHS joined `op_compound_fused`; the comparison-suite hot loop runs

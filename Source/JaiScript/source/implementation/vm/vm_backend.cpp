@@ -3213,7 +3213,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	// cell, texts included (KEEP BYTE-PARALLEL with the this-field landing below).
 	if (!(ins.c & store_flag_global_only) && f.locals && !f.top_level) {
 		type_info* ic_declared = nullptr;
-		if (script_value* cell = this_field_store_probe(f, f.ip * 3, ic_declared)) {
+		if (script_value* cell = this_field_store_probe(f, f.ip * 3, sym, ic_declared)) {
 			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 				value = value.detached_for_store();
 			}
@@ -4916,8 +4916,15 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
 	// round-trip through the value stack. Any non-trivial shape bails to the pair.
 	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t prof_c0 = __rdtsc();
+#endif
 		const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
 		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
+#ifdef JAISCRIPT_VM_PROFILE
+		profile_cmp_operands_cyc_ += __rdtsc() - prof_c0; ++profile_cmp_count_;
+		if (lp && rp) { const size_t lk = lp->raw_storage_index(), rk = rp->raw_storage_index(); if (lk == script_value::TYPEID_SHARED_PTR || rk == script_value::TYPEID_SHARED_PTR) ++profile_cmp_sptr_null_; }
+#endif
 		if (rp) {
 			const size_t li = lp->raw_storage_index();
 			const size_t ri = rp->raw_storage_index();
@@ -6549,7 +6556,14 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_d0 = __rdtsc();
+#define JAI_DECL_SUB(idx) { const uint64_t prof_d1 = __rdtsc(); profile_decl_sub_[idx] += prof_d1 - prof_d0; prof_d0 = prof_d1; }
+#else
+#define JAI_DECL_SUB(idx)
+#endif
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
+	JAI_DECL_SUB(0);
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
 	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
@@ -6588,12 +6602,15 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 				++profile_decl_paths_[0];
 #endif
+				JAI_DECL_SUB(1);
 				script_value value = seen == &top ? std::move(top) : script_value(*seen);
 				stack_.pop_back();
+				JAI_DECL_SUB(2);
 				if (decl->type) {
 					value.set_type_info(decl->type);
 				}
 				frame_slot_set(f, decl->slot_index, std::move(value));
+				JAI_DECL_SUB(3);
 				return {};
 			}
 #ifdef JAISCRIPT_VM_PROFILE
@@ -12203,6 +12220,13 @@ void vm_backend::dump_opcode_profile() const {
 		fprintf(stderr, "[vm-profile] method-push receiver+env sub-split (avg cyc): set_this %.0f | env-acquire/rebind %.0f\n",
 			(double)profile_mpush_sub_[0] / (double)profile_mpush_count_,
 			(double)profile_mpush_sub_[1] / (double)profile_mpush_count_);
+		fprintf(stderr, "[vm-profile] method-push prologue split (avg cyc from entry): depth+limit %.0f | +chunk-cache %.0f | +records %.0f\n",
+			(double)profile_mpush_pro_[0] / (double)profile_mpush_count_, (double)profile_mpush_pro_[1] / (double)profile_mpush_count_, (double)profile_mpush_pro_[2] / (double)profile_mpush_count_);
+		fprintf(stderr, "[vm-profile] decl fast-path sub-sections (avg cyc): node %.0f | flags+top %.0f | move+pop %.0f | tag+slot %.0f (%llu fast decls)\n",
+			profile_decl_paths_[0] ? (double)profile_decl_sub_[0] / (double)profile_decl_paths_[0] : 0.0, profile_decl_paths_[0] ? (double)profile_decl_sub_[1] / (double)profile_decl_paths_[0] : 0.0,
+			profile_decl_paths_[0] ? (double)profile_decl_sub_[2] / (double)profile_decl_paths_[0] : 0.0, profile_decl_paths_[0] ? (double)profile_decl_sub_[3] / (double)profile_decl_paths_[0] : 0.0, (unsigned long long)profile_decl_paths_[0]);
+		fprintf(stderr, "[vm-profile] fused_cmp_jump: operand resolution %.0f avg cyc over %llu compares; %llu had a shared_ptr side\n",
+			profile_cmp_count_ ? (double)profile_cmp_operands_cyc_ / (double)profile_cmp_count_ : 0.0, (unsigned long long)profile_cmp_count_, (unsigned long long)profile_cmp_sptr_null_);
 		fprintf(stderr, "[vm-profile] method-push sections (%llu pushes, avg cyc): entry+chunk+rec %.0f | rec-init+pins %.0f | receiver+env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
 			(unsigned long long)profile_mpush_count_,
 			(double)profile_mpush_cyc_[0] / (double)profile_mpush_count_,
@@ -13082,9 +13106,11 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_p0 = __rdtsc();
 	++profile_mpush_count_;
+#define JAI_MPUSH_SUB(idx) { const uint64_t prof_q1 = __rdtsc(); profile_mpush_pro_[idx] += prof_q1 - prof_p0; }
 #define JAI_MPUSH_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_mpush_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
 #else
 #define JAI_MPUSH_SECTION(idx)
+#define JAI_MPUSH_SUB(idx)
 #endif
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return raise_(
@@ -13095,6 +13121,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		return raise_from(execution_limit_failure());
 	}
 	assert(!has_return_value_);
+	JAI_MPUSH_SUB(0);
 
 	chunk* body_chunk;
 	{
@@ -13106,10 +13133,12 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
 		}
+		JAI_MPUSH_SUB(1);
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
 		}
 	}
+	JAI_MPUSH_SUB(2);
 	JAI_MPUSH_SECTION(0);
 
 	call_record& rec = *call_records_[call_records_top_];

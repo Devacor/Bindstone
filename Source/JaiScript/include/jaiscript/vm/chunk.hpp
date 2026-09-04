@@ -207,6 +207,7 @@ namespace jai::vm {
         // (polymorphic site) or no slot (overflow field) takes the generic find.
         uint64_t this_field_serial = 0;
         const void* this_field_class = nullptr;
+        uint64_t this_field_sym = 0;       // the symbol that armed the proof: cache roles are per ip, not per symbol (invariants.md 9)
         uint32_t this_field_slot = 0xFFFFFFFFu;
         // Store twin (bare method-field WRITES): the same serial + class proof names the
         // cell; the arm banks what the store landing needs on top - no C++ property

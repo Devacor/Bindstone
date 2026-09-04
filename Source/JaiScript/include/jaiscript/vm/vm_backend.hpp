@@ -125,6 +125,9 @@ namespace jai::vm {
         // atomic copy lives here) [2]=receiver deref + set_this + method env
         // [3]=frame init + frames_ push [4]=bind_parameters [5]=window fill + stage
         uint64_t profile_mpush_cyc_[6] = {};
+        uint64_t profile_mpush_pro_[3] = {0, 0, 0};
+        uint64_t profile_decl_sub_[4] = {0, 0, 0, 0};
+        uint64_t profile_cmp_operands_cyc_ = 0, profile_cmp_count_ = 0, profile_cmp_sptr_null_ = 0;
         uint64_t profile_mpush_count_ = 0;
         // receiver+env sub-split: [0]=receiver deref + set_this [1]=env acquire/rebind
         uint64_t profile_mpush_sub_[2] = {};
@@ -1115,7 +1118,7 @@ namespace jai::vm {
             auto& cache = f.code->env_lookup_cache;
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
-            if (entry.this_field_serial == 0) { return nullptr; }
+            if (entry.this_field_serial == 0 || entry.this_field_sym != sym) { return nullptr; }
             if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
@@ -1161,7 +1164,8 @@ namespace jai::vm {
             class_definition* cd = instance ? instance->get_class_definition() : nullptr;
             // Re-arm after serial churn (eager frames, constructions): the class's id->slot
             // mapping is append-only, so a same-class re-arm keeps slot and store facts
-            if (cd && entry.this_field_class == static_cast<const void*>(cd)) { return; }
+            if (cd && entry.this_field_class == static_cast<const void*>(cd) && entry.this_field_sym == sym) { return; }
+            entry.this_field_sym = sym;
             entry.this_field_class = nullptr;
             entry.this_field_slot = 0xFFFFFFFFu;
             entry.this_store_state = 0;
@@ -1175,13 +1179,13 @@ namespace jai::vm {
         }
         // Store-side this-field IC (bare method-field writes): the read proof plus the
         // arm-time facts of the store landing. Returns the live cell, or null for the ladder.
-        script_value* this_field_store_probe(frame& f, size_t cache_slot, type_info*& declared_out) {
+        script_value* this_field_store_probe(frame& f, size_t cache_slot, uint64_t sym, type_info*& declared_out) {
             if (!cached_global_env_ || cache_slot == SIZE_MAX) { return nullptr; }
             if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
             auto& cache = f.code->env_lookup_cache;
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
-            if (entry.this_store_state != 1) { return nullptr; }
+            if (entry.this_store_state != 1 || entry.this_field_sym != sym) { return nullptr; }
             if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }

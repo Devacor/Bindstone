@@ -1881,6 +1881,35 @@ public:
             check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
         });
 
+        test("bare_field_store_then_read_in_loops_battery", [check_quad]() {
+            // The Foundry field-write shape: a bare field store followed by a bare read of the
+            // same field as an operand in the same method frame, across loop iterations. Any
+            // inline cache on the operand path must observe the store (the vm once read a stale
+            // or wrong cell here while every other test stayed green).
+            const std::string BW = "class BW { int a = 0; int b = 0; ";
+            check_quad((BW + "int run() { for (auto k = 0; k < 20; ++k) { for (auto i = 0; i < 1000; ++i) { a = i; b = a + i; } } return a + b; } } BW w = BW(); to_string(w.run())").c_str(), "2997", "store then binary read");
+            check_quad((BW + "string run() { string log = \"\"; for (auto i = 0; i < 3; ++i) { a = i; b = a + i; log += to_string(a) + \",\" + to_string(b) + \";\"; } return log; } } BW w = BW(); w.run()").c_str(), "0,0;1,2;2,4;", "per-iteration values");
+            check_quad((BW + "int run() { int hits = 0; for (auto i = 0; i < 10; ++i) { a = i; if (a < 5) { hits += 1; } if (i >= a) { hits += 10; } } return hits; } } BW w = BW(); to_string(w.run())").c_str(), "105", "store then fused compare reads");
+            check_quad((BW + "int run() { for (auto i = 0; i < 4; ++i) { a = i; b = a * 2; a = b + 1; } return a * 100 + b; } } BW w = BW(); to_string(w.run())").c_str(), "706", "two fields written and read alternately");
+            check_quad((BW + "int run() { int s = 0; for (auto i = 0; i < 5; ++i) { a += i; s += a; } return s; } } BW w = BW(); to_string(w.run())").c_str(), "20", "compound store then read");
+            check_quad((BW + "int run() { for (auto i = 0; i < 3; ++i) { a = i; } return a; } } BW w = BW(); BW v = BW(); to_string(w.run()) + \",\" + to_string(v.run()) + \",\" + to_string(w.a)").c_str(), "2,2,2", "two instances through one site");
+        });
+
+        test("method_ic_exact_type_memo_battery", [check_quad, check_quad_error]() {
+            // A single-overload typed method armed in the call-site IC: exact-typed arguments take
+            // the memo (no resolver run), convertible ones re-resolve, rejected ones keep the
+            // overload-miss text, and a retyping reload invalidates the memo through the epoch.
+            const std::string M = "class M { int acc = 0; int add(int v) { acc += v; return acc; } float scale(float f, int k) { return f * k; } } M m = M(); ";
+            auto q = [&](const char* tail) { return M + tail; };
+            check_quad(q("int t = 0; for (int i = 0; i < 5; ++i) { t = m.add(i); } to_string(t)").c_str(), "10", "exact int args hit the memo across the loop");
+            check_quad(q("m.add(1); m.add(2.9); to_string(m.acc)").c_str(), "3", "a float into int truncates on the resolver path after a memo hit (one table)");
+            check_quad(q("m.add(1); var x = \"x\"; var caught = \"\"; try { m.add(x); } catch (e) { caught = e; } caught").c_str(), "No overload of 'add' takes (string)", "a var-sourced rejected argument keeps the overload-miss text after memo hits");
+            check_quad(q("to_string(m.scale(2.0, 3)) + \",\" + to_string(m.scale(2, 3))").c_str(), "6.000000,6.000000", "two-parameter memo: exact then int-to-float conversion");
+            check_quad(q("m.add(1); m.add(2); class M { int acc = 0; int add(float v) { acc += cast<int>(v * 10.0); return acc; } } m.add(3); to_string(m.acc)").c_str(), "33", "a retyping reload invalidates the memo (the new overload runs)");
+            check_quad(q("m.add(1); class M { int acc = 0; int add(int v) { acc += v; return acc; } int add(string s) { return -1; } } to_string(m.add(2)) + \",\" + to_string(m.add(\"s\"))").c_str(), "3,-1", "a reload adding an overload leaves the single-overload memo behind");
+            check_quad_error(q("var n = null; m.add(n)").c_str(), "var-sourced null into a typed int parameter raises identically");
+        });
+
         test("null_compare_battery", [check_quad]() {
             // Null compares (`x == null` / `x != null`) on both backends: every row is the
             // exact pre-lane output of both backends. The vm branch lane answers a null

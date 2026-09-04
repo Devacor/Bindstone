@@ -158,3 +158,19 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
   result holds a view of that stable copy (`intern_exception_text`), never the source buffer.
 - Parallel workers never borrow string handles raw: the "all primitive" short-circuit excludes
   the str kind, and a typed input is read through a boxed snapshot (stage-3 raw reads pending).
+
+## 9. Inline-cache entries are keyed by site, never by symbol (2026-09-04)
+
+`env_lookup_cache` entries (`chunk.hpp`) carry a class pointer, a field slot and a serial but
+NO symbol. The this-field IC (`this_field_ic_probe` / `this_field_ic_arm`, the store twin) is
+therefore sound only at a cache slot that exactly one symbol ever resolves through: an op's
+own `ip * 3` (+1 for its second operand) when that op resolves that symbol and nothing else
+arms the same index. A fused store's `ip * 3` is armed for the STORE TARGET; its operand
+resolvers must not probe a read IC at that index for a different symbol - the entry answers
+the target's cell and the operand reads the wrong field. The value resolvers survive because
+they re-stamp class and slot on every miss; a pointer resolver that trusts the entry does not.
+Adding an IC probe to a resolver requires either an exclusively owned slot (the string-builtin
+receiver gate reads the receiver LOAD's own slot, recorded at compile time as
+`call_site::receiver_cache_slot`) or a symbol check on the entry. Pinned by
+`Strong Types :: bare_field_store_then_read_in_loops_battery` (the Foundry field-write shape,
+which the whole suite otherwise missed).

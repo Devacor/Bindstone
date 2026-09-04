@@ -85,6 +85,21 @@ range-checked int→char rule.
 - Serialization, `print`, JSON rendering of chars: unchanged. Map keys keep type-rank
   ordering (char keys never interleave with int keys).
 
+## Iterating a string
+
+Range-`for` over a string yields its chars in order, one per element, exactly the reads
+`s[i]` gives (`type_of(c) == "char"`, promotion applies as above). The binding is by value
+only: a char is a read, never a cell, so `for (auto& c : s)` raises `Cannot iterate a string
+by reference: its chars are not lvalues (use for (auto c : s))` before the first element.
+An empty string iterates zero times; `break`, `continue` and `yield` behave as in an array
+loop; the string itself is never modified by the loop.
+
+```cpp
+int sum = 0;
+for (auto c : s) { sum += c; }                // byte sum, chars promote to 0..255
+for (const auto c : "\x50\x4B") { ... }       // literals and nested reads (m["k"]) iterate too
+```
+
 ## Recipes for binary-format work
 
 ```cpp

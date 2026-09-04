@@ -206,6 +206,148 @@ public:
             
             check(result.as<std::string>().find("30") != std::string::npos);
         });
+
+        // ===== STRINGS (docs/grammar.md, docs/char_semantics.md): one char per element,
+        // by value only - the same char s[i] reads =====
+        test("string_value_iteration", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "abc";
+                string joined = "";
+                for (auto c : s) {
+                    if (joined != "") { joined += ","; }
+                    joined += c;
+                }
+                joined
+            )");
+            check_eq(std::string("a,b,c"), result.as<std::string>());
+        });
+
+        test("string_iteration_yields_chars", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "ab";
+                string kinds = "";
+                int code = 0;
+                for (auto c : s) {
+                    kinds += type_of(c);
+                    code = code * 1000 + (c + 0);
+                }
+                kinds + ":" + to_string(code)
+            )");
+            check_eq(std::string("charchar:97098"), result.as<std::string>());
+        });
+
+        test("string_iteration_sources", [this]() {
+            // a literal, a var-held string, a typed loop variable, const, a nested read and a
+            // slotted function body all iterate the same way
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string out = "";
+                for (auto c : "xy") { out += c; }
+                out += "|";
+                var held = "pq";
+                for (auto c : held) { out += c; }
+                out += "|";
+                for (char c : "mn") { out += c; }
+                out += "|";
+                for (const auto c : "rs") { out += c; }
+                out += "|";
+                var m = {"k": "hi"};
+                for (auto c : m["k"]) { out += c; }
+                out += "|";
+                string dotted(string s) { string o = ""; for (auto c : s) { o += c; o += "."; } return o; }
+                out += dotted("ab");
+                out += "|";
+                for (auto a : "ab") { for (auto b : "xy") { out += a; out += b; out += ","; } }
+                out
+            )");
+            check_eq(std::string("xy|pq|mn|rs|hi|a.b.|ax,ay,bx,by,"), result.as<std::string>());
+        });
+
+        test("empty_string_iterates_zero_times", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "";
+                int n = 0;
+                for (auto c : s) { n++; }
+                for (auto c : "") { n++; }
+                n
+            )");
+            check_eq(result.as<int>(), 0);
+        });
+
+        test("break_and_continue_in_string_range_for", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "abcdef";
+                string out = "";
+                for (auto c : s) {
+                    if (c == 'b') { continue; }
+                    if (c == 'e') { break; }
+                    out += c;
+                }
+                out + "|" + s
+            )");
+            check_eq(std::string("acd|abcdef"), result.as<std::string>());
+        });
+
+        test("string_iteration_is_by_value", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "abc";
+                for (auto c : s) { c = 'z'; }
+                s
+            )");
+            check_eq(std::string("abc"), result.as<std::string>());
+        });
+
+        test("string_reference_iteration_raises", [this]() {
+            // a string char is a read, never a cell: the by-reference binding raises before
+            // the first element, with the body untouched
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                string s = "abc";
+                var held = "xy";
+                string empty = "";
+                string r1 = "";
+                int visited = 0;
+                try { for (auto& c : s) { visited++; } } catch (e) { r1 = e; }
+                string r2 = "";
+                try { for (const auto& c : held) { visited++; } } catch (e) { r2 = e; }
+                string r3 = "";
+                try { for (auto& c : empty) { visited++; } } catch (e) { r3 = e; }
+                r1 + "#" + r2 + "#" + r3 + "#" + to_string(visited) + "#" + s
+            )");
+            const std::string text = "Cannot iterate a string by reference: its chars are not lvalues (use for (auto c : s))";
+            check_eq(text + "#" + text + "#" + text + "#0#abc", result.as<std::string>());
+        });
+
+        test("non_iterable_value_names_its_type", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(engine);
+            auto result = engine->execute(R"(
+                class Foo { int a = 1; }
+                var n = 5; var f = Foo(); var nothing = null; var x = 2.5;
+                string r1 = ""; try { for (auto c : n) { } } catch (e) { r1 = e; }
+                string r2 = ""; try { for (auto c : f) { } } catch (e) { r2 = e; }
+                string r3 = ""; try { for (auto c : nothing) { } } catch (e) { r3 = e; }
+                string r4 = ""; try { for (auto& c : x) { } } catch (e) { r4 = e; }
+                r1 + "#" + r2 + "#" + r3 + "#" + r4
+            )");
+            check_eq(std::string("Cannot iterate int: not an array, map, string or coroutine#"
+                                 "Cannot iterate Foo: not an array, map, string or coroutine#"
+                                 "Cannot iterate null: not an array, map, string or coroutine#"
+                                 "Cannot iterate float: not an array, map, string or coroutine"),
+                     result.as<std::string>());
+        });
     }
 };
 

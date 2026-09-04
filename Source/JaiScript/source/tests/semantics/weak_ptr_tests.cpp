@@ -730,12 +730,9 @@ public:
             } catch (const std::exception& e) {
                 std::string error_msg = e.what();
 
-                // Verify error message is helpful
-                check(error_msg.find("weak_ptr") != std::string::npos,
-                      "Error message should mention 'weak_ptr'");
-                check(error_msg.find("value-semantic") != std::string::npos ||
-                      error_msg.find("shared_ptr") != std::string::npos,
-                      "Error message should guide user to use shared_ptr");
+                // Family D's declaration shape (docs/diagnostics.md): the slot and its declared type
+                check(error_msg.find("Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker") != std::string::npos,
+                      "weak_ptr declaration from a value names the slot (got: " + error_msg + ")");
 
                 std::cout << "  Error message: " << error_msg << std::endl;
             }
@@ -759,12 +756,9 @@ public:
             } catch (const std::exception& e) {
                 std::string error_msg = e.what();
 
-                // Verify error message is helpful
-                check(error_msg.find("weak_ptr") != std::string::npos,
-                      "Error message should mention 'weak_ptr'");
-                check(error_msg.find("value-semantic") != std::string::npos ||
-                      error_msg.find("shared_ptr") != std::string::npos,
-                      "Error message should guide user to use shared_ptr");
+                // Family D's assignment shape (docs/diagnostics.md): the slot and its declared type
+                check(error_msg.find("Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)") != std::string::npos,
+                      "weak_ptr assignment from a value names the slot (got: " + error_msg + ")");
 
                 std::cout << "  Error message: " << error_msg << std::endl;
             }
@@ -1137,7 +1131,7 @@ public:
                 auto tracker = shared_ptr<LifetimeTracker>(42);
             )");
 
-            // This should fail with "no operator= defined" error
+            // No operator=: family D's assignment shape names the handle variable (docs/diagnostics.md)
             bool threw = false;
             std::string error_msg;
             try {
@@ -1148,8 +1142,8 @@ public:
                 std::cout << "  Error (expected): " << error_msg << std::endl;
             }
             check_eq(threw, true);
-            check_true(error_msg.find("operator=") != std::string::npos ||
-                      error_msg.find("no operator") != std::string::npos);
+            check(error_msg.find("Cannot assign int to 'tracker' (declared shared_ptr<LifetimeTracker>)") != std::string::npos,
+                  "handle assignment without operator= names the slot (got: " + error_msg + ")");
         });
 
         // Test same_as() for shared_ptr - pointer identity comparison

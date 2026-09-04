@@ -2436,12 +2436,16 @@ namespace jai {
         void set_type_info(type_info_ptr type) {
             type_info_ = type;
             // Demote-on-stamp (typed_array_design.md): re-tagging an array value 'any'
-            // (var binding) demotes a typed node in place — node kind must never outrun
-            // the views' tags. The stamp sites operate on fresh clones/moved temps, so
-            // the node is unique here; a shared demote would still be value-correct
-            // (identity + contents preserved), merely losing the raw-buffer form.
-            if (type && type->base_type == script_value_type::jai_any_type &&
-                raw_storage_index() == TYPEID_ARRAY) {
+            // (var binding) or an open-element array tag (array<var>: the boundary
+            // kernel rebuilds first, this is the net) demotes a typed node in place —
+            // node kind must never outrun the views' tags. The stamp sites operate on
+            // fresh clones/moved temps, so the node is unique here; a shared demote
+            // would still be value-correct (identity + contents preserved), merely
+            // losing the raw-buffer form.
+            if (type && raw_storage_index() == TYPEID_ARRAY &&
+                (type->base_type == script_value_type::jai_any_type ||
+                 (type->base_type == script_value_type::jai_array_type &&
+                  (!type->element_type() || type->element_type()->base_type == script_value_type::jai_any_type)))) {
                 auto& node = *storage_.get_if<TYPEID_ARRAY>();
                 if (node && node->is_typed()) {
                     node->demote_to_hetero(engine_);

@@ -800,7 +800,8 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 				if (ident->symbol_id == UINT64_MAX) {
 					ident->symbol_id = symbolizer_->intern(ident->name);
 				}
-				emit(opcode::op_ref_return_bind, identifier_slot_operand(ident), add_symbol(ident->symbol_id));
+				emit(opcode::op_ref_return_bind, identifier_slot_operand(ident), add_symbol(ident->symbol_id),
+				     ident->global_qualified ? load_flag_global_only : 0u);
 			} else if (rs->binds_reference && detail::is_ref_bindable_lvalue(rs->value.get())) {
 				// Field/subscript/chain operand: owner-pinned reference via the shared kernel
 				emit(opcode::op_ref_return_lvalue, add_node(rs->value));
@@ -812,6 +813,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 					ident->symbol_id = symbolizer_->intern(ident->name);
 				}
 				uint32_t flags = 0;
+				if (ident->global_qualified) flags |= load_flag_global_only;
 				if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
 				    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 					flags |= load_flag_type_ctor;

@@ -17,6 +17,7 @@
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (vm parity)
+#include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (vm parity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
@@ -220,11 +221,13 @@ static std::string get_type_info_name(type_info_ptr info) {
 }
 
 // Forward declaration for mutual recursion
-static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path = "");
+static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path,
+                                                           const detail::arity_count_symbols& counts, const string_symbolizer& symbols);
 
 // Helper to validate map value homogeneity for auto declarations
 // Returns: error_code if values have different types, success otherwise
-static checked_result<void> validate_map_homogeneous(const script_value& map_value, const std::string& path) {
+static checked_result<void> validate_map_homogeneous(const script_value& map_value, const std::string& path,
+                                                     const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
     if (!map_value.is_map()) {
         return {};  // Not a map, nothing to validate
     }
@@ -236,7 +239,7 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
         if (map.size() == 1) {
             const script_value& first_val = map.begin()->second.is_reference() ?
                 map.begin()->second.deref() : map.begin()->second;
-            JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[0]"));
+            JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[0]", counts, symbols));
         }
         return {};
     }
@@ -257,7 +260,7 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
     }
 
     // Recursively validate the first value if it's a container
-    JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[first]"));
+    JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[first]", counts, symbols));
 
     // Check all other values match
     size_t idx = 1;
@@ -267,10 +270,8 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
 
         // Check base type match
         if (val_type != deduced_type) {
-            return checked_result<void>(
-                make_error_code(runtime_error_code::map_value_type_mismatch),
-                "Map 'auto' requires homogeneous values - type mismatch at index {0}",
-                static_cast<uint64_t>(idx), val.type_id());
+            return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
+                detail::auto_map_values, detail::auto_map_values_at, idx, counts, symbols);
         }
 
         // For object types, also check class name match
@@ -278,15 +279,13 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
             auto val_type_info = val.get_type_info();
             std::string val_class_name = val_type_info ? val_type_info->type_name : "";
             if (val_class_name != deduced_class_name) {
-                return checked_result<void>(
-                    make_error_code(runtime_error_code::map_value_type_mismatch),
-                    "Map 'auto' requires homogeneous class types - mismatch at index {0}",
-                    static_cast<uint64_t>(idx), val.type_id());
+                return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
+                    detail::auto_map_classes, detail::auto_map_classes_at, idx, counts, symbols);
             }
         }
 
         // Recursively validate this value if it's a container
-        JAISCRIPT_TRY(validate_container_homogeneous(val, path + "[" + std::to_string(idx) + "]"));
+        JAISCRIPT_TRY(validate_container_homogeneous(val, path + "[" + std::to_string(idx) + "]", counts, symbols));
     }
 
     return {};
@@ -296,7 +295,8 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
 // Returns: error_code if elements have different types, success otherwise
 // For auto x = [...] and array<auto> x = [...], all elements must have the same type
 // Recursively validates nested arrays and maps to arbitrary depth
-static checked_result<void> validate_array_homogeneous(const script_value& array_value, const std::string& path = "") {
+static checked_result<void> validate_array_homogeneous(const script_value& array_value, const std::string& path,
+                                                       const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
     if (!array_value.is_array()) {
         return {};  // Not an array, nothing to validate
     }
@@ -310,7 +310,7 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
         // But still need to recursively validate the single element if it's a container
         if (elements.size() == 1) {
             const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
-            JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]"));
+            JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]", counts, symbols));
         }
         return {};
     }
@@ -330,7 +330,7 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
     }
 
     // Recursively validate the first element if it's a container
-    JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]"));
+    JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]", counts, symbols));
 
     // Check all other elements match
     for (size_t i = 1; i < elements.size(); ++i) {
@@ -339,10 +339,8 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
 
         // Check base type match
         if (elem_type != deduced_type) {
-            return checked_result<void>(
-                make_error_code(runtime_error_code::array_element_type_mismatch),
-                "Array 'auto' requires homogeneous elements - type mismatch at index {0}",
-                static_cast<uint64_t>(i), elem.type_id());
+            return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
+                detail::auto_array_elements, detail::auto_array_elements_at, i, counts, symbols);
         }
 
         // For object types, also check class name match
@@ -350,26 +348,25 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
             auto elem_type_info = elem.get_type_info();
             std::string elem_class_name = elem_type_info ? elem_type_info->type_name : "";
             if (elem_class_name != deduced_class_name) {
-                return checked_result<void>(
-                    make_error_code(runtime_error_code::array_element_type_mismatch),
-                    "Array 'auto' requires homogeneous class types - mismatch at index {0}",
-                    static_cast<uint64_t>(i), elem.type_id());
+                return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
+                    detail::auto_array_classes, detail::auto_array_classes_at, i, counts, symbols);
             }
         }
 
         // Recursively validate this element if it's a container
-        JAISCRIPT_TRY(validate_container_homogeneous(elem, path + "[" + std::to_string(i) + "]"));
+        JAISCRIPT_TRY(validate_container_homogeneous(elem, path + "[" + std::to_string(i) + "]", counts, symbols));
     }
 
     return {};  // All elements are the same type
 }
 
 // Unified container homogeneity validation - handles both arrays and maps recursively
-static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path) {
+static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path,
+                                                           const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
     if (container.is_array()) {
-        return validate_array_homogeneous(container, path);
+        return validate_array_homogeneous(container, path, counts, symbols);
     } else if (container.is_map()) {
-        return validate_map_homogeneous(container, path);
+        return validate_map_homogeneous(container, path, counts, symbols);
     }
     return {};  // Not a container, nothing to validate
 }
@@ -5508,14 +5505,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 if (eng) {
                                     auto actual_def = eng->get_class_definition(actual_class);
                                     if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-                                        uint64_t expected_id = expected_type->id;
-                                        uint64_t actual_id = value_type_info->element_type()
-                                            ? value_type_info->element_type()->id
-                                            : value_type_info->id;
-                                        return checked_result<void>(
-                                            make_error_code(runtime_error_code::type_mismatch),
-                                            "Cannot assign shared_ptr<{}> to weak_ptr<{}>: type must match or be a subclass",
-                                            actual_id, expected_id);
+                                        return detail::typed_slot_rejection(value, *weak_type_info,
+                                            detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
                                     }
                                 }
                             }
@@ -5527,23 +5518,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return weak_result.error_value();
                         }
                         JAISCRIPT_TRY(store_back(std::move(weak_result.value())));
-                    } else if (value.type() == script_value_type::jai_object_type) {
-                        // Helpful error for value-semantic objects
-                        auto type_info = currentVal->get_type_info();
-                        uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
-                            ? type_info->type_params[0]->id : 0;
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign value-semantic object to weak_ptr<{}>: use shared_ptr<T>",
-                            weak_type_id);
                     } else {
-                        auto type_info = value.get_type_info();
-                        uint64_t actual_type_id = type_info ? type_info->id : 0;
-                        auto weak_type_info = currentVal->get_type_info();
-                        uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
-                            ? weak_type_info->type_params[0]->id : 0;
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign {} to weak_ptr<{}>: use shared_ptr<T>",
-                            actual_type_id, weak_type_id);
+                        // A value-semantic object or a primitive: family D's assignment shape
+                        // (KEEP BYTE-PARALLEL with vm_backend::exec_store)
+                        const type_info* weak_tag = currentVal->get_type_info().get();
+                        if (!weak_tag) { weak_tag = engine_->get_type_info_weak_ptr(nullptr); }
+                        return detail::typed_slot_rejection(value, *weak_tag,
+                            detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
                     }
                 } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
@@ -5689,12 +5670,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return checked_result<void>(result.error(), "operator= failed");
                         }
 
-                        // No operator= found - type error
-                        auto type_info = value.get_type_info();
-                        uint64_t type_id = type_info ? type_info->id : 0;
-                        uint64_t expected_id = expected_type ? expected_type->id : 0;
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign {0} to shared_ptr<{1}>: no operator=({0}) defined", type_id, expected_id);
+                        // No operator=: family D's assignment shape names the handle variable
+                        // (KEEP BYTE-PARALLEL with vm_backend::exec_store)
+                        return detail::typed_slot_rejection(value, *ptr_type_info,
+                            detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
                     }
                 } else {
                     // Regular variable assignment with STRONG TYPES enforcement
@@ -6307,14 +6286,8 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                         if (eng) {
                             auto actual_def = eng->get_class_definition(actual_class);
                             if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-                                uint64_t expected_id = expected_type->id;
-                                uint64_t actual_id = value_type_info->element_type()
-                                    ? value_type_info->element_type()->id
-                                    : value_type_info->id;
-                                return checked_result<void>(
-                                    make_error_code(runtime_error_code::type_mismatch),
-                                    "Cannot initialize weak_ptr<{}> from shared_ptr<{}>: type must match or be a subclass",
-                                    expected_id, actual_id);
+                                return detail::typed_slot_rejection(value, *decl->type,
+                                    detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
                             }
                         }
                     }
@@ -6326,23 +6299,11 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     return weak_result.error_value();
                 }
                 define_variable(std::move(weak_result.value()));
-            } else if (value.type() == script_value_type::jai_object_type) {
-                // Helpful error for value-semantic objects
-                auto type_info = decl->type;
-                uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
-                    ? type_info->type_params[0]->id : 0;
-                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot initialize weak_ptr<{}> from value-semantic object: use shared_ptr<T>",
-                    weak_type_id);
             } else {
-                auto type_info = value.get_type_info();
-                uint64_t actual_type_id = type_info ? type_info->id : 0;
-                auto weak_type_info = decl->type;
-                uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
-                    ? weak_type_info->type_params[0]->id : 0;
-                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot initialize weak_ptr<{}> with {}: use shared_ptr<T>",
-                    weak_type_id, actual_type_id);
+                // A value-semantic object or a primitive: family D's declaration shape
+                // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+                return detail::typed_slot_rejection(value, *decl->type,
+                    detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
             }
         }
     } else if (is_shared_ptr) {
@@ -6640,7 +6601,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 }
 
                 if (requires_homogeneity) {
-                    JAISCRIPT_TRY(validate_container_homogeneous(value, ""));
+                    JAISCRIPT_TRY(validate_container_homogeneous(value, "", arity_count_ids_, *string_symbolizer_));
                     // A uniform primitive literal infers the element type and takes its
                     // representation (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
                     if (value.is_array()) {
@@ -10537,6 +10498,73 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
         }
 
+    } else if (container.is_string()) {
+        // Iterate a string by value, one char per element like s[i]; a char is not a cell,
+        // so the by-reference binding raises (KEEP BYTE-PARALLEL with vm_backend::exec_iter_init)
+        if (stmt->is_reference) {
+            pop_scope();
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
+                detail::string_range_for_by_ref_text);
+        }
+        if (!container.unchecked_as_string().empty()) {
+            script_value* loop_var_ptr = nullptr;
+            if (use_slot) {
+                if (!replaying || !call_stack_.back().get_local(stmt->variable_slot_index)) {
+                    call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                }
+                loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
+            } else {
+                if (!replaying || !environment_->get_value_ptr(stmt->variable_name_id)) {
+                    environment_->define(stmt->variable_name_id, make_value());
+                }
+                loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            }
+
+            // Live size each iteration: the body can alias and shrink the shared string
+            for (size_t i = resume_index; i < container.unchecked_as_string().size(); ++i) {
+                if (execution_limit_exhausted()) [[unlikely]] {
+                    pop_scope();
+                    return execution_limit_failure();
+                }
+
+                const bool resume_body = replaying;
+                if (replaying) {
+                    replaying = false;
+                } else {
+                    *loop_var_ptr = script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
+                }
+
+                auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
+                if (!body_result) {
+                    pop_scope();
+                    return body_result;
+                }
+
+                if (is_unwinding_) {
+                    break;
+                }
+                if (hasBreakRequest_) {
+                    hasBreakRequest_ = false;
+                    break;
+                }
+                if (hasContinueRequest_) {
+                    hasContinueRequest_ = false;
+                    continue;
+                }
+                if (hasReturnValue_) {
+                    break;
+                }
+                if (hasYieldRequest_) {
+                    if (active_coroutine_) {
+                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        if (coro_state.has_continuations()) coro_state.push_continuation(stmt, i, nullptr, container);
+                        else coro_state.push_replay(stmt, rp_body_done, i + 1, {}, nullptr, container);
+                    }
+                    return {};
+                }
+            }
+        }
+
     } else if (container.is_map()) {
         // Iterate over map - return key-value pairs with first/second access
         auto& map_storage = container.get_map_storage();
@@ -10710,11 +10738,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
         } else {
             pop_scope();
-            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+            return detail::not_iterable(container, engine_);
         }
     } else {
         pop_scope();
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+        return detail::not_iterable(container, engine_);
     }
 
     // Pop the loop scope (only on normal exit, not yield)
@@ -10736,15 +10764,20 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                     ident->symbol_id = string_symbolizer_->intern(ident->name);
                 }
                 script_value* storage = nullptr;
-                if (ident->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                    storage = call_stack_.back().get_local(ident->slot_index);
-                }
-                if (!storage) {
-                    storage = environment_->get_value_ptr(ident->symbol_id);
+                if (ident->global_qualified) {
+                    // ::name - GLOBAL env only (slots, captures, member scope all skipped)
+                    storage = get_global_environment()->get_value_ptr(ident->symbol_id);
+                } else {
+                    if (ident->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                        storage = call_stack_.back().get_local(ident->slot_index);
+                    }
+                    if (!storage) {
+                        storage = environment_->get_value_ptr(ident->symbol_id);
+                    }
                 }
                 if (!storage) {
                     // A hybrid's bare C++ property (KEEP BYTE-PARALLEL with the vm's exec_ref_return_bind)
-                    if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, false)) {
+                    if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, ident->global_qualified)) {
                         if (!*minted) {
                             return minted->error_value();
                         }
@@ -12839,7 +12872,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // skip recursive parent processing to avoid re-evaluating defaults.
     // Skip entirely when this ctor delegated via `: this(...)` — the target
     // already initialized the fields and re-running would clobber them (#24).
-    if (!delegated_to_this) {
+    if (!delegated_to_this &&
+        (!instance->seeded_from_plan() || handled_parent_init || !class_def->chain_initializers_all_literal())) {
+        // A literal-only chain's initializers ARE the defaults create_instance's plan just
+        // seeded (post-conversion); the re-run only matters after a parent ctor body ran
         evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
     }
 
@@ -12898,10 +12934,12 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     auto global_env = current_env ? current_env : environment_;
 
     // Evaluate field initializers with a regular environment that has 'this'
-    auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
-    init_env->define("this", this_value);
-    init_env->set_access_context(class_def.get());
-    evaluate_field_initializers(instance, class_def, init_env);
+    if (!instance->seeded_from_plan() || !class_def->chain_initializers_all_literal()) {
+        auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
+        init_env->define("this", this_value);
+        init_env->set_access_context(class_def.get());
+        evaluate_field_initializers(instance, class_def, init_env);
+    }
 
     // Default constructor object wrapped
     return this_value;

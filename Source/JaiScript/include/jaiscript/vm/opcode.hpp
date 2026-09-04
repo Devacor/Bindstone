@@ -91,8 +91,9 @@ namespace jai::vm {
                             // c=condition proved bool; BINARY_FUSED+JUMP_IF_FALSE superinstruction
         op_compound_fused,  // a=compound_fused_proto index; BINARY_FUSED+COMPOUND_STORE superinstruction
 
-        op_ref_return_bind,   // a=slot (k_invalid_u32 = env-only), b=symbol index; pushes a
-                              // shared/boxed reference to the named storage (ref-return producer)
+        op_ref_return_bind,   // a=slot (k_invalid_u32 = env-only), b=symbol index, c=load flags
+                              // (load_flag_global_only for ::name); pushes a shared/boxed
+                              // reference to the named storage (ref-return producer)
         op_ref_return_lvalue, // a=node index (lvalue expr); pushes an owner-pinned reference
                               // via detail::resolve_ref_lvalue (ref-return producer)
 

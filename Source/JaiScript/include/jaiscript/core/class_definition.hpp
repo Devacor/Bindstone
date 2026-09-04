@@ -9,6 +9,9 @@
 #include <jaiscript/detail/slot_site.hpp>
 #include <set>
 #include <algorithm>
+#include <functional>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 
@@ -58,6 +61,10 @@ public:
     void set_field(uint64_t id, const script_value& value);
 
     void set_field_unchecked(uint64_t id, const script_value& value);
+    // create_instance's plan landing: fresh instance, no references, no overflow - one
+    // cell copy per planned slot (materialize_field's slot arm without the hash)
+    void seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count);
+    bool seeded_from_plan() const { return seeded_from_plan_; }
 
     // Records this instance as its C++ object's script layer when _cpp_object lands on a
     // script class deriving a bound C++ class: into the object's script_extensible slot
@@ -264,6 +271,7 @@ private:
     class_definition* class_def_ = nullptr;
     engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
+    bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
     // swap-removes in O(1) instead of scanning and locking the whole list
     size_t registry_slot_ = SIZE_MAX;
@@ -577,7 +585,7 @@ public:
         } else {
             field_defaults_.insert_or_assign(name_id, default_value);
         }
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         bump_field_shape_epoch();
         bump_method_epoch();   // method ICs memoize the field-shadow answer per class
@@ -589,7 +597,7 @@ public:
 
         uint64_t name_id = eng->symbolize(name);
         field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         bump_field_shape_epoch();
         bump_method_epoch();
@@ -883,6 +891,75 @@ public:
         return names;
     }
 
+    uint64_t chain_defaults_version() const {
+        uint64_t v = defaults_version_;
+        for (const auto& parent : parent_classes_) { if (parent) { v += parent->chain_defaults_version() * 1315423911u; } }
+        return v;
+    }
+    // The plan's values: the chain's merged defaults (a typed-null placeholder for an
+    // instance field - its initializer is per-construction code) with every LITERAL
+    // initializer baked in, each through the enforcing store's conversion. The script layer
+    // supplies the literals (script_class.hpp); a plain class_definition has none.
+    virtual const script_value* literal_initializer_for(uint64_t) const { return nullptr; }
+    virtual bool chain_literal_plan_ok() const { return true; }
+    const std::vector<std::pair<uint32_t, script_value>>& instance_plan() const {
+        const uint64_t want = chain_defaults_version() ^ (field_shape_epoch_ << 32) ^ (method_epoch_ << 48);
+        if (instance_plan_version_ == want && !instance_plan_.empty()) { return instance_plan_; }
+        instance_plan_.clear();
+        if (!chain_literal_plan_ok()) { instance_plan_version_ = 0; return instance_plan_; }
+        std::unordered_map<uint64_t, script_value> merged;
+        std::vector<const class_definition*> chain;
+        std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
+            for (const auto& parent : cd.parent_classes_) { if (parent) { walk(*parent); } }
+            chain.push_back(&cd);
+        };
+        walk(*this);
+        // base-first: a child's default (and literal) overrides its parent's, like the
+        // create_instance loops and the initializer passes that follow them
+        for (const class_definition* cd : chain) {
+            for (const auto& [id, value] : cd->field_defaults_) {
+                const script_value* lit = cd->literal_initializer_for(id);
+                if (lit) {
+                    // the stamp's materialize_constant: engine-tagged, strings re-minted so
+                    // instances never share a literal's buffer
+                    // exactly visit_literal_expr / materialize_constant: a parser literal has no
+                    // engine or tag; the value is recreated with the canonical primitive tag
+                    script_value baked(std::monostate{}, engine_);
+                    switch (lit->raw_storage_index()) {
+                        case script_value::TYPEID_INT: baked = script_value(lit->unchecked_as_int(), engine_); break;
+                        case script_value::TYPEID_FLOAT: baked = script_value(lit->unchecked_as_float(), engine_); break;
+                        case script_value::TYPEID_STRING: baked = script_value(lit->unchecked_as_string(), engine_); break;
+                        case script_value::TYPEID_CHAR: baked = script_value(lit->unchecked_as_char(), engine_); break;
+                        case script_value::TYPEID_BOOL: baked = script_value(lit->unchecked_as_bool(), engine_); break;
+                        default: instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_;   // not a scalar literal: the slow path
+                    }
+                    merged.insert_or_assign(id, std::move(baked));
+                } else {
+                    merged.insert_or_assign(id, value);
+                }
+            }
+        }
+        instance_plan_.reserve(merged.size());
+        for (const auto& [id, value] : merged) {
+            const uint32_t slot = field_slot(id);
+            if (slot == k_no_field_slot) { instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_; }
+            script_value stored = value;
+            if (!value.is_null()) {
+                type_info_ptr declared;
+                for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                    if (auto d = (*it)->field_declared_types_.find(id); d != (*it)->field_declared_types_.end()) { declared = d->second; break; }
+                }
+                if (declared && declared->base_type != script_value_type::jai_any_type) {
+                    if (auto converted = detail::field_store_convert_no_script(value, declared, engine_)) { stored = std::move(*converted); }
+                    else { instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_; }
+                }
+            }
+            instance_plan_.emplace_back(slot, std::move(stored));
+        }
+        std::sort(instance_plan_.begin(), instance_plan_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        instance_plan_version_ = want;
+        return instance_plan_;
+    }
     std::shared_ptr<class_instance> create_instance() {
         std::shared_ptr<class_instance> instance;
         // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
@@ -948,6 +1025,10 @@ public:
 
         register_instance(std::weak_ptr<class_instance>(instance));
 
+        if (const auto& plan = instance_plan(); !plan.empty()) {
+            instance->seed_fields_from_plan(plan, field_slot_count());
+            return instance;
+        }
         for (const auto& parent : parent_classes_) {
             if (parent) {
                 const auto& parent_fields = parent->get_all_field_defaults();
@@ -1079,7 +1160,7 @@ public:
                 has_property_getters_ = true;
             }
         }
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         refresh_access_chain_flag();
         if (chain_changed) { bump_field_shape_epoch(); }
@@ -1096,7 +1177,7 @@ public:
         }
 
         parent_classes_.push_back(parent);
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
 
         if (has_diamond_inheritance()) {
@@ -1118,7 +1199,7 @@ public:
     [[nodiscard]] bool set_parents(const std::vector<std::shared_ptr<class_definition>>& parents) {
         const bool chain_changed = parent_classes_ != parents;   // every (re)definition rewires; identical reloads must not move the shape epoch
         parent_classes_ = parents;
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
 
         if (has_diamond_inheritance()) {
@@ -1608,7 +1689,7 @@ public:
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
                         engine* engine_ref,
                         bool structurally_identical = false) {
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         ++reflection_generation_;
         if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
@@ -1768,7 +1849,7 @@ public:
     }
 
     void update_instances_from_base() {
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         const auto& all_fields = get_all_field_defaults();
         std::set<uint64_t> dummy_old_fields;
@@ -1865,6 +1946,13 @@ private:
     std::unordered_map<uint64_t, type_info_ptr> static_declared_types_;
     std::vector<std::shared_ptr<class_definition>> parent_classes_;
     mutable std::unordered_map<uint64_t, script_value> all_field_defaults_cache_;
+    uint64_t defaults_version_ = 1;                       // bumps with every defaults-cache invalidation (own class)
+    // Instance plan: the chain's merged defaults as (slot, value) in slot order, so
+    // create_instance is one resize + one cell copy per slot instead of three hashes
+    // and an enforcing store per field. Valid while every class in the chain keeps the
+    // defaults_version_ it was built under (chain_defaults_version sums them).
+    mutable std::vector<std::pair<uint32_t, script_value>> instance_plan_;
+    mutable uint64_t instance_plan_version_ = 0;
     mutable bool field_defaults_cache_valid_ = false;
     // Ids whose methods_ entry is the SYNTHESIZED field accessor (see user_accessor)
     std::unordered_set<uint64_t> auto_accessor_ids_;
@@ -1958,7 +2046,7 @@ private:
 
     void store_field_defaults(const std::unordered_map<uint64_t, script_value>& new_field_defaults, engine* engine_ref) {
         field_defaults_.clear();
-        field_defaults_cache_valid_ = false;
+        field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         bump_method_epoch();
         for (const auto& [id, value] : new_field_defaults) {
@@ -2024,6 +2112,15 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
         overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
     }
     return overflow_fields_->insert_or_assign(id, std::move(v)).first->second;
+}
+
+inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count) {
+    if (flat_fields_.size() < slot_count) { flat_fields_.resize(slot_count); }
+    seeded_from_plan_ = true;
+    for (const auto& [slot, value] : plan) {
+        auto& cell = flat_fields_[slot];
+        if (!cell) { cell = make_cell(script_value(value)); } else { *cell = value; }
+    }
 }
 
 inline void class_instance::set_field_unchecked(uint64_t id, const script_value& value) {

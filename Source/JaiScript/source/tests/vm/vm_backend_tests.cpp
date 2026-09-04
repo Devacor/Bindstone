@@ -3620,6 +3620,153 @@ public:
 			check_eq(i1, v1, "typed-return mismatch error parity (byte-identical text)");
 		});
 
+		// === ::name (global-qualified) across every specialized identifier consumer:
+		// the qualifier must ride op_return_ident, op_ref_return_bind, op_decl_ref_ident,
+		// the cast identifier arm, fused operands, callees and builtin-method receivers
+		// exactly like op_load (the compiler dropped it on the RETURN_IDENT fusion) ===
+
+		test("global_qualified_return_ident_fusion", [this, run_both_backends]() {
+			// `return ::hp;` fuses to op_return_ident; a shadowing field, a shadowing
+			// local and captured shadows must all still answer the global
+			auto [i1, v1] = run_both_backends(R"(
+				int hp = 1000;
+				class U {
+					int hp = 5;
+					int by_field() { return ::hp; }
+					int by_local() { int hp = 7; return ::hp; }
+					int bare() { return hp; }
+				}
+				auto u = U();
+				int cap_copy() { int hp = 5; auto l = [hp]() { return ::hp; }; return l(); }
+				int cap_ref() { int hp = 5; auto l = [&hp]() { return ::hp; }; return l(); }
+				int free_fn() { int hp = 9; return ::hp; }
+				"" + u.by_field() + "|" + u.by_local() + "|" + u.bare() + "|" + cap_copy() + "|" + cap_ref() + "|" + free_fn();
+			)");
+			check_eq(std::string("1000|1000|5|1000|1000|1000"), i1, "interp: return ::name answers the global");
+			check_eq(i1, v1, "return ::name parity");
+		});
+
+		test("global_qualified_fused_operand_positions", [this, run_both_backends]() {
+			// ::name as a fused operand: return-binary, cmp-jump, decl init, compound,
+			// equality, mixed with the bare (member) spelling, literal-left, both sides
+			auto [i1, v1] = run_both_backends(R"(
+				int hp = 1000;
+				class P {
+					int hp = 5;
+					int plus() { return ::hp + 1; }
+					int cmp() { if (::hp < 10) { return 1; } return 2; }
+					int decl() { int x = ::hp; return x; }
+					int compound() { int s = 1; s += ::hp; return s; }
+					bool eq() { return ::hp == 1000; }
+					int mixed() { return ::hp * 2 - hp; }
+					int lit_left() { return 1 + ::hp; }
+					int both() { return ::hp - ::hp; }
+				}
+				auto p = P();
+				"" + p.plus() + "|" + p.cmp() + "|" + p.decl() + "|" + p.compound() + "|" + p.eq() + "|" + p.mixed() + "|" + p.lit_left() + "|" + p.both();
+			)");
+			check_eq(std::string("1001|2|1000|1001|true|1995|1001|0"), i1, "interp: fused ::name operands");
+			check_eq(i1, v1, "fused ::name operand parity");
+		});
+
+		test("global_qualified_callee", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				int f() { return 1; }
+				int g(int n) { return n * 10; }
+				class C {
+					int f() { return 2; }
+					int g(int n) { return -n; }
+					int call_f() { return ::f(); }
+					int call_g() { return ::g(4); }
+					int held() { auto r = ::f(); return r + ::g(1); }
+				}
+				auto c = C();
+				int f_local() { int f = 5; return ::f() + f; }
+				"" + c.call_f() + "|" + c.call_g() + "|" + c.held() + "|" + f_local();
+			)");
+			check_eq(std::string("1|40|11|6"), i1, "interp: ::f() reaches the global function");
+			check_eq(i1, v1, "::f() parity");
+		});
+
+		test("global_qualified_reference_binds", [this, run_both_backends]() {
+			// Ref decl, cast<T&>, and ref-return producers under env-resident shadows
+			// (block locals, captures): every bind lands on the GLOBAL cell
+			auto [i1, v1] = run_both_backends(R"(
+				int hp = 1000;
+				string log = "";
+				{ int hp = 5; auto& r = ::hp; r = r + 1; log = log + hp + ":" + ::hp; }
+				int via_cap() { int hp = 5; auto l = [hp]() { auto& r = ::hp; r = r + 1; return hp; }; return l(); }
+				log = log + "|" + via_cap() + ":" + hp;
+				{ int hp = 5; auto& r = cast<int&>(::hp); r = r + 1; log = log + "|" + hp + ":" + ::hp; }
+				int cast_cap() { int hp = 5; auto l = [hp]() { auto& r = cast<int&>(::hp); r = r + 1; return hp; }; return l(); }
+				log = log + "|" + cast_cap() + ":" + hp;
+				auto& by_ref_local() { int hp = 5; return ::hp; }
+				auto& r1 = by_ref_local(); r1 = r1 + 1;
+				int ref_cap() { int hp = 5; auto l = [&hp]() -> auto& { return ::hp; }; auto& r = l(); r = r + 1; return hp; }
+				log = log + "|" + ref_cap() + ":" + hp;
+				log;
+			)");
+			check_eq(std::string("5:1001|5:1002|5:1003|5:1004|5:1006"), i1, "interp: ::name reference binds hit the global");
+			check_eq(i1, v1, "::name reference bind parity");
+		});
+
+		test("global_qualified_string_builtin_receiver", [this, run_both_backends]() {
+			// `::s.insert(...)`: the in-place string builtin mutates the GLOBAL string,
+			// never a block-local, captured or field shadow
+			auto [i1, v1] = run_both_backends(R"(
+				string s = "glob";
+				string log = "";
+				{ string s = "blk"; ::s.insert(0, "x"); log = s + ":" + ::s; }
+				string cap() { string s = "loc"; auto l = [s]() { ::s.insert(0, "y"); return s; }; return l(); }
+				log = log + "|" + cap() + ":" + s;
+				class H { string s = "fld"; string m() { ::s.insert(0, "z"); return s; } }
+				auto h = H();
+				log = log + "|" + h.m() + ":" + s;
+				log;
+			)");
+			check_eq(std::string("blk:xglob|loc:yxglob|fld:zyxglob"), i1, "interp: ::s builtin receiver is the global");
+			check_eq(i1, v1, "::s builtin receiver parity");
+		});
+
+		test("global_qualified_missing_global_error_parity", [this, run_both_backends_in]() {
+			// A ::name with no global never falls back to a same-named member or local:
+			// the undefined-variable text is identical on both backends for every consumer
+			auto [i1, v1] = run_both_backends_in(jai::check_mode::off, R"(
+				class W { int nothere = 5; int a() { return ::nothere; } }
+				auto w = W();
+				w.a();
+			)");
+			check_eq(i1, v1, "return ::missing error parity");
+			check_true(i1.find("Undefined variable 'nothere'") != std::string::npos, "return ::missing raises (got: " + i1 + ")");
+			auto [i2, v2] = run_both_backends_in(jai::check_mode::off, R"(
+				class W { int nothere = 5; int a() { return ::nothere + 1; } }
+				auto w = W();
+				w.a();
+			)");
+			check_eq(i2, v2, "fused ::missing operand error parity");
+			check_true(i2.find("Undefined variable 'nothere'") != std::string::npos, "fused ::missing raises (got: " + i2 + ")");
+			auto [i3, v3] = run_both_backends_in(jai::check_mode::off, R"(
+				class W { int nothere = 5; int a() { auto& r = ::nothere; return r; } }
+				auto w = W();
+				w.a();
+			)");
+			check_eq(i3, v3, "ref-decl ::missing error parity");
+			check_true(i3.find("Cannot take reference of undefined variable") != std::string::npos, "ref-decl ::missing raises (got: " + i3 + ")");
+			auto [i4, v4] = run_both_backends_in(jai::check_mode::off, R"(
+				class W { int nothere = 5; int a() { auto& r = cast<int&>(::nothere); return r; } }
+				auto w = W();
+				w.a();
+			)");
+			check_eq(i4, v4, "cast<T&> ::missing error parity");
+			check_true(i4.find("Cannot take reference of undefined variable") != std::string::npos, "cast<T&> ::missing raises (got: " + i4 + ")");
+			auto [i5, v5] = run_both_backends_in(jai::check_mode::off, R"(
+				auto& g() { int nothere = 1; return ::nothere; }
+				g();
+			)");
+			check_eq(i5, v5, "ref-return ::missing error parity");
+			check_true(i5.find("Cannot take reference of undefined variable") != std::string::npos, "ref-return ::missing raises (got: " + i5 + ")");
+		});
+
 		// === Callee-first semantics guards (Dev ruling 2026-07-08: callee-before-args
 		// IS the language, matching C++17; the vm's probe pair keeps the observation
 		// point without materializing the callee on the value stack) ===

@@ -333,14 +333,28 @@ namespace jai::detail {
 		if (target_base == script_value_type::jai_array_type &&
 		    value.raw_storage_index() == script_value::TYPEID_ARRAY) {
 			type_info_ptr element_type = target_type->element_type();
+			const script_array* src = value.unchecked_array_node();
 			if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
-				// open element type: allow-all, and KEEP the value's own (possibly
-				// tighter) tag — array<int> into array<var> stays enforced as int
-				out.value = std::move(value);
+				// open element type: allow-all. array<var> IS the script_value-vector form
+				// (the representation rule), so a typed source reboxes into a fresh node
+				// under the declared tag - its own buffer is untouched; a hetero source
+				// passes through and keeps its own (possibly tighter) tag
+				if (!element_type || !src->is_typed()) {
+					out.value = std::move(value);
+					return out;
+				}
+				const size_t count = src->size();
+				script_value rebuilt = script_value::make_array(element_type, eng);
+				auto& dest = *rebuilt.get_array_storage();
+				dest.reserve(count);
+				for (size_t i = 0; i < count; ++i) {
+					dest.push(src->get(i, eng));
+				}
+				rebuilt.set_type_info(target_type);
+				out.value = std::move(rebuilt);
 				return out;
 			}
 			const auto target_elem_base = element_type->base_type;
-			const script_array* src = value.unchecked_array_node();
 
 			// The node kind this binding wants: raw buffers for the primitive element
 			// types (the boundary kernel is THE typed-node producer)

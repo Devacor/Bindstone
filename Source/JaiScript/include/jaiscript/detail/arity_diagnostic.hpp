@@ -55,4 +55,24 @@ inline error_propagator arity_error(std::string_view callee, size_t expected, si
     return {ec, expected == 1 ? arity_named_one : arity_named_many, symbolizer.intern(callee), count};
 }
 
+// 'auto' container homogeneity (both backends' validators): {0} = the offending index on
+// the symbol channel, the count table's spelling; past the table it is interned on the main
+// thread only, and a worker takes the index-free twin
+inline constexpr std::string_view auto_array_elements = "Array 'auto' requires homogeneous elements - type mismatch";
+inline constexpr std::string_view auto_array_elements_at = "Array 'auto' requires homogeneous elements - type mismatch at index {0}";
+inline constexpr std::string_view auto_array_classes = "Array 'auto' requires homogeneous class types - mismatch";
+inline constexpr std::string_view auto_array_classes_at = "Array 'auto' requires homogeneous class types - mismatch at index {0}";
+inline constexpr std::string_view auto_map_values = "Map 'auto' requires homogeneous values - type mismatch";
+inline constexpr std::string_view auto_map_values_at = "Map 'auto' requires homogeneous values - type mismatch at index {0}";
+inline constexpr std::string_view auto_map_classes = "Map 'auto' requires homogeneous class types - mismatch";
+inline constexpr std::string_view auto_map_classes_at = "Map 'auto' requires homogeneous class types - mismatch at index {0}";
+
+template <typename Symbolizer>
+inline error_propagator homogeneity_error(runtime_error_code code, std::string_view text, std::string_view text_at, size_t index,
+                                          const arity_count_symbols& symbols, const Symbolizer& symbolizer) {
+    const uint64_t at = index < arity_count_symbols::count ? symbols.ids[index]
+                      : symbolizer.frozen() ? 0 : symbolizer.intern(std::to_string(index));
+    return {make_error_code(code), at ? text_at : text, at, 0};
+}
+
 } // namespace jai::detail

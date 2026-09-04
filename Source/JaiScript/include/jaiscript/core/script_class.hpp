@@ -167,6 +167,15 @@ public:
     // literal (the shape evaluate_field_initializers stamps without evaluating), so a
     // construction with no initializer list never consults its init env. Memo under
     // method_epoch (a reload re-adds the ASTs after clear_asts and bumps it)
+    // Instance-plan hooks (class_definition::instance_plan): the plan is valid only for a
+    // literal-only chain, and each literal's value is what the stamp pass would store
+    bool chain_literal_plan_ok() const override { return chain_initializers_all_literal(); }
+    const script_value* literal_initializer_for(uint64_t id) const override {
+        for (const auto& [fid, ast] : field_initializer_asts_) {
+            if (fid == id) { return ast && ast->get_type() == node_type::literal_expr ? &static_cast<const literal_expr*>(ast.get())->value : nullptr; }
+        }
+        return nullptr;
+    }
     bool chain_initializers_all_literal() const {
         if (literal_memo_epoch_ != method_epoch() || literal_memo_count_ != field_initializer_asts_.size()) {
             bool all = true;

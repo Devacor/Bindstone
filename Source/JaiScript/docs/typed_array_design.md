@@ -191,8 +191,13 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   The scaffold flag is DELETED: `array<int>`/`array<float>` are raw buffers always,
   `array<var>` (and `array<auto>` without a uniform inferred type) is the only
   `script_value`-vector form, and moving between them is an explicit language step
-  (`array<var> x = ints;`). No path demotes silently (a demote is a full copy the type
-  never asked for). Consequences at the C++ boundary, consistent in every build:
+  (`array<var> x = ints;`): the boundary kernel (`enforce_container_boundary`, the one
+  table behind decl, assignment, parameter, return, field store and `cast`) REBUILDS a
+  typed source into a fresh vector node under the `array<var>` tag — a full copy, the
+  source keeps its buffer — exactly as `array<int> back = x;` rebuilds the buffer the
+  other way; `set_type_info` demotes any typed node that still meets an open-element
+  array tag (the net under the kernel). No path demotes silently (a demote is a full
+  copy the type never asked for). Consequences at the C++ boundary, consistent in every build:
   - `as_array()` / `checked_as_array()` are the `array<var>` view; on a typed node they
     return the one error (`typed_array_vector_view_message`) instead of asserting in
     Debug and reading empty in Release. `unchecked_as_array()` keeps its precondition.

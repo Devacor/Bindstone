@@ -1486,6 +1486,21 @@ public:
                 "12caughttrue", "a rethrow from a resumed catch block fails the handle");
         });
 
+        test("yield_inside_string_range_for", [this, both_drained]() {
+            // a string iterates one char per element by value; the suspended position and the
+            // evaluated string ride the continuation like an array's do
+            both_drained("coroutine string g() { string t = \"xyz\"; string a = \"\"; for (auto c : t) { yield a + c; a += c; } return a; }\nauto h = g(); drain(h)",
+                "x|xy|xyz|xyz", "yield per char inside a string range-for");
+            both_drained("coroutine int g() { for (auto c : \"ab\") yield c + 0; return 9; }\nauto h = g(); drain(h)",
+                "97|98|9", "brace-less range-for body over a string literal");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int t = 0; for (auto c : \"abcd\") { t += nz(yield c + 0); if (c == 'b') { break; } } return t; }\nauto h = g(); drain(h)",
+                "97|98|2", "break after a resumed yield mid-string");
+            both_drained("coroutine int g() { int n = 0; for (auto c : \"\") { yield 1; n++; } for (auto c : \"q\") { yield c + 0; n++; } return n; }\nauto h = g(); drain(h)",
+                "113|1", "an empty string yields nothing; the next loop runs");
+            both_drained("coroutine string g() { string s = \"ab\"; string r = \"\"; try { for (auto& c : s) { yield \"never\"; } } catch (e) { r = e; } yield r; return s; }\nauto h = g(); drain(h)",
+                "Cannot iterate a string by reference: its chars are not lvalues (use for (auto c : s))|ab", "by-reference string iteration raises inside a coroutine body");
+        });
+
         test("error_after_resumed_yield_fails_handle", [this, both_drained]() {
             both_drained("int nz(var v) { return v == null ? 1 : 0; }\nint boom(int x) { throw \"boom\" + to_string(x); }\ncoroutine int g() { int r = boom(nz(yield 1)); return r; }\n"
                          "auto h = g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",

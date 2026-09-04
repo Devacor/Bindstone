@@ -799,10 +799,12 @@ switch (weapon_type) {
         damage = 5;
 }
 
-// Range-based for — optional const and & bindings
+// Range-based for — optional const and & bindings; arrays, maps (pairs), strings (chars,
+// by value only) and coroutines are iterable
 for (auto item : items) { process(item); }
 for (auto& x : nums) { x *= 2; }             // mutate in place
 for (const auto& row : grid) { render(row); }
+for (auto c : "abc") { out += c; }           // each char, like s[i]; auto& over a string raises
 
 // Traditional for
 for (int i = 0; i < 10; i++) {
@@ -857,7 +859,8 @@ string healthLevel = health > 75 ? "healthy" :
    `&` parameters. References into **typed containers carry the element type**: storing a
    mismatched type through `auto& x = intArr[i]`, `for (auto& x : intArr)`, or a ref
    parameter bound to an element errors exactly like direct element assignment. `var`
-   (any-tagged) containers stay unconstrained.
+   (any-tagged) containers stay unconstrained. A string's chars are reads, not cells:
+   `for (auto& c : s)` raises (iterate by value; see `char_semantics.md`).
 4. **RAII**: Constructors and destructors called automatically.
 5. **Generic Types**: Limited to built-in containers plus C++-bound template types; not full
    script-side templates.

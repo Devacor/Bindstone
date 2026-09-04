@@ -1881,6 +1881,25 @@ public:
             check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
         });
 
+        test("instance_plan_battery", [check_quad, check_quad_error]() {
+            // create_instance seeds every default through a per-class plan (slot order, post-
+            // conversion) and a literal-only chain skips the initializer re-run; every row is
+            // the exact pre-plan output of both backends.
+            check_quad("class A { int a = 1; float f = 2; string s = 3; bool b = 1; } A x = A(); to_string(x.a) + \",\" + to_string(x.f) + \",\" + x.s + \",\" + to_string(x.b)", "1,2.000000,3,true", "literal defaults convert to the declared types");
+            check_quad("class P { int a = 1; int b = 2; } class C : P { int b = 20; int c = 3; } C x = C(); to_string(x.a) + \",\" + to_string(x.b) + \",\" + to_string(x.c)", "1,20,3", "child default overrides the parent default");
+            check_quad("class P { int a = 0; P(int v) { a = v; } } class C : P { int a2 = 7; C() : super(5) {} } C x = C(); to_string(x.a) + \",\" + to_string(x.a2)", "5,7", "parent ctor body writes a field the plan seeded");
+            check_quad("class P { int a = 1; P() { a = 9; } } class C : P { int a = 4; C() : super() {} } C x = C(); to_string(x.a)", "4", "child re-declares a field the parent ctor wrote: child initializer wins after the parent body");
+            check_quad("class D { int a = 1; int b = 2; D() : this(10) {} D(int v) { a = v; } } D x = D(); to_string(x.a) + \",\" + to_string(x.b)", "10,2", "this(...) delegation keeps the target ctor as the field authority");
+            check_quad("int g = 5; class N { int a = g + 1; int b = 2; } N x = N(); g = 100; N y = N(); to_string(x.a) + \",\" + to_string(y.a) + \",\" + to_string(y.b)", "6,101,2", "a non-literal initializer re-evaluates per construction");
+            check_quad("class R { int a = 1; } R x = R(); class R { int a = 2; int z = 3; } R y = R(); to_string(x.a) + \",\" + to_string(y.a) + \",\" + to_string(y.z)", "1,2,3", "a reload rebuilds the plan (new default, new slot)");
+            check_quad("class P { int a = 1; } class C : P { int c = 2; } C x = C(); class P { int a = 50; } C y = C(); to_string(x.a) + \",\" + to_string(y.a)", "1,50", "a PARENT reload invalidates the child's plan");
+            check_quad("class V { float x = 0; float y = 0; V(float px, float py) { x = px; y = py; } } float s = 0.0; for (int i = 0; i < 100; ++i) { auto v = V(1.0, 2.0); s += v.x + v.y; } to_string(s)", "300.000000", "the hot ctor shape across many constructions");
+            check_quad("class K { int a = 1; shared_ptr<K> next; } K x = K(); to_string(x.a) + \",\" + to_string(x.next == null)", "1,true", "handle-typed field defaults to a typed null");
+            check_quad("class E { int a = 1; int b; } E x = E(); to_string(x.a) + \",\" + to_string(x.b == null)", "1,true", "an uninitialized typed field is a typed null");
+            check_quad("class M { var m = [1, 2]; } M x = M(); M y = M(); x.m.push(3); to_string(x.m.size()) + \",\" + to_string(y.m.size())", "3,2", "container defaults are per-instance copies");
+            check_quad("class S { string name = \"n\"; int hp = 3; } S a = S(); S b = S(); a.name = \"q\"; a.name + b.name + to_string(a.hp + b.hp)", "qn6", "string defaults are independent");
+        });
+
         test("bare_field_store_then_read_in_loops_battery", [check_quad]() {
             // The Foundry field-write shape: a bare field store followed by a bare read of the
             // same field as an operand in the same method frame, across loop iterations. Any
@@ -2319,6 +2338,63 @@ public:
             check_quad("var m = []; array<int> a = [7]; m.push(a); to_string(m[0][0])", "7", "typed inside untyped");
         });
 
+        test("typed_to_array_var_conversion_rebuilds", [this, quad, check_quad, check_quad_error]() {
+            // `array<var> x = typed;` is the explicit representation step (typed_array_design.md):
+            // every typed kind reboxes into a fresh script_value vector under the array<var> tag
+            // (pushes of anything then land), the source buffer is untouched, and the two are
+            // independent. Pre-fix the raw buffer survived under the array<var> tag and the
+            // first heterogeneous push wrote a script_value into it (segfault, both backends).
+            check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(\"four\"); ints.push(9); m[0] = \"zero\"; "
+                       "to_json(m) + \"|\" + to_json(ints) + \"|\" + to_string(m.size()) + \"|\" + type_of(m) + \"|\" + type_of(m[1]) + \"|\" + type_of(m[3])",
+                       "[\"zero\",2,3,\"four\"]|[1,2,3,9]|4|array|int|string", "int buffer -> array<var>");
+            check_quad("array<float> fs = [1.5, 2.5]; array<var> m = fs; m.push(\"x\"); to_json(m) + \"|\" + to_json(fs) + \"|\" + type_of(m[0])",
+                       "[1.5,2.5,\"x\"]|[1.5,2.5]|float", "float buffer -> array<var>");
+            check_quad("array<bool> bs = [true, false]; array<var> m = bs; m.push(\"x\"); to_json(m) + \"|\" + to_json(bs) + \"|\" + type_of(m[0])",
+                       "[true,false,\"x\"]|[true,false]|bool", "bool buffer -> array<var>");
+            check_quad("array<char> cs = ['a', 'b']; array<var> m = cs; m.push(\"x\"); to_json(m) + \"|\" + to_json(cs) + \"|\" + type_of(m[0])",
+                       "[\"a\",\"b\",\"x\"]|[\"a\",\"b\"]|char", "char buffer -> array<var>");
+            check_quad("array<string> ss = [\"a\", \"b\"]; array<var> m = ss; m.push(5); m[0] = \"z\"; to_json(m) + \"|\" + to_json(ss) + \"|\" + type_of(m[2])",
+                       "[\"z\",\"b\",5]|[\"a\",\"b\"]|int", "string buffer -> array<var>");
+            check_quad("class K { int a = 1; K(int v) { a = v; } } array<K> ks = [K(1), K(2)]; array<var> m = ks; m.push(\"x\"); m[0].a = 9; "
+                       "to_string(m.size()) + \"|\" + type_of(m[0]) + \"|\" + to_string(m[0].a) + \"|\" + to_string(ks[0].a) + \"|\" + type_of(m[2])",
+                       "3|object|9|1|string", "object buffer -> array<var> (decl copies the instances)");
+            check_quad("array<int> ints = []; array<var> m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)", "[\"x\"]|[]", "empty buffer -> array<var>");
+            // the same table at every boundary: assignment, parameter, return, field store,
+            // field initializer, cast
+            check_quad("array<int> ints = [1, 2, 3]; array<var> m = []; m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "assignment");
+            check_quad("array<int> ints = [1, 2, 3]; function f(array<var> a) { a.push(\"x\"); return to_json(a); } f(ints) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "parameter");
+            check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } array<var> r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "return into array<var>");
+            check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } var r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "return into var (the rebuild never aliases the source)");
+            check_quad("class C { array<var> f = []; } array<int> ints = [1, 2, 3]; auto c = C(); c.f = ints; c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "field store");
+            check_quad("array<int> ints = [1, 2, 3]; class C { array<var> f = ints; } auto c = C(); c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "field initializer");
+            check_quad("array<int> ints = [1, 2, 3]; array<var> m = cast<array<var>>(ints); m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
+                       "[1,2,3,\"x\"]|[1,2,3]", "cast<array<var>>");
+            // auto infers the buffer (no rebuild): still enforced
+            check_quad("array<int> ints = [1, 2, 3]; auto a = ints; a.push(4); ints.push(9); to_json(a) + \"|\" + to_json(ints)", "[1,2,3,4]|[1,2,3,9]", "auto keeps array<int>");
+            check_quad_error("array<int> ints = [1, 2, 3]; auto a = ints; a.push(\"x\"); a.size()", "auto keeps array<int> enforcement");
+            // the opposite direction rebuilds the raw buffer from a vector holding only ints
+            check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(4); array<int> back = m; back.push(5); m.push(\"s\"); to_json(back) + \"|\" + to_json(m)",
+                       "[1,2,3,4,5]|[1,2,3,4,\"s\"]", "array<var> -> array<int> rebuilds the buffer");
+            // element coercion between primitive buffers, independent both ways
+            check_quad("array<int> ints = [1, 2]; array<float> fs = ints; fs.push(3.5); ints.push(7); to_json(fs) + \"|\" + type_of(fs[0]) + \"|\" + to_json(ints)",
+                       "[1.0,2.0,3.5]|float|[1,2,7]", "array<int> -> array<float>");
+            check_quad("array<float> fs = [1.5, 2.5]; array<int> ints = fs; ints.push(3); to_json(ints) + \"|\" + type_of(ints[0]) + \"|\" + to_json(fs)",
+                       "[1,2,3]|int|[1.5,2.5]", "array<float> -> array<int>");
+            // mismatches keep the documented boundary text on both backends
+            auto mixed = quad("array<var> m = [1, \"two\"]; array<int> ints = m; ints.size()");
+            check_eq(mixed[0], mixed[1], "mixed vector -> array<int> parity");
+            check(mixed[0].find("Cannot store string in array<int>") != std::string::npos, "mixed vector -> array<int> raises the boundary text: " + mixed[0]);
+            auto strs = quad("array<string> ss = [\"a\"]; array<int> ints = ss; ints.size()");
+            check_eq(strs[0], strs[1], "string buffer -> array<int> parity");
+            check(strs[0].find("Cannot store string in array<int>") != std::string::npos, "string buffer -> array<int> raises the boundary text: " + strs[0]);
+        });
+
         test("typed_storage_parallel_bridge", [check_quad]() {
             // stage-2a bridge: a typed parallel source demotes in place at the barrier
             // (stage 3 replaces this with raw typed worker reads) — results identical
@@ -2374,6 +2450,34 @@ public:
             check(oa.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "an auto object literal stays dynamic");
             auto os = e->execute("class K5 { int a = 1; } shared_ptr<K5> sp = K5(); array<K5> ks5 = [sp]; ks5");
             check(os.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "a shared_ptr-tagged element lives in the object buffer");
+        });
+
+        test("open_element_boundary_rebuilds_typed_source", [this]() {
+            // The boundary kernel itself: a typed node crossing into array<var> comes back as a
+            // FRESH hetero node under the target tag; the source buffer is untouched. The stamp
+            // net (set_type_info) demotes any typed node that still meets an open-element tag.
+            auto e = jai::engine::make();
+            jai::stdlib::register_all(e);
+            auto ints = e->execute("array<int> ints = [1, 2, 3]; ints");
+            check(ints.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "source is an i64 buffer");
+            jai::type_info_ptr open{e->get_type_info_array(e->get_type_info_any())};
+            auto out = jai::detail::enforce_container_boundary(ints, open, e.get());
+            check(out.value.has_value(), "open boundary admits a typed source");
+            check(out.value->unchecked_array_node() != ints.unchecked_array_node(), "rebuilt into a fresh node");
+            check(out.value->unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "array<var> is the script_value-vector form");
+            check(out.value->get_type_info().get() == open.get(), "rebuilt value carries the target tag");
+            check_eq((size_t)3, out.value->unchecked_array_node()->size(), "elements carried over");
+            check_eq((int64_t)3, out.value->unchecked_array_node()->values()[2].as_int(), "elements boxed in order");
+            check(ints.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "source buffer untouched");
+            auto m = e->execute("array<var> m = ints; m.push(\"four\"); m");
+            check(m.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "the decl lands the vector form");
+            check_eq((size_t)4, m.unchecked_array_node()->size(), "push after the conversion");
+            auto ks = e->execute("class KO { int a = 1; } array<KO> ks = [KO()]; array<var> mo = ks; mo");
+            check(ks.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "an object buffer reboxes too");
+            auto stamped = e->execute("array<float> fs = [1.5]; fs").clone();
+            check(stamped.unchecked_array_node()->kind() == jai::script_array::kind_t::f64, "clone keeps the buffer");
+            stamped.set_type_info(open);
+            check(stamped.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "stamping an open-element tag demotes the node");
         });
 
         // type_of on a shared-pointer-semantic instance must match a value instance: both "object".
@@ -3013,6 +3117,56 @@ public:
                 r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7
             )JAI", "Cannot pass null to parameter 'x' of 'i' (declared int)|Cannot convert B to A (no suitable single-argument constructor)|Cannot pass int to parameter 'p' of 'sp' (declared shared_ptr<C>)|Cannot return string from 'r' (declared -> int)|Cannot pass int to parameter 'p' of 'wp' (declared weak_ptr<C>)|Cannot pass int to parameter 'a' of 'pa' (declared array<int>)|Cannot pass array to parameter 'x' of 'i' (declared int)",
                 "source spellings are the payload's type, targets their canonical name");
+        });
+
+        test("typed_slot_handle_variable_texts", [check_both]() {
+            // weak_ptr<T> / shared_ptr<T> VARIABLES reject through family D's declaration and
+            // assignment shapes like every other slot (docs/diagnostics.md): the payload's type,
+            // the slot, the declared handle type - never 'any', never a bare placeholder
+            check_both(R"JAI(
+                class Foo { int a = 1; } class Bar { int b = 2; }
+                var obj = Foo(); var five = 5; var sb = shared_ptr<Bar>(); var str = "s"; var arr = [1]; var bar = Bar();
+                string r1 = ""; try { weak_ptr<Foo> w = obj; } catch (e) { r1 = e; }
+                string r2 = ""; try { weak_ptr<Foo> w = five; } catch (e) { r2 = e; }
+                string r3 = ""; try { weak_ptr<Foo> w = sb; } catch (e) { r3 = e; }
+                string r4 = ""; try { weak_ptr<Foo> w; w = obj; } catch (e) { r4 = e; }
+                string r5 = ""; try { weak_ptr<Foo> w; w = five; } catch (e) { r5 = e; }
+                string r6 = ""; try { weak_ptr<Foo> w; w = sb; } catch (e) { r6 = e; }
+                string r7 = ""; try { auto p = shared_ptr<Foo>(); p = str; } catch (e) { r7 = e; }
+                string r8 = ""; try { auto p = shared_ptr<Foo>(); p = arr; } catch (e) { r8 = e; }
+                string r9 = ""; try { shared_ptr<Foo> p = shared_ptr<Foo>(); p = bar; } catch (e) { r9 = e; }
+                string local1() { string r = ""; try { weak_ptr<Foo> w; var o = Foo(); w = o; } catch (e) { r = e; } return r; }
+                string local2() { string r = ""; try { var o = Foo(); weak_ptr<Foo> w = o; } catch (e) { r = e; } return r; }
+                r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7 + "|" + r8 + "|" + r9 + "|" + local1() + "|" + local2()
+            )JAI", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo|Cannot initialize 'w' (declared weak_ptr<Foo>) with int|Cannot initialize 'w' (declared weak_ptr<Foo>) with Bar|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot assign int to 'w' (declared weak_ptr<Foo>)|Cannot assign Bar to 'w' (declared weak_ptr<Foo>)|Cannot assign string to 'p' (declared shared_ptr<Foo>)|Cannot assign array to 'p' (declared shared_ptr<Foo>)|Cannot assign Bar to 'p' (declared shared_ptr<Foo>)|Cannot assign Foo to 'w' (declared weak_ptr<Foo>)|Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo",
+                "handle variables name the slot and spell the payload's type (globals and slotted locals alike)");
+            check_both(R"JAI(
+                class Foo { int a = 1; }
+                class Foo2 : Foo { }
+                var keep = shared_ptr<Foo>(); var sub = shared_ptr<Foo2>(); var nothing = null; var five = 5;
+                string r1 = "ok"; try { weak_ptr<Foo> w = keep; weak_ptr<Foo> w2 = sub; weak_ptr<Foo> w3 = nothing; w = sub; w2 = nothing; w3 = keep; } catch (e) { r1 = e; }
+                string r2 = "ok"; try { auto p = keep; p = five; } catch (e) { r2 = e; }
+                r1 + "|" + r2 + "|" + to_string(keep.a)
+            )JAI", "ok|Cannot assign int to 'p' (declared shared_ptr<Foo>)|1",
+                "handles and subclass handles still bind; a rejected handle store leaves the pointee untouched");
+        });
+
+        test("auto_container_homogeneity_index", [check_both]() {
+            // the offending index rides the pre-interned count table (it rendered as a symbol
+            // NAME before); every 'auto' homogeneity text, both containers, nested too
+            check_both(R"JAI(
+                class A { int a = 0; } class B { int b = 0; }
+                var one = 1; var s = "s";
+                string r1 = ""; try { auto x = [1, 2, s]; } catch (e) { r1 = e; }
+                string r2 = ""; try { auto x = ["a", "b", "c", "d", one]; } catch (e) { r2 = e; }
+                string r3 = ""; try { array<auto> x = [1, 2.5]; } catch (e) { r3 = e; }
+                string r4 = ""; try { auto x = [A(), B()]; } catch (e) { r4 = e; }
+                string r5 = ""; try { auto m = {"a": 1, "b": s}; } catch (e) { r5 = e; }
+                string r6 = ""; try { auto m = {"a": A(), "b": B()}; } catch (e) { r6 = e; }
+                string r7 = ""; try { auto x = [[1], [2, s]]; } catch (e) { r7 = e; }
+                r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7
+            )JAI", "Array 'auto' requires homogeneous elements - type mismatch at index 2|Array 'auto' requires homogeneous elements - type mismatch at index 4|Array 'auto' requires homogeneous elements - type mismatch at index 1|Array 'auto' requires homogeneous class types - mismatch at index 1|Map 'auto' requires homogeneous values - type mismatch at index 1|Map 'auto' requires homogeneous class types - mismatch at index 1|Array 'auto' requires homogeneous elements - type mismatch at index 1",
+                "homogeneity texts render the index as a number");
         });
 
         test("typed_slot_throwing_conversion_propagates", [check_both]() {

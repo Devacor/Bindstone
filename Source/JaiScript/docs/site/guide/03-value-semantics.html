@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li class="current"><a href="../guide/03-value-semantics.html" aria-current="page">Value Semantics &amp; References</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="value-semantics-references">Value Semantics &amp; References<a class="hlink" href="#value-semantics-references" aria-label="link">&#8203;</a></h1>
-<p><strong>If you read only one chapter of this guide, read this one.</strong> The single most common ambush for a newcomer lives here: <em>JaiScript copies by default — everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
+<p><strong>If you read only one chapter of this guide, read this one.</strong> The single most common ambush for a newcomer lives here: <em>JaiScript copies by default, everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
 <h2 id="the-ambush-mutations-on-copies-vanish-silently">The ambush: mutations on copies vanish silently<a class="hlink" href="#the-ambush-mutations-on-copies-vanish-silently" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto a = [1, 2, 3];
 auto b = a;          // assignment COPIES the array
@@ -49,7 +49,7 @@ print(&quot;after double_all(nums): nums[0] = {}  &lt;- mutation vanished!&quot;
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a[0] = 1  (the original is untouched)
 b[0] = 99
 after double_all(nums): nums[0] = 1  &lt;- mutation vanished!</code></pre></div>
-<p><strong>This applies to class instances too</strong> — unlike Python/JS/Lua/C#, objects are values:</p>
+<p><strong>This applies to class instances too</strong>. Unlike Python/JS/Lua/C#, objects are values:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
     void set(int v) { x = v; }             // methods mutate their own instance
@@ -90,7 +90,7 @@ print(&quot;h.hp = {}&quot;, h.hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after bump(n): 42
 items.size() = 1
 h.hp = 15</code></pre></div>
-<p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion — the aliasing follows the value wherever the call takes it.</p>
+<p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion. The aliasing follows the value wherever the call takes it.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }
@@ -108,7 +108,7 @@ print(&quot;arr[1] after realloc = {}&quot;, arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">h.hp = 11
 arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
-<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. This one is not catchable &mdash; it is an invariant of the reference model, not a script error.</p>
+<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. This one is not catchable: it is an invariant of the reference model, not a script error.</p>
 <h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
 <p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
@@ -124,7 +124,7 @@ x = 42;              // still writes through after the array reallocated
 print(&quot;arr[1] = {}&quot;, arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">v = 4
 arr[1] = 42</code></pre></div>
-<p>References respect the type system, and builtin methods work through them. A write through an <code>auto&amp;</code> bound to a typed array&#x27;s element converts when compatible and rejects when not — exactly like writing to the element directly — and calling a string/array/map method through a reference mutates the referent in place:</p>
+<p>References respect the type system, and builtin methods work through them. A write through an <code>auto&amp;</code> bound to a typed array&#x27;s element converts when compatible and rejects when not (exactly like writing to the element directly), and calling a string/array/map method through a reference mutates the referent in place:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 auto&amp; e = nums[0];
 e = 9.7;                       // converts to the element type, like any typed write
@@ -149,7 +149,7 @@ for (auto&amp; x : nums) { x *= 2; }      // references: mutates in place
 print(&quot;after ref loop:   {}&quot;, nums[0]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after value loop: 1
 after ref loop:   2</code></pre></div>
-<h2 id="escape-hatch-5-shared-ptr-opt-in-reference-semantics">Escape hatch 5: <code>shared_ptr&lt;T&gt;</code> — opt-in reference semantics<a class="hlink" href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics" aria-label="link">&#8203;</a></h2>
+<h2 id="escape-hatch-5-shared-ptr-opt-in-reference-semantics">Escape hatch 5: <code>shared_ptr&lt;T&gt;</code> (opt-in reference semantics)<a class="hlink" href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics" aria-label="link">&#8203;</a></h2>
 <p>When you <em>want</em> an object shared by handle (entity registries, cross-references), declare it <code>shared_ptr&lt;T&gt;</code>. Copies of the handle alias the same object:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
@@ -161,7 +161,7 @@ poke(sp);
 print(&quot;after poke: {}&quot;, sp.x);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sp.x = 99 (shared!)
 after poke: 42</code></pre></div>
-<p><code>new P()</code> is the direct spelling for a handle &mdash; <code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way &mdash; and every copy of the handle shares the object. <code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
+<p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
 weak_ptr&lt;P&gt; w = sp;
@@ -170,7 +170,7 @@ auto l = w.lock();
 l.x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">expired: false
 == result: 3</code></pre></div>
-<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> raises at run time &mdash; a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>.</p>
+<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> raises at run time: a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>.</p>
 <h2 id="escape-hatch-6-cast-t-and-cast-shared-ptr-t">Escape hatch 6: <code>cast&lt;T&amp;&gt;</code> and <code>cast&lt;shared_ptr&lt;T&gt;&gt;</code><a class="hlink" href="#escape-hatch-6-cast-t-and-cast-shared-ptr-t" aria-label="Link to this section">&#8203;</a></h2>
 <p><code>cast</code> comes in three forms, and the difference between them is exactly this chapter&#x27;s subject: <code>cast&lt;T&gt;(e)</code> is a <strong>copy</strong>, <code>cast&lt;T&amp;&gt;(e)</code> is a <strong>reference</strong> to the same object, <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing it. The reference form earns its place here as the strict-mode fix for a classic situation: a base-typed variable holding a derived object, and you need a member only the derived class declares.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
@@ -193,19 +193,19 @@ print(&quot;original:     &quot;, cast&lt;Derived&amp;&gt;(h).t, &quot;  copy: &
 after write:  5
 via handle:   77
 original:     77  copy: 0</code></pre></div>
-<p>Two things to keep in mind. The value form applied to a handle or a reference still copies &mdash; and because that is almost never what you meant, the checker warns about it (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). And a cast to an unrelated class raises the catchable <code>Cannot cast &#x27;X&#x27; to &#x27;T&#x27;</code> at run time; the checker never second-guesses the operand, since saying <code>cast</code> is how you tell it you know better. The primitive forms, the char rules and the full contract are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
+<p>Two things to keep in mind. The value form applied to a handle or a reference still copies, and because that is almost never what you meant, the checker warns about it (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). And a cast to an unrelated class raises the catchable <code>Cannot cast &#x27;X&#x27; to &#x27;T&#x27;</code> at run time; the checker never second-guesses the operand, since saying <code>cast</code> is how you tell it you know better. The primitive forms, the char rules and the full contract are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
 <h2 id="what-each-strategy-costs">Choosing a strategy<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
 <p>The short version: passing by value pays for a deep copy that grows with the payload; <code>&amp;</code> and <code>shared_ptr</code> alias the same object at essentially the same cost. All three strategies are quantified side by side in <a href="../embedding/11-performance.html#value-strategy-costs">Performance</a>.</p>
 <p><strong>Decision guide:</strong></p>
 <ul>
-<li><strong>Plain values (default)</strong> for scalars, strings (O(1) shared copies), small structs, and anywhere you <em>want</em> snapshot semantics. Stop when the object carries containers and sits in a hot path — the per-call deep copy is the one cost here that grows with the object.</li>
-<li><strong><code>T&amp;</code> params / <code>auto&amp;</code> decls</strong> when a function needs to see or mutate the caller&#x27;s object: cheapest aliasing, fastest shape for in-place algorithms. Constraint: references are <em>aliases, not storage</em> — plain assignment stores a value through them, and a reference can&#x27;t live in a field or container. <code>&amp;</code> can&#x27;t be your data model.</li>
-<li><strong><code>shared_ptr&lt;T&gt;</code> (<code>new T(...)</code>)</strong> when identity must outlive the call: fields holding objects, containers of entities, registries, trees/graphs where nodes hold nodes. Same cost as <code>&amp;</code> at call boundaries. Copies follow the declaration: if the object was declared <code>shared_ptr</code> (<code>new T(...)</code>), <code>var</code>/<code>auto</code> copies <strong>share the handle</strong> (as in C++ — copying a <code>shared_ptr</code> copies the handle, not the object); if it was declared a value (<code>MyType(5)</code>), copies <strong>deep-copy</strong>.</li>
+<li><strong>Plain values (default)</strong> for scalars, strings (O(1) shared copies), small structs, and anywhere you <em>want</em> snapshot semantics. Stop when the object carries containers and sits in a hot path: the per-call deep copy is the one cost here that grows with the object.</li>
+<li><strong><code>T&amp;</code> params / <code>auto&amp;</code> decls</strong> when a function needs to see or mutate the caller&#x27;s object: cheapest aliasing, fastest shape for in-place algorithms. Constraint: references are <em>aliases, not storage</em>. Plain assignment stores a value through them, and a reference can&#x27;t live in a field or container. <code>&amp;</code> can&#x27;t be your data model.</li>
+<li><strong><code>shared_ptr&lt;T&gt;</code> (<code>new T(...)</code>)</strong> when identity must outlive the call: fields holding objects, containers of entities, registries, trees/graphs where nodes hold nodes. Same cost as <code>&amp;</code> at call boundaries. Copies follow the declaration: if the object was declared <code>shared_ptr</code> (<code>new T(...)</code>), <code>var</code>/<code>auto</code> copies <strong>share the handle</strong> (as in C++: copying a <code>shared_ptr</code> copies the handle, not the object); if it was declared a value (<code>MyType(5)</code>), copies <strong>deep-copy</strong>.</li>
 </ul>
 <p><strong>A <code>var</code> holding a handle.</strong> You can skip this on a first read. A <code>var</code> that holds a handle behaves exactly like a typed handle wherever the typed spelling would be legal; the only thing <code>var</code> adds is accepting what a typed holder would reject. What <code>=</code> does to such a variable depends on what is on the right:</p>
 <ul>
 <li>A <strong>handle</strong> on the right (<code>p = new Foo();</code>) <strong>rebinds</strong> <code>p</code>.</li>
-<li>A <strong>value of a compatible class</strong> (the held class or a subclass) <strong>assigns into</strong> the shared object, so every alias sees it &mdash; exactly what a <code>shared_ptr&lt;Foo&gt;</code> variable does. <code>Foo()</code> is a value, <code>new Foo()</code> is a handle: the same distinction the typed rungs draw.</li>
+<li>A <strong>value of a compatible class</strong> (the held class or a subclass) <strong>assigns into</strong> the shared object, so every alias sees it, exactly what a <code>shared_ptr&lt;Foo&gt;</code> variable does. <code>Foo()</code> is a value, <code>new Foo()</code> is a handle: the same distinction the typed rungs draw.</li>
 <li>A <strong>value of an unrelated class, or a primitive</strong> (<code>p = Bar();</code>, <code>p = 5;</code>) <strong>rebinds</strong> <code>p</code> to an independent copy. This is the one move <code>var</code> adds, and it sits precisely where a typed holder would raise.</li>
 <li><code>auto q = p;</code> taken from a var-held handle locks <code>q</code> as a <code>shared_ptr&lt;Foo&gt;</code>; the typed rungs themselves are unchanged.</li>
 </ul>

@@ -34,7 +34,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="dynamic-binder-binding-c-classes"><code>dynamic_binder</code>: Binding C++ Classes<a class="hlink" href="#dynamic-binder-binding-c-classes" aria-label="link">&#8203;</a></h1>
 <p><strong>One declaration, three jobs.</strong> Declare a field once with <code>JAI_PROPERTY</code> and it is
 simultaneously <em>reflected</em> (C++ code can enumerate and edit it by name), <em>script-visible</em>
-(<code>obj.field</code> just works), and <em>serialized</em> (JSON and binary, from the same declaration —
+(<code>obj.field</code> just works), and <em>serialized</em> (JSON and binary, from the same declaration,
 including polymorphic pointers and signal connections). This chapter walks one game class through all three,
 then documents the fluent binder chain that makes it go. Every C++ signature below is taken from
 <code>include/jaiscript/core/dynamic_binder.hpp</code> and friends; every snippet was compiled against the real
@@ -43,11 +43,11 @@ library and run on <strong>both backends</strong>, with byte-identical output.</
 <h2 id="three-systems-that-drift">Three systems that drift<a class="hlink" href="#three-systems-that-drift" aria-label="link">&#8203;</a></h2>
 <p>Every engine eventually grows the same three subsystems, usually years apart, usually by different people:</p>
 <ul>
-<li><strong>Reflection</strong> — an editor or debug inspector needs to enumerate an object's fields by name.</li>
-<li><strong>Script binding</strong> — designers need <code>tower.level</code> to work from a script.</li>
-<li><strong>Serialization</strong> — save files need to write those same fields out and read them back.</li>
+<li><strong>Reflection</strong>: an editor or debug inspector needs to enumerate an object's fields by name.</li>
+<li><strong>Script binding</strong>: designers need <code>tower.level</code> to work from a script.</li>
+<li><strong>Serialization</strong>: save files need to write those same fields out and read them back.</li>
 </ul>
-<p>Three systems, three registration sites, one class — and every new field is a three-stop tour. Miss a stop
+<p>Three systems, three registration sites, one class. Every new field is a three-stop tour. Miss a stop
 and you get the classic bugs: the field that saves but doesn't show in the editor, the script-visible field
 that silently never persists, the renamed member that still loads under its old name in one system and not the
 other. The systems don't fail loudly; they <em>drift</em>.</p>
@@ -58,7 +58,7 @@ keep in sync because there is only one thing.</p>
 
 <h2 id="the-declaration">The declaration<a class="hlink" href="#the-declaration" aria-label="link">&#8203;</a></h2>
 <p>A spawner building for a tower-defense game: three plain properties, one observable property, one signal,
-and two ordinary methods. This is the entire integration surface — everything in the rest of this chapter
+and two ordinary methods. This is the entire integration surface. Everything in the rest of this chapter
 falls out of these 25 lines:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/registrar.hpp&gt;
 #include &lt;jaiscript/properties/macros.hpp&gt;
@@ -88,19 +88,19 @@ static jai::registrar&lt;Spawner, void&gt; _regSpawner("Spawner",
 <p>Reading it back:</p>
 <ul>
 <li><code>property_owner&lt;Spawner&gt;</code> gives the class a <code>property_mgr</code> and registers its
-serialization identity (<code>$type</code> name, polymorphic load factory) at program start — no separate
+serialization identity (<code>$type</code> name, polymorphic load factory) at program start. No separate
 serialization registration exists to forget.</li>
 <li><code>JAI_PROPERTY((type), name, default)</code> declares a <code>jai::property&lt;T&gt;</code> member.
 The type goes in parentheses so templates with commas survive the macro. The member behaves like a
 <code>T</code> in C++ (<code>level += 1</code>, comparisons, streaming all forward), and it self-registers
 into the manager and the type schema.</li>
-<li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> expands to the engine's established pair — a private
+<li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> expands to the engine's established pair: a private
 <code>signal_emitter</code> you fire (<code>onWaveSignal(n)</code>) and a public <code>jai::signal</code> view
-scripts and other systems connect to — plus a hidden property that rides save/load. Declaring it is also
+scripts and other systems connect to, plus a hidden property that rides save/load. Declaring it is also
 the entire script registration: <code>auto_bind</code> surfaces the signal as a connectable member
 (<a href="#signals-one-view-every-signature">how, below</a>).</li>
 <li><code>jai::registrar</code> is a self-registering static: any binary that links this file knows how to
-bind <code>Spawner</code> into any engine. The configure lambda only names what the macros can't know —
+bind <code>Spawner</code> into any engine. The configure lambda only names what the macros can't know:
 the methods. Everything <code>JAI_PROPERTY</code> and <code>JAI_SIGNAL_PROPERTY</code> declared is bound
 automatically (<code>registrar</code> calls <code>auto_bind()</code> for you).</li>
 </ul>
@@ -114,37 +114,37 @@ as the second type argument (<code>jai::registrar&lt;Building, Services&gt;</cod
 engine services.</p>
 
 <h2 id="three-doors">Three doors, each an explicit opt-in<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h2>
-<p>The pieces above are a deliberate layering — a type's visibility widens only when you ask:</p>
+<p>The pieces above are a deliberate layering. A type's visibility widens only when you ask:</p>
 <ul>
 <li><strong>Declaring</strong> (<code>property_owner</code> + the macros) gives a type its identity,
 inheritance, properties, and serialization. A declaration alone is never script-visible.</li>
 <li><strong><code>jai::registrar&lt;T&gt;</code></strong> opts the <em>type</em> in: one static line, and
-every engine the host hands to <code>bind_registrar</code> knows it. Engines that never make that call —
-sandboxes, workers, network peers — know nothing.</li>
+every engine the host hands to <code>bind_registrar</code> knows it. Engines that never make that call
+(sandboxes, workers, network peers) know nothing.</li>
 <li><strong><code>dynamic_binder&lt;T&gt;(eng, "Name")</code></strong> opts one <em>engine</em> in, with a
 curated name and engine-specific methods.</li>
 </ul>
 <p>Whichever door a type enters, its <code>property_owner</code> bases follow it inside that engine
-(<a href="#inheritance-and-polymorphism">inheritance</a>, below), and it carries one name everywhere —
+(<a href="#inheritance-and-polymorphism">inheritance</a>, below), and it carries one name everywhere:
 the in-class pin when declared, else the bare class name, always matching the serialization
 <code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
 on its own, which is exactly what makes an empty engine a sandbox
 (<a href="05-safety-rails.html">Safety Rails</a>).</p>
 <p><strong>Timing.</strong> One term first: a derived registration <em>auto-materializes</em> its
-<code>property_owner</code> base — registers it under its own name without you asking; a later explicit
+<code>property_owner</code> base, registering it under its own name without you asking; a later explicit
 registration of that base <em>adopts</em> the same definition and renames it. The static phase (declarations,
 schema entries, serialization identity, the registrar queue) completes at program start, touches no engine,
 and its cross-file order is irrelevant.
 The runtime phase is host-sequenced: <code>make()</code> → <code>register_all</code> →
 <code>bind_registrar</code> (once per engine) → any explicit binders → run scripts. Inside that
-registration window, order never matters — registrars replay in arbitrary order, derived-before-base is
+registration window, order never matters: registrars replay in arbitrary order, derived-before-base is
 fine, and explicit registrations adopt what auto-materialization created. Registering more types
 <em>after</em> scripts have run is supported and intentional (new types appear; re-registering an
 explicitly-bound type replaces its binding for future constructions, while existing instances keep the
 shape they were built with). One contract is enforced, not assumed: <strong>an explicit registration
-cannot adopt an auto-materialized base while script instances of it are alive</strong> — that would
+cannot adopt an auto-materialized base while script instances of it are alive</strong>. That would
 change their type identity, so the binder throws at the registration site. In practice: finish
-registering before constructing, and treat bare auto-names as internal plumbing — give anything scripts
+registering before constructing, and treat bare auto-names as internal plumbing. Give anything scripts
 construct directly a fixed script name (<code>JAI_PROPERTY_OWNER</code>).</p>
 
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
@@ -164,13 +164,13 @@ wave 2 incoming
 north-gate at level 3: 2 waves so far</code></pre></div>
 <p>The constructor came free too: <code>build()</code> auto-registers a default constructor for any
 default-constructible, non-abstract type (and prefers a <code>T(engine*)</code> constructor when one exists).
-Signal connections take a <em>name</em> (<code>"hud"</code>) — named connections are owned by the signal, so
+Signal connections take a <em>name</em> (<code>"hud"</code>): named connections are owned by the signal, so
 they live as long as the object and can be replaced or removed by name
 (<code>disconnect("hud")</code>).</p>
 
 <h2 id="live-objects-both-directions">Live objects, both directions<a class="hlink" href="#live-objects-both-directions" aria-label="link">&#8203;</a></h2>
 <p>Objects are reference types at the boundary. <code>make_object(shared_ptr)</code> wraps <em>your</em>
-pointer — no copy, shared identity — so script writes land in the C++ member and C++ emits reach script
+pointer (no copy, shared identity), so script writes land in the C++ member and C++ emits reach script
 receivers:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto gate = std::make_shared&lt;Spawner&gt;();
 eng-&gt;add_global("gate", eng-&gt;make_object(gate));
@@ -184,7 +184,7 @@ eng-&gt;execute(R"JAI(
 )JAI");
 gate-&gt;spawn_wave();   // C++ emit -&gt; the script receiver runs</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">gate wave 1</code></pre></div>
-<p>The observable property completes the loop in the other direction — script observes, C++ mutates, and the
+<p>The observable property completes the loop in the other direction: script observes, C++ mutates, and the
 change notification crosses the boundary. Assignments from either side fire it; unchanged writes don't:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration + gate global"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">gate.threat.on_change([=](int old_value, int new_value) -&gt; void {
     print("threat {} -&gt; {}", old_value, new_value);
@@ -195,7 +195,7 @@ eng-&gt;execute("gate.threat = gate.threat + 2;");      // script write; reads u
 threat 5 -&gt; 7</code></pre></div>
 <p>Lifetime notes: <code>eng-&gt;make_object&lt;T&gt;(args...)</code> constructs in place;
 <code>add_global_ref</code> on a class instance wraps a <strong>non-owning</strong> alias (you guarantee the
-object outlives the engine). One engine serves one thread at a time — two engines on two threads need no
+object outlives the engine). One engine serves one thread at a time. Two engines on two threads need no
 locks, because nothing is global.</p>
 <p>Passing a bound property by reference follows the spelling: <code>gate.level</code> or, inside a method of
 a script class that derives <code>Spawner</code>, <code>this.level</code> handed to a <code>&amp;</code>
@@ -206,7 +206,7 @@ into a <code>&amp;</code> parameter is the error <code>Cannot take reference of 
 exactly as for a method name.</p>
 
 <h2 id="reflected">Reflected<a class="hlink" href="#reflected" aria-label="link">&#8203;</a></h2>
-<p>Job two: reflected. The same declaration is a runtime reflection surface — this is what editor inspectors and
+<p>Job two: reflected. The same declaration is a runtime reflection surface. This is what editor inspectors and
 debug panels are built on. Walk every property by name, read typed values, and write through the property so
 observable change signals still fire:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;visit_reflected_properties([](const std::string&amp; name, jai::property_base* p) {
@@ -224,13 +224,13 @@ prop: threat
 level via reflection: 7
 threat 7 -&gt; 9</code></pre></div>
 <p>The walk is <em>virtual</em>: hold a base pointer to a derived object and you still see the full most-derived
-chain. Per-property metadata rides along — <code>value_type_id()</code> for the C++ type,
-<code>allow_save()</code> for serialization eligibility — and the static side is queryable without an instance
+chain. Per-property metadata rides along (<code>value_type_id()</code> for the C++ type,
+<code>allow_save()</code> for serialization eligibility), and the static side is queryable without an instance
 via <code>Spawner::schema()</code> / <code>Spawner::all_property_names()</code>.</p>
 
 <h2 id="serialized">Serialized<a class="hlink" href="#serialized" aria-label="link">&#8203;</a></h2>
 <p>Job three: serialized. No save/load methods were written. One call walks the same property manager the
-other two jobs use — and notice what's inside the payload: the signal's named script receiver serialized
+other two jobs use. And notice what's inside the payload: the signal's named script receiver serialized
 <em>with the object</em>. The outer two levels are the archive's root record: an empty <code>_type_</code>
 (every archived object opens with one; the root record has no name) and a <code>value0</code> slot holding
 the pointer you passed, with its <code>$id</code>; your object is the <code>$val</code>.</p>
@@ -277,19 +277,19 @@ persisted script receivers attach to it and execute on the next emit:</p>
 // loaded-&gt;id.get() == "east-gate", level 7, threat 9
 loaded-&gt;spawn_wave();   // the receiver came back from the save file</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
-<p>Binary is the same declaration through a different archive — no second format to maintain, and this
+<p>Binary is the same declaration through a different archive. No second format to maintain, and this
 object's payload is 374 bytes instead of 492 characters of JSON:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector&lt;uint8_t&gt;
 auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes, *eng);
 again-&gt;spawn_wave();   // "wave logged" — receivers persist in binary too</code></pre></div>
-<p>Ship saves in binary, debug them in JSON, diff them in code review — one declaration serves all of it. The
+<p>Ship saves in binary, debug them in JSON, diff them in code review. One declaration serves all of it. The
 receiver rule is deliberate: <strong>named script-text receivers persist; function-object receivers (script
-lambdas and C++ callbacks) are runtime-only</strong> and are skipped, never errored on. Serialization depth —
-versioning, migration hooks, <code>$ref</code> aliasing, custom archives — lives in
+lambdas and C++ callbacks) are runtime-only</strong> and are skipped, never errored on. Serialization depth
+(versioning, migration hooks, <code>$ref</code> aliasing, custom archives) lives in
 <a href="../embedding/08-serialization.html">Serialization</a>.</p>
 
 <h2 id="hot-reload-with-state-intact">Hot reload with state intact<a class="hlink" href="#hot-reload-with-state-intact" aria-label="link">&#8203;</a></h2>
-<p>Script classes can extend bound C++ classes — and because the C++ half of such an object is the
+<p>Script classes can extend bound C++ classes. Because the C++ half of such an object is the
 <em>same live object</em> across reloads, iterating on the script half never resets engine state. Redefine the
 class with a new field mid-session:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
@@ -300,7 +300,7 @@ auto smart = SmartSpawner();
 smart.level = 5;
 smart.aggression = 2;
 smart.spawn_wave();</code></pre></div>
-<p>Later, same session — a fresh <code>execute()</code> redefines the class with a new field, while
+<p>Later, same session: a fresh <code>execute()</code> redefines the class with a new field, while
 <code>smart</code> is alive:</p>
 <div class="codeblock cb-jai" data-host="Spawner registration, same session as the block above"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
@@ -312,14 +312,14 @@ print("reloaded: level={} aggression={} burst={} waves={}",
     smart.level, smart.aggression, smart.burst, smart.total_waves());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">reloaded: level=5 aggression=2 burst=4 waves=1</code></pre></div>
 <p>Existing script fields kept their values (<code>aggression=2</code>), the new field took its initializer
-(<code>burst=4</code>), and the C++ base — its properties <em>and</em> its private
-<code>total_waves_</code> counter — was neither destroyed nor rebuilt (<code>waves=1</code>). The migration
+(<code>burst=4</code>), and the C++ base (its properties <em>and</em> its private
+<code>total_waves_</code> counter) was neither destroyed nor rebuilt (<code>waves=1</code>). The migration
 rules, the <code>migrate</code> hook, and the it-always-succeeds contract are in
 <a href="../embedding/07-hot-reload.html">Hot Reload</a>.</p>
 
 <h2 id="the-fluent-chain-verb-by-verb">The fluent chain, verb by verb<a class="hlink" href="#the-fluent-chain-verb-by-verb" aria-label="link">&#8203;</a></h2>
 <p>Under the registrar sits <code>jai::dynamic_binder&lt;T&gt;</code>
-(<code>include/jaiscript/core/dynamic_binder.hpp</code>) — the fluent builder you can also drive directly for
+(<code>include/jaiscript/core/dynamic_binder.hpp</code>), the fluent builder you can also drive directly for
 types that aren't <code>property_owner</code>s. The classic value-type example:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
     .constructor&lt;&gt;()
@@ -355,62 +355,62 @@ axes 2
 dot 11.000000</code></pre></div>
 <p>Two behaviors in that transcript deserve a sentence each. The chain
 <code>Vec2(1,1).scale(3).translate(1,0).x</code> runs entirely on C++ temporaries: a method returning
-<code>T&amp;</code> into its receiver stays valid because the bound receiver is kept alive across the chain —
-the idiom is safe by construction, not by luck. And <code>!=</code> worked without being registered: when only
+<code>T&amp;</code> into its receiver stays valid because the bound receiver is kept alive across the chain.
+The idiom is safe by construction, not by luck. And <code>!=</code> worked without being registered: when only
 <code>==</code> exists, script <code>!=</code> is its negation.</p>
 <p>The verbs:</p>
 <ul>
-<li><code>.constructor&lt;Args...&gt;()</code> — typed constructor overload; script calls
+<li><code>.constructor&lt;Args...&gt;()</code>: typed constructor overload; script calls
 <code>Vec2(3.0, 4.0)</code> and overloads resolve by arity and C++ parameter types.
 <code>.constructor&lt;&gt;()</code> prefers a <code>T(engine*)</code> constructor when the type has one.
 If you register none, <code>build()</code> adds a default constructor for default-constructible types.</li>
-<li><code>.method(name, &amp;T::fn)</code> — member function pointer, const or not.</li>
-<li><code>.method(name, lambda)</code> — a lambda whose first parameter is <code>T&amp;</code> or
+<li><code>.method(name, &amp;T::fn)</code>: member function pointer, const or not.</li>
+<li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
 <code>const T&amp;</code> becomes a method (that parameter is <code>self</code>); without it, a method that
-ignores the instance. Same-arity overloads of one name resolve by C++ parameter signature — registering
+ignores the instance. Same-arity overloads of one name resolve by C++ parameter signature: registering
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
 clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
 <code>.property()</code>.</li>
-<li><code>.method("+", ...)</code> — operator overloading by token: <code>+ - * / % == != &lt; &lt;= &gt;
+<li><code>.method("+", ...)</code>: operator overloading by token, <code>+ - * / % == != &lt; &lt;= &gt;
 &gt;= &lt;=&gt;</code> and <code>[]</code>. Script classes can overload operators from the other side, so a
 type can start in script and graduate to C++ without call sites changing.</li>
-<li><code>.static_method(name, fn)</code> — free function or stateless lambda, called as
+<li><code>.static_method(name, fn)</code>: free function or stateless lambda, called as
 <code>Vec2::axes()</code>. Bound-class arguments work (<code>Vec2::dot(a, b)</code> above); returning a bound
-class from the <em>lambda</em> form doesn't compile — see the last section.</li>
-<li><code>.property(name, &amp;T::member)</code> — read/write field access. Setters are only generated for
+class from the <em>lambda</em> form doesn't compile. See the last section.</li>
+<li><code>.property(name, &amp;T::member)</code>: read/write field access. Setters are only generated for
 copy-assignable member types. A <code>std::vector&lt;E&gt;</code> member binds as a zero-copy live view with
 array-like methods (<code>size/push/pop/at/[]</code>). Members whose type is a registered class bind by
 reference, so mutation acts on the live member. A plain <code>jai::signal&lt;Sig&gt;</code> or
-<code>signal_emitter&lt;Sig&gt;</code> member binds as a script connect surface with this same one line —
-see <a href="#signals-one-view-every-signature">the signals section</a>.</li>
-<li><code>.property(name, getter, setter)</code> — computed properties from lambdas or member function
+<code>signal_emitter&lt;Sig&gt;</code> member binds as a script connect surface with this same one line.
+See <a href="#signals-one-view-every-signature">the signals section</a>.</li>
+<li><code>.property(name, getter, setter)</code>: computed properties from lambdas or member function
 pairs; pass <code>nullptr</code> as the setter for read-only.</li>
-<li><code>.property(name, &amp;T::member, jai::skip_type_check)</code> — a property whose type isn't
+<li><code>.property(name, &amp;T::member, jai::skip_type_check)</code>: a property whose type isn't
 registered yet throws at registration time with a fix-it message; this tag acknowledges a deliberate circular
 dependency and skips the check. The classic case is self-reference: <code>class Node { std::shared_ptr&lt;Node&gt; next; }</code>
 binds <code>next</code> before <code>Node</code> itself is registered.</li>
-<li><code>.static_property(name, &amp;var)</code> / <code>.static_property(name, getter, setter)</code> —
+<li><code>.static_property(name, &amp;var)</code> / <code>.static_property(name, getter, setter)</code>:
 class-level values.</li>
-<li><code>.base_class&lt;Base&gt;()</code> — inheritance edge: methods and properties of the base become
+<li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>
-<li><code>.version(n)</code> + <code>.post_load_hook(fn)</code> — serialization version stamp and a
+<li><code>.version(n)</code> + <code>.post_load_hook(fn)</code>: serialization version stamp and a
 post-load migration hook, <code>[](T&amp; self)</code> or <code>[](T&amp; self, int version)</code>.</li>
-<li><code>.deserialization_factory(fn)</code> — construct non-default-constructible types on load;
+<li><code>.deserialization_factory(fn)</code>: construct non-default-constructible types on load;
 archive-only, context-only, and context+archive signatures are auto-detected.</li>
-<li><code>.transparent_wrapper(unwrap)</code> — operations not found on the wrapper retry on the unwrapped
+<li><code>.transparent_wrapper(unwrap)</code>: operations not found on the wrapper retry on the unwrapped
 value. This is how <code>gate.threat + 2</code> worked: the observable wrapper unwraps to its
 <code>int</code> for arithmetic while keeping <code>.on_change</code> on the wrapper.</li>
-<li><code>.auto_bind(mode)</code> — everything the declarations already know:
+<li><code>.auto_bind(mode)</code> binds everything the declarations already know:
 <code>property_owner</code> schemas (<code>JAI_PROPERTY</code> values, <code>JAI_OBSERVABLE_PROPERTY</code>
 wrappers, <code>JAI_SIGNAL_PROPERTY</code> connect surfaces), base classes from the inheritance declaration,
 and common methods by concept (<code>to_string()</code>, <code>size()</code>, <code>empty()</code>, <code>==</code>/<code>!=</code>
 from <code>operator==</code>). A <code>static T::jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code> hook lets a
 class bind its own private members. Modes: <code>all</code>, <code>properties</code>,
 <code>hierarchy</code>.</li>
-<li><code>.bound_engine()</code> — the engine this binder targets; configure lambdas use it for
+<li><code>.bound_engine()</code>: the engine this binder targets; configure lambdas use it for
 <code>bind_signal_type</code> and globals.</li>
-<li><code>.build()</code> — finalizes registration. The destructor calls it if you forget; the binder is
+<li><code>.build()</code>: finalizes registration. The destructor calls it if you forget; the binder is
 movable, non-copyable.</li>
 </ul>
 
@@ -423,7 +423,7 @@ or <code>signal_emitter&lt;Sig&gt;</code> member is exposed by one <code>.proper
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true
 s.onWave.disconnect("hud");</code></pre></div>
-<p>Script sees one generic <code>Signal</code> view for every signature — one class, not one per signature —
+<p>Script sees one generic <code>Signal</code> view for every signature (one class, not one per signature),
 and the lookup walks the whole inheritance chain, so a signal declared on a <em>base</em> class connects
 through a <em>derived</em> registration in either registration order: a <code>Pickup</code> base declares a
 signal, <code>HealthPickup</code> registers with <code>base_class</code> + <code>auto_bind</code>, and script
@@ -432,34 +432,34 @@ script, made in C++, or loaded from a save.</p>
 <details><summary>How the view is built</summary>
 <p>Reading a signal member hands script an engine-wide <code>Signal</code> view over a type-erased operations
 table (<code>signal_script_ops</code>, <code>include/jaiscript/signals/signal_view.hpp</code>): three function
-pointers — connect, disconnect, connected — whose thunks instantiate at the binding site, where the emitter's
+pointers (connect, disconnect, connected) whose thunks instantiate at the binding site, where the emitter's
 concrete type is known. On the <code>auto_bind</code> path, <code>JAI_SIGNAL_PROPERTY</code> stamps its schema
 entry <code>is_signal</code> (<code>properties/property_schema.hpp</code>), and the binder turns that entry
 into a read-only property whose getter asks the live signal property for its erased table
-(<code>property_base::signal_ops</code>). That lookup is <code>find_reflected_property</code> — virtual, whole
+(<code>property_base::signal_ops</code>). That lookup is <code>find_reflected_property</code>: virtual, whole
 inheritance chain. Connecting text routes the binding engine into the emitter before the connect, so C++-side
 emits fire text receivers regardless of how the object came to exist.</p>
 </details>
 <p>A <em>typed</em> registration can sit on top of this: <code>jai::bind_signal_type&lt;Sig&gt;</code>
 registers a named class for one signature and takes precedence over the generic view at member reads.
-When to reach for it — named signal types, pre-registration, precedence — is covered in
+When to reach for it (named signal types, pre-registration, precedence) is covered in
 <a href="10-signals-properties.html#bind-signal-type">Signals &amp; Observable Properties</a>.</p>
 <p>What the view doesn't do (and what to use instead):</p>
 <ul>
-<li><strong>It doesn't own the signal.</strong> A view is a member read of a live bound object — the same
+<li><strong>It doesn't own the signal.</strong> A view is a member read of a live bound object, the same
 lifetime class as any C++-bound member reference. A view held past its owner dangles; keep the owner alive
 for as long as script holds the signal.</li>
 <li><strong>It doesn't set <code>parameter_names</code>.</strong> Script-text receivers connected through
 the view see whatever parameter names the emitter's owner set in C++ (none, by default). When a handler
-needs the emit arguments, connect a function receiver — its parameters bind positionally, no naming
+needs the emit arguments, connect a function receiver. Its parameters bind positionally, no naming
 required.</li>
 </ul>
-<p>That is the binder&#x27;s half of the signal story. Your half as the host — firing signals from C++ with the
+<p>That is the binder&#x27;s half of the signal story. Your half as the host (firing signals from C++ with the
 owner/view idiom, receiver lifetime and <code>emit_while</code>, the two receiver forms, and observable
-properties — is <a href="10-signals-properties.html">Signals &amp; Observable Properties</a>.</p>
+properties) is <a href="10-signals-properties.html">Signals &amp; Observable Properties</a>.</p>
 
 <h2 id="inheritance-and-polymorphism">Inheritance and polymorphism<a class="hlink" href="#inheritance-and-polymorphism" aria-label="link">&#8203;</a></h2>
-<p>Declare the C++ inheritance once — <code>property_owner&lt;Derived, Base&gt;</code> — and the same edge
+<p>Declare the C++ inheritance once (<code>property_owner&lt;Derived, Base&gt;</code>), and the same edge
 serves script dispatch, C++ upcasts, and polymorphic saves:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Pickup : public jai::property_owner&lt;Pickup&gt; {
 public:
@@ -483,7 +483,7 @@ jai::dynamic_binder&lt;HealthPickup&gt;(*eng, "HealthPickup")
 <p>(<code>auto_bind</code> reads the inheritance edge straight from the <code>property_owner</code>
 declaration. Classes that don't use <code>property_owner</code> declare the same edge explicitly with
 <code>.base_class&lt;Base&gt;()</code>.)</p>
-<p>Polymorphic serialization needs no extra registration at all — <code>property_owner</code> already recorded
+<p>Polymorphic serialization needs no extra registration at all. <code>property_owner</code> already recorded
 the <code>$type</code> identity and the derived→base edge. Save through the base pointer, load through the base
 pointer, get the derived object back:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Pickup&gt; loot = std::make_shared&lt;HealthPickup&gt;();
@@ -506,7 +506,7 @@ auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, heali
     }
   }
 }</code></pre></div>
-<p>The <code>$type</code> discriminator picked the concrete factory on load — no switch statement, no factory
+<p>The <code>$type</code> discriminator picked the concrete factory on load: no switch statement, no factory
 map, no slicing. On the script side, the same edge gives upcasts and inherited dispatch: a C++ function taking
 <code>shared_ptr&lt;Pickup&gt;</code> accepts a script-made <code>HealthPickup</code>, and base methods are
 callable on derived instances:</p>
@@ -521,18 +521,18 @@ inherited method: pickup:elixir</code></pre></div>
 <p>There is no registration-order rule. <strong>The <code>property_owner</code> declaration is the
 inheritance truth, and registration projects it completely</strong>: a derived registration
 materializes an unregistered <code>property_owner</code> base on the spot (methods from its
-<code>jai_auto_bind</code>, schema properties, signal views — recursively up the chain), and an explicit
-registration arriving later <em>adopts</em> that same definition and gives it its curated script name —
-existing bindings and derived instances follow, because it is the same definition. Methods and
+<code>jai_auto_bind</code>, schema properties, signal views, all recursively up the chain), and an explicit
+registration arriving later <em>adopts</em> that same definition and gives it its curated script name.
+Existing bindings and derived instances follow, because it is the same definition. Methods and
 <code>JAI_PROPERTY</code> fields both inherit through the chain, and base-level declarations need no
 re-exposure on the derived binder. Auto-materialized bases are named by the shared ladder: a
 <code>JAI_PROPERTY_OWNER(Name)</code> / <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when the
-class declares one, else the bare C++ class name — the same name serialization uses for
+class declares one, else the bare C++ class name, the same name serialization uses for
 <code>$type</code>, so a type carries one identity everywhere. (Plain non-<code>property_owner</code>
 bases keep the explicit <code>.base_class&lt;B&gt;()</code> spelling, and a base whose name is already
 taken by a different type simply waits for its own registration, exactly as before.)</p>
 <p>Script classes extending C++ classes (<code>class SmartSpawner : Spawner</code>, with
-<code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section — that
+<code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section. That
 direction works with zero extra registration.</p>
 
 <h2 id="what-this-doesn-t-do-and-what-to-use-instead">What this doesn't do (and what to use instead)<a class="hlink" href="#what-this-doesn-t-do-and-what-to-use-instead" aria-label="link">&#8203;</a></h2>
@@ -542,10 +542,10 @@ fields of <code>int</code>-family, <code>float</code>/<code>double</code>, <code
 <code>std::string</code> become script-visible automatically, and <code>JAI_SIGNAL_PROPERTY</code> members
 surface as connectable signal views. Container- and class-typed properties still
 reflect and serialize from the one declaration, but script access needs an explicit
-<code>.property()</code>/<code>.method()</code> in the configure lambda — a member-pointer
+<code>.property()</code>/<code>.method()</code> in the configure lambda. A member-pointer
 <code>.property()</code> on a <code>std::vector</code> gets you the zero-copy live view.</li>
 <li><strong>Inherited properties resolve through derived registrations.</strong> Every schema-generated
-accessor — value, observable, and signal alike — looks the property up over the whole inheritance chain
+accessor (value, observable, and signal alike) looks the property up over the whole inheritance chain
 (the virtual <code>find_reflected_property</code>), so a base-declared <code>JAI_PROPERTY</code> or
 <code>JAI_SIGNAL_PROPERTY</code> reads, writes, and connects through a derived registration in either
 registration order. This matches serialization, which saves and loads every level's properties the same
@@ -560,7 +560,7 @@ they re-arm.</li>
 Return primitives or strings from static lambdas; for factories, register a constructor overload or an
 engine-level function instead.</li>
 <li><strong><code>property_owner</code> types round-trip as <code>shared_ptr</code>, not by value.</strong>
-Their property managers hold pointers into the object, so the types are deliberately move-pinned —
+Their property managers hold pointers into the object, so the types are deliberately move-pinned:
 <code>from_json&lt;Spawner&gt;</code> by value won't compile. Use
 <code>from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;</code>, as every example here does.</li>
 <li><strong>Reading an observable property yields a wrapper, not the raw value.</strong> In expressions it
@@ -573,7 +573,7 @@ values copy cleanly, and nothing needs a lock. There is no binder flag that make
 thread-shared.</li>
 <li><strong>Auto-named registrars can't name template instantiations.</strong>
 <code>jai::registrar&lt;Point&lt;int&gt;, Ctx&gt;</code> without an explicit name is a compile error pointing
-you at the named constructor — pass <code>"Pointi"</code> (or any script-legal name) yourself. Template-syntax
+you at the named constructor. Pass <code>"Pointi"</code> (or any script-legal name) yourself. Template-syntax
 names like <code>"Point&lt;int&gt;"</code> register the base template name with the parser
 automatically.</li>
 </ul>

@@ -34,8 +34,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="script-extensible-objects-extend">Script-Extensible Objects: <code>extend</code><a class="hlink" href="#script-extensible-objects-extend" aria-label="link">&#8203;</a></h1>
 <p><strong>A script class can derive a bound C++ class, and the script decides which object becomes which class.</strong>
 The host constructs and owns its objects exactly as before; a script hands one of them a class with
-<code>extend(object, Class)</code>, and from that moment the object <em>is</em> that class everywhere — typed
-fields, overrides, methods — no matter which road brings it back into script. This chapter covers the script
+<code>extend(object, Class)</code>, and from that moment the object <em>is</em> that class everywhere (typed
+fields, overrides, methods), no matter which road brings it back into script. This chapter covers the script
 surface, the one-line host surface, who owns what, and how it serializes. The host-side examples below are
 taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp</code> and run on
 <strong>both backends</strong>; the mechanism is specified in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/script_extensible.md"><code>docs/script_extensible.md</code></a>.</p>
@@ -56,9 +56,9 @@ class Voidling : Creature {        // Creature is the host&#x27;s bound C++ clas
 self.spawn  = [=](var&amp; creature) -&gt; void { extend(creature, Voidling).spawn(); };
 self.update = [=](var&amp; creature, double dt) -&gt; void { creature.update(dt); };
 self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></pre></div>
-<p>After <code>extend</code>, every road back into script — a bound method returning
+<p>After <code>extend</code>, every road back into script (a bound method returning
 <code>shared_ptr&lt;Creature&gt;</code>, a signal argument, a container element, a serialized
-<code>shared_ptr&lt;Base&gt;</code>, the host's next <code>update</code> call — hands script the
+<code>shared_ptr&lt;Base&gt;</code>, the host's next <code>update</code> call) hands script the
 <em>Voidling</em>, not a sliced view of its base. That is C++'s own rule, "a base pointer to a derived object is
 the derived object", carried across the boundary. The object is a <strong>hybrid</strong>: one script instance
 that owns or references the C++ object through a private <code>_cpp_object</code> field and carries the script
@@ -66,7 +66,7 @@ layer (fields, overrides) on top.</p>
 
 <h2 id="extend-object-class">extend(object, Class)<a class="hlink" href="#extend-object-class" aria-label="link">&#8203;</a></h2>
 <p><code>extend</code> is an engine-core builtin (every engine has it, sandboxes included). <code>Class</code> is
-the bare class name — its constructor value carries the definition — or a string. It works <strong>in
+the bare class name (its constructor value carries the definition) or a string. It works <strong>in
 place</strong>: the instance the handle already holds is re-classed where it stands, so nothing needs
 rebinding and every other handle to the same object follows.</p>
 <div class="codeblock cb-jai" data-host="Creature registration + raw"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern raw;                             // `raw` arrives from the host, so declare it
@@ -97,8 +97,8 @@ Anything else is refused, naming both classes.</li>
 <li><strong>Same class: no-op.</strong> The current layer is returned.</li>
 <li><strong>Another class: re-derive.</strong> Every field both classes declare keeps its value
 (<code>chomp</code> above), the new class's own fields take their initializers (<code>fangs</code>), the new
-overrides dispatch, and fields only the old class declared stay reachable. No constructor runs — field
-initializers do, in declaration order, base first — so a class meant for extension needs no constructor.</li>
+overrides dispatch, and fields only the old class declared stay reachable. No constructor runs. Field
+initializers do, in declaration order, base first, so a class meant for extension needs no constructor.</li>
 <li><strong>Every handle follows.</strong> A handle taken <em>before</em> the extend resolves to the layer on its
 next member access: reads, writes, getters, setters and bound methods all reach it.</li>
 <li><strong>Pure script objects re-derive too.</strong> <code>extend(p, Pt3)</code> on a script-only instance
@@ -106,7 +106,7 @@ re-classes it in place under the same rule (<code>Pt3</code> must derive <code>p
 <li><strong>Refusals are catchable</strong> in script (<code>try { extend(x, Wrong); } catch (e) { ... }</code>)
 and thrown from the C++ entry point.</li>
 </ul>
-<p>Write it as a statement — <code>extend(kin, Voidling); kin.chompCount = 1;</code> — or chain it. A
+<p>Write it as a statement (<code>extend(kin, Voidling); kin.chompCount = 1;</code>) or chain it. A
 <code>var q = extend(p, C)</code> binding follows the language&#x27;s
 <a href="../guide/03-value-semantics.html">value-semantics</a> rules for call results; the object
 <code>p</code> holds is already the re-classed one either way.</p>
@@ -134,12 +134,12 @@ the same three rules the C++ case obeys.</p>
 <h3 id="what-the-checker-sees">What the checker sees<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h3>
 <p>Extension is decided at run time, so <a href="06-static-checking.html">the checker</a> deliberately
 stops gating on it. Any name passed to <code>extend(...)</code> anywhere in a unit is <strong>open</strong>
-for that whole unit &mdash; flow-insensitively, by name &mdash; and a bound C++ class stays open once any
+for that whole unit (flow-insensitively, by name), and a bound C++ class stays open once any
 script layer has been extended over it. A member the checker cannot find on such a receiver is not an
 error; the ones it <em>can</em> find are still typed and still checked.</p>
 <p>What it does still gate is the name itself. Under the strict default a handle the host injects is an
 undeclared identifier, so scripts like the two above declare it: <code>extern self;</code>,
-<code>extern raw;</code>. The declaration is a no-op at run time &mdash; it only tells the checker the name
+<code>extern raw;</code>. The declaration is a no-op at run time. It only tells the checker the name
 arrives from outside the program. The typed form, <code>extern shared_ptr&lt;Creature&gt; raw;</code>, buys
 member checking against <code>Creature</code> for everything the checker can still see; a name passed to
 <code>extend</code> stays open either way.</p>
@@ -176,21 +176,21 @@ access reports instead of dangling.</li>
 <li>A type <strong>without</strong> the slot cannot own anything, so its extended layers are engine-owned (and keep
 the object alive) until <code>script_layer_detach</code>.</li>
 </ul>
-<p>Copies follow the C++ base. Assignment of a hybrid (<code>var b = a;</code>) deep-copies — a copyable base
-copies its C++ object too, giving two identities — while a hybrid over a base without a copy function is
+<p>Copies follow the C++ base. Assignment of a hybrid (<code>var b = a;</code>) deep-copies (a copyable base
+copies its C++ object too, giving two identities), while a hybrid over a base without a copy function is
 <code>nocopy</code> automatically, exactly as a derived class of a <code>nocopy</code> script class is.
 By-value capture (<code>[=]</code>) shares a hybrid, like any engine object.</p>
 
 <h2 id="serialization">Serialization<a class="hlink" href="#serialization" aria-label="link">&#8203;</a></h2>
-<p>A hybrid serializes as <em>itself</em>. Through any C++ archive path — a <code>shared_ptr&lt;Base&gt;</code>
-field, a container, a save file — the writer emits <code>$type</code> = the script class name,
+<p>A hybrid serializes as <em>itself</em>. Through any C++ archive path (a <code>shared_ptr&lt;Base&gt;</code>
+field, a container, a save file) the writer emits <code>$type</code> = the script class name,
 <code>$script</code> = the script-level fields, and <code>$val</code> = the C++ base's ordinary payload; the
 reader rebuilds the C++ object through the base's registered load, extends it with the script class, hydrates
-the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code> &mdash; define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp, <code>1</code> today). JSON and binary, back-references
+the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code>: define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp, <code>1</code> today). JSON and binary, back-references
 included, and the script-level <code>to_json(v)</code> / <code>from_json(s)</code> do the same for a script
 value. Because extension runs field initializers before hydration, a field that was never written during play
-still loads with its declared default. The archive framework itself — dispatch order, the binder chain as the
-polymorphism declaration, the security posture — is the <a href="08-serialization.html">Serialization</a>
+still loads with its declared default. The archive framework itself (dispatch order, the binder chain as the
+polymorphism declaration, the security posture) is the <a href="08-serialization.html">Serialization</a>
 chapter.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Creature&gt; original = eng-&gt;execute("v").as&lt;std::shared_ptr&lt;Creature&gt;&gt;();
 auto loaded = roundtrip_binary(*eng, original);           // a fresh object...
@@ -200,14 +200,14 @@ eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its 
 <p>A layer belongs to exactly one engine (its symbols, its class definition). Extending an object in engine
 <code>B</code> while engine <code>A</code> holds its layer <em>moves</em> it: the fields travel by name, the new
 layer is hydrated in <code>B</code>, and <code>A</code>'s layer is retired. For slot-carrying types that is one
-call — <code>b-&gt;extend(obj, "Voidkin")</code>; a type without the slot needs the explicit pair
+call: <code>b-&gt;extend(obj, "Voidkin")</code>; a type without the slot needs the explicit pair
 <code>b-&gt;extend(obj, "Voidkin", a-&gt;script_layer_detach(obj))</code>, since no engine can see into
-another's lookup. Layers are movable, never shared between threads — the same rule every script value follows.</p>
+another's lookup. Layers are movable, never shared between threads: the same rule every script value follows.</p>
 
 <h2 id="errors-and-cost">Errors and cost<a class="hlink" href="#errors-and-cost" aria-label="link">&#8203;</a></h2>
-<p>Inside the engine every refusal is an error code — <code>extend_rejected</code> (the class does not derive
+<p>Inside the engine every refusal is an error code: <code>extend_rejected</code> (the class does not derive
 the object's class, the argument is not a class, arity) and <code>script_layer_retired</code> (a detached,
-moved, or outlived layer reached for its object) — so script catches them like any runtime error; the C++
+moved, or outlived layer reached for its object), so script catches them like any runtime error; the C++
 <code>engine::extend</code> throws at its boundary.</p>
 <p>The lookup that hands script the layer is a pointer read on the object's slot; it replaces the wrapper the
 boundary used to allocate on every crossing. In a creature-simulation workload the class-based scripts measured a few

@@ -35,7 +35,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>Script coroutines are the built-in answer to per-entity behaviors, cutscenes, and multi-frame AI.
 Calling a <code>coroutine</code> function returns a <strong>handle</strong>: <code>resume()</code> runs to
 the next <code>yield</code>, <code>done()</code> reports completion.</p>
-<p>Each backend owns its continuation representation behind that one interface — the interpreter saves
+<p>Each backend owns its continuation representation behind that one interface. The interpreter saves
 an environment and replays an AST continuation, the VM parks a fiber
 (<code>include/jaiscript/core/coroutine.hpp</code>). Nothing you write has to know which.</p>
 <h2 id="script-surface">Script surface<a class="hlink" href="#script-surface" aria-label="link">&#8203;</a></h2>
@@ -56,7 +56,7 @@ print(to_json(seen));                                  // yielded values only</c
 0
 [4,3,2,1]</code></pre></div>
 <p>Two things to read off that: the final <code>resume()</code> hands you the <code>return</code> value
-(the <code>0</code>), and a range-<code>for</code> consumes only what the coroutine <em>yields</em> — the
+(the <code>0</code>), and a range-<code>for</code> consumes only what the coroutine <em>yields</em>: the
 return value never lands in <code>seen</code>.</p>
 
 <h3 id="how-to-spell-one">How to spell one<a class="hlink" href="#how-to-spell-one" aria-label="link">&#8203;</a></h3>
@@ -70,11 +70,11 @@ coroutine function plain()           { yield true; }
 print(to_string(ticks().resume()) + &quot; &quot; + names().resume() + &quot; &quot; +
       to_string(guess().resume()) + &quot; &quot; + to_string(plain().resume()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 a 2.500000 true</code></pre></div>
-<p>The bare form drops <code>function</code> as well — <code>coroutine g() { &hellip; }</code> and
-<code>coroutine g() -&gt; int { &hellip; }</code> — and the same prefix works on methods, static ones
+<p>The bare form drops <code>function</code> as well (<code>coroutine g() { &hellip; }</code> and
+<code>coroutine g() -&gt; int { &hellip; }</code>), and the same prefix works on methods, static ones
 included. Coroutines cannot return references, and they are not allowed inside a namespace body yet
 (both are parse errors). The full rule is <a href="https://github.com/Devacor/JaiScript/blob/master/docs/grammar.md"><code>docs/grammar.md</code></a>&#x27;s function-declaration
-production; the language-side tour — independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended), the edges — is
+production; the language-side tour, covering independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended) and the edges, is
 the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter.</p>
 <p>Coroutine <strong>methods</strong> work too. The handle pins the receiver alive across suspension, <code>this</code> stays bound, and mutations through the receiver are visible to the outside world while the coroutine is parked (<code>examples/crawler</code>&#x27;s boss is built this way):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Boss {
@@ -85,9 +85,9 @@ auto b = Boss();
 auto c = b.fight();
 print(to_string(c.resume()) + &quot; phase=&quot; + to_string(b.phase));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 phase=1</code></pre></div>
-<p>All of it — yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving — behaves identically on both backends; the test suite holds them to it. The checker treats a coroutine call as yielding a handle of unknown type, and does not check yield or return types (see the <a href="06-static-checking.html">Static Checking</a> precision map), so a wrong-typed <code>yield</code> is a run-time error, never a load error.</p>
+<p>All of it (yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving) behaves identically on both backends; the test suite holds them to it. The checker treats a coroutine call as yielding a handle of unknown type, and does not check yield or return types (see the <a href="06-static-checking.html">Static Checking</a> precision map), so a wrong-typed <code>yield</code> is a run-time error, never a load error.</p>
 <h2 id="driving-from-c-pattern-1-through-executes-the-simple-way">Driving from C++, pattern 1: through executes (the simple way)<a class="hlink" href="#driving-from-c-pattern-1-through-executes-the-simple-way" aria-label="link">&#8203;</a></h2>
-<p>A handle stored in an engine global persists <strong>across separate <code>execute()</code> calls</strong> — each execute resumes exactly where the last left off. This is the frame-loop pattern: create behaviors once, tick them per frame with tiny resume scripts. (The strict checker is happy with this: <code>c</code> is declared by the first execute, and later executes on the same engine see it as a declared global.)</p>
+<p>A handle stored in an engine global persists <strong>across separate <code>execute()</code> calls</strong>. Each execute resumes exactly where the last left off. This is the frame-loop pattern: create behaviors once, tick them per frame with tiny resume scripts. (The strict checker is happy with this: <code>c</code> is declared by the first execute, and later executes on the same engine see it as a declared global.)</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R&quot;( coroutine int spawner(int n) {
                      for (int i = 1; i &lt;= n; ++i) { yield i * 10; }
                      return -1;
@@ -100,7 +100,7 @@ for (int i = 0; i &lt; 4; ++i) {
 }</code></pre></div>
 <p>This survives re-executing the declaring line in between (which redeclares <code>c</code>), and running the whole pattern through a <code>jaibite</code> instead of raw strings.</p>
 <h2 id="driving-from-c-pattern-2-the-native-handle">Driving from C++, pattern 2: the native handle<a class="hlink" href="#driving-from-c-pattern-2-the-native-handle" aria-label="link">&#8203;</a></h2>
-<p>The script value <em>is</em> a <code>jai::coroutine_handle</code> in an object holder — you can pull it out once and drive it with zero script round-trips:</p>
+<p>The script value <em>is</em> a <code>jai::coroutine_handle</code> in an object holder. You can pull it out once and drive it with zero script round-trips:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/coroutine.hpp&gt;
 
 eng-&gt;execute(&quot;var c2 = spawner(2);&quot;);
@@ -114,9 +114,9 @@ while (!handle-&gt;done()) {
 }</code></pre></div>
 <p>Output: <code>C++ resume -&gt; 10</code>, <code>C++ resume -&gt; 20</code>, <code>C++ resume -&gt; -1</code>.</p>
 <p>API notes (<code>coroutine.hpp</code>):</p>
-<ul><li><code>resume(engine*)</code> returns <code>checked_result&lt;script_value&gt;</code> — test it before using the value; a failed coroutine reports <code>status::failed</code>.</li><li><code>done()</code> == <code>completed || failed</code>; <code>get_status()</code> exposes <code>created/running/suspended/completed/failed</code>.</li><li>The <code>shared_ptr</code> you extracted keeps the coroutine (and, for method coroutines, its receiver) alive — this is the supported way to own a behavior from C++.</li></ul>
+<ul><li><code>resume(engine*)</code> returns <code>checked_result&lt;script_value&gt;</code>. Test it before using the value; a failed coroutine reports <code>status::failed</code>.</li><li><code>done()</code> == <code>completed || failed</code>; <code>get_status()</code> exposes <code>created/running/suspended/completed/failed</code>.</li><li>The <code>shared_ptr</code> you extracted keeps the coroutine (and, for method coroutines, its receiver) alive. This is the supported way to own a behavior from C++.</li></ul>
 <h2 id="semantics-worth-knowing-before-you-build-on-them">Semantics worth knowing before you build on them<a class="hlink" href="#semantics-worth-knowing-before-you-build-on-them" aria-label="link">&#8203;</a></h2>
-<ul><li><strong>The final <code>resume()</code> of a completed coroutine delivers the <code>return</code> value</strong> (the <code>-1</code> / <code>99</code> above), and typed coroutine returns convert to the declared type. Range-for consumes only the <em>yielded</em> values.</li><li><strong>Resuming past the end of a coroutine with no <code>return</code></strong> completes with null, exactly like a function falling off the end — identical on both backends.</li><li><strong>Budget interaction</strong>: the execution budget applies per <code>execute()</code>/<code>resume()</code> call, and a budget overrun inside a coroutine is terminal like everywhere else — a <code>catch</code> around the <code>yield</code> cannot swallow it.</li><li>Coroutine parameters bind <strong>by value</strong> on both backends — even reference-shaped arguments; captures and closure state behave like lambdas.</li><li>Hot reload: a suspended coroutine keeps its old body until it finishes; new invocations get the new definition (see <a href="07-hot-reload.html">Hot Reload</a> and the crawler&#x27;s boss brain).</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/08-serialization.html"><span>&larr; previous</span>Serialization</a><a class="next" rel="next" href="../embedding/10-signals-properties.html"><span>next &rarr;</span>Signals &amp; Observable Properties</a></nav></article>
+<ul><li><strong>The final <code>resume()</code> of a completed coroutine delivers the <code>return</code> value</strong> (the <code>-1</code> / <code>99</code> above), and typed coroutine returns convert to the declared type. Range-for consumes only the <em>yielded</em> values.</li><li><strong>Resuming past the end of a coroutine with no <code>return</code></strong> completes with null, exactly like a function falling off the end, identical on both backends.</li><li><strong>Budget interaction</strong>: the execution budget applies per <code>execute()</code>/<code>resume()</code> call, and a budget overrun inside a coroutine is terminal like everywhere else: a <code>catch</code> around the <code>yield</code> cannot swallow it.</li><li>Coroutine parameters bind <strong>by value</strong> on both backends, even reference-shaped arguments; captures and closure state behave like lambdas.</li><li>Hot reload: a suspended coroutine keeps its old body until it finishes; new invocations get the new definition (see <a href="07-hot-reload.html">Hot Reload</a> and the crawler&#x27;s boss brain).</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/08-serialization.html"><span>&larr; previous</span>Serialization</a><a class="next" rel="next" href="../embedding/10-signals-properties.html"><span>next &rarr;</span>Signals &amp; Observable Properties</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

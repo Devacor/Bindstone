@@ -35,8 +35,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
   <h1 class="rainbow">JaiScript</h1>
   <p class="tagline">An embedded scripting language for C++ engines: C++-flavored syntax, script classes with
   hot reload, coroutines, a three-rung type ladder (<code>int</code> / <code>auto</code> / <code>var</code>)
-  with a checker that is strict by default, and <strong>two interchangeable backends</strong> — a
-  tree-walking interpreter and a bytecode VM — kept at byte-for-byte parity by 2,400+ tests and a
+  with a checker that is strict by default, and <strong>two interchangeable backends</strong> (a
+  tree-walking interpreter and a bytecode VM) kept at byte-for-byte parity by 2,400+ tests and a
   differential fuzzer.</p>
   <p class="sub">every example on this site was executed on both backends before it was written down</p>
   <div class="hero-ctas">
@@ -51,14 +51,14 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
 e-&gt;execute("print(\"hello\");");</code></pre></div>
 
-<p>Yes, really two lines — a bare engine ships a basic <code>print</code>. One more,
+<p>Yes, really two lines: a bare engine ships a basic <code>print</code>. One more,
 <code>jai::stdlib::register_all(e);</code>, adds the formatted <code>{}</code> <code>print</code> and the
 standard library (math, containers, JSON). It is a static lib plus headers, with no global interpreter state.</p>
 
 <p>The <a href="embedding/index.html">embedding chapters</a> take it from there: bind a C++ class in a
 <a href="embedding/02-dynamic-binder.html">fluent chain</a> (one declaration makes a field reflected,
 script-visible and serialized), connect host signals to script, give a script a budget and a memory cap,
-and hot-reload it. Every sample on this site assumes the stdlib is registered — the standalone runner does
+and hot-reload it. Every sample on this site assumes the stdlib is registered. The standalone runner does
 that for you, and the two-line host needs the <code>register_all</code> line first. Here is what the
 language itself looks like:</p>
 
@@ -78,7 +78,7 @@ print("hp = {}", h.hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 16</code></pre></div>
 
 <p>No host yet? The repository ships a standalone runner. Save the script above as <code>hello.jai</code> and
-run <code>jaiscript hello.jai</code> — strict checking and the VM backend are the defaults, <code>jaiscript</code>
+run <code>jaiscript hello.jai</code>. Strict checking and the VM backend are the defaults, <code>jaiscript</code>
 alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every save.
 <a href="guide/01-hello.html#try-it-from-a-terminal">Building the runner</a> is one CMake target;
 <a href="reference/index.html#command-line-runner">its flags</a> are on the reference page.</p>
@@ -89,8 +89,8 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
 <div class="pillars">
   <div class="pillar"><h3><span class="pnum">01</span>The type ladder</h3>
     <p><code>int x</code> is enforced. <code>auto x</code> is inferred, then enforced. <code>var x</code> is
-    dynamic — a choice you can see in a diff, not a default you fall into. The static checker — strict by
-    default — maps onto it exactly: typed code gets load-time errors before a statement runs, <code>var</code>
+    dynamic, a choice you can see in a diff, not a default you fall into. The static checker (strict by
+    default) maps onto it exactly: typed code gets load-time errors before a statement runs, <code>var</code>
     opts out (like TypeScript's <code>any</code>, but designed-in), and <code>warn</code> / <code>off</code>
     are the opt-downs.</p>
     <p><a href="guide/02-type-ladder.html">The Type Ladder →</a></p></div>
@@ -100,31 +100,31 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
     <code>to_json</code> of any value means what you think it means.</p>
     <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
   <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one executable spec</h3>
-    <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte — including error text —
+    <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte (including error text),
     enforced by 2,400+ tests run against both, plus a differential fuzzer that files a bug whenever they
     disagree. Semantics cannot rot silently.</p>
     <p><a href="embedding/03-backends.html">Backends →</a></p></div>
   <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
     <p>No statics, no singletons; every value carries its engine. Two engines on two threads need no locks,
     tests cannot contaminate each other, and in-language parallelism (<code>parallel_for</code>,
-    <code>parallel_transform</code> — deterministic at any worker count) falls out of this property instead of
+    <code>parallel_transform</code>, deterministic at any worker count) falls out of this property instead of
     fighting it.</p>
     <p><a href="embedding/01-embedding-quickstart.html">Quickstart →</a></p></div>
   <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
     <p>Redefine a class mid-session and live instances migrate: fields keep values, changed types convert
-    permissively, new fields take their initializers. Migration never fails — a reload never bricks an
+    permissively, new fields take their initializers. Migration never fails. A reload never bricks an
     instance; a source that does not parse or check simply does not load, and the old class keeps running.
     The dungeon crawler reloads its own scripts mid-game on a keypress.</p>
     <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
   <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
-    <p>A script can only touch what the host registered — the
+    <p>A script can only touch what the host registered. The
     <a href="embedding/02-dynamic-binder.html">binding surface</a> <em>is</em> the allowlist.
     Checked integer overflow, catchable recursion limits, an execution budget and a memory cap that a hostile
     script cannot catch-and-swallow its way past. Untrusted scripts are a configuration, not a rewrite.</p>
     <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
   <div class="pillar"><h3><span class="pnum">07</span>Parse once, run anywhere</h3>
     <p><code>engine-&gt;jaibite(source)</code> parses once, executes many, and <code>save("level.jaibite")</code>
-    ships precompiled — symbols relocate on load, so one file serves any engine. Even naive
+    ships precompiled: symbols relocate on load, so one file serves any engine. Even naive
     <code>execute(str)</code> in a loop pays the parse once via the source cache.</p>
     <p><a href="embedding/04-jaibite.html">jaibite →</a></p></div>
 </div>
@@ -133,9 +133,9 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
 <div class="home-section">
 <h2 id="the-receipts">The receipts</h2>
 <div class="receipts">
-  <div class="receipt"><span class="big">2,400+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
-  <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
-  <div class="receipt"><span class="big">3 games</span><span class="what">ship in the repository: a <a href="examples/index.html#gloom">raycast shooter</a>, a <a href="examples/index.html#grubwell">dungeon crawler</a> and a 13-scene <a href="examples/index.html#demoreel">demoreel</a> — plus one demo we can describe but not ship: over 8,000 lines of pure JaiScript reimplementing <a href="examples/index.html#jaidoom">DOOM</a>, WAD parser to BSP renderer, 16-player netplay with the wire protocol in script, inside the original's 35 Hz budget (its assets are not ours to distribute)</span></div>
+  <div class="receipt"><span class="big">2,400+</span><span class="what">tests green on both backends, every commit, plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
+  <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated (two per cache line)</span></div>
+  <div class="receipt"><span class="big">3 games</span><span class="what">ship in the repository: a <a href="examples/index.html#gloom">raycast shooter</a>, a <a href="examples/index.html#grubwell">dungeon crawler</a> and a 13-scene <a href="examples/index.html#demoreel">demoreel</a>, plus one demo we can describe but not ship: over 8,000 lines of pure JaiScript reimplementing <a href="examples/index.html#jaidoom">DOOM</a>, WAD parser to BSP renderer, 16-player netplay with the wire protocol in script, inside the original's 35 Hz budget (its assets are not ours to distribute)</span></div>
   <div class="receipt"><span class="big">5 languages</span><span class="what">the raycast shooter reimplemented in Squirrel, Lua, ChaiScript and Python to one spec and one seeded RNG, each held to the JaiScript state hashes bit-exactly, so the <a href="examples/index.html#gloom">comparison</a> measures the runtimes and nothing else; the report is in the repository</span></div>
   <div class="receipt"><span class="big">strict by default</span><span class="what">compiler-style diagnostics with line/column before a single statement runs; <code>warn</code> and <code>off</code> are one call away, per engine or per region (<code>[[warn_mode]]</code>)</span></div>
   <div class="receipt"><span class="big">measured</span><span class="what">hot-loop, call, boot, and per-feature costs are quantified on one page, under one protocol: <a href="embedding/11-performance.html">Performance</a></span></div>
@@ -146,7 +146,7 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
 <h2 id="the-honest-tradeoffs">The honest tradeoffs</h2>
 <ul class="tradeoffs">
   <li><strong>Copies cost.</strong> Value semantics means passing a big structure by value deep-copies it.
-  The idiom is <code>&amp;</code> parameters for anything heavy — cheap by design. If you write Python-shaped
+  The idiom is <code>&amp;</code> parameters for anything heavy, cheap by design. If you write Python-shaped
   code expecting reference semantics, your first hour will surprise you; read
   <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
   <li><strong>Lua is faster where it counts for some workloads.</strong> The VM wins or ties statements,

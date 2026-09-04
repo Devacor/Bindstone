@@ -98,6 +98,7 @@ namespace jai {
 		// pre-warm pass at the region barrier must make every worker intern a HIT). Reads
 		// are unaffected; zero cost on the hit path.
 		inline void set_frozen(bool frozen) noexcept { frozen_ = frozen; }
+		inline bool frozen() const noexcept { return frozen_; }
 
 		// Get/create getter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_get_<member>" name.

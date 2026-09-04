@@ -219,13 +219,14 @@ public:
             // Test array parameter
             check_eq(eng->execute("ArrayUtils::sum([1, 2, 3, 4, 5])").as<int>(), 15);
             
-            // Test array return value - check the first few elements
+            // Test array return value: the declared array<int> return converts the dynamic
+            // literal into the typed representation (a raw int buffer)
             auto result = eng->execute("ArrayUtils::createRange(1, 5)");
             check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 5);
-            check_eq(arr[0].as<int>(), 1);
-            check_eq(arr[4].as<int>(), 5);
+            auto arr = result.as<std::vector<jai::script_int>>();
+            check_eq(arr.size(), (size_t)5);
+            check_eq(arr[0], (jai::script_int)1);
+            check_eq(arr[4], (jai::script_int)5);
         });
         
         test("static_method_mixed_with_instance", [&]() {

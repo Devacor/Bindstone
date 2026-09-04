@@ -20,10 +20,10 @@ namespace jai::detail {
                   "type_proofs: storage indices moved - re-audit same_type_payload");
 
     // TRUE iff the unproven conversion for `target` is the identity on `v` (v deref-normalized):
-    // mirrors enforce_type_compatibility's same-base fast path (value.type() == base, non-object) and
-    // its same-class-name object branch, try_convert_for_parameter's exact-name branch, and
-    // try_convert_field_value's same-base branch (that one RETAGS scalars/strings - see
-    // retags_on_field_write). tag_agrees reproduces defined_type(): a non-any tag must name the base.
+    // mirrors the typed-slot table's identity rows (detail::convert_for_typed_slot_core: same-base
+    // scalars/strings, the exact class-name tag) as every site consumes them - the field store
+    // RETAGS scalars/strings on top (see retags_on_field_write). tag_agrees reproduces
+    // defined_type(): a non-any tag must name the base.
     inline bool same_type_payload(const script_value& v, const type_info* target) noexcept {
         if (!target) return false;
         const size_t ri = v.raw_storage_index();
@@ -42,7 +42,7 @@ namespace jai::detail {
         }
     }
 
-    // try_convert_field_value stamps set_type_info(declared) on same-base scalars/strings and leaves
+    // detail::field_store_value stamps set_type_info(declared) on scalar/string fields and leaves
     // same-class objects untouched.
     inline bool retags_on_field_write(const type_info* declared) noexcept {
         switch (declared->base_type) {

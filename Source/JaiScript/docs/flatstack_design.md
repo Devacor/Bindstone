@@ -28,6 +28,15 @@ not-callable check) to the ruled interpreter order. Semantics guards:
 `callee_first_*` pins in vm_backend_tests.cpp (missing-fn/not-a-function before arg side
 effects, rebind-in-args calls the original, throw/yield pending-register hygiene — the
 pending stack is per-fiber and unwind-truncated like the value stack).
+`op_probe_member` extends the pair to member and computed callees: emitted only when an
+argument is non-trivial (anything but a literal, `this`, or a frame-slot local), it runs the
+member lookup — null receiver, builtin registry, object access/getter/field/method ladder —
+at the pre-args point with the receiver still on the stack (no value materialized; the call
+op's ladder runs unchanged), reusing the site's method IC and a small probe memo so a hit is
+one epoch compare; for a computed callee it is the callable check. Guards:
+`callee_first_method_*` / `nested_callee_lookup_order` / `scalar_receiver_unknown_member_text`
+in review_regression_tests.cpp. Residual: a member backed by a CUSTOM getter keeps the vm's
+post-args getter call (running it in the probe would run a side-effecting getter twice).
 
 **Status: DESIGN — no implementation.** Roadmap item 3 ("Flat-stack VM"), the committed fix
 for the call-dense recursion gap vs Lua (`PERFORMANCE.md` Known gaps: fib(15) 697 µs VM vs

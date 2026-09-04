@@ -521,6 +521,14 @@ auto v = Vec(1.0, 2.0) + Vec{3.0, 4.0};        // Type(args) and Type{args} both
 print(Vec::count());
 ```
 
+Static fields are class state, spelled `Class::name` anywhere or bare `name` inside the
+class's methods, constructors and static methods (statics are not inherited: qualify with the
+declaring class; `Class.name` is not a spelling). A static's declared type is enforced on every
+store spelling exactly like an instance field — the same conversion table, the same
+`Type mismatch in assignment` — and its initializer converts the same way (`static float f = 3`
+holds `3.0`; `static int n;` is a readable typed null). `Class::name op= v` and `++`/`--` are
+lvalues; `static auto` infers from its initializer, `static var` stays dynamic.
+
 Typed operator methods accept named-class, container, and shared_ptr return types
 (`Vec operator+(Vec other) { ... }` parses and chains), in both the typed-first and the
 `function operator+(...)` spellings.

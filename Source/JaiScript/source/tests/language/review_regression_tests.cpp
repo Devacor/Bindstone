@@ -7,6 +7,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <optional>
@@ -15,6 +16,23 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// A dynamic_binder-bound base for hybrid (script class : C++ class) rows
+struct hybrid_prop_probe {
+    int64_t value = 0;
+    std::string name = "n";
+    int64_t doubled() const { return value * 2; }
+};
+
+inline void bind_hybrid_probe(engine& e) {
+    dynamic_binder<hybrid_prop_probe>(e, "HybridProbe")
+        .constructor<>()
+        .method("doubled", &hybrid_prop_probe::doubled)
+        .property("value", &hybrid_prop_probe::value)
+        .property("name", &hybrid_prop_probe::name)
+        .property("ro", [](const hybrid_prop_probe& s) -> int64_t { return s.value + 100; }, nullptr)
+        .build();
+}
 
 class review_regression_tests : public suite {
 public:
@@ -960,6 +978,171 @@ public:
             // rhs fine, target undefined: symmetric decorated text
             expect_both("v1 += 1;", "Undefined variable 'v1' (no 'this' in scope)", "undef += literal");
         });
+        // ---- fuzz seed 100991: the vm's register-file lift computed a lifting RIGHT
+        // subtree into its temp before an operand-shaped LEFT subscript resolved, so
+        // `v6[1] - (g7 + 3)` in a function body raised the rhs overflow where the
+        // interpreter raises the lhs index error (left-to-right sequencing). The subscript
+        // now materializes into a temp first (op_operand_temp) on every lift level. ----
+        test("fuzz_lift_subscript_left_sequencing_parity", [this]() {
+            auto run_both = [](const std::string& src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect_both = [&](const std::string& src, const std::string& needle, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(i_out, v_out, std::string(what) + " is byte-identical across backends");
+                check_true(i_out.find(needle) != std::string::npos,
+                    std::string(what) + " lands the expected text (got: " + i_out + ")");
+            };
+            const std::string oob = "Array index 1 out of bounds for array of size 0";
+            const std::string big = "9223372036854775807";
+            auto fn = [](const std::string& body) { return "function f() { " + body + " } f();"; };
+            expect_both(fn("array<float> v6 = []; int g7 = " + big + "; auto v = v6[1] - (g7 + 3); return 1;"),
+                oob, "typed subscript left of an overflowing rhs");
+            expect_both(fn("array<var> v6 = []; int g7 = " + big + "; auto v = v6[1] - (g7 + 3); return 1;"),
+                oob, "dynamic subscript left of an overflowing rhs");
+            expect_both(fn("array<int> v6 = []; int z = 0; auto v = v6[1] - (1 / z); return 1;"),
+                oob, "subscript left of a dividing rhs");
+            expect_both(fn("array<int> v6 = []; int g7 = " + big + "; auto v = (v6[1] - (g7 + 3)) * 2; return 1;"),
+                oob, "nested lift level");
+            expect_both(fn("array<int> a = [7]; array<int> v6 = []; int g7 = " + big + "; auto v = a[0] - (v6[1] - (g7 + 3)); return 1;"),
+                oob, "subscript left inside a lifted right subtree");
+            expect_both(fn("array<var> g = [[1, 2], [3, 4]]; array<int> v6 = []; int g7 = " + big + "; auto v = g[1][0] - (v6[1] * (g7 + 3)); return 1;"),
+                oob, "two-level subscript left, subscript inside the lifted rhs");
+            expect_both(fn("array<int> v6 = []; int g7 = " + big + "; return v6[1] - (g7 + 3);"),
+                oob, "fused return operand");
+            expect_both("class C { array<int> a = []; int g = " + big + "; int m() { return a[1] - (g + 3); } } C().m();",
+                oob, "bare-field subscript in a method");
+            expect_both(fn("array<int> v6 = []; int g7 = " + big + "; auto l = [=]() -> int { return v6[1] - (g7 + 3); }; return l();"),
+                oob, "captured subscript in a lambda");
+            // a sound left read still lets the rhs raise, and materialized operands compute as before
+            expect_both(fn("array<int> a = [7]; int g7 = " + big + "; auto v = a[0] - (g7 + 3); return 1;"),
+                "Integer overflow in '+'", "sound left read then rhs overflow");
+            expect_both(fn("array<int> a = [7]; int x = 3; int y = 4; return a[0] - (x * y);"), "-5", "materialized int operand");
+            expect_both(fn("array<float> a = [1.5]; int x = 3; int y = 4; return a[0] * (x + y);"), "10.5", "materialized float operand");
+            expect_both(fn("array<string> a = [\"ab\"]; string s = \"c\"; string t = \"d\"; return a[0] + (s + t);"), "abcd", "materialized string operand");
+            expect_both(fn("array<var> g = [[1, 2], [3, 4]]; int x = 3; int y = 4; return g[1][0] - (x * y);"), "-9", "materialized two-level operand");
+            expect_both(fn("array<int> a = [7]; int x = 3; int y = 4; int acc = 0; for (int i = 0; i < 3; i++) { acc += a[0] - (x * y) + i; } return acc;"), "-12", "materialized operand across loop iterations");
+        });
+        // ---- A member store on a non-object receiver raised the bool `true` on the
+        // interpreter (make_value(const char*) picked the bool overload) while the vm raised
+        // the text; the caught value is the string on both. ----
+        test("member_store_on_non_object_raises_string", [this]() {
+            auto run_both = [](const char* src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->static_checking(check_mode::off);
+                    jai::stdlib::register_all(e);
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect_both = [&](const char* src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string("interp: ") + what);
+                check_eq(expected, v_out, std::string("vm: ") + what);
+            };
+            expect_both("function f() {} string r = \"\"; try { f.x = 1; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
+                "string:Cannot assign to member of non-object type", "store on a function");
+            expect_both("var n = 5; string r = \"\"; try { n.x = 1; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
+                "string:Cannot assign to member of non-object type", "store on an int");
+            expect_both("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (e) { r = type_of(e) + \":\" + to_string(e); } r",
+                "string:Cannot assign to member of non-object type", "dot store on a class name");
+        });
+        // ---- returnattr: a failed typed-return conversion raises at the `return` with the
+        // returning frame on top (the vm captures before the callee frame pops, the
+        // interpreter before cleanup; a resumed coroutine's frames sit above the resumer's
+        // on both). what() and format_stack_trace() are byte-identical across backends. ----
+        test("return_conversion_attribution_parity", [this]() {
+            auto run_both = [](const char* src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { e->execute(src); out[idx] = "OK"; }
+                    catch (const std::exception& ex) { out[idx] = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect_both = [&](const char* src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string("interp: ") + what);
+                check_eq(expected, v_out, std::string("vm: ") + what);
+            };
+            const std::string mismatch = "Type mismatch: expected int but got string: Type mismatch\n";
+            expect_both("int f() {\n  var x = \"s\";\n  return x;\n}\nint g() { return 1; }\nint a = g();\nint b = f();\n",
+                mismatch + "  at f (<script>:3)\n  at <script> (<script>:7)\n", "plain return");
+            expect_both("int f() {\n  var x = \"s\";\n  return x;\n}\nint g() {\n  int r = f();\n  return r;\n}\nint b = g();\n",
+                mismatch + "  at f (<script>:3)\n  at g (<script>:6)\n  at <script> (<script>:9)\n", "nested return");
+            expect_both("var x = \"s\";\nauto l = []() -> int {\n  return x;\n};\nint b = l();\n",
+                mismatch + "  at <lambda> (<script>:3)\n  at <script> (<script>:5)\n", "lambda return");
+            expect_both("class C {\n  int m() {\n    var x = \"s\";\n    return x;\n  }\n}\nauto c = C();\nint b = c.m();\n",
+                mismatch + "  at m (<script>:4)\n  at <script> (<script>:8)\n", "method return");
+            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+                mismatch + "  at co (<script>:4)\n  at <script> (<script>:8)\n", "coroutine return, top-level resume");
+            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  h.resume();\n  return h.resume();\n}\nint b = g();\n",
+                mismatch + "  at co (<script>:4)\n  at g (<script>:9)\n  at <script> (<script>:11)\n", "coroutine return, nested resume");
+            expect_both("coroutine int co() {\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  return h.resume();\n}\nint b = g();\n",
+                mismatch + "  at co (<script>:3)\n  at g (<script>:7)\n  at <script> (<script>:9)\n", "coroutine return, first resume");
+            expect_both("coroutine int co() {\n  yield 1;\n  var a = [];\n  int y = a[0];\n  return y;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+                "Array index 0 out of bounds for array of size 0: Array index out of bounds\n  at co (<script>:4)\n  at <script> (<script>:9)\n", "coroutine body error");
+            expect_both("coroutine int co() {\n  yield 1;\n  throw \"x\";\n  return 1;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+                "x\n  at co (<script>:3)\n  at <script> (<script>:8)\n", "coroutine body throw");
+            expect_both("int& f() {\n  return 5;\n}\nint b = f();\n",
+                "Function with reference return type must return an lvalue reference: Invalid reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return");
+        });
+        // ---- The typed-boundary texts name the VALUE's type (never the var tag): parameters,
+        // returns and class targets, byte-identical across backends. ----
+        test("typed_boundary_error_names_dynamic_type", [this]() {
+            auto run_both = [](const char* src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect_both = [&](const char* src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string("interp: ") + what);
+                check_eq(expected, v_out, std::string("vm: ") + what);
+            };
+            const char* tail = " string r = \"\"; try { f(); } catch (e) { r = e; } r";
+            auto ret = [&](const char* decl) { return std::string(decl) + " int f() { return v; }" + tail; };
+            expect_both(ret("var v = \"s\";").c_str(), "Type mismatch: expected int but got string", "string return");
+            expect_both(ret("var v = cast<char>(97);").c_str(), "Type mismatch: expected int but got char", "char return");
+            expect_both(ret("var v = null;").c_str(), "Type mismatch: expected int but got null", "null return");
+            expect_both(ret("class Cat {} var v = Cat();").c_str(), "Type mismatch: expected int but got Cat", "object return");
+            expect_both(ret("var v = [1];").c_str(), "Type mismatch: expected int but got array", "array return");
+            expect_both(ret("var v = {\"a\": 1};").c_str(), "Type mismatch: expected int but got map", "map return");
+            expect_both((std::string("class Cat {} var v = true; Cat f() { return v; }") + tail).c_str(),
+                "Cannot convert bool to Cat (no suitable single-argument constructor)", "bool into class return");
+            expect_both((std::string("class Cat {} var v = 1.5; Cat f() { return v; }") + tail).c_str(),
+                "Cannot convert float to Cat (no suitable single-argument constructor)", "float into class return");
+            expect_both("void h(int a) {} var x = \"s\"; string r = \"\"; try { h(x); } catch (e) { r = e; } r",
+                "Type mismatch: expected int but got string", "string parameter");
+            expect_both("class A {} class B {} void fa(A v) {} var b = B(); string r = \"\"; try { fa(b); } catch (e) { r = e; } r",
+                "Cannot convert B to A (no suitable single-argument constructor)", "class parameter");
+        });
         test("fuzz_compound_undef_rhs_side_effects_run_first", [this]() {
             const char* src = R"(
                 var log = "";
@@ -1226,6 +1409,484 @@ public:
             // ref-param shape, the one escape route that works for slot locals today.)
             check_eq((int64_t)42, e->execute(
                 "function set42(int& t) { t = 42; } function f() -> int { int x = 1; set42(x); return x; } f();").as_int());
+        });
+
+        // ---- Callee-first for member and computed callees (C++17 [expr.call]; the
+        // interpreter is the oracle): `recv.m(args)` evaluates the receiver and looks the
+        // member up BEFORE any argument runs, so null-receiver / unknown-member /
+        // not-callable errors beat argument side effects (the vm used to evaluate the
+        // arguments first - fuzz seed 132479 blamed 'length' for `v8.push(v8.length())`
+        // on a null v8). Overload resolution stays post-args. Also the scalar-receiver
+        // text: `n.nosuch` on an int/float/bool/char/function receiver reads
+        // `int has no member 'nosuch'` (both backends raised an EMPTY text). Each program
+        // logs argument side effects into `log` and returns `log + "|" + caught`. ----
+        auto run_order_both = [](const char* src, check_mode mode) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(mode);
+                try {
+                    auto r = e->execute(src);
+                    out[idx] = r.is_string() ? r.as_string() : std::string("<non-string>");
+                } catch (const std::exception& ex) { out[idx] = std::string("what:") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto expect_order = [this, run_order_both](const char* src, const std::string& expected,
+                                                   const std::string& what, check_mode mode) {
+            auto [i, v] = run_order_both(src, mode);
+            check_eq(expected, i, what + " (interpreter)");
+            check_eq(i, v, what + " parity");
+            return i;
+        };
+        const char* side_prelude = "var log = \"\"; int side() { log += \"A\"; return 1; }\n";
+        test("callee_first_method_null_receiver_before_args", [this, expect_order, run_order_both, side_prelude]() {
+            expect_order((std::string(side_prelude) + R"(
+                var v8 = null; var caught = "";
+                try { v8.push(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Member 'push' accessed on null: 'v8' is null", "null receiver beats arg side effects", check_mode::strict);
+            // the fuzz shape (seed 132479): the callee's null error names the CALLEE member
+            auto [i, v] = run_order_both(R"(
+                auto v7 = [4611686018427387904, 5]; auto v8 = v7.reverse(); v8.push(v8.length());
+            )", check_mode::strict);
+            check_eq(i, v, "uncaught null-receiver what() parity");
+            check_true(i.find("Member 'push' accessed on null: 'v8' is null") != std::string::npos,
+                "the callee member is blamed, not the argument's (got: " + i + ")");
+            expect_order((std::string(side_prelude) + R"(
+                var v8 = null; var r = v8?.push(side());
+                log + "|" + (r == null);
+            )").c_str(), "|true", "null-safe call skips the arguments", check_mode::strict);
+        });
+        test("scalar_receiver_unknown_member_text", [this, expect_order, run_order_both, side_prelude]() {
+            const std::pair<const char*, const char*> receivers[] = {
+                {"5", "int"}, {"1.5", "float"}, {"true", "bool"}, {"'c'", "char"}, {"side", "function"},
+            };
+            for (const auto& [init, type_name] : receivers) {
+                const std::string src = std::string(side_prelude) +
+                    "var n = " + init + "; var caught = \"\";\n"
+                    "try { n.nosuch(side()); } catch (e) { caught = e; }\n"
+                    "log + \"|\" + caught;";
+                expect_order(src.c_str(), std::string("|") + type_name + " has no member 'nosuch'",
+                    std::string("scalar receiver ") + type_name, check_mode::strict);
+            }
+            expect_order(R"(
+                var n = 5; var caught = "";
+                try { var z = n.nosuch; } catch (e) { caught = e; }
+                caught;
+            )", "int has no member 'nosuch'", "scalar member read", check_mode::strict);
+            auto [i, v] = run_order_both("var n = 5; n.nosuch(1);", check_mode::strict);
+            check_eq(i, v, "uncaught scalar-member what() parity");
+            check_true(i.find("int has no member 'nosuch'") != std::string::npos,
+                "uncaught scalar-member text (got: " + i + ")");
+            // container receivers keep their own texts, still before the arguments
+            expect_order((std::string(side_prelude) + R"(
+                var s = "abc"; var caught = "";
+                try { s.nosuch(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|String has no method 'nosuch'", "string receiver", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                var a = [1]; var caught = "";
+                try { a.nosuch(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Array has no method 'nosuch'", "array receiver", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                var m = {"k": 1}; var caught = "";
+                try { m.nosuch(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Map has no method or key 'nosuch'", "map receiver", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                class W { int x = 0; }
+                shared_ptr<W> o = W(); weak_ptr<W> w = o; var caught = "";
+                try { w.nosuch(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|weak_ptr has no method 'nosuch'", "weak_ptr receiver", check_mode::warn);
+        });
+        test("object_receiver_lookup_before_args", [this, expect_order, side_prelude]() {
+            const std::string cls = std::string(side_prelude) + R"(
+                class O {
+                    int x = 1;
+                    var lam = null;
+                    int f(int a) { return a; }
+                    int f(int a, int b) { return a + b; }
+                }
+                var obj = O(); var caught = "none";
+            )";
+            expect_order((cls + R"(
+                try { obj.nosuch(side()); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Object has no member 'nosuch'", "unknown member beats arg side effects", check_mode::warn);
+            // a plain field is not callable: the check fires before the arguments
+            expect_order((cls + R"(
+                try { obj.x(side()); } catch (e) { caught = "c:" + e; }
+                log + "|" + caught;
+            )").c_str(), "|c:", "field shadow not-callable beats arg side effects", check_mode::warn);
+            expect_order((cls + R"(
+                obj.lam = [](int a) { return a * 2; };
+                var r = obj.lam(side());
+                log + "|" + r;
+            )").c_str(), "A|2", "callable field still calls once", check_mode::warn);
+            // overload resolution needs the argument values: stays post-args
+            expect_order((cls + R"(
+                var r1 = obj.f(side()); var r2 = obj.f(side(), 2);
+                log + "|" + r1 + ":" + r2;
+            )").c_str(), "AA|1:3", "multi-overload method resolves post-args", check_mode::warn);
+        });
+        test("nested_callee_lookup_order", [this, expect_order, side_prelude]() {
+            const std::string cls = std::string(side_prelude) + R"(
+                class C { int h() { log += "H"; return 1; } }
+                class A { int f(int v) { return v; } }
+                class A2 { int z = 0; }
+                var c = C(); var caught = "";
+            )";
+            expect_order((cls + R"(
+                var a = A(); var b = null;
+                try { a.f(b.g(c.h())); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Member 'g' accessed on null: 'b' is null", "inner null receiver beats the innermost call", check_mode::warn);
+            expect_order((cls + R"(
+                var a = null; var b = null;
+                try { a.f(b.g(c.h())); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Member 'f' accessed on null: 'a' is null", "outer null receiver beats everything", check_mode::warn);
+            expect_order((cls + R"(
+                var a = A2(); var b = null;
+                try { a.f(b.g(c.h())); } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "|Object has no member 'f'", "outer unknown member beats the inner null", check_mode::warn);
+        });
+        test("trivial_args_unchanged", [this, expect_order, side_prelude]() {
+            expect_order(R"(
+                class O { int f(int a, int b, string s) { return a + b + s.length(); } }
+                string run() {
+                    var obj = O(); int local = 2; var arr = [1];
+                    arr.push(local);
+                    return "" + obj.f(1, local, "abc") + ":" + arr.length();
+                }
+                run();
+            )", "6:2", "slot-local / literal arguments", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                var v8 = null; var n = 5;
+                var c1 = ""; var c2 = ""; var c3 = ""; var c4 = "";
+                try { v8.push(1); } catch (e) { c1 = e; }
+                try { v8.push(side()); } catch (e) { c2 = e; }
+                try { n.nosuch(1); } catch (e) { c3 = e; }
+                try { n.nosuch(side()); } catch (e) { c4 = e; }
+                log + "|" + (c1 == c2) + ":" + (c3 == c4) + "|" + c1 + "|" + c3;
+            )").c_str(), "|true:true|Member 'push' accessed on null: 'v8' is null|int has no member 'nosuch'",
+                "probed and unprobed shapes raise the same texts", check_mode::strict);
+        });
+        test("computed_callee_callable_check_before_args", [this, expect_order, side_prelude]() {
+            expect_order((std::string(side_prelude) + R"(
+                var arr = [1]; var caught = "none";
+                try { arr[0](side()); } catch (e) { caught = "c:" + e; }
+                log + "|" + caught;
+            )").c_str(), "|c:", "non-callable element beats arg side effects", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                var fs = [[](int a) -> int { return a * 2; }];
+                var r = fs[0](side());
+                log + "|" + r;
+            )").c_str(), "A|2", "callable element still calls", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                function mk() -> auto { return [](int a) -> int { return a + 100; }; }
+                var r = mk()(side());
+                log + "|" + r;
+            )").c_str(), "A|101", "call-result callee still calls", check_mode::strict);
+        });
+        test("operator_overloads_unaffected", [this, expect_order, run_order_both]() {
+            expect_order(R"(
+                var log = "";
+                class V {
+                    int v = 0;
+                    V(int x) { v = x; }
+                    function operator+(V o) -> V { log += "+"; return V(v + o.v); }
+                }
+                V make() { log += "M"; return V(2); }
+                var a = V(1);
+                var r = a + make();
+                log + "|" + r.v;
+            )", "M+|3", "operator overload call", check_mode::strict);
+            auto [i, v] = run_order_both(R"(
+                var log = "";
+                class V { int v = 0; V(int x) { v = x; } function operator+(V o) -> V { return V(v + o.v); } }
+                V make() { log += "M"; return V(2); }
+                var n = null; var caught = "none";
+                try { var q = n + make(); } catch (e) { caught = "c"; }
+                log + "|" + caught;
+            )", check_mode::strict);
+            check_eq(i, v, "null left operand parity");
+        });
+        test("coroutine_calls_unaffected", [this, expect_order, side_prelude]() {
+            // Method calls inside a coroutine body, resumer-side method calls between
+            // resumes, and a handle method taking a non-trivial argument. (A yield INSIDE
+            // a call argument - `acc.add((yield 1) ? 0 : 5)` - is a pre-existing
+            // interpreter replay divergence, free-function callees included; not pinned.)
+            expect_order(R"(
+                class Acc { int total = 0; int add(int v) { total += v; return total; } }
+                var acc = Acc();
+                coroutine int gen() {
+                    var t = (yield 1) ? 0 : 5;
+                    acc.add(t + 0);
+                    return acc.total;
+                }
+                var h = gen();
+                var first = h.resume();
+                var acc2 = Acc(); var between = acc2.add(2 + 3);
+                var final = h.resume();
+                "" + first + ":" + between + ":" + final + ":" + h.done();
+            )", "1:5:5:true", "method calls around a yield", check_mode::strict);
+            expect_order((std::string(side_prelude) + R"(
+                coroutine int gen() { yield 1; return 2; }
+                var h = gen(); h.resume(); h.resume();
+                var d = h.done(side());
+                log + "|" + d;
+            )").c_str(), "A|true", "handle method with a non-trivial argument", check_mode::strict);
+        });
+
+        // ---- hybrid methods: a bare C++ property name reads/writes through the binder
+        // accessors exactly like this.name (lookup ladder: locals -> members -> globals) ----
+        test("hybrid_bare_cpp_property_read", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class W : HybridProbe {
+                    W() : super() {}
+                    int v() { return value; }
+                    int v1() { return value + 1; }
+                    int v2() { return 1 + value; }
+                    bool lt() { return value < 10; }
+                    string nm() { return name + "!"; }
+                    int sum() { return value + value; }
+                    int viaLocal() { int k = 2; return value + k; }
+                }
+                W w = W(); w.value = 5; w.name = "x";
+            )");
+            check_eq((int64_t)5, e->execute("w.v()").as_int());
+            check_eq((int64_t)6, e->execute("w.v1()").as_int());
+            check_eq((int64_t)6, e->execute("w.v2()").as_int());
+            check_true(e->execute("w.lt()").as_bool());
+            check_eq(std::string("x!"), e->execute("w.nm()").as_string());
+            check_eq((int64_t)10, e->execute("w.sum()").as_int());
+            check_eq((int64_t)7, e->execute("w.viaLocal()").as_int());
+            check_eq((int64_t)6, e->execute("w.value = 6; w.v()").as_int(), "no stale shadow after a C++-side change");
+            check_false(e->execute("w").get_class_instance()->has_user_overflow_fields(),
+                        "bare reads never materialize a field for a C++ property");
+        });
+        test("hybrid_bare_cpp_property_store_writes_through", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class W : HybridProbe {
+                    W() : super() {}
+                    void set(int x) { value = x; }
+                    void rename(string s) { name = s; }
+                    int v() { return value; }
+                }
+                W w = W(); w.set(7); w.rename("r");
+            )");
+            check_eq((int64_t)7, e->execute("w.value").as_int());
+            check_eq((int64_t)14, e->execute("w.doubled()").as_int(), "the C++ member itself moved");
+            check_eq((int64_t)7, e->execute("w.v()").as_int());
+            check_eq(std::string("r"), e->execute("w.name").as_string());
+            check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
+        });
+        test("hybrid_bare_cpp_property_compound_and_incdec", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class W : HybridProbe {
+                    W() : super() {}
+                    void bump() { value += 2; value++; ++value; value -= 1; }
+                    int post() { return value++; }
+                    int pre() { return ++value; }
+                    int postdec() { return value--; }
+                    int predec() { return --value; }
+                    void bang() { name += "!"; }
+                    void times() { value *= 3; }
+                }
+                W w = W(); w.value = 5; w.name = "x"; w.bump();
+            )");
+            check_eq((int64_t)8, e->execute("w.value").as_int());
+            check_eq((int64_t)16, e->execute("w.doubled()").as_int());
+            check_eq((int64_t)8, e->execute("w.post()").as_int());
+            check_eq((int64_t)9, e->execute("w.value").as_int());
+            check_eq((int64_t)10, e->execute("w.pre()").as_int());
+            check_eq((int64_t)10, e->execute("w.value").as_int());
+            check_eq((int64_t)10, e->execute("w.postdec()").as_int());
+            check_eq((int64_t)8, e->execute("w.predec()").as_int());
+            check_eq((int64_t)8, e->execute("w.value").as_int());
+            check_eq((int64_t)24, e->execute("w.times(); w.value").as_int());
+            check_eq(std::string("x!"), e->execute("w.bang(); w.name").as_string());
+            check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
+        });
+        test("hybrid_bare_cpp_property_in_lambdas", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class W : HybridProbe {
+                    int q = 3;
+                    W() : super() {}
+                    int a() { auto f = [this]() { return value; }; return f(); }
+                    int b() { auto f = []() { return value + 1; }; return f(); }
+                    int bq() { auto f = []() { return q + 1; }; return f(); }
+                    int b0() { auto f = []() { return value; }; return f(); }
+                    int b1() { auto f = []() { int k = 1; return value + k; }; return f(); }
+                    int b2() { auto f = []() { return this.value + 1; }; return f(); }
+                    int b3() { auto f = []() { return 1 + value; }; return f(); }
+                    int a1() { auto f = [this]() { return value + 1; }; return f(); }
+                    void c() { auto f = [this]() { value = 9; }; f(); }
+                    int d() { auto f = [=]() { return value; }; return f(); }
+                    int dq() { auto f = [=]() { return q; }; return f(); }
+                    int r() { auto f = [&]() { return value; }; return f(); }
+                    void cc() { auto f = [this]() { value += 1; value++; }; f(); }
+                }
+                W w = W(); w.value = 5;
+            )");
+            auto run_int = [&](const char* src, const char* label) -> int64_t {
+                try { return e->execute(src).as_int(); }
+                catch (const std::exception& ex) { check_true(false, std::string(label) + ": " + ex.what()); return -1; }
+            };
+            check_eq((int64_t)5, run_int("w.a()", "[this] lambda read"), "[this] lambda reads the property");
+            check_eq((int64_t)4, run_int("w.bq()", "bare lambda field read"), "bare lambda reads a script field (baseline)");
+            check_eq((int64_t)5, run_int("w.b0()", "bare lambda plain property read"));
+            check_eq((int64_t)6, run_int("w.b1()", "bare lambda property + local"));
+            check_eq((int64_t)6, run_int("w.b2()", "bare lambda this.property + 1"));
+            check_eq((int64_t)6, run_int("w.b3()", "bare lambda 1 + property"));
+            check_eq((int64_t)6, run_int("w.a1()", "[this] lambda property + 1"));
+            check_eq((int64_t)6, run_int("w.b()", "bare lambda property read"), "bare lambda reads the property");
+            check_eq((int64_t)9, run_int("w.c(); w.value", "[this] lambda store"), "[this] lambda store writes through");
+            check_eq((int64_t)3, run_int("w.dq()", "[=] field snapshot"), "[=] snapshots a script field (baseline)");
+            check_eq((int64_t)9, run_int("w.d()", "[=] property snapshot"), "[=] snapshots the property like a field");
+            check_eq((int64_t)9, run_int("w.r()", "[&] property snapshot"), "[&] snapshots too: a C++ property has no cell to alias");
+            check_eq((int64_t)11, run_int("w.cc(); w.value", "[this] lambda compound"));
+            check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
+        });
+        test("hybrid_script_field_shadows_cpp_property", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class S : HybridProbe {
+                    int value = 42;
+                    S() : super() {}
+                    int v() { return value; }
+                    int tv() { return this.value; }
+                    void set(int x) { value = x; }
+                    void tset(int x) { this.value = x; }
+                    void bump() { value += 1; value++; }
+                }
+                S s = S();
+            )");
+            check_eq((int64_t)42, e->execute("s.v()").as_int());
+            check_eq((int64_t)42, e->execute("s.tv()").as_int());
+            check_eq((int64_t)42, e->execute("s.value").as_int());
+            check_eq((int64_t)0, e->execute("s.doubled()").as_int(), "the C++ member is untouched");
+            e->execute("s.set(43)");
+            check_eq((int64_t)43, e->execute("s.v()").as_int());
+            check_eq((int64_t)43, e->execute("s.tv()").as_int());
+            check_eq((int64_t)0, e->execute("s.doubled()").as_int(), "a bare store lands on the shadowing script field");
+            e->execute("s.tset(44)");
+            check_eq((int64_t)44, e->execute("s.v()").as_int());
+            check_eq((int64_t)0, e->execute("s.doubled()").as_int());
+            e->execute("s.bump()");
+            check_eq((int64_t)46, e->execute("s.v()").as_int());
+            check_eq((int64_t)0, e->execute("s.doubled()").as_int());
+        });
+        test("hybrid_bare_cpp_property_error_texts_match_this_form", [this]() {
+            std::string bare_msg[2], this_msg[2], undef_msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::off);   // the undef row is a RUNTIME text
+                bind_hybrid_probe(*e);
+                e->execute(R"(
+                    class W : HybridProbe {
+                        W() : super() {}
+                        void bad() { value = "str"; }
+                        void bad_this() { this.value = "str"; }
+                        int ro_read() { return ro; }
+                        void ro_store() { ro = 5; }
+                        void ro_store_this() { this.ro = 5; }
+                        int undef() { return zzz_nope + 1; }
+                    }
+                    W w = W(); w.value = 5;
+                )");
+                bool threw = false;
+                try { e->execute("w.bad();"); } catch (const std::exception& ex) { threw = true; bare_msg[idx] = ex.what(); }
+                check_true(threw, "a mistyped bare store raises");
+                threw = false;
+                try { e->execute("w.bad_this();"); } catch (const std::exception& ex) { threw = true; this_msg[idx] = ex.what(); }
+                check_true(threw, "a mistyped this. store raises");
+                check_eq((int64_t)5, e->execute("w.value").as_int(), "a rejected store leaves the member alone");
+                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "bare read of a getter-only property");
+                e->execute("w.ro_store(); w.ro_store_this();");
+                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "read-only stores are silent no-ops both ways");
+                check_eq((int64_t)5, e->execute("w.value").as_int());
+                threw = false;
+                try { e->execute("w.undef();"); } catch (const std::exception& ex) { threw = true; undef_msg[idx] = ex.what(); }
+                check_true(threw);
+                check_true(undef_msg[idx].find("Undefined variable 'zzz_nope'") != std::string::npos, undef_msg[idx]);
+                ++idx;
+            }
+            check_eq(bare_msg[0], bare_msg[1], "bare-store error text is byte-identical across backends");
+            check_eq(this_msg[0], this_msg[1], "this-store error text is byte-identical across backends");
+            check_eq(undef_msg[0], undef_msg[1], "undefined-name text is byte-identical across backends");
+        });
+        test("hybrid_cpp_property_has_no_reference_cell", [this]() {
+            // A C++ property is not a cell: by-reference bindings to the bare name raise the
+            // method-shadow text on both backends (docs/script_extensible.md S10; by-value
+            // arguments read through the getter as usual)
+            std::string decl_msg[2], arg_msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::off);
+                bind_hybrid_probe(*e);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 1; }
+                    int by_val(int p) { return p + 1; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int decl_ref() { auto& r = value; return r; }
+                        void arg_ref() { by_ref(value); }
+                        int arg_val() { return by_val(value); }
+                    }
+                    W w = W(); w.value = 5;
+                )");
+                check_eq((int64_t)6, e->execute("w.arg_val()").as_int());
+                try { e->execute("w.decl_ref();"); } catch (const std::exception& ex) { decl_msg[idx] = ex.what(); }
+                try { e->execute("w.arg_ref();"); } catch (const std::exception& ex) { arg_msg[idx] = ex.what(); }
+                check_true(decl_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, decl_msg[idx]);
+                check_true(arg_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, arg_msg[idx]);
+                check_eq((int64_t)5, e->execute("w.value").as_int(), "nothing wrote through a shadow cell");
+                ++idx;
+            }
+            check_eq(decl_msg[0], decl_msg[1], "decl-ref text is byte-identical across backends");
+            check_eq(arg_msg[0], arg_msg[1], "ref-arg text is byte-identical across backends");
+        });
+        test("hybrid_two_level_chain_bare_cpp_property", [this]() {
+            auto e = make_engine();
+            bind_hybrid_probe(*e);
+            e->execute(R"(
+                class Kind : HybridProbe { Kind() : super() {} int kv() { return value; } }
+                class W2 : Kind {
+                    W2() : super() {}
+                    int v() { return value; }
+                    void set(int x) { value = x; }
+                    void bump() { value += 10; }
+                }
+                W2 w = W2(); w.set(3);
+            )");
+            check_eq((int64_t)3, e->execute("w.v()").as_int());
+            check_eq((int64_t)3, e->execute("w.kv()").as_int());
+            check_eq((int64_t)3, e->execute("w.value").as_int());
+            check_eq((int64_t)6, e->execute("w.doubled()").as_int());
+            check_eq((int64_t)13, e->execute("w.bump(); w.value").as_int());
+            check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
         });
     }
 };

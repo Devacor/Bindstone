@@ -24,4 +24,46 @@ inline std::string_view null_member_message(const expression* receiver) {
         : "Member '{0}' accessed on null: '{1}' is null";
 }
 
+// A non-null receiver with no member table at all (int, float, bool, char, function, ...):
+// {0} = the receiver's base type spelling, {1} = the member
+inline constexpr std::string_view scalar_member_message = "{0} has no member '{1}'";
+
+inline constexpr std::string_view base_type_spelling(script_value_type type) {
+    switch (type) {
+        case script_value_type::jai_null_type: return "null";
+        case script_value_type::jai_int_type: return "int";
+        case script_value_type::jai_float_type: return "float";
+        case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_char_type: return "char";
+        case script_value_type::jai_bool_type: return "bool";
+        case script_value_type::jai_array_type: return "array";
+        case script_value_type::jai_map_type: return "map";
+        case script_value_type::jai_object_type: return "object";
+        case script_value_type::jai_function_type: return "function";
+        case script_value_type::jai_reference_type: return "reference";
+        case script_value_type::jai_shared_ptr_type: return "shared_ptr";
+        case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+        case script_value_type::jai_any_type: return "any";
+        case script_value_type::jai_invalid_type: return "invalid";
+        default: return "unknown";
+    }
+}
+
+// Interned base-type spellings, filled once at backend init: error paths never intern
+// (parallel workers run against a frozen symbolizer)
+struct base_type_symbols {
+    static constexpr size_t count = static_cast<size_t>(script_value_type::jai_invalid_type) + 1;
+    uint64_t ids[count] = {};
+    template <typename Symbolizer>
+    void intern(const Symbolizer& symbolizer) {
+        for (size_t i = 0; i < count; ++i) {
+            ids[i] = symbolizer.intern(base_type_spelling(static_cast<script_value_type>(i)));
+        }
+    }
+    uint64_t operator[](script_value_type type) const {
+        const size_t i = static_cast<size_t>(type);
+        return i < count ? ids[i] : ids[count - 1];
+    }
+};
+
 }

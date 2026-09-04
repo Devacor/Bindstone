@@ -62,7 +62,7 @@ namespace jai::vm {
         op_get_static,      // a=node index (member_expr with ::); pushes static member
         op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value
-        op_member_compound, // a=node index, c=compound kind; stack [current, rhs, object] -> pushes result
+        op_member_compound, // a=node index, c=compound kind; stack [current, rhs, object] (no object for a :: target) -> pushes result
         op_call_method,     // a=argc, b=call site (member_node/receiver_symbol); stack [object, args...]
         op_new,             // a=node index (new_expr), b=argc; pops args, pushes instance
         op_class_decl,      // a=node index (class_decl); defines/redefines the class
@@ -105,6 +105,9 @@ namespace jai::vm {
                             // callee-before-args IS the language, matching C++17) into the
                             // pending-callee register stack - no value-stack materialization
         op_call_from_scratch, // a=argc, b=site index: call the pending callee (args at stack top)
+        op_probe_member,    // a=site index, b=0 member lookup / 1 callable check: raise the
+                            // callee's lookup error at the callee-first observation point
+                            // (receiver / callee at stack top, stack untouched)
 
         op_math,            // a=detail::math_fn id, b=argc: math:: language intrinsic; pops
                             // argc args, evaluates via the shared kernel, pushes the result
@@ -133,6 +136,10 @@ namespace jai::vm {
                                // result lands RAW in a compiler temp slot (above local_count,
                                // inside the window) - the register-file wave's producer form;
                                // consumers read it back through the ordinary fused slot operand
+        op_operand_temp,       // a=fused_binary_protos index (left = a subscript operand), b=frame
+                               // slot: the operand resolves RAW into a compiler temp BEFORE a
+                               // lifted right subtree computes (left-to-right sequencing of the
+                               // read and any index error it raises)
 
         op_index_fused,     // a=fused_index_protos index, b=index flags: subscript read whose
                             // container+index resolve as fused operands (no LOAD dispatches);
@@ -291,6 +298,7 @@ namespace jai::vm {
             case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_probe_callee: return "PROBE_CALLEE";
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
+            case opcode::op_probe_member: return "PROBE_MEMBER";
             case opcode::op_cast: return "CAST";
             case opcode::op_error: return "ERROR";
             case opcode::op_parallel_for: return "PARALLEL_FOR";
@@ -300,6 +308,7 @@ namespace jai::vm {
             case opcode::op_index_fused_decl: return "INDEX_FUSED_DECL";
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
+            case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

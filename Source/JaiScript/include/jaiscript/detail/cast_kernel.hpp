@@ -7,8 +7,8 @@
 // and the interpreter (parity by construction): operand-shape classification, the
 // class-derivation verdict and its error text, the class-target value/handle/reference
 // outcomes, and the char rules (the one primitive pair the assignment table refuses).
-// Other primitive and container targets convert through each backend's assignment table
-// (enforce_type_compatibility) and only borrow the error text here.
+// Other primitive and container targets convert through the typed-slot table
+// (detail::convert_for_typed_slot via enforce_type_compatibility) and only borrow the error text here.
 
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/container_enforce.hpp>

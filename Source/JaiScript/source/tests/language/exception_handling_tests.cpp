@@ -16,6 +16,23 @@ std::string static_error_text(jai::engine& e, const char* src) {
     catch (...) {}
     return {};
 }
+
+// Runs src to its uncaught error: what(), empty when it ran clean.
+std::string failure_text(jai::engine& e, const char* src) {
+    try { e.execute(src); }
+    catch (const std::exception& ex) { return ex.what(); }
+    return {};
+}
+
+// The kept trace as "fn:line|fn:line" (files omitted).
+std::string trace_shape(jai::engine& e) {
+    std::string out;
+    for (const auto& fr : e.last_stack_trace()) {
+        if (!out.empty()) out += "|";
+        out += fr.function + ":" + std::to_string(fr.line);
+    }
+    return out;
+}
 }
 
 class exception_handling_tests : public suite {
@@ -375,6 +392,204 @@ public:
             auto trace = engine->last_stack_trace();
             check_false(trace.empty());
             check_eq((size_t)1, trace[0].line);
+        });
+
+        // ---- A typed return whose conversion fails raises AT the return statement: the
+        // returning function is the top frame and the call site sits below it, and the
+        // text names the value's own type, never its var tag. ----
+        test("return_conversion_error_attributed_to_return_site", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "int f() {\n"                 // 1
+                "  var x = \"s\";\n"          // 2
+                "  return x;\n"               // 3
+                "}\n"                         // 4
+                "int g() { return 1; }\n"     // 5
+                "int a = g();\n"              // 6
+                "int b = f();\n";             // 7
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Type mismatch: expected int but got string") == 0, "text names the value type (got: " + what + ")");
+            check_true(what.find("got any") == std::string::npos, "no var tag in the text");
+            check_eq(std::string("f:3|<script>:7"), trace_shape(*engine));
+            check_eq(std::string("  at f (<script>:3)\n  at <script> (<script>:7)\n"), engine->format_stack_trace());
+        });
+
+        test("return_conversion_error_nested_frames", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "int f() {\n"                 // 1
+                "  var x = \"s\";\n"          // 2
+                "  return x;\n"               // 3
+                "}\n"                         // 4
+                "int g() {\n"                 // 5
+                "  int r = f();\n"            // 6
+                "  return r;\n"               // 7
+                "}\n"                         // 8
+                "int b = g();\n";             // 9
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_eq(std::string("f:3|g:6|<script>:9"), trace_shape(*engine));
+        });
+
+        test("lambda_typed_return_conversion_attributed", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "var x = \"s\";\n"            // 1
+                "auto l = []() -> int {\n"    // 2
+                "  return x;\n"               // 3
+                "};\n"                        // 4
+                "int b = l();\n";             // 5
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_eq(std::string("<lambda>:3|<script>:5"), trace_shape(*engine));
+        });
+
+        test("method_typed_return_conversion_attributed", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "class C {\n"                 // 1
+                "  int m() {\n"               // 2
+                "    var x = \"s\";\n"        // 3
+                "    return x;\n"             // 4
+                "  }\n"                       // 5
+                "}\n"                         // 6
+                "auto c = C();\n"             // 7
+                "int b = c.m();\n";           // 8
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_eq(std::string("m:4|<script>:8"), trace_shape(*engine));
+        });
+
+        test("coroutine_typed_return_conversion_attributed", [this]() {
+            // Second resume at top level: the coroutine frame is on top of the resume site
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  yield 1;\n"            // 2
+                    "  var x = \"s\";\n"      // 3
+                    "  return x;\n"           // 4
+                    "}\n"                     // 5
+                    "auto h = co();\n"        // 6
+                    "var a = h.resume();\n"   // 7
+                    "var b = h.resume();\n";  // 8
+                std::string what = failure_text(*engine, src);
+                check_true(what.find("Type mismatch: expected int but got string") == 0, "top-level resume text (got: " + what + ")");
+                check_eq(std::string("co:4|<script>:8"), trace_shape(*engine));
+            }
+            // Resumed inside a function: the resumer's frames stay under the coroutine's
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  yield 1;\n"            // 2
+                    "  var x = \"s\";\n"      // 3
+                    "  return x;\n"           // 4
+                    "}\n"                     // 5
+                    "auto h = co();\n"        // 6
+                    "int g() {\n"             // 7
+                    "  h.resume();\n"         // 8
+                    "  return h.resume();\n"  // 9
+                    "}\n"                     // 10
+                    "int b = g();\n";         // 11
+                std::string what = failure_text(*engine, src);
+                check_true(what.find("Type mismatch: expected int but got string") == 0, "nested resume text (got: " + what + ")");
+                check_eq(std::string("co:4|g:9|<script>:11"), trace_shape(*engine));
+            }
+            // First resume runs to completion
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  var x = \"s\";\n"      // 2
+                    "  return x;\n"           // 3
+                    "}\n"                     // 4
+                    "auto h = co();\n"        // 5
+                    "int g() {\n"             // 6
+                    "  return h.resume();\n"  // 7
+                    "}\n"                     // 8
+                    "int b = g();\n";         // 9
+                std::string what = failure_text(*engine, src);
+                check_true(what.find("Type mismatch: expected int but got string") == 0, "first-resume text (got: " + what + ")");
+                check_eq(std::string("co:3|g:7|<script>:9"), trace_shape(*engine));
+            }
+        });
+
+        // Same capture site: any error raised by a resumed segment keeps the coroutine frame
+        test("coroutine_body_error_keeps_coroutine_frame", [this]() {
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  yield 1;\n"            // 2
+                    "  var a = [];\n"         // 3
+                    "  int y = a[0];\n"       // 4
+                    "  return y;\n"           // 5
+                    "}\n"                     // 6
+                    "auto h = co();\n"        // 7
+                    "var a = h.resume();\n"   // 8
+                    "var b = h.resume();\n";  // 9
+                std::string what = failure_text(*engine, src);
+                check_true(what.find("Array index 0 out of bounds") == 0, "index error text (got: " + what + ")");
+                check_eq(std::string("co:4|<script>:9"), trace_shape(*engine));
+            }
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  yield 1;\n"            // 2
+                    "  throw \"x\";\n"        // 3
+                    "  return 1;\n"           // 4
+                    "}\n"                     // 5
+                    "auto h = co();\n"        // 6
+                    "var a = h.resume();\n"   // 7
+                    "var b = h.resume();\n";  // 8
+                std::string what = failure_text(*engine, src);
+                check_eq(std::string("x"), what);
+                check_eq(std::string("co:3|<script>:8"), trace_shape(*engine));
+            }
+        });
+
+        test("ref_return_error_attributed_to_return_site", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "int& f() {\n"                // 1
+                "  return 5;\n"               // 2
+                "}\n"                         // 3
+                "int b = f();\n";             // 4
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Function with reference return type must return an lvalue reference") == 0, "text (got: " + what + ")");
+            check_eq(std::string("f:2|<script>:4"), trace_shape(*engine));
+        });
+
+        // The conversion still surfaces in the CALLER (a try around the return inside the
+        // callee does not see it) - attribution changed, catchability did not.
+        test("return_conversion_error_reaches_caller_not_callee_try", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "int f() {\n"
+                "  try {\n"
+                "    var x = \"s\";\n"
+                "    return x;\n"
+                "  } catch (e) {\n"
+                "    return -1;\n"
+                "  }\n"
+                "}\n"
+                "string r = \"\";\n"
+                "try { int v = f(); r = \"v\"; } catch (e) { r = \"caller:\" + e; }\n"
+                "r\n");
+            check_eq(std::string("caller:Type mismatch: expected int but got string"), result.as_string());
+            // A caught return-conversion error leaves no stale trace behind for a later error
+            auto later = make_engine();
+            const char* src =
+                "int f() {\n"                                   // 1
+                "  var x = \"s\";\n"                            // 2
+                "  return x;\n"                                 // 3
+                "}\n"                                           // 4
+                "try { int v = f(); } catch (e) {}\n"           // 5
+                "throw \"later\";\n";                           // 6
+            check_eq(std::string("later"), failure_text(*later, src));
+            check_eq(std::string("<script>:6"), trace_shape(*later));
         });
 
         // A throw during argument evaluation must propagate the thrown value; it must not

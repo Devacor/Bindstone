@@ -1007,17 +1007,40 @@ public:
             e->execute(src);
             e->execute(src);   // class registered: field proofs would stamp if admissible
             check_eq((uint32_t)0, e->last_proof_stats().members, "nonpublic chain: no field proofs at all");
-            // A same-class `_get_b` is shadowed by the synthesized accessor at definition
-            // (is_auto_accessor stays true; q.b reads the raw field at runtime), so the three
-            // `b` sites prove and only the static `count` is refused.
+            // A user `_get_b` owns the member: q.b dispatches to it, and neither the member
+            // site nor the bare `b` sites carry a field proof (the static `count` never did).
             const std::string plain =
                 "class Q { static int count = 0; int b = 2;\n"
                 "  int _get_b() { return b * 10; }\n"
                 "  int read() { return count + b; } }\n"
                 "Q q = Q(); q.read() + q.b";
-            check_eq((int64_t)4, e->execute(plain).as_int());
+            check_eq((int64_t)22, e->execute(plain).as_int());
             e->execute(plain);
-            check_eq((uint32_t)3, e->last_proof_stats().members, "static field refused; b proven at its three sites");
+            check_eq((uint32_t)0, e->last_proof_stats().members, "a user accessor takes the field off the proof lanes");
+        });
+
+        test("accessor_members_known_with_unknown_type", [this]() {
+            // _get_x/_set_x declare a member x the checker knows (no `no member` error) whose
+            // static type is the accessor's business: reads and writes are lenient, bare x
+            // inside the class keeps the field's declared type.
+            auto e = make_engine();
+            check_eq((int64_t)5, e->execute(
+                "class V { int seen = 0; int _get_virt() { return seen; } void _set_virt(int v) { seen = v; } }\n"
+                "V v = V(); v.virt = 5; v.virt").as_int(), "virtual property on a typed receiver under strict");
+            check_eq(std::string("s"), e->execute(
+                "class P { int b = 1; } class C : P { override string _get_b() { return \"s\"; } }\n"
+                "C c = C(); string s = c.b; s").as<std::string>(), "the getter's type, not the field's declared int");
+            std::string text;
+            try { e->execute("C c2 = C(); int n = c2.b; n"); text = "ran"; }
+            catch (const static_check_error&) { text = "static"; }
+            catch (const std::exception& ex) { text = ex.what(); }
+            check_true(text.find("Type mismatch") != std::string::npos, "unknown-typed member into int: a run-time mismatch, not a load error: " + text);
+            bool threw = false;
+            std::string message;
+            try { e->execute("class Q { int b = 1; int _get_b() { return 7; } } Q q = Q(); q.zzz;"); }
+            catch (const static_check_error& err) { threw = true; message = err.what(); }
+            check_true(threw, "a genuinely unknown member still errors");
+            check_true(message.find("no member 'zzz' in class 'Q'") != std::string::npos, message);
         });
 
         test("proof_jaibite_paths_restamp_without_touching_diagnostics", [this]() {
@@ -1327,6 +1350,118 @@ public:
             check_eq((uint32_t)0, r->last_proof_stats().decls, "a reference never proves");
         });
 
+        // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
+        // runtime is right); the checker names the aliasing spellings at warning severity.
+
+        test("cast_value_form_on_handle_warns", [this]() {
+            const std::string P = "class C { int v = 1; } class H { shared_ptr<C> p = null; }\n";
+            const std::string text = "cast<C>(h) copies the instance - use cast<C&>(h) to alias it or cast<shared_ptr<C>>(h) to share it";
+            auto e = make_engine();
+            auto r = e->check(P + "shared_ptr<C> h = shared_ptr<C>();\nauto c = cast<C>(h);");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, text));
+            check_eq((size_t)3, r.diagnostics[0].line, "anchored at the cast");
+            check_eq((size_t)2, r.diagnostics[0].related_line, "related: the operand's declaration");
+            r = e->check(P + "auto hh = H(); auto c = cast<C>(hh.p);");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(hh.p) copies the instance - use cast<C&>(hh.p) to alias it or cast<shared_ptr<C>>(hh.p) to share it"));
+            check_eq((size_t)0, r.diagnostics[0].related_line, "member chain: no related declaration");
+            r = e->check(P + "function mk() -> shared_ptr<C> { return shared_ptr<C>(); } auto c = cast<C>(mk());");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(...) copies the instance - use cast<C&>(...) to alias it or cast<shared_ptr<C>>(...) to share it"));
+            r = e->check(P + "shared_ptr<auto> h = C(); auto c = cast<C>(h);");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, text));
+            r = e->check(P + "function f(shared_ptr<C> p) -> int { auto q = cast<C>(p); return q.v; }");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(p) copies the instance"));
+            r = e->check(P + "class M { shared_ptr<C> f = null; int m() { auto q = cast<C>(f); return q.v; } int n() { auto q = cast<C>(this.f); return q.v; } }");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)2, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(f) copies the instance"));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(this.f) copies the instance - use cast<C&>(this.f) to alias it"));
+        });
+
+        test("cast_value_form_on_reference_warns", [this]() {
+            const std::string P = "class C { int v = 1; }\n";
+            auto e = make_engine();
+            auto r = e->check(P + "C c0 = C(); auto& r = c0; auto c = cast<C>(r);");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(r) copies the instance - use cast<C&>(r) to alias it or cast<shared_ptr<C>>(r) to share it"));
+            r = e->check(P + "C c0 = C(); var& vr = c0; auto c = cast<C>(vr);");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(vr) copies the instance"));
+            r = e->check(P + "function f(C& p) -> int { auto q = cast<C>(p); return q.v; }");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(p) copies the instance"));
+            r = e->check(P + "array<C> xs = [C()]; for (auto& x : xs) { auto q = cast<C>(x); }");
+            check_eq((size_t)1, warning_count(r));
+            check_true(has_diag(r, dlevel::warning, "cast<C>(x) copies the instance"));
+        });
+
+        test("cast_copy_warning_silent_forms", [this]() {
+            const std::string P = "class C { int v = 1; } class H { shared_ptr<C> p = null; }\n";
+            auto e = make_engine();
+            const char* rows[] = {
+                "shared_ptr<C> h = shared_ptr<C>(); auto& a = cast<C&>(h);",
+                "shared_ptr<C> h = shared_ptr<C>(); shared_ptr<C> s = cast<shared_ptr<C>>(h);",
+                "shared_ptr<C> h = shared_ptr<C>(); int i = cast<int>(h.v); string t = cast<string>(42);",
+                "C c = C(); auto d = cast<C>(c);",
+                "auto d = cast<C>(C());",
+                "function f(C p) -> int { auto q = cast<C>(p); return q.v; }",
+                "shared_ptr<C> h = shared_ptr<C>(); var g = h; auto d = cast<C>(g);",
+                "shared_ptr<C> h = shared_ptr<C>(); weak_ptr<C> w = h; var m = \"\"; try { auto d = cast<C>(w); } catch (e) { m = e; }",
+                "class M { C f = C(); int m() { auto q = cast<C>(f); return q.v + cast<C>(this.f).v; } }",
+                "class D : C { int m() { auto q = cast<C>(this); return q.v; } }",
+            };
+            for (const char* row : rows) {
+                auto r = e->check(P + row);
+                check_eq((size_t)0, r.diagnostics.size(), row);
+            }
+        });
+
+        test("cast_copy_warning_never_gates", [this]() {
+            const std::string P = "class C { int v = 1; }\n";
+            const std::string body = "shared_ptr<C> h = shared_ptr<C>(); auto c = cast<C>(h); c.v = 5; h.v * 10 + c.v";
+            auto strict = make_engine();
+            strict->static_checking(check_mode::strict);
+            check_eq((int64_t)15, strict->execute(P + body).as_int());
+            const auto& r = strict->last_check_diagnostics();
+            check_eq((size_t)1, r.diagnostics.size());
+            check_eq((size_t)0, error_count(r));
+            check_true(r.diagnostics[0].severity == dlevel::warning);
+            auto warn = make_engine();
+            warn->static_checking(check_mode::warn);
+            check_eq((int64_t)15, warn->execute("[[strict_mode]];\n" + P + body).as_int());
+            check_false(warn->last_check_diagnostics().has_strict_errors());
+            check_eq((size_t)1, warning_count(warn->last_check_diagnostics()));
+            // a weak_ptr operand keeps the runtime's verdict and draws nothing
+            check_eq(std::string("Cannot cast 'weak_ptr' to 'C'"),
+                     warn->execute(P + "shared_ptr<C> h = shared_ptr<C>(); weak_ptr<C> w = h; var m = \"\"; try { auto d = cast<C>(w); } catch (e) { m = e; } m").to_string());
+            check_eq((size_t)0, warn->last_check_diagnostics().diagnostics.size());
+            auto off = make_engine();
+            off->static_checking(check_mode::off);
+            check_eq((int64_t)15, off->execute(P + body).as_int());
+            check_eq((size_t)0, off->last_check_diagnostics().diagnostics.size());
+        });
+
+        test("cast_copy_warning_jaibite_unaffected", [this]() {
+            const std::string src = "class C { int v = 1; }\nshared_ptr<C> h = shared_ptr<C>(); auto c = cast<C>(h); c.v = 5; h.v * 10 + c.v";
+            for (check_mode mode : {check_mode::strict, check_mode::warn}) {
+                auto e = make_engine();
+                e->static_checking(mode);
+                auto bite = e->jaibite(src);
+                check_true(bite.checked_clean());
+                check_false(bite.check_diagnostics().has_errors());
+                check_true(has_diag(bite.check_diagnostics(), dlevel::warning, "cast<C>(h) copies the instance"));
+                auto loaded = e->jaibite_load_bytes(bite.save_bytes());
+                check_true(loaded.checked_clean());
+                check_eq((int64_t)15, loaded.execute().as_int());
+            }
+        });
+
         // ------------------------------------------------------------ programs (closure checking)
 
         test("program_closure_forward_reference_across_units", [this]() {
@@ -1478,9 +1613,11 @@ public:
             auto r = e->check(root);
             check_eq((size_t)0, error_count(r), r.format(root));
             check_eq((int64_t)37, e->execute(root).as_int());
-            // a bare C++ property resolves through the chain too
-            auto prop = e->check("import \"cpp_kind.jai\";\nclass W : Kind { W() : super() {} int v() { return value; } }");
-            check_eq((size_t)0, error_count(prop), prop.format());
+            // a bare C++ property resolves through the chain too - checked AND executed
+            const std::string prop_src = "import \"cpp_kind.jai\";\nclass W : Kind { W() : super() {} int v() { return value; } }\nW w2 = W();\nw2.value = 5;\nw2.v()";
+            auto prop = e->check(prop_src);
+            check_eq((size_t)0, error_count(prop), prop.format(prop_src));
+            check_eq((int64_t)5, e->execute(prop_src).as_int());
             // a miss below the C++ base is still certain (closed binder surface)
             auto miss = e->check("import \"cpp_kind.jai\";\nclass W : Kind { int tick() { return zzz_nope; } }");
             check_eq((size_t)1, error_count(miss));
@@ -1816,6 +1953,49 @@ public:
             check_eq((int64_t)1, e->execute("[[warn_mode]];\nint x = 1;\nx").as_int());
             check_eq((int64_t)1, e->execute("[[strict_mode]]\nint z = 1;\nz").as_int());
         });
+        test("typed_slot_table_sync", [this]() {
+            // assignable IS the runtime table (detail::convert_for_typed_slot): rows the runtime
+            // converts are accepted, rows it rejects are refused up front
+            auto e = make_engine();
+            check_eq((int64_t)3, e->execute("class K { int to_int() { return 3; } } int v = K(); v").as_int());
+            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "to_int() source is clean under strict");
+            check_eq(std::string("5"), e->execute("string t(string s) { return s; } t(5)").as<std::string>());
+            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "int into a string parameter is clean");
+            check_eq(std::string("yes"), e->execute("class C { int a = 0; } string p(shared_ptr<C> x) { if (x == null) { return \"yes\"; } return \"no\"; } p(null)").as<std::string>());
+            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "null into a shared_ptr parameter is clean");
+            std::string text;
+            try { e->execute("class D {} int w = D();"); } catch (const static_check_error& ex) { text = ex.what(); }
+            check_true(text.find("cannot initialize 'w' declared 'int' with 'D'") != std::string::npos, "no to_int(): still a load error (got: " + text + ")");
+            text.clear();
+            try { e->execute("class TA { int v = 1; } class TB { TB(TA a) {} } class TC { TC(TB b) {} } TC c = TA();"); } catch (const static_check_error& ex) { text = ex.what(); }
+            check_true(text.find("cannot initialize 'c' declared 'TC' with 'TA'") != std::string::npos, "a chained ctor conversion is refused up front (got: " + text + ")");
+            text.clear();
+            try { e->execute("class C2 { int a = 0; C2(int v) { a = v; } } C2 c2 = true;"); } catch (const static_check_error& ex) { text = ex.what(); }
+            check_true(text.find("cannot initialize 'c2' declared 'C2' with 'bool'") != std::string::npos, "a converting ctor's parameter takes only its own base or int<->float (got: " + text + ")");
+        });
+
+        // Static field stores: every spelling (C::s, bare s in a method / static method,
+        // compound forms, inside functions and lambdas) reports the field-store mismatch;
+        // converting stores and initializers are clean like instance fields.
+        test("static_store_mismatch_every_spelling", [this]() {
+            auto e = make_engine();
+            auto r = e->check("class C { static int s = 0;\n  void m() { s = \"x\"; }\n  static void sm() { s = \"y\"; } }");
+            check_eq((size_t)2, error_count(r), "bare stores in an instance and a static method");
+            check_true(has_diag(r, dlevel::error, "cannot assign 'string' to field 's' declared 'int'"));
+            const std::string ok_cls = "class C { static int s = 0;\n  void m() { s = 2.7; s += 1; }\n  static void sm() { s = true; s++; } }\n";
+            check_eq((size_t)0, error_count(e->check(ok_cls)), "well-typed bare stores are clean");
+            check_eq((size_t)1, error_count(e->check(ok_cls + "C::s = \"x\";")), "C::s = string");
+            check_eq((size_t)1, error_count(e->check(ok_cls + "C::s += \"x\";")), "C::s += string");
+            check_eq((size_t)1, error_count(e->check(ok_cls + "function f() { C::s = \"x\"; }")), "inside a function");
+            check_eq((size_t)1, error_count(e->check(ok_cls + "auto l = [](){ C::s = \"x\"; };")), "inside a lambda");
+            check_true(has_diag(e->check(ok_cls + "C::s = \"x\";"), dlevel::error, "cannot assign 'string' to field 's' declared 'int'"));
+            check_eq((size_t)0, error_count(e->check(ok_cls + "C::s = 5; C::s = 2.7; C::s += 1; C::s++; --C::s; C::s = true;")), "well-typed C::s stores are clean");
+            auto ri = e->check("class C { static int s = \"x\"; }");
+            check_eq((size_t)1, error_count(ri));
+            check_true(has_diag(ri, dlevel::error, "cannot initialize field 's' declared 'int' with 'string'"));
+            check_eq((size_t)0, error_count(e->check("class C { static float f = 3; static string t = 5; static int n = true; static int u; }")), "converting static initializers are clean");
+        });
+
     }
 };
 

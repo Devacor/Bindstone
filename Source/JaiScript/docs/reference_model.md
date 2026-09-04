@@ -54,7 +54,8 @@ Binding is two-tiered; both tiers land in the same four holder modes:
 
 What stays a non-lvalue: rvalues (arithmetic, calls, literals), string subscripts
 (chars are values), map KEYS (`kv.first` — ordering invariant), computed properties
-and C++-backed members whose accessors return copies, missing map keys (reads never
+(a field with a user `_get_`/`_set_` anywhere in its chain included) and C++-backed
+members whose accessors return copies, missing map keys (reads never
 insert), and member-final chains over COMPUTED subscripts (`objs[i+1].v` — bind a
 `var&` row first).
 - **Ref returns** (`int& f()`, `-> auto&`): the return operand binds like a ref arg

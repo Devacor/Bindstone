@@ -9,12 +9,14 @@
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
+#include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
+#include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (vm parity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
@@ -2168,6 +2170,13 @@ script_value interpreter::member_target::method(uint64_t id) const {
     return script_value::make_invalid(nullptr);
 }
 
+script_value interpreter::member_target::user_accessor(uint64_t id) const {
+    if (class_def) {
+        return class_def->find_user_accessor(id);
+    }
+    return script_value::make_invalid(nullptr);
+}
+
 bool interpreter::member_target::has_field(uint64_t id) const {
     return instance && instance->has_field(id);
 }
@@ -2222,7 +2231,8 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
 
 // Helper for is_truthy() to check for to_bool() method on objects
 bool interpreter::object_to_bool_via_method(const script_value& value) {
-    // KEEP BYTE-PARALLEL with vm_backend::object_to_bool_via_method (class to_bool memo)
+    // KEEP BYTE-PARALLEL with vm_backend::object_to_bool_via_method (class to_bool memo) and
+    // the typed-slot table's bool row (detail::convert_typed_slot_script_rows_impl)
     if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
         auto* oh = h->get();
         if (oh->is_class_instance_wrapper && oh->data) {
@@ -2402,6 +2412,7 @@ interpreter::interpreter()
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    base_type_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2469,6 +2480,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    base_type_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2536,6 +2548,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    base_type_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2987,6 +3000,13 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                 } else {
                     push_value(std::move(member.method_value));   // static method: unbound callable
                 }
+            } else if (member.what == detail::member_probe_hit::kind::cpp_property) {
+                auto read = detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
+                                                           member.method_value, member.getter_id, expr->symbol_id);
+                if (!read) {
+                    return read.error_value();
+                }
+                push_value(std::move(read.value()));
             } else {
                 push_value(*member.value_ptr);
             }
@@ -3035,6 +3055,16 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     // Intern the name to ID
                     uint64_t name_id = string_symbolizer_->intern(expr->name);
 
+                    // A hybrid's C++ property reads through its getter (never a placeholder cell)
+                    if (uint64_t getter_id = detail::cpp_property_getter_id(instance.get(), name_id)) {
+                        auto read = detail::read_bare_cpp_property(this_val, instance.get(),
+                                                                   instance->get_method(getter_id, false), getter_id, name_id);
+                        if (!read) {
+                            return read.error_value();
+                        }
+                        push_value(std::move(read.value()));
+                        return checked_result<void>();
+                    }
                     // Check instance fields first
                     if (instance->has_field(name_id)) {
                         push_value(instance->get_field(name_id));
@@ -3080,260 +3110,261 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
-				// Both operands are simple identifiers - direct variable lookup without AST traversal
-				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
-				if (!leftResult) return leftResult.error_value();
-				const script_value& leftVal = leftResult.value()->deref();
+				// Both operands are simple identifiers - direct variable lookup without AST
+				// traversal (a null resolution - undefined name, member-method or C++-property
+				// shadow - takes the generic path below, which raises the same texts)
+				script_value* leftPtr = resolve_local_or_env(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
+				script_value* rightPtr = leftPtr ? resolve_local_or_env(rightId->slot_index, rightId->symbol_id, rightId->global_qualified) : nullptr;
+				if (leftPtr && rightPtr) {
+					const script_value& leftVal = leftPtr->deref();
+					const script_value& rightVal = rightPtr->deref();
 
-				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id, rightId->global_qualified);
-				if (!rightResult) return rightResult.error_value();
-				const script_value& rightVal = rightResult.value()->deref();
+					// Fast path for integer arithmetic (most common in loops)
+					if (can_use_fast_path(expr->op.type)) {
+						// Gate on STORAGE, not declared type: a typed-but-uninitialized variable
+						// (`int x;`) holds monostate and unchecked_* access would deref null.
+						const size_t leftIdx = leftVal.raw_storage_index();
+						const size_t rightIdx = rightVal.raw_storage_index();
 
-				// Fast path for integer arithmetic (most common in loops)
-				if (can_use_fast_path(expr->op.type)) {
-					// Gate on STORAGE, not declared type: a typed-but-uninitialized variable
-					// (`int x;`) holds monostate and unchecked_* access would deref null.
-					const size_t leftIdx = leftVal.raw_storage_index();
-					const size_t rightIdx = rightVal.raw_storage_index();
+						if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
+							script_int leftInt = leftVal.unchecked_as_int();
+							script_int rightInt = rightVal.unchecked_as_int();
 
-					if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
-						script_int leftInt = leftVal.unchecked_as_int();
-						script_int rightInt = rightVal.unchecked_as_int();
-
-						switch (expr->op.type) {
-						case token_type::plus:
-							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::minus:
-							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::star:
-							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::slash:
-							if (rightInt == 0) {
-								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+							switch (expr->op.type) {
+							case token_type::plus:
+								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::minus:
+								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::star:
+								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::slash:
+								if (rightInt == 0) {
+									return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+								}
+								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::percent:
+								if (rightInt == 0) {
+									return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+								}
+								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
+								return {};
+							case token_type::less:
+								push_value(make_bool_fast(leftInt < rightInt));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftInt <= rightInt));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftInt > rightInt));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftInt >= rightInt));
+								return {};
+							case token_type::equal_equal:
+								push_value(make_bool_fast(leftInt == rightInt));
+								return {};
+							case token_type::bang_equal:
+								push_value(make_bool_fast(leftInt != rightInt));
+								return {};
+							default:
+								break; // Fall through to normal path
 							}
-							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::percent:
-							if (rightInt == 0) {
-								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						}
+						// Fast path for float/mixed arithmetic
+						else if ((leftIdx == script_value::TYPEID_INT || leftIdx == script_value::TYPEID_FLOAT) &&
+							(rightIdx == script_value::TYPEID_INT || rightIdx == script_value::TYPEID_FLOAT)) {
+							script_float leftFloat = leftIdx == script_value::TYPEID_INT ?
+								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
+							script_float rightFloat = rightIdx == script_value::TYPEID_INT ?
+								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
+
+							switch (expr->op.type) {
+							case token_type::plus:
+								push_value(make_float_fast(leftFloat + rightFloat));
+								return {};
+							case token_type::minus:
+								push_value(make_float_fast(leftFloat - rightFloat));
+								return {};
+							case token_type::star:
+								push_value(make_float_fast(leftFloat * rightFloat));
+								return {};
+							case token_type::slash:
+								if (rightFloat == 0.0) {
+									return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+								}
+								push_value(make_float_fast(leftFloat / rightFloat));
+								return {};
+							case token_type::percent:
+								if (rightFloat == 0.0) {
+									return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+								}
+								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
+								return {};
+							case token_type::less:
+								push_value(make_bool_fast(leftFloat < rightFloat));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftFloat <= rightFloat));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftFloat > rightFloat));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftFloat >= rightFloat));
+								return {};
+							case token_type::equal_equal:
+								push_value(make_bool_fast(leftFloat == rightFloat));
+								return {};
+							case token_type::bang_equal:
+								push_value(make_bool_fast(leftFloat != rightFloat));
+								return {};
+							default:
+								break;
 							}
-							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
+						}
+						// Fast path for string concatenation (common operation)
+						else if (expr->op.type == token_type::plus &&
+							leftIdx == script_value::TYPEID_STRING &&
+							rightIdx == script_value::TYPEID_STRING) {
+							const script_string& leftStr = leftVal.unchecked_as_string();
+							const script_string& rightStr = rightVal.unchecked_as_string();
+							// engine::memory_cap chokepoint: deny the concat result before it exists
+							if (!limits_->memory_charge(sizeof(script_value) + leftStr.size() + rightStr.size())) [[unlikely]] {
+								return detail::raise_memory_cap(*limits_);
+							}
+							push_value(make_value(leftStr + rightStr));
 							return {};
-						case token_type::less:
-							push_value(make_bool_fast(leftInt < rightInt));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftInt <= rightInt));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftInt > rightInt));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftInt >= rightInt));
-							return {};
-						case token_type::equal_equal:
-							push_value(make_bool_fast(leftInt == rightInt));
-							return {};
-						case token_type::bang_equal:
-							push_value(make_bool_fast(leftInt != rightInt));
-							return {};
-						default:
-							break; // Fall through to normal path
+						}
+						// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
+						// error surface identical to this shape's plain fast path (twin parity)
+						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+								return checked_result<void>(make_error_code(z->code), z->text);
+							}
 						}
 					}
-					// Fast path for float/mixed arithmetic
-					else if ((leftIdx == script_value::TYPEID_INT || leftIdx == script_value::TYPEID_FLOAT) &&
-						(rightIdx == script_value::TYPEID_INT || rightIdx == script_value::TYPEID_FLOAT)) {
-						script_float leftFloat = leftIdx == script_value::TYPEID_INT ?
-							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-						script_float rightFloat = rightIdx == script_value::TYPEID_INT ?
-							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
 
-						switch (expr->op.type) {
-						case token_type::plus:
-							push_value(make_float_fast(leftFloat + rightFloat));
-							return {};
-						case token_type::minus:
-							push_value(make_float_fast(leftFloat - rightFloat));
-							return {};
-						case token_type::star:
-							push_value(make_float_fast(leftFloat * rightFloat));
-							return {};
-						case token_type::slash:
-							if (rightFloat == 0.0) {
-								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-							}
-							push_value(make_float_fast(leftFloat / rightFloat));
-							return {};
-						case token_type::percent:
-							if (rightFloat == 0.0) {
-								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-							}
-							push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-							return {};
-						case token_type::less:
-							push_value(make_bool_fast(leftFloat < rightFloat));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftFloat <= rightFloat));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftFloat > rightFloat));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftFloat >= rightFloat));
-							return {};
-						case token_type::equal_equal:
-							push_value(make_bool_fast(leftFloat == rightFloat));
-							return {};
-						case token_type::bang_equal:
-							push_value(make_bool_fast(leftFloat != rightFloat));
-							return {};
-						default:
-							break;
-						}
-					}
-					// Fast path for string concatenation (common operation)
-					else if (expr->op.type == token_type::plus &&
-						leftIdx == script_value::TYPEID_STRING &&
-						rightIdx == script_value::TYPEID_STRING) {
-						const script_string& leftStr = leftVal.unchecked_as_string();
-						const script_string& rightStr = rightVal.unchecked_as_string();
-						// engine::memory_cap chokepoint: deny the concat result before it exists
-						if (!limits_->memory_charge(sizeof(script_value) + leftStr.size() + rightStr.size())) [[unlikely]] {
-							return detail::raise_memory_cap(*limits_);
-						}
-						push_value(make_value(leftStr + rightStr));
-						return {};
-					}
-					// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
-					// error surface identical to this shape's plain fast path (twin parity)
-					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-							return checked_result<void>(make_error_code(z->code), z->text);
-						}
-					}
+					// Fast path didn't handle it - copy values for fallback dispatch
+					pre_fetched_left = leftVal;
+					pre_fetched_right = rightVal;
+					already_have_values = true;
 				}
-
-				// Fast path didn't handle it - copy values for fallback dispatch
-				pre_fetched_left = leftVal;
-				pre_fetched_right = rightVal;
-				already_have_values = true;
 			}
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
 			else if (expr->right->get_type() == node_type::literal_expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
-				if (!leftResult) return leftResult.error_value();
-				const script_value& leftVal = leftResult.value()->deref();
-				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
+				if (script_value* leftPtr = resolve_local_or_env(leftId->slot_index, leftId->symbol_id, leftId->global_qualified)) {
+					const script_value& leftVal = leftPtr->deref();
+					const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
 
-				// Ultra-fast integer path (most common for loop conditions)
-				if (can_use_fast_path(expr->op.type)) {
-					// Use raw_storage_index for fastest type check
-					size_t leftIdx = leftVal.raw_storage_index();
-					size_t rightIdx = rightVal.raw_storage_index();
+					// Ultra-fast integer path (most common for loop conditions)
+					if (can_use_fast_path(expr->op.type)) {
+						// Use raw_storage_index for fastest type check
+						size_t leftIdx = leftVal.raw_storage_index();
+						size_t rightIdx = rightVal.raw_storage_index();
 
-					if (leftIdx == 1 && rightIdx == 1) {  // Both ints
-						script_int leftInt = leftVal.unchecked_as_int();
-						script_int rightInt = rightVal.unchecked_as_int();
+						if (leftIdx == 1 && rightIdx == 1) {  // Both ints
+							script_int leftInt = leftVal.unchecked_as_int();
+							script_int rightInt = rightVal.unchecked_as_int();
 
-						switch (expr->op.type) {
-						case token_type::less:
-							push_value(make_bool_fast(leftInt < rightInt));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftInt <= rightInt));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftInt > rightInt));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftInt >= rightInt));
-							return {};
-						case token_type::equal_equal:
-							push_value(make_bool_fast(leftInt == rightInt));
-							return {};
-						case token_type::bang_equal:
-							push_value(make_bool_fast(leftInt != rightInt));
-							return {};
-						case token_type::plus:
-							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::minus:
-							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::star:
-							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::slash:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::percent:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
-							return {};
-						default:
-							break;
+							switch (expr->op.type) {
+							case token_type::less:
+								push_value(make_bool_fast(leftInt < rightInt));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftInt <= rightInt));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftInt > rightInt));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftInt >= rightInt));
+								return {};
+							case token_type::equal_equal:
+								push_value(make_bool_fast(leftInt == rightInt));
+								return {};
+							case token_type::bang_equal:
+								push_value(make_bool_fast(leftInt != rightInt));
+								return {};
+							case token_type::plus:
+								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::minus:
+								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::star:
+								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::slash:
+								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::percent:
+								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
+								return {};
+							default:
+								break;
+							}
+						}
+						// Float/mixed numeric path
+						else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
+							script_float leftFloat = leftIdx == 1 ?
+								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
+							script_float rightFloat = rightIdx == 1 ?
+								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
+
+							switch (expr->op.type) {
+							case token_type::less:
+								push_value(make_bool_fast(leftFloat < rightFloat));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftFloat <= rightFloat));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftFloat > rightFloat));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftFloat >= rightFloat));
+								return {};
+							case token_type::plus:
+								push_value(make_float_fast(leftFloat + rightFloat));
+								return {};
+							case token_type::minus:
+								push_value(make_float_fast(leftFloat - rightFloat));
+								return {};
+							case token_type::star:
+								push_value(make_float_fast(leftFloat * rightFloat));
+								return {};
+							case token_type::slash:
+								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+								push_value(make_float_fast(leftFloat / rightFloat));
+								return {};
+							case token_type::percent:
+								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
+								return {};
+							default:
+								break;
+							}
+						}
+						// twin parity for bound operands: float / and % are covered inline in this
+						// shape (vm op_binary_fused), so bound pairs keep the same error surface
+						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+								return checked_result<void>(make_error_code(z->code), z->text);
+							}
 						}
 					}
-					// Float/mixed numeric path
-					else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
-						script_float leftFloat = leftIdx == 1 ?
-							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-						script_float rightFloat = rightIdx == 1 ?
-							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
-
-						switch (expr->op.type) {
-						case token_type::less:
-							push_value(make_bool_fast(leftFloat < rightFloat));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftFloat <= rightFloat));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftFloat > rightFloat));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftFloat >= rightFloat));
-							return {};
-						case token_type::plus:
-							push_value(make_float_fast(leftFloat + rightFloat));
-							return {};
-						case token_type::minus:
-							push_value(make_float_fast(leftFloat - rightFloat));
-							return {};
-						case token_type::star:
-							push_value(make_float_fast(leftFloat * rightFloat));
-							return {};
-						case token_type::slash:
-							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-							push_value(make_float_fast(leftFloat / rightFloat));
-							return {};
-						case token_type::percent:
-							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-							push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-							return {};
-						default:
-							break;
-						}
-					}
-					// twin parity for bound operands: float / and % are covered inline in this
-					// shape (vm op_binary_fused), so bound pairs keep the same error surface
-					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-							return checked_result<void>(make_error_code(z->code), z->text);
-						}
-					}
+					// Fast path didn't fully handle - copy for slow path (literal needs hydration)
+					pre_fetched_left = leftVal;
+					pre_fetched_right = rightVal.has_valid_engine() ? rightVal : hydrate_literal(rightVal);
+					already_have_values = true;
 				}
-				// Fast path didn't fully handle - copy for slow path (literal needs hydration)
-				pre_fetched_left = leftVal;
-				pre_fetched_right = rightVal.has_valid_engine() ? rightVal : hydrate_literal(rightVal);
-				already_have_values = true;
 			}
 		}
 		// FAST PATH 3: literal + identifier (e.g., "100 > i", "5 + x")
@@ -3342,113 +3373,113 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
-				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id, rightId->global_qualified);
-				if (!rightResult) return rightResult.error_value();
-				script_value rightVal = rightResult.value()->deref();
+				if (script_value* rightPtr = resolve_local_or_env(rightId->slot_index, rightId->symbol_id, rightId->global_qualified)) {
+					script_value rightVal = rightPtr->deref();
 
-				// Ultra-fast integer path
-				if (can_use_fast_path(expr->op.type)) {
-					size_t leftIdx = leftVal.raw_storage_index();
-					size_t rightIdx = rightVal.raw_storage_index();
+					// Ultra-fast integer path
+					if (can_use_fast_path(expr->op.type)) {
+						size_t leftIdx = leftVal.raw_storage_index();
+						size_t rightIdx = rightVal.raw_storage_index();
 
-					if (leftIdx == 1 && rightIdx == 1) {  // Both ints
-						script_int leftInt = leftVal.unchecked_as_int();
-						script_int rightInt = rightVal.unchecked_as_int();
+						if (leftIdx == 1 && rightIdx == 1) {  // Both ints
+							script_int leftInt = leftVal.unchecked_as_int();
+							script_int rightInt = rightVal.unchecked_as_int();
 
-						switch (expr->op.type) {
-						case token_type::less:
-							push_value(make_bool_fast(leftInt < rightInt));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftInt <= rightInt));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftInt > rightInt));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftInt >= rightInt));
-							return {};
-						case token_type::equal_equal:
-							push_value(make_bool_fast(leftInt == rightInt));
-							return {};
-						case token_type::bang_equal:
-							push_value(make_bool_fast(leftInt != rightInt));
-							return {};
-						case token_type::plus:
-							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::minus:
-							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::star:
-							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::slash:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-							return {};
-						case token_type::percent:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
-							return {};
-						default:
-							break;
+							switch (expr->op.type) {
+							case token_type::less:
+								push_value(make_bool_fast(leftInt < rightInt));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftInt <= rightInt));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftInt > rightInt));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftInt >= rightInt));
+								return {};
+							case token_type::equal_equal:
+								push_value(make_bool_fast(leftInt == rightInt));
+								return {};
+							case token_type::bang_equal:
+								push_value(make_bool_fast(leftInt != rightInt));
+								return {};
+							case token_type::plus:
+								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::minus:
+								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::star:
+								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::slash:
+								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
+								return {};
+							case token_type::percent:
+								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
+								return {};
+							default:
+								break;
+							}
+						}
+						// Float/mixed numeric path (vm op_binary_fused parity: informative
+						// zero-divisor texts live on this shape's fast-path surface too)
+						else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
+							script_float leftFloat = leftIdx == 1 ?
+								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
+							script_float rightFloat = rightIdx == 1 ?
+								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
+
+							switch (expr->op.type) {
+							case token_type::less:
+								push_value(make_bool_fast(leftFloat < rightFloat));
+								return {};
+							case token_type::less_equal:
+								push_value(make_bool_fast(leftFloat <= rightFloat));
+								return {};
+							case token_type::greater:
+								push_value(make_bool_fast(leftFloat > rightFloat));
+								return {};
+							case token_type::greater_equal:
+								push_value(make_bool_fast(leftFloat >= rightFloat));
+								return {};
+							case token_type::plus:
+								push_value(make_float_fast(leftFloat + rightFloat));
+								return {};
+							case token_type::minus:
+								push_value(make_float_fast(leftFloat - rightFloat));
+								return {};
+							case token_type::star:
+								push_value(make_float_fast(leftFloat * rightFloat));
+								return {};
+							case token_type::slash:
+								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+								push_value(make_float_fast(leftFloat / rightFloat));
+								return {};
+							case token_type::percent:
+								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
+								return {};
+							default:
+								break;
+							}
+						}
+						// twin parity for bound operands: float / and % are covered inline in this
+						// shape (vm op_binary_fused), so bound pairs keep the same error surface
+						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+								return checked_result<void>(make_error_code(z->code), z->text);
+							}
 						}
 					}
-					// Float/mixed numeric path (vm op_binary_fused parity: informative
-					// zero-divisor texts live on this shape's fast-path surface too)
-					else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
-						script_float leftFloat = leftIdx == 1 ?
-							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-						script_float rightFloat = rightIdx == 1 ?
-							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
-
-						switch (expr->op.type) {
-						case token_type::less:
-							push_value(make_bool_fast(leftFloat < rightFloat));
-							return {};
-						case token_type::less_equal:
-							push_value(make_bool_fast(leftFloat <= rightFloat));
-							return {};
-						case token_type::greater:
-							push_value(make_bool_fast(leftFloat > rightFloat));
-							return {};
-						case token_type::greater_equal:
-							push_value(make_bool_fast(leftFloat >= rightFloat));
-							return {};
-						case token_type::plus:
-							push_value(make_float_fast(leftFloat + rightFloat));
-							return {};
-						case token_type::minus:
-							push_value(make_float_fast(leftFloat - rightFloat));
-							return {};
-						case token_type::star:
-							push_value(make_float_fast(leftFloat * rightFloat));
-							return {};
-						case token_type::slash:
-							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-							push_value(make_float_fast(leftFloat / rightFloat));
-							return {};
-						case token_type::percent:
-							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-							push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-							return {};
-						default:
-							break;
-						}
-					}
-					// twin parity for bound operands: float / and % are covered inline in this
-					// shape (vm op_binary_fused), so bound pairs keep the same error surface
-					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-							return checked_result<void>(make_error_code(z->code), z->text);
-						}
-					}
+					// Fast path didn't fully handle - save for slow path (literal needs hydration)
+					pre_fetched_left = leftVal.has_valid_engine() ? leftVal : hydrate_literal(leftVal);
+					pre_fetched_right = std::move(rightVal);
+					already_have_values = true;
 				}
-				// Fast path didn't fully handle - save for slow path (literal needs hydration)
-				pre_fetched_left = leftVal.has_valid_engine() ? leftVal : hydrate_literal(leftVal);
-				pre_fetched_right = std::move(rightVal);
-				already_have_values = true;
 			}
 		}
 	}
@@ -3988,7 +4019,17 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                         std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                         if (instance && instance->has_field(identifier->symbol_id)) {
-                            script_value currentVal = instance->get_field(identifier->symbol_id);
+                            // A hybrid's C++ property reads through its getter and stores through
+                            // its setter (KEEP BYTE-PARALLEL with the VM exec_incdec this-tail)
+                            const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
+                            const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
+                            script_value currentVal = make_value();
+                            if (prop_getter) {
+                                JAISCRIPT_TRY_ASSIGN(currentVal, detail::read_bare_cpp_property(this_val, instance.get(),
+                                    instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+                            } else {
+                                currentVal = instance->get_field(identifier->symbol_id);
+                            }
                             const bool isIncrement = (expr->op.type == token_type::plus_plus);
                             // S8: a bound-alias field decodes live; set_field stores the detached
                             // result (§12.5). KEEP BYTE-PARALLEL with the VM this-field fallback.
@@ -4004,13 +4045,21 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                                 } else {
                                     if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
                                 }
-                                instance->set_field(identifier->symbol_id, make_value(newVal));
+                                if (prop_setter) {
+                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, make_value(newVal)));
+                                } else {
+                                    instance->set_field(identifier->symbol_id, make_value(newVal));
+                                }
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
                                 return {};
                             } else if (ti == script_value::TYPEID_FLOAT) {
                                 script_float oldVal = currentVal.unchecked_as_float();
                                 script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-                                instance->set_field(identifier->symbol_id, make_value(newVal));
+                                if (prop_setter) {
+                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, make_value(newVal)));
+                                } else {
+                                    instance->set_field(identifier->symbol_id, make_value(newVal));
+                                }
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
                                 return {};
                             } else {
@@ -4072,7 +4121,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     }
 
     auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
-    script_value setter = target.method(setter_id);
+    script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
         const script_function& func = setter.as_function();
         std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
@@ -4599,8 +4648,17 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         "Undefined variable '{0}' (not a field of 'this')", identifier->symbol_id);
                 }
 
-                // Get current field value
-                script_value currentValue = instance->get_field(identifier->symbol_id);
+                // Get current field value. A hybrid's C++ property reads through its getter and
+                // stores through its setter (KEEP BYTE-PARALLEL with the VM exec_compound_store this-tail)
+                const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
+                const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
+                script_value currentValue = make_value();
+                if (prop_getter) {
+                    JAISCRIPT_TRY_ASSIGN(currentValue, detail::read_bare_cpp_property(this_val, instance.get(),
+                        instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+                } else {
+                    currentValue = instance->get_field(identifier->symbol_id);
+                }
 
                 // Check for custom arithmetic operators on class instances
                 if (currentValue.is_object()) {
@@ -4616,11 +4674,15 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (op_symbol_id != 0) {
                         auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                         if (custom_result.has_value()) {
-                            auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(custom_result.value()));
-                            if (!enforced) {
-                                return enforced.error_value();
+                            if (prop_setter) {
+                                JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
+                            } else {
+                                auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(custom_result.value()));
+                                if (!enforced) {
+                                    return enforced.error_value();
+                                }
+                                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                             }
-                            instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                             push_value(std::move(custom_result.value()));
                             return {};
                         }
@@ -4707,15 +4769,32 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // Store the enforced (declared-type converted) value; the expression result
                 // stays the promoted value, matching member/element compound semantics
-                auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(resultValue));
-                if (!enforced) {
-                    return enforced.error_value();
+                if (prop_setter) {
+                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
+                } else {
+                    auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(resultValue));
+                    if (!enforced) {
+                        return enforced.error_value();
+                    }
+                    instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                 }
-                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                 push_value(std::move(resultValue));
             }
         } else if (expr->target->get_type() == node_type::member_expr) {
             auto* memberExpr = static_cast<member_expr*>(expr->target.get());
+            // C::s op= v writes back through the shared static-store kernel (vm parity)
+            auto store_static_target = [&](const script_value& result) -> checked_result<void> {
+                auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
+                                                              environment_->find_access_context());
+                if (!cls) {
+                    return cls.error_value();
+                }
+                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, clone_for_assignment(result));
+                if (!stored) {
+                    return stored.error_value();
+                }
+                return {};
+            };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
             JAISCRIPT_TRY(dispatch_expr(memberExpr));
@@ -4757,6 +4836,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (op_symbol_id != 0) {
                     auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                     if (custom_result.has_value()) {
+                        if (memberExpr->is_static) {
+                            JAISCRIPT_TRY(store_static_target(custom_result.value()));
+                            push_value(std::move(custom_result.value()));
+                            return {};
+                        }
                         // Assign the result back to the property
                         JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
                         script_value objectValue = pop_value().deref();
@@ -4866,6 +4950,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         "Unsupported compound assignment operator");
             }
             
+            if (memberExpr->is_static) {
+                JAISCRIPT_TRY(store_static_target(resultValue));
+                push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
+                return {};
+            }
+
             // Now assign the result back to the property
             // We need to evaluate the object again to get a fresh reference
             JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
@@ -4874,7 +4964,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Check if it's an object
             if (!objectValue.is_object()) {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value("Cannot assign to member of non-object type");
+                active_exception_value_ = make_value(std::string("Cannot assign to member of non-object type"));
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
@@ -5217,7 +5307,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         const bool proven_identity = expr->static_store_proof == proof_same_type && slot_type &&
                                                      detail::same_type_payload(value, slot_type.get());
                         if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
-                                          slot_type->base_type == script_value_type::jai_object_type)) {
+                                          slot_type->base_type == script_value_type::jai_object_type ||
+                                          slot_type->base_type == script_value_type::jai_array_type ||
+                                          slot_type->base_type == script_value_type::jai_map_type)) {
                             auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
                             if (!enforced) {
                                 return enforced.error_value();
@@ -5672,27 +5764,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                             // First try instance fields
                             if (instance->has_field(identifier->symbol_id)) {
-                                // Check if this is a C++ parent property that needs setter method
-                                auto class_def = instance->get_class_definition();
-                                if (class_def) {
-                                    auto cpp_base = class_def->find_cpp_base_class();
-                                    if (cpp_base) {
-                                        // Check if field has a pre-registered setter ID (fast path)
-                                        uint64_t setter_id = cpp_base->get_property_setter_id(identifier->symbol_id);
-                                        if (setter_id != 0) {
-                                            // This is a C++ property - call the setter method
-                                            auto setter = cpp_base->get_method(setter_id, false);
-                                            if (setter.is_function()) {
-                                                // Call setter with this and value
-                                                std::vector<script_value> args = {this_val, value};
-                                                auto result = setter.as_function()(args);
-                                                if (!result) {
-                                                    return result.error_value();
-                                                }
-                                                assigned_to_member = true;
-                                            }
-                                        }
-                                    }
+                                // A hybrid's C++ property stores through its setter, exactly like
+                                // this.name = v (a same-named script field shadows it)
+                                if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), identifier->symbol_id)) {
+                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), setter_id, value));
+                                    assigned_to_member = true;
                                 }
                                 // Not a C++ property or no setter - use regular field assignment
                                 // (typed fields enforce like locals)
@@ -5720,28 +5796,55 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     assigned_to_member = true;
                                 }
                             }
-                            // Then try static fields
+                            // Then try static fields (typed statics enforce like fields)
                             else {
                                 auto class_def = instance->get_class_definition();
-                                if (class_def) {
+                                if (class_def && class_def->has_static_field(identifier->symbol_id)) {
                                     // All-detach (#12): implicit static store snapshots too
                                     if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
                                         value = value.detached_for_store();
                                     }
                                     if (is_lvalue_read) {
-                                        if (class_def->set_static_field(identifier->symbol_id, clone_for_assignment(value))) {
-                                            assigned_to_member = true;
+                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, clone_for_assignment(value));
+                                        if (!stored) {
+                                            return stored.error_value();
                                         }
                                     } else {
-                                        if (class_def->set_static_field(identifier->symbol_id, std::move(value))) {
-                                            value = class_def->get_static_field(identifier->symbol_id);  // Get back
-                                            assigned_to_member = true;
+                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, std::move(value));
+                                        if (!stored) {
+                                            return stored.error_value();
                                         }
+                                        value = std::move(stored.value());
                                     }
+                                    assigned_to_member = true;
                                 }
                             }
                         }
                     }
+                }
+
+                // Static-method scope: no 'this' to route through, and a nested block's env
+                // assign would raw-write the static cell it finds through the scope env - land
+                // the store on the scope's class (KEEP BYTE-PARALLEL with vm_backend
+                // store_popped_value's statics tail)
+                if (!assigned_to_member && member_scope_.state == detail::member_scope_state::statics &&
+                    member_scope_.statics && member_scope_.statics->has_static_field(identifier->symbol_id)) {
+                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                        value = value.detached_for_store();
+                    }
+                    if (is_lvalue_read) {
+                        auto stored = detail::store_static_member(*member_scope_.statics, identifier->symbol_id, clone_for_assignment(value));
+                        if (!stored) {
+                            return stored.error_value();
+                        }
+                    } else {
+                        auto stored = detail::store_static_member(*member_scope_.statics, identifier->symbol_id, std::move(value));
+                        if (!stored) {
+                            return stored.error_value();
+                        }
+                        value = std::move(stored.value());
+                    }
+                    assigned_to_member = true;
                 }
 
                 if (!assigned_to_member) {
@@ -5764,54 +5867,25 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
         // Check if target is a member expression (property assignment)
         else if (expr->target->get_type() == node_type::member_expr) {
             auto* memberExpr = static_cast<member_expr*>(expr->target.get());
-            // Check if this is a static member assignment
+            // Static member assignment: the shared kernel resolves the class and runs the
+            // field-store table over the static's declared type (vm parity)
             if (memberExpr->is_static) {
-                // For static assignment, get the class definition
-                if (memberExpr->object->get_type() != node_type::identifier_expr) {
-                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                        "Static member assignment requires a class name");
+                auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
+                                                              environment_->find_access_context());
+                if (!cls) {
+                    return cls.error_value();
                 }
-                auto* ident_expr = static_cast<identifier_expr*>(memberExpr->object.get());
-
-                uint64_t class_name_id = ident_expr->symbol_id;
-                auto [class_var_id, class_var_name] = string_symbolizer_->get_class_var_id_with_view(class_name_id);
-                auto class_result = environment_->get(class_var_id);
-                if (!class_result) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Class '{0}' not found", class_name_id);
-                }
-                script_value class_var = std::move(class_result.value());
-
-                if (!class_var.is_object()) {
-                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                        "'{0}' is not a class", class_name_id);
-                }
-
-                auto objHolder = class_var.get_object_holder();
-                if (!objHolder || objHolder->type_name != "class_definition") {
-                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                        "'{0}' is not a valid class", class_name_id);
-                }
-
-                auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
-
-                if (class_def->chain_has_nonpublic()) [[unlikely]] {
-                    JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), memberExpr->member_id,
-                                                                environment_->find_access_context()));
-                }
-
-                // Evaluate the value
                 JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value value = pop_value();
-
-                // Set the static field
-                if (!class_def->set_static_field(memberExpr->member_id, clone_for_assignment(value))) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Cannot assign to static member: field '{0}' not found", memberExpr->member_id);
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
                 }
-
-
-                push_value(std::move(value));
+                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, clone_for_assignment(value));
+                if (!stored) {
+                    return stored.error_value();
+                }
+                push_value(std::move(stored.value()));
                 return {};
             }
 
@@ -5832,7 +5906,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Check if it's an object
             if (!dereferenced.is_object()) {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value("Cannot assign to member of non-object type");
+                active_exception_value_ = make_value(std::string("Cannot assign to member of non-object type"));
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
@@ -6557,213 +6631,62 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 }
 
 // === STRONG TYPES: Type enforcement for assignment ===
+// The one typed-slot table (detail::convert_for_typed_slot); this site owns the assignment
+// texts. KEEP BYTE-PARALLEL with vm_backend::enforce_type_compatibility.
 checked_result<script_value> interpreter::enforce_type_compatibility(
     script_value value,
     type_info_ptr target_type,
     std::string_view var_name
 ) {
-    // Case 1: Uninitialized variable (auto x;) - lock to source type
-    if (!target_type) {
-        // First assignment locks the type - value already has its own type
+    // nullptr target (auto x;) locks to the source type; any (var x) takes anything
+    if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
         return std::move(value);
     }
-
-    // Case 2: Any type (var x) - allow anything
-    if (target_type->base_type == script_value_type::jai_any_type) {
-        // Keep any_type on the variable, but store the value
-        // The value's internal type is preserved for operations
-        return std::move(value);
-    }
-
-    // Case 3: Locked type - enforce compatibility
-    auto source_type = value.type();
-    auto target = target_type->base_type;
-
-    // Fast path: same type (but NOT for object types - need to compare class names)
-    if (source_type == target && target != script_value_type::jai_object_type) {
-        // Typed-container boundary: array/map payloads are element-checked with push's
-        // rules before they may sit behind an array<T>/map<K,V> tag (shared kernel,
-        // KEEP BYTE-PARALLEL with vm_backend::enforce_type_compatibility)
-        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
-            auto outcome = detail::enforce_container_boundary(std::move(value), target_type, engine_);
-            if (!outcome.value) {
-                auto* sym = engine_->get_symbolizer();
-                return checked_result<script_value>(
-                    make_error_code(runtime_error_code::array_element_type_mismatch),
-                    detail::container_boundary_mismatch_text,
-                    sym->intern(outcome.offending), sym->intern(outcome.expected));
-            }
-            return std::move(*outcome.value);
+    {   // same-storage scalars are the table's identity row
+        const script_value& seen = value.is_reference() ? value.deref() : value;
+        size_t want = script_value::TYPEID_INVALID;
+        switch (target_type->base_type) {
+            case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;
+            case script_value_type::jai_float_type: want = script_value::TYPEID_FLOAT; break;
+            case script_value_type::jai_string_type: want = script_value::TYPEID_STRING; break;
+            case script_value_type::jai_bool_type: want = script_value::TYPEID_BOOL; break;
+            case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
+            default: break;
         }
-        return std::move(value);
-    }
-
-    // Numeric conversions (int <-> float)
-    if (target == script_value_type::jai_int_type) {
-        if (source_type == script_value_type::jai_float_type) {
-            // float -> int (truncate)
-            return make_value(static_cast<script_int>(value.unchecked_as_float()));
-        }
-        if (source_type == script_value_type::jai_bool_type) {
-            // bool -> int
-            return make_value(static_cast<script_int>(value.unchecked_as_bool() ? 1 : 0));
+        if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want) {
+            return std::move(value);
         }
     }
-
-    if (target == script_value_type::jai_float_type) {
-        if (source_type == script_value_type::jai_int_type) {
-            // int -> float (widening)
-            return make_value(static_cast<script_float>(value.unchecked_as_int()));
+    auto outcome = detail::convert_for_typed_slot(value, target_type, engine_);
+    if (!outcome) {
+        return outcome.error_value();
+    }
+    using verdict = detail::slot_conversion::verdict;
+    detail::slot_conversion& out = outcome.value();
+    switch (out.v) {
+        case verdict::identity:
+        case verdict::identity_exact:
+            return std::move(value);
+        case verdict::converted:
+            return std::move(*out.value);
+        case verdict::container_mismatch: {
+            auto* sym = engine_->get_symbolizer();
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::array_element_type_mismatch),
+                detail::container_boundary_mismatch_text,
+                sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
         }
-        if (source_type == script_value_type::jai_bool_type) {
-            // bool -> float
-            return make_value(static_cast<script_float>(value.unchecked_as_bool() ? 1.0 : 0.0));
-        }
-    }
-
-    if (target == script_value_type::jai_bool_type) {
-        // Truthy conversion to bool
-        return make_value(is_truthy(value));
-    }
-
-    if (target == script_value_type::jai_string_type) {
-        // to_string conversion
-        return make_value(value.to_string());
-    }
-
-    // Null can be assigned to object/shared_ptr/weak_ptr types
-    // Keep the target type_info so the variable remains typed
-    if (source_type == script_value_type::jai_null_type) {
-        if (target == script_value_type::jai_object_type ||
-            target == script_value_type::jai_shared_ptr_type ||
-            target == script_value_type::jai_weak_ptr_type) {
-            // Return null but preserve the target type for future assignments
-            script_value null_val = make_value();
-            null_val.set_type_info(target_type);
-            return null_val;
-        }
-    }
-
-    // Class type compatibility for object types (nominal typing)
-    if (target == script_value_type::jai_object_type &&
-        source_type == script_value_type::jai_object_type) {
-
-        auto source_type_info = value.get_type_info();
-        if (source_type_info && target_type) {
-            // Compare class names - must match exactly or source must be subclass of target
-            const std::string& source_class_name = source_type_info->type_name;
-            const std::string& target_class_name = target_type->type_name;
-
-            // Same class name - compatible
-            if (source_class_name == target_class_name) {
+        case verdict::reject_class:
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
+        case verdict::handle_target:
+            // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is (outside the table)
+            if (value.type() == target_type->base_type) {
                 return std::move(value);
             }
-
-            // Check inheritance - source must be derived from target (child -> parent is OK)
-            // We need to get the actual class instance to check the inheritance chain
-            try {
-                auto instance = value.as<std::shared_ptr<class_instance>>();
-                if (instance) {
-                    class_definition* class_def = instance->get_class_definition();
-                    if (class_def) {
-                        // Walk up the inheritance chain looking for target class
-                        class_definition* current = class_def;
-                        while (current) {
-                            for (const auto& parent : current->get_parent_classes()) {
-                                if (parent && parent->get_name() == target_class_name) {
-                                    // Source is derived from target - compatible
-                                    return std::move(value);
-                                }
-                            }
-                            // Move up to first parent for next iteration (single inheritance path)
-                            current = current->get_parent().get();
-                        }
-                    }
-                }
-            } catch (...) {
-                // Not a class_instance or extraction failed - fall through to error
-            }
-
-            // Classes are incompatible - try constructor-based conversion
-            // Look for a constructor Target(Source) in the target class.
-            // Ruling: a defaulted-param ctor is NOT a converting ctor - implicit
-            // conversion needs a TRUE 1-param ctor (delegating overload opts in);
-            // without one, skip the dispatcher (whose explicit path keeps the window).
-            auto conv_class_def = engine_ ? engine_->get_class_definition(target_class_name) : nullptr;
-            if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
-            }
-            auto ctor_result = environment_->get(target_class_name);
-            if (ctor_result && ctor_result.value().is_function()) {
-                const script_function& ctor = ctor_result.value().as_function();
-                std::vector<script_value> ctor_args;
-                ctor_args.push_back(value);
-
-                try {
-                    auto result = ctor(ctor_args);
-                    if (result.has_value()) {
-                        return std::move(result.value());
-                    }
-                } catch (const runtime_error& e) {
-                    std::string error_msg = e.what();
-                    if (error_msg.find("No constructor found") == std::string::npos) {
-                        // Constructor exists but failed - propagate the error
-                        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Constructor conversion failed", target_type->id);
-                    }
-                    // No matching constructor - fall through to type mismatch error
-                }
-            }
-
-            // No suitable constructor found - incompatible types
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
-        }
+            [[fallthrough]];
+        default:
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
     }
-
-    // Primitive-to-object conversion via constructor
-    // Try to convert primitives (int, float, string, bool, char) to object types via constructors
-    if (target == script_value_type::jai_object_type && target_type && !target_type->type_name.empty()) {
-        bool is_primitive = (source_type == script_value_type::jai_int_type ||
-                            source_type == script_value_type::jai_float_type ||
-                            source_type == script_value_type::jai_string_type ||
-                            source_type == script_value_type::jai_bool_type ||
-                            source_type == script_value_type::jai_char_type);
-
-        if (is_primitive) {
-            const std::string& target_class_name = target_type->type_name;
-
-            // Ruling: implicit primitive->object conversion needs a TRUE 1-param ctor
-            // (a defaulted-param ctor is not a converting ctor; delegating overload opts
-            // in) - same error text as the incompatible-types tail below
-            auto conv_class_def = engine_ ? engine_->get_class_definition(target_class_name) : nullptr;
-            if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
-            }
-            // Try to find and call the constructor with the primitive value
-            auto ctor_result = environment_->get(target_class_name);
-            if (ctor_result && ctor_result.value().is_function()) {
-                const script_function& ctor = ctor_result.value().as_function();
-                std::vector<script_value> ctor_args;
-                ctor_args.push_back(value);
-
-                try {
-                    auto result = ctor(ctor_args);
-                    if (result.has_value()) {
-                        return std::move(result.value());
-                    }
-                } catch (const runtime_error& e) {
-                    std::string error_msg = e.what();
-                    if (error_msg.find("No constructor found") == std::string::npos) {
-                        // Constructor exists but failed - propagate the error
-                        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Primitive conversion failed", target_type->id);
-                    }
-                    // No matching constructor - fall through to type mismatch error
-                }
-            }
-        }
-    }
-
-    // Incompatible types - error
-    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type ? target_type->id : 0);
 }
 
 // Compound store-back: locked targets convert the promoted result like '=' does; var
@@ -7720,11 +7643,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return {};
         }
 
-        // Try static field access
-        // get_static_field returns null if not found
-        script_value static_value = class_def->get_static_field(expr->member_id);
-        if (!static_value.is_null()) {
-            push_value(std::move(static_value));
+        // Try static field access (presence, not null-ness: a typed null static reads null)
+        if (const script_value* static_value = class_def->get_static_field_ptr(expr->member_id)) {
+            push_value(*static_value);
             return {};
         }
 
@@ -8103,7 +8024,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         if (objectValue.is_null()) {
             return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
         }
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+        return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+            scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
     }
 
     // One path for every object shape (class_instance wrapper, cpp_bound T&, raw holder)
@@ -8121,9 +8043,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Use pre-computed member_id from parser
     uint64_t member_id = expr->member_id;
 
-    // Check for property getter method (C++ properties and inherited properties)
-    // OPTIMIZATION 1: Skip getter lookup entirely if class has no property getters
-    // OPTIMIZATION 2: Cache getter_id on AST node to avoid repeated string allocation + interning
+    // The nearest USER _get_ in the chain (script or C++) wins over the field; the synthesized
+    // accessor is skipped - its body IS the field rung below (KEEP BYTE-PARALLEL with the vm's
+    // member_access_value). getter_id is cached on the node.
     if (target.class_def && target.class_def->has_property_getters()) {
         try {
             uint64_t getter_id = expr->getter_id;
@@ -8132,35 +8054,14 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 getter_id = id;
                 expr->getter_id = getter_id;
             }
-            script_value getter = target.method(getter_id);
+            script_value getter = target.user_accessor(getter_id);
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-                // Call the getter with 'this' as argument
-                const script_function& func = getter.as_function();
-                // A bound C++ getter on a retired script layer reports (script getters
-                // still see the layer's own fields)
-                if (target.instance && target.instance->script_layer_retired() &&
-                    !func.target<script_method_dispatch>() && !target.class_def->is_auto_accessor(getter_id)) {
-                    return checked_result<void>(make_error_code(runtime_error_code::script_layer_retired),
-                        "Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
-                        target.class_def->get_type_id());
-                }
-                std::vector<script_value> args = {objectValue};
-                auto result = func(args);
+                // The shared read (retired-layer report, receiver pin): the bare-name
+                // rung of detail/member_scope.hpp runs the identical kernel
+                auto result = detail::read_cpp_property(objectValue, target.class_def, target.instance.get(),
+                                                        getter, getter_id);
                 if (!result) {
                     return result.error_value();
-                }
-                // Getters for registered-class members return non-owning cpp_bound
-                // references into the receiver - pin the receiver's owning data (same
-                // anchor create_bound_method applies to chained method returns) so
-                // makeFoo().member doesn't dangle when the temporary receiver drops.
-                script_value& getterResult = result.value();
-                if (getterResult.is_non_owning_object()) {
-                    auto resultHolder = getterResult.get_object_holder();
-                    auto receiverHolder = objectValue.get_object_holder();
-                    if (resultHolder && receiverHolder) {
-                        resultHolder->keep_alive = receiverHolder->data ? receiverHolder->data
-                                                                        : receiverHolder->keep_alive;
-                    }
                 }
                 push_value(std::move(result.value()));
                 return {};
@@ -8710,12 +8611,30 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // a same-named GLOBAL over the member.
                     script_value* scoped_target = member_scope_.active()
                         ? scoped_env_lookup(var_id) : nullptr;
+                    // A hybrid's C++ property has no cell to alias: [=] and [&] both take the
+                    // getter snapshot (the field snapshot rule)
+                    std::optional<script_value> property_snapshot;
+                    if (!scoped_target && member_scope_.state == detail::member_scope_state::instance &&
+                        member_scope_.this_storage) {
+                        auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                                 member_scope_.statics, var_id, /*want_methods*/ true);
+                        if (member.what == detail::member_probe_hit::kind::cpp_property) {
+                            auto read = detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
+                                                                       member.method_value, member.getter_id, var_id);
+                            if (!read) {
+                                return read.error_value();
+                            }
+                            property_snapshot = std::move(read.value());
+                        }
+                    }
                     if (scoped_target) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_env_storage(*scoped_target, engine_));
                         } else {
                             captureEnv->define(var_id, clone_for_capture(scoped_target->deref(), string_symbolizer_));
                         }
+                    } else if (property_snapshot) {
+                        captureEnv->define(var_id, clone_for_capture(*property_snapshot, string_symbolizer_));
                     } else if (!member_scope_.active() && environment_->contains(var_id)) {
                         if (capture_by_ref) {
                             script_value* targetPtr = environment_->get_value_ptr(var_id);
@@ -11048,6 +10967,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Collect new field defaults and methods (using uint64_t IDs for performance)
     std::unordered_map<uint64_t, script_value> new_field_defaults;
     std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)
+    std::unordered_map<uint64_t, type_info_ptr> new_static_types; // declared static types ('auto' = null entry)
     std::unordered_map<uint64_t, script_value> new_methods;
     std::unordered_map<uint64_t, script_value> new_static_methods;
     std::set<uint64_t> new_static_field_ids; // statics declared in this (re)definition, for reload purge
@@ -11243,6 +11163,22 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     // Ensure the default value has an engine reference
                     if (!default_val.has_valid_engine() && engine_) {
                         default_val.set_engine(engine_);
+                    }
+                }
+                // Declared type ('auto' parses as null and infers; 'var' stores the any tag);
+                // the initializer converts through the field table like an instance initializer
+                if (field_id != 0) {
+                    new_static_types[field_id] = var_decl->type;
+                }
+                if (!preserve_existing && var_decl->type && var_decl->type->base_type != script_value_type::jai_any_type) {
+                    if (default_val.is_null()) {
+                        default_val.set_type_info(var_decl->type);
+                    } else {
+                        auto converted = detail::field_store_convert(default_val, var_decl->type, engine_);
+                        if (!converted) {
+                            return converted.error_value();
+                        }
+                        default_val = std::move(converted.value());
                     }
                 }
 
@@ -11456,8 +11392,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             field_defaults_with_engine[field_id] = evaluated_value;
         }
 
-        // Generate getter and setter methods for all fields (including new ones)
-        // This is needed for hot reload to work properly with property access
+        // Synthesized accessors for every field without a user _get_/_set_ (a user accessor
+        // keeps its id; the set replaces auto_accessor_ids_ after redefine_class)
+        std::unordered_set<uint64_t> synthesized_accessor_ids;
         for (const auto& [field_id, default_val] : field_defaults_with_engine) {
             // Add getter method
             auto getter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11473,7 +11410,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return instance->get_field(field_id);
             };
             auto [getter_id, _1] = string_symbolizer_->get_getter_id_with_view(field_id);
-            new_methods[getter_id] = script_value::make_function(getter, engine_);
+            if (!new_methods.count(getter_id)) {
+                new_methods[getter_id] = script_value::make_function(getter, engine_);
+                synthesized_accessor_ids.insert(getter_id);
+            }
 
             // Add setter method
             auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11495,13 +11435,17 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return std::move(enforced.value());
             };
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
-            new_methods[setter_id] = script_value::make_function(setter, engine_);
+            if (!new_methods.count(setter_id)) {
+                new_methods[setter_id] = script_value::make_function(setter, engine_);
+                synthesized_accessor_ids.insert(setter_id);
+            }
         }
         
         
         // Declared types install first so redefine_class flags a retype as fields_changed
         // and migrate_fields converts against the NEW types (retype ruling)
         class_def->replace_field_declared_types(std::move(new_field_types), true);
+        class_def->replace_static_declared_types(std::move(new_static_types));
 
         // Structural identity (position-insensitive AST key): an identical reload adopts
         // the freshly minted ASTs (line info stays current) but skips all per-instance
@@ -11521,6 +11465,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_,
                                   structurally_identical);
+        class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
 
         if (structural_key.empty()) {
             try {
@@ -11550,6 +11495,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     } else {
         // For new classes, add the fields normally
         class_def->replace_field_declared_types(std::move(new_field_types), false);
+        class_def->replace_static_declared_types(std::move(new_static_types));
         for (const auto& [field_id, default_val] : new_field_defaults) {
             // Convert ID back to string for add_field (legacy API)
             std::string field_name(string_symbolizer_->get_string(field_id));
@@ -11572,7 +11518,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return instance->get_field(field_id);
             };
             auto [getter_id, _1] = string_symbolizer_->get_getter_id_with_view(field_id);
-            class_def->add_method_by_id(getter_id, getter, true);  // true = is_property_getter
+            if (!class_def->has_method(getter_id)) { class_def->add_method_by_id(getter_id, getter, true); }   // a user _get_ keeps its id
 
             // Add setter method - capture field_id for performance
             auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11594,7 +11540,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return std::move(enforced.value());
             };
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
-            class_def->add_method_by_id(setter_id, setter, true);  // true = synthesized accessor
+            if (!class_def->has_method(setter_id)) { class_def->add_method_by_id(setter_id, setter, true); }
         }
     }
     
@@ -12662,7 +12608,9 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             if (member.value_ptr) {
                 return bind_reference_to_storage(*member.value_ptr, frame_index, param.slot_index);
             }
-            if (detail::member_scope_has_method(caller_state, caller_locals->scope_this,
+            // A C++ property has no cell to alias: it shadows like a method (never a global)
+            if (member.what == detail::member_probe_hit::kind::cpp_property ||
+                detail::member_scope_has_method(caller_state, caller_locals->scope_this,
                                                 caller_locals->scope_static, symbol_id)) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::undefined_variable),
@@ -13236,6 +13184,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             auto passed = detail::ref_return_pass_through(std::move(returnValue_.value()),
                                                           function.return_type, string_symbolizer_);
             if (!passed) {
+                // The returning frame is still live: the trace names the return site
+                if (!trace_captured_) capture_stack_trace();
                 cleanup();
                 return passed.error_value();
             }
@@ -13263,6 +13213,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 if (!(return_proven_ && detail::same_type_payload(result, function.return_type.get()))) {
                     auto convert_result = try_convert_for_parameter(result, function.return_type);
                     if (!convert_result) {
+                        if (!trace_captured_) capture_stack_trace();
                         cleanup();
                         return convert_result.error_value();
                     }
@@ -13396,241 +13347,90 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
     return false;
 }
 
+// The one typed-slot table (detail::convert_for_typed_slot); this site owns the parameter /
+// return texts and the identity return shapes (the arg itself; the derefed arg for exact-name
+// objects - the I-C1 lane and the exact-class lane replicate them).
+// KEEP BYTE-PARALLEL with vm_backend::try_convert_for_parameter.
 checked_result<script_value> interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
     if (!target_type) {
         return arg;  // No type specified = any type accepted
     }
 
-    // Dereference if the argument is a reference to get the actual value type
-    // (deref() follows chains to a non-reference or throws - no residual-ref case)
+    // deref() follows chains to a non-reference or throws - no residual-ref case
     const script_value& derefed_arg = arg.deref();
-    auto source_type = derefed_arg.storage_type();
-    auto target_base_type = target_type->base_type;
-
-    // Any type accepts anything - no conversion needed
+    const auto target_base_type = target_type->base_type;
     if (target_base_type == script_value_type::jai_any_type) return arg;
-
-    // Exact match - no conversion needed
-    if (source_type == target_base_type) {
-        // For objects, also check the type name (with inheritance support)
-        if (source_type == script_value_type::jai_object_type) {
-            // First, try to get the type name from type_info
-            auto source_type_info = derefed_arg.get_type_info();
-            if (source_type_info && !source_type_info->type_name.empty() &&
-                source_type_info->type_name == target_type->type_name) {
-                return derefed_arg;  // Same object type - no conversion needed
-            }
-            // Also check the resolved class name (script classes, cpp_bound references)
-            auto resolved = resolve_member_target(derefed_arg);
-            if (resolved) {
-                if (resolved.class_name() == target_type->type_name) {
-                    return arg;  // Same object type - no conversion needed
-                }
-                // Check inheritance - derived types are compatible with base types
-                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-                    return arg;  // Derived type - compatible without conversion
-                }
-            }
-            // Different object types - fall through to try constructor conversion
-        } else {
-            return arg;  // Non-object types match - no conversion needed
-        }
+    switch (derefed_arg.raw_storage_index()) {   // same-storage scalars and handles bind as-is (the table's identity / handle rows)
+        case script_value::TYPEID_INT: if (target_base_type == script_value_type::jai_int_type) return arg; break;
+        case script_value::TYPEID_FLOAT: if (target_base_type == script_value_type::jai_float_type) return arg; break;
+        case script_value::TYPEID_STRING: if (target_base_type == script_value_type::jai_string_type) return arg; break;
+        case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
+        case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
+        case script_value::TYPEID_SHARED_PTR: if (target_base_type == script_value_type::jai_shared_ptr_type) return arg; break;
+        case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
+        default: break;
     }
 
-    // Null can be assigned to object types without conversion
-    if (source_type == script_value_type::jai_null_type &&
-        target_base_type == script_value_type::jai_object_type) {
-        return arg;
+    auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_);
+    if (!outcome) {
+        return outcome.error_value();
     }
-
-    // shared_ptr<T> handling
-    auto source_type_info = derefed_arg.get_type_info();
-    if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        // shared_ptr<T> -> shared_ptr<T> - same shared_ptr type
-        if (target_base_type == script_value_type::jai_shared_ptr_type) {
-            // Check if inner types match
-            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-                return arg;  // shared_ptr<T> -> shared_ptr<T> with matching inner type
-            }
-            // Also check via resolved class (with inheritance support)
-            auto resolved = resolve_member_target(derefed_arg);
-            if (resolved) {
-                if (resolved.class_name() == target_type->type_name) {
-                    return arg;
-                }
-                // Check inheritance
-                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-                    return arg;  // Derived type compatible with base
-                }
-            }
+    using verdict = detail::slot_conversion::verdict;
+    detail::slot_conversion& out = outcome.value();
+    switch (out.v) {
+        case verdict::identity:
+            return arg;
+        case verdict::identity_exact:
+            return derefed_arg;
+        case verdict::converted:
+            return std::move(*out.value);
+        case verdict::container_mismatch: {
+            auto* sym = engine_->get_symbolizer();
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::array_element_type_mismatch),
+                detail::container_boundary_mismatch_text,
+                sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
         }
-        // shared_ptr<T> -> T - unwrap to regular object
-        if (target_base_type == script_value_type::jai_object_type) {
-            // Check if the inner type matches the target type (with inheritance)
-            auto resolved = resolve_member_target(derefed_arg);
-            if (resolved) {
-                if (resolved.class_name() == target_type->type_name) {
-                    return arg;  // shared_ptr<T> -> T is allowed (preserves reference semantics)
-                }
-                // Check inheritance
-                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-                    return arg;  // Derived type compatible with base
-                }
-            }
-            // Check type_info's inner type name
-            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+        case verdict::handle_target: {
+            // shared_ptr<T> / weak_ptr<T> parameters and returns (outside the table): a same-kind
+            // payload, a matching or derived handle binds as-is
+            if (derefed_arg.storage_type() == target_base_type) {
                 return arg;
             }
-        }
-    }
-
-    // For object target types, try constructor-based conversion
-    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
-        const std::string& target_class_name = target_type->type_name;
-
-        // First, check if there's a constructor that directly accepts the source type
-        // This prevents chained conversions (A->B->C)
-        auto eng = engine_;
-        if (eng) {
-            auto class_def = eng->get_class_definition(target_class_name);
-            if (class_def) {
-                auto script_class = std::dynamic_pointer_cast<script_class_definition>(class_def);
-                if (script_class) {
-                    // Check constructor ASTs for one that accepts the source type
-                    const auto& ctor_asts = script_class->get_constructor_asts();
-                    bool has_matching_ctor = false;
-
-                    // Get source type info (name and class_def for inheritance)
-                    std::string source_type_name;
-                    class_definition* source_class_def = nullptr;
-                    if (source_type == script_value_type::jai_object_type) {
-                        auto resolved = resolve_member_target(derefed_arg);
-                        if (resolved) {
-                            source_type_name = resolved.class_name();
-                            source_class_def = resolved.class_def;
-                        }
+            auto source_type_info = derefed_arg.get_type_info();
+            if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
+                target_base_type == script_value_type::jai_shared_ptr_type) {
+                if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+                    return arg;
+                }
+                auto resolved = resolve_member_target(derefed_arg);
+                if (resolved) {
+                    if (resolved.class_name() == target_type->type_name) {
+                        return arg;
                     }
-
-                    for (const auto& ctor_ast : ctor_asts) {
-                        if (ctor_ast->parameters.size() != 1) continue;
-
-                        const auto& param = ctor_ast->parameters[0];
-                        if (!param.type || param.type->type_name.empty()) {
-                            // Untyped parameter - accepts anything
-                            has_matching_ctor = true;
-                            break;
-                        }
-
-                        // Check if parameter type matches source type (with inheritance)
-                        if (source_type == script_value_type::jai_object_type) {
-                            if (param.type->type_name == source_type_name) {
-                                has_matching_ctor = true;
-                                break;
-                            }
-                            // Check inheritance - derived types are accepted
-                            if (source_class_def && source_class_def->is_subtype_of(param.type->type_name)) {
-                                has_matching_ctor = true;
-                                break;
-                            }
-                        } else {
-                            // For primitives, check base_type match or numeric conversion
-                            if (param.type->base_type == source_type ||
-                                (source_type == script_value_type::jai_int_type &&
-                                 param.type->base_type == script_value_type::jai_float_type) ||
-                                (source_type == script_value_type::jai_float_type &&
-                                 param.type->base_type == script_value_type::jai_int_type)) {
-                                has_matching_ctor = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!has_matching_ctor) {
-                        // No constructor directly accepts the source type - don't allow chained conversion
-                        return checked_result<script_value>(
-                            make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot convert {0} to {1} (no suitable single-argument constructor)",
-                            derefed_arg.type_id(), target_type->id);
+                    if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
+                        return arg;
                     }
                 }
             }
+            break;
         }
+        default:
+            break;
+    }
 
-        // Try to find and call the constructor with the source value
-        // Use global environment since constructors are always registered at global scope
-        auto ctor_result = get_global_environment()->get(target_class_name);
-        if (ctor_result && ctor_result.value().is_function()) {
-            const script_function& ctor = ctor_result.value().as_function();
-
-            // Call constructor with the source value as argument
-            std::vector<script_value> ctor_args;
-            ctor_args.push_back(arg);
-
-            auto result = ctor(ctor_args);
-            if (result.has_value()) {
-                return std::move(result.value());
-            }
-            // Constructor returned invalid result - fall through to error
-        }
-
-        // No suitable constructor found
+    const uint64_t source_id = string_symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_));
+    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
+        (out.v == verdict::reject || out.v == verdict::reject_class)) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::type_mismatch),
             "Cannot convert {0} to {1} (no suitable single-argument constructor)",
-            derefed_arg.type_id(), target_type->id);
+            source_id, target_type->id);
     }
-
-    // Built-in type conversions
-    // Int <-> Float implicit conversions
-    if (source_type == script_value_type::jai_int_type &&
-        target_base_type == script_value_type::jai_float_type) {
-        return script_value(static_cast<script_float>(derefed_arg.unchecked_as_int()), engine_);
-    }
-    if (source_type == script_value_type::jai_float_type &&
-        target_base_type == script_value_type::jai_int_type) {
-        return script_value(static_cast<script_int>(derefed_arg.unchecked_as_float()), engine_);
-    }
-
-    // Object -> primitive via to_X() methods
-    if (source_type == script_value_type::jai_object_type) {
-        std::string method_name;
-        if (target_base_type == script_value_type::jai_int_type) {
-            method_name = "to_int";
-        } else if (target_base_type == script_value_type::jai_float_type) {
-            method_name = "to_float";
-        } else if (target_base_type == script_value_type::jai_string_type) {
-            method_name = "to_string";
-        } else if (target_base_type == script_value_type::jai_bool_type) {
-            method_name = "to_bool";
-        } else if (target_base_type == script_value_type::jai_char_type) {
-            method_name = "to_char";
-        }
-
-        if (!method_name.empty()) {
-            // Use get_class_instance() which safely returns nullptr if not a class instance
-            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-            if (instance) {
-                auto method_id = string_symbolizer_->intern(method_name);
-                auto method_val = instance->get_method(method_id, false);
-                if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
-                    // Create a bound method with the object as 'this'
-                    script_value bound = create_bound_method(arg, method_val);
-                    const script_function& method = bound.as_function();
-                    std::vector<script_value> no_args;
-                    auto result = method(no_args);
-                    if (result.has_value()) {
-                        return std::move(result.value());
-                    }
-                }
-            }
-        }
-    }
-
-    // Type mismatch - return error
     return checked_result<script_value>(
         make_error_code(runtime_error_code::type_mismatch),
         "Type mismatch: expected {0} but got {1}",
-        target_type->id, derefed_arg.type_id());
+        detail::slot_target_symbol(*target_type, *string_symbolizer_), source_id);
 }
 
 script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle) {
@@ -13704,14 +13504,28 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
     } else {
         auto caller_env = environment_;
-        auto caller_call_stack = std::move(call_stack_);
         auto caller_return_value = std::move(returnValue_);
         bool caller_has_return = hasReturnValue_;
         const bool caller_return_proven = return_proven_;
         const detail::member_scope_ctx caller_member_scope = member_scope_;
 
+        // The coroutine's frames go ABOVE the resumer's (vm frames_ parity): a trace taken
+        // inside the segment names the whole resume chain
+        const size_t frame_base = call_stack_.size();
+        for (auto& saved_frame : state.saved_call_stack) {
+            call_stack_.push_back(std::move(saved_frame));
+        }
+        state.saved_call_stack.clear();
+        // Detached frames die LAST (after the caller state is restored): releasing their
+        // locals can fire destructors that reenter call_function
+        std::vector<call_frame> dying_frames;
+        auto detach_frames = [&](std::vector<call_frame>& into) {
+            into.assign(std::make_move_iterator(call_stack_.begin() + frame_base),
+                        std::make_move_iterator(call_stack_.end()));
+            call_stack_.erase(call_stack_.begin() + frame_base, call_stack_.end());
+        };
+
         environment_ = state.saved_environment;
-        call_stack_ = std::move(state.saved_call_stack);
         returnValue_ = std::move(state.saved_return_value);
         hasReturnValue_ = state.saved_has_return;
         return_proven_ = state.saved_return_proven;
@@ -13739,6 +13553,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
             if (!decl_result) {
                 if (decl_result.error() != std::error_code()) {
+                    if (!trace_captured_) capture_stack_trace();
                     handle.set_status(coroutine_handle::status::failed);
                     had_error = true;
                     error_result.emplace(decl_result.error_value());
@@ -13751,13 +13566,16 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             }
         }
 
-        if (!had_error) {
+        if (had_error) {
+            detach_frames(dying_frames);
+        } else {
             if (is_unwinding_) {
                 // Script throw escaped the resumed segment: fail the handle; the throw
                 // keeps propagating to the caller through the unwinding flag
+                if (!trace_captured_) capture_stack_trace();
                 handle.set_status(coroutine_handle::status::failed);
                 state.saved_environment.reset();
-                state.saved_call_stack.clear();
+                detach_frames(dying_frames);
             } else if (hasYieldRequest_) {
                 // Record where to resume in the function body.
                 // If inner constructs pushed continuations, re-enter this statement.
@@ -13765,7 +13583,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 size_t resume_idx = state.has_continuations() ? last_body_idx : last_body_idx + 1;
                 state.push_continuation(function->body.get(), resume_idx);
                 state.saved_environment = environment_;
-                state.saved_call_stack = std::move(call_stack_);
+                detach_frames(state.saved_call_stack);
                 state.saved_return_value = std::move(returnValue_);
                 state.saved_has_return = hasReturnValue_;
                 state.saved_return_proven = return_proven_;
@@ -13785,6 +13603,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                         function->return_type->base_type != script_value_type::jai_any_type) {
                         auto convert_result = try_convert_for_parameter(final_result, function->return_type);
                         if (!convert_result) {
+                            if (!trace_captured_) capture_stack_trace();
                             handle.set_status(coroutine_handle::status::failed);
                             error_result.emplace(convert_result.error_value());
                         } else {
@@ -13795,19 +13614,18 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                     }
                 }
                 state.saved_environment.reset();
-                state.saved_call_stack.clear();
+                detach_frames(dying_frames);
             } else {
                 // Ran past the final yield: completion yields null (vm run_fiber parity),
                 // never a replay of the stale last-yielded value.
                 handle.set_status(coroutine_handle::status::completed);
                 handle.yield_value_ = make_value();
                 state.saved_environment.reset();
-                state.saved_call_stack.clear();
+                detach_frames(dying_frames);
             }
         }
 
         environment_ = caller_env;
-        call_stack_ = std::move(caller_call_stack);
         returnValue_ = std::move(caller_return_value);
         hasReturnValue_ = caller_has_return;
         return_proven_ = caller_return_proven;

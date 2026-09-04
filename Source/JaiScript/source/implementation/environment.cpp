@@ -5,6 +5,8 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/member_scope.hpp>
+#include <jaiscript/detail/typed_slot.hpp>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -40,6 +42,12 @@ bool native_stack_low() noexcept {
 #else
     return false;
 #endif
+}
+
+// Out-of-line door for class_definition.hpp's field kernel (typed_slot.hpp holds the body)
+checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value,
+                                                              const type_info_ptr& target_type, engine* eng) {
+    return convert_typed_slot_script_rows_impl(std::move(pending), value, target_type, eng);
 }
 
 } // namespace detail
@@ -186,9 +194,10 @@ checked_result<script_value> environment::get(uint64_t id) const {
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
-                // Try to get field first (non-throwing)
+                // Try to get field first (non-throwing). A C++ property's placeholder is
+                // never an env cell: the this-tails read it through its getter
                 const script_value& field_ref = instance->get_field(id, false);
-                if (!field_ref.is_invalid()) {
+                if (!field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
                     return field_ref;
                 }
 
@@ -290,7 +299,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 
                 // Try to get instance field first (return const reference)
                 const script_value& inst_field_ref = instance->get_field(id, false);
-                if (!inst_field_ref.is_invalid()) {
+                if (!inst_field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
                     return std::cref(inst_field_ref);
                 }
 
@@ -366,7 +375,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
                 // Try to get instance field first (return non-const reference)
                 script_value& inst_field_ref = instance->get_field(id, false);
-                if (!inst_field_ref.is_invalid()) {
+                if (!inst_field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
                     return std::ref(inst_field_ref);
                 }
 
@@ -437,24 +446,10 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 if (instance && instance->has_field(id)) {
-                    // Check if this is a C++ parent property that needs setter method
-                    auto class_def = instance->get_class_definition();
-                    if (class_def) {
-                        auto cpp_base = class_def->find_cpp_base_class();
-                        if (cpp_base) {
-                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                            if (setter_id != 0) {
-                                auto setter = cpp_base->get_method(setter_id, false);
-                                if (setter.is_function()) {
-                                    std::vector<script_value> args = {this_object_, value};
-                                    auto result = setter.as_function()(args);
-                                    if (!result) {
-                                        return result.error_value();
-                                    }
-                                    return {};
-                                }
-                            }
-                        }
+                    // A hybrid's C++ property stores through its setter (a same-named
+                    // script field shadows it)
+                    if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
+                        return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
                     auto enforced = instance->enforce_field_write(id, clone_for_assignment(value));
@@ -471,10 +466,13 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_def_->has_static_field(id)) {
-            if (class_def_->set_static_field(id, value.clone())) {
+            auto enforced = class_def_->enforce_static_write(id, clone_for_assignment(value));
+            if (!enforced) {
+                return enforced.error_value();
+            }
+            if (class_def_->set_static_field(id, std::move(enforced.value()))) {
                 return {};
             }
-            // Field existed but set failed - shouldn't happen, but handle gracefully
         }
     }
 
@@ -520,24 +518,8 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 if (instance && instance->has_field(id)) {
-                    // Check if this is a C++ parent property that needs setter method
-                    auto class_def = instance->get_class_definition();
-                    if (class_def) {
-                        auto cpp_base = class_def->find_cpp_base_class();
-                        if (cpp_base) {
-                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                            if (setter_id != 0) {
-                                auto setter = cpp_base->get_method(setter_id, false);
-                                if (setter.is_function()) {
-                                    std::vector<script_value> args = {this_object_, std::move(value)};
-                                    auto result = setter.as_function()(args);
-                                    if (!result) {
-                                        return result.error_value();
-                                    }
-                                    return {};
-                                }
-                            }
-                        }
+                    if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
+                        return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
                     auto enforced = instance->enforce_field_write(id, std::move(value));
@@ -554,10 +536,13 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_def_->has_static_field(id)) {
-            if (class_def_->set_static_field(id, std::move(value))) {
+            auto enforced = class_def_->enforce_static_write(id, std::move(value));
+            if (!enforced) {
+                return enforced.error_value();
+            }
+            if (class_def_->set_static_field(id, std::move(enforced.value()))) {
                 return {};
             }
-            // Field existed but set failed - shouldn't happen, but handle gracefully
         }
     }
 
@@ -779,9 +764,11 @@ script_value* environment::get_value_ptr(uint64_t id) {
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
-                // Try to get instance field - get_field returns a reference
+                // Try to get instance field - get_field returns a reference. A C++ property's
+                // placeholder is never an env cell (contains/get_env_var_ptr/vm_storage_lookup
+                // walk through here): the this-tails read it through its getter
                 script_value& field_ref = instance->get_field(id, false);
-                if (!field_ref.is_invalid()) {
+                if (!field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
                     return &field_ref;
                 }
 

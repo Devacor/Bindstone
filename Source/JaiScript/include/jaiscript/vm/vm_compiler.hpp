@@ -139,6 +139,7 @@ namespace jai::vm {
 
         uint32_t identifier_slot_operand(identifier_expr* ident) const;
         bool symbol_is_env_only(uint64_t symbol_id) const;
+        bool call_args_need_probe(const call_expr& call) const;
         fused_operand make_fused_operand(const expression* e);
         // Node-owning spelling: an env-resolved plain identifier also pins its node
         // (fused_operand::ident_node) so field proofs stay live across re-stamps

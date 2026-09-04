@@ -92,6 +92,14 @@ carried across the boundary.
   same `execution_backend::apply_field_initializers` entry; the hook that records the layer
   (`class_instance::set_field` on `_cpp_object`) is shared, so binder-ctor `super()`, `extend`,
   and archive load register identically by construction.
+- **S10 — C++ properties are members.** Inside a hybrid's methods (and the lambdas made
+  there) a bare `.property()` name resolves on the member rung of the lookup ladder
+  (locals → members → globals, `detail/member_scope.hpp`): it reads through `_get_name` and
+  stores through `_set_name` exactly like `this.name` — plain, compound and `++`/`--` — with
+  the same texts; a same-named script field shadows it for both spellings. No field is ever
+  materialized on the instance for a C++ property. A property has no cell to alias: `[=]`
+  and `[&]` both snapshot it, and a by-reference binding (`auto& r = name`, `f(name)` into a
+  `&` parameter) is `Cannot take reference of undefined variable`, as for a method name.
 
 ## 3. Decisions
 

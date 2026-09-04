@@ -8,6 +8,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <set>
 #include <algorithm>
+#include <memory>
 #include <optional>
 
 namespace jai {
@@ -16,9 +17,10 @@ class function_decl;
 class environment;
 
 namespace detail {
-    // Field-write conversion kernel (defined below class_definition): the ONE table for
-    // declared-type class fields across every write path.
-    inline std::optional<script_value> try_convert_field_value(const script_value& value_in, type_info_ptr target_type, engine* eng);
+    // Typed-slot conversion table (defined below class_definition): the ONE table for every
+    // declared-type slot; the field store and the C++ set_field API enter through these.
+    inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng);
+    inline std::optional<script_value> field_store_convert_no_script(const script_value& value, const type_info_ptr& declared, engine* eng);
 }
 
 enum class access_level {
@@ -365,21 +367,42 @@ public:
         bump_method_epoch();
     }
 
-    // TRUE when methods_[id] is the synthesized field accessor (the auto-getter body is
-    // verbatim get_field, so a field-read IC may treat it as non-shadowing); any
-    // unflagged registration of the same id (a CUSTOM getter) reclaims the name. Walks
-    // the chain like get_method.
-    bool is_auto_accessor(uint64_t id) const {
-        if (auto_accessor_ids_.find(id) != auto_accessor_ids_.end()) {
-            return true;
+    // The nearest USER-defined _get_/_set_ for id in get_method order (own methods_, parents
+    // in declaration order, the C++ base), skipping entries flagged synthesized in their
+    // owning class; null when none. On a C++ class (empty auto set) this is get_method. A
+    // synthesized entry anywhere in the script chain is a script field declaration, which
+    // shadows a same-named C++ .property() (docs/script_extensible.md S10).
+    const script_value* user_accessor(uint64_t id) const {
+        bool script_field_seen = false;
+        return user_accessor_walk(id, script_field_seen);
+    }
+    const script_value* user_accessor_walk(uint64_t id, bool& script_field_seen) const {
+        if (is_cpp_class() && script_field_seen) { return nullptr; }   // the C++ base sits in parent_classes_ too
+        if (auto it = methods_.find(id); it != methods_.end()) {
+            if (auto_accessor_ids_.find(id) == auto_accessor_ids_.end()) { return &it->second; }
+            script_field_seen = true;
         }
         for (const auto& parent : parent_classes_) {
-            if (parent && parent->is_auto_accessor(id)) {
-                return true;
+            if (parent) {
+                if (const script_value* found = parent->user_accessor_walk(id, script_field_seen)) { return found; }
             }
         }
-        return false;
+        if (cpp_base_class_) { return cpp_base_class_->user_accessor_walk(id, script_field_seen); }
+        return nullptr;
     }
+    script_value find_user_accessor(uint64_t id) const {
+        const script_value* found = user_accessor(id);
+        return found ? *found : script_value::make_invalid(engine_);
+    }
+
+    // No user accessor anywhere in the chain: the accessor for id (if any) is the synthesized
+    // field accessor, whose body is verbatim get_field / enforce+set_field, so member-site
+    // caches and field proofs may bypass it.
+    bool is_auto_accessor(uint64_t id) const { return user_accessor(id) == nullptr; }
+    bool owns_auto_accessor(uint64_t id) const { return auto_accessor_ids_.find(id) != auto_accessor_ids_.end(); }
+    // Replaces the synthesized set after redefine_class installs new_methods (no epoch move:
+    // identical reloads must keep field proofs armed)
+    void set_auto_accessor_ids(std::unordered_set<uint64_t> ids) { auto_accessor_ids_ = std::move(ids); }
 
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         add_method(name, std::move(func), arity, {});
@@ -399,6 +422,10 @@ public:
         }
 
         uint64_t name_id = eng->symbolize(name);
+        // A first user _get_/_set_ (or one replacing the synthesized accessor) changes the field
+        // ladder: armed field proofs and member caches must miss
+        const bool accessor_set_changes = (name.rfind("_get_", 0) == 0 || name.rfind("_set_", 0) == 0) &&
+            (methods_.find(name_id) == methods_.end() || auto_accessor_ids_.find(name_id) != auto_accessor_ids_.end());
 
         if (arity != SIZE_MAX) {
             auto& bucket = cpp_method_overloads_[name_id][arity];
@@ -465,6 +492,7 @@ public:
             ));
         }
         auto_accessor_ids_.erase(name_id);
+        if (accessor_set_changes) { bump_field_shape_epoch(); }
         bump_method_epoch();
     }
 
@@ -637,6 +665,23 @@ public:
         }
     }
 
+    // Declared static types, replaced wholesale at every script (re)definition: 'auto'
+    // stores a null entry (infers from the held value's tag), 'var' the any tag; a static
+    // with NO entry (C++ static_property) stays lenient. No epoch: statics carry no proofs.
+    void replace_static_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types) {
+        static_declared_types_ = std::move(new_types);
+    }
+
+    type_info_ptr get_static_declared_type(uint64_t id) const {
+        auto it = static_declared_types_.find(id);
+        return it != static_declared_types_.end() ? it->second : nullptr;
+    }
+
+    // Script-write enforcement for statics: enforce_field_write's ladder over the static's
+    // declared type (its held tag when 'auto'). Callers store the returned value via
+    // set_static_field. Defined out-of-line.
+    checked_result<script_value> enforce_static_write(uint64_t id, script_value value) const;
+
     // Hot reload: clear the instance-method overload sets + resolution cache so a reload
     // rebuilds them fresh (re-adding each method via add_script_method) instead of appending
     // to the previous definition's overloads.
@@ -656,6 +701,7 @@ public:
         for (auto it = static_fields_.begin(); it != static_fields_.end();) {
             if (keep.find(*it) == keep.end()) {
                 static_field_values_.erase(*it);
+                static_declared_types_.erase(*it);
                 it = static_fields_.erase(it);
             } else {
                 ++it;
@@ -946,24 +992,38 @@ public:
     static constexpr uint32_t k_no_field_slot = UINT32_MAX;
     void ensure_field_slots() const {
         if (field_slots_current_) return;
+        cpp_property_slots_.assign(slot_to_field_.size(), 0);
         std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
             for (const auto& parent : cd.parent_classes_) {
                 if (parent) walk(*parent);
             }
+            const uint8_t cpp_declared = cd.is_cpp_class() ? 1 : 0;
             for (const auto& [id, value] : cd.field_defaults_) {
-                if (field_slots_.find(id) == field_slots_.end()) {
-                    field_slots_.emplace(id, static_cast<uint32_t>(slot_to_field_.size()));
+                auto it = field_slots_.find(id);
+                if (it == field_slots_.end()) {
+                    it = field_slots_.emplace(id, static_cast<uint32_t>(slot_to_field_.size())).first;
                     slot_to_field_.push_back(id);
+                    cpp_property_slots_.push_back(0);
                 }
+                // A binder .property() placeholder marks its slot; a script declaration
+                // anywhere in the chain (walked base-first) shadows it
+                cpp_property_slots_[it->second] = cpp_declared;
             }
         };
         walk(*this);
+        has_cpp_property_slots_ = std::find(cpp_property_slots_.begin(), cpp_property_slots_.end(), 1) != cpp_property_slots_.end();
         field_slots_current_ = true;
     }
     uint32_t field_slot(uint64_t id) const {
         ensure_field_slots();
         auto it = field_slots_.find(id);
         return it != field_slots_.end() ? it->second : k_no_field_slot;
+    }
+    // The slot holds a C++ property's placeholder (its truth lives in the C++ object,
+    // reached through _get_/_set_) and no script class in the chain shadows the name.
+    // Valid right after field_slot() (the same recompute fills both).
+    bool slot_is_cpp_property(uint32_t slot) const {
+        return has_cpp_property_slots_ && cpp_property_slots_[slot] != 0;
     }
     uint64_t slot_field(uint32_t slot) const { return slot_to_field_[slot]; }
     uint32_t field_slot_count() const {
@@ -1173,10 +1233,37 @@ public:
         bump_field_shape_epoch();
     }
 
+    // Chain-aware (this class, then its bound C++ bases): a property registered on a
+    // binder base_class<> answers for the derived binding too
     uint64_t get_property_setter_id(uint64_t field_id) const {
         auto it = property_setter_ids_.find(field_id);
         if (it != property_setter_ids_.end()) {
             return it->second;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (uint64_t inherited = parent->get_property_setter_id(field_id)) { return inherited; }
+            }
+        }
+        return 0;
+    }
+
+    // Binder .property() registry (the getter side): the "this name is a C++ property of
+    // this class" test for the bare-name ladder (detail/member_scope.hpp)
+    void register_property_getter(uint64_t field_id, uint64_t getter_id) {
+        property_getter_ids_[field_id] = getter_id;
+        bump_field_shape_epoch();
+    }
+
+    uint64_t get_property_getter_id(uint64_t field_id) const {
+        auto it = property_getter_ids_.find(field_id);
+        if (it != property_getter_ids_.end()) {
+            return it->second;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (uint64_t inherited = parent->get_property_getter_id(field_id)) { return inherited; }
+            }
         }
         return 0;
     }
@@ -1744,10 +1831,11 @@ private:
     bool declared_types_dirty_ = false;
     std::unordered_map<uint64_t, script_value> static_field_values_;
     std::unordered_set<uint64_t> static_fields_;
+    std::unordered_map<uint64_t, type_info_ptr> static_declared_types_;
     std::vector<std::shared_ptr<class_definition>> parent_classes_;
     mutable std::unordered_map<uint64_t, script_value> all_field_defaults_cache_;
     mutable bool field_defaults_cache_valid_ = false;
-    // Ids whose methods_ entry is the SYNTHESIZED field accessor (see is_auto_accessor)
+    // Ids whose methods_ entry is the SYNTHESIZED field accessor (see user_accessor)
     std::unordered_set<uint64_t> auto_accessor_ids_;
     // Flat-field slot registry (tier-1 flat classes): APPEND-ONLY — a field id keeps
     // its slot for the class's lifetime (re-added fields REUSE their retired slot), so
@@ -1756,6 +1844,8 @@ private:
     // base-first, so first-build slot order ≈ declaration order.
     mutable std::unordered_map<uint64_t, uint32_t> field_slots_;
     mutable std::vector<uint64_t> slot_to_field_;
+    mutable std::vector<uint8_t> cpp_property_slots_;   // see slot_is_cpp_property
+    mutable bool has_cpp_property_slots_ = false;
     mutable bool field_slots_current_ = false;   // re-walk the chain on next query
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value null_field_value_;
@@ -1772,6 +1862,7 @@ private:
     bool extended_ever_ = false;
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
+    std::unordered_map<uint64_t, uint64_t> property_getter_ids_;
 
     bool has_property_getters_ = false;
 
@@ -2019,151 +2110,331 @@ inline void class_instance::copy_fields_from(const class_instance& other) {
 
 namespace detail {
 
-// Field-write conversion kernel: the ONE table for declared-type class fields (script
-// writes on both backends, synthesized setters, the C++ set_field API, and hot-reload
-// migration). Returns the STORE-READY value (primitives convert and re-tag to the
-// declared type; pointer-ish and container values keep their own tag — JaiScript
-// objects travel as object OR shared_ptr wrappers over the same holder, so retagging
-// would lie about the storage). Primitive conversions mirror the backends'
-// enforce_type_compatibility; object/shared_ptr acceptance mirrors the field-reference
-// gate (ref_field_constraint_compatible) so direct writes and writes through a bound
-// ref can't diverge. No constructor-based conversions and no object to_bool() (both
-// run script). Returns nullopt when no conversion exists.
-inline std::optional<script_value> try_convert_field_value(const script_value& value_in, type_info_ptr target_type, engine* eng) {
-    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+// The ONE conversion table for every typed slot (docs/static_checking.md rule table):
+// declaration/initializer, `=`, compound store-back, the cast<T> value form, by-value
+// parameter binding, typed return and field store all classify the source by STORAGE
+// (never by its tag - a shared_ptr<C> handle IS a C) and run these rows. This is the
+// script-free half; rows that must run script (a converting ctor, to_X(), object
+// to_bool()) come back as needs_* verdicts for detail::convert_for_typed_slot
+// (typed_slot.hpp) to resolve. The C++ set_field API and hot-reload migration stop
+// here by policy. Identity never touches the value, so a parameter site keeps its
+// arg / derefed-arg return shapes; converted payloads come back UNTAGGED (each site
+// tags as it always did). Each site owns its rejection texts.
+struct slot_conversion {
+    enum verdict : uint8_t {
+        identity,            // the slot holds the value as it is
+        identity_exact,      // identity by an exact class-name tag (parameter sites return the derefed arg)
+        converted,           // `value` holds the converted payload
+        reject,              // no row (non-class target; primitive into a class without a viable ctor)
+        reject_class,        // class into an unrelated class without a viable ctor
+        container_mismatch,  // element boundary failed: offending / expected filled
+        handle_target,       // non-null into shared_ptr<T> / weak_ptr<T>: the site's own rows (outside the table)
+        needs_ctor,          // class target: only a true 1-param ctor can answer (script)
+        needs_to_x,          // primitive target from an object: to_int/to_float/to_char/to_string (script)
+        needs_to_bool        // bool target from an object: to_bool() or truthy (script)
+    };
+    verdict v = reject;
+    std::optional<script_value> value;
+    std::unique_ptr<std::pair<std::string, std::string>> mismatch;   // container_mismatch only: offending / expected
+
+    bool needs_script() const { return v == needs_ctor || v == needs_to_x || v == needs_to_bool; }
+    static slot_conversion of(verdict verdict_) { slot_conversion out; out.v = verdict_; return out; }
+    static slot_conversion converted_to(script_value v_) { slot_conversion out; out.v = converted; out.value = std::move(v_); return out; }
+};
+
+// The class behind an object-storage value: class_instance wrappers resolve through the
+// instance (a plain wrapper of an extended object re-points to its script layer, exactly
+// like the backends' resolve_member_target), raw holders through the engine registry.
+struct slot_class_view {
+    std::shared_ptr<class_instance> instance;
+    std::shared_ptr<class_definition> engine_def;
+    class_definition* def = nullptr;
+};
+
+inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
+    slot_class_view view;
+    auto holder = v.get_object_holder();
+    if (!holder) {
+        return view;
+    }
+    if (holder->is_class_instance_wrapper) {
+        view.instance = std::static_pointer_cast<class_instance>(holder->data);
+        if (view.instance) {
+            view.def = view.instance->get_class_definition();
+            if (view.def && !view.def->is_script_class() && view.def->extended_ever()) {
+                if (auto hooks = view.def->slot_hooks()) {
+                    auto layer = hooks->read(view.instance->cpp_object_pointer());
+                    if (layer && layer != view.instance && layer->get_engine() == eng) {
+                        holder->data = layer;
+                        view.instance = std::move(layer);
+                        view.def = view.instance->get_class_definition();
+                    }
+                }
+            }
+        }
+    } else if (eng) {
+        view.engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
+                                                        : eng->get_class_definition(holder->type_name);
+        view.def = view.engine_def.get();
+    }
+    return view;
+}
+
+// Does an object-storage value already satisfy a `target`-classed slot? Empty handles
+// answer by their tag's class; live objects by their class (subtypes included), the
+// holder's registered name, the tag, or - unknown host objects without a tag - by the
+// permissive fallback the field-reference gate keeps.
+inline bool class_slot_admits(const slot_class_view& view, const script_value& v, const type_info& target, engine* eng) {
+    const std::string& want = target.type_name;
+    if (want.empty()) {
+        return true;
+    }
+    const type_info* tag = v.get_type_info().get();
+    const bool tagged = tag && tag->base_type != script_value_type::jai_any_type;
+    if (tagged && tag->type_name == want) {
+        return true;
+    }
+    auto holder = v.get_object_holder();
+    if (!holder) {
+        if (!tagged || tag->type_name.empty()) {
+            return true;   // an untagged empty handle is null-like
+        }
+        auto tag_def = eng ? eng->get_class_definition(tag->type_name) : nullptr;
+        return tag_def && tag_def->is_subtype_of(want);
+    }
+    if (view.def && view.def->is_subtype_of(want)) {
+        return true;
+    }
+    if (holder->type_name == want) {
+        return true;
+    }
+    return !view.def && !tagged;
+}
+
+inline slot_conversion convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
+    using verdict = slot_conversion::verdict;
     if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
-        return value;
+        return slot_conversion::of(verdict::identity);
     }
-    auto source_type = value.type();
-    auto target = target_type->base_type;
-    if (source_type == target && target != script_value_type::jai_object_type) {
-        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
-            // Typed-container boundary (shared kernel): element-check with push's rules,
-            // coerce int<->float payloads, retag concrete targets so pushes through the
-            // field stay enforced; open targets (array<var>/untyped params) keep the
-            // value's own (possibly tighter) tag
-            auto outcome = detail::enforce_container_boundary(value, target_type, eng);
-            if (!outcome.value) {
-                return std::nullopt;
+    const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
+    const size_t ri = v.raw_storage_index();
+    const auto target = target_type->base_type;
+    // bound primitives classify by their semantic type; every other kind by storage
+    const script_value_type src = v.current_type();
+    const bool primitive_src = ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
+                               ri == script_value::TYPEID_STRING || ri == script_value::TYPEID_BOOL ||
+                               ri == script_value::TYPEID_CHAR ||
+                               (ri == script_value::TYPEID_CPP_BOUND && src != script_value_type::jai_null_type);
+    const bool object_src = ri == script_value::TYPEID_OBJECT ||
+                            (ri == script_value::TYPEID_CPP_BOUND && src == script_value_type::jai_null_type);
+
+    auto typed_null = [&]() {
+        script_value null_val(std::monostate{}, eng);
+        null_val.set_type_info(target_type);
+        return slot_conversion::converted_to(std::move(null_val));
+    };
+    auto boundary = [&]() {
+        if (v.get_type_info().get() == target_type.get()) {
+            return slot_conversion::of(verdict::identity);   // the declared representation already
+        }
+        auto outcome = enforce_container_boundary(v, target_type, eng);
+        if (!outcome.value) {
+            slot_conversion out = slot_conversion::of(verdict::container_mismatch);
+            out.mismatch = std::make_unique<std::pair<std::string, std::string>>(std::move(outcome.offending), std::move(outcome.expected));
+            return out;
+        }
+        return slot_conversion::converted_to(std::move(*outcome.value));
+    };
+
+    switch (target) {
+        case script_value_type::jai_int_type:
+            if (src == script_value_type::jai_int_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (src == script_value_type::jai_float_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_int>(v.unchecked_as_float()), eng));
+            if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_int>(v.unchecked_as_bool() ? 1 : 0), eng));
+            if (object_src) return slot_conversion::of(verdict::needs_to_x);
+            return slot_conversion::of(verdict::reject);
+        case script_value_type::jai_float_type:
+            if (src == script_value_type::jai_float_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (src == script_value_type::jai_int_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_float>(v.unchecked_as_int()), eng));
+            if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_float>(v.unchecked_as_bool() ? 1.0 : 0.0), eng));
+            if (object_src) return slot_conversion::of(verdict::needs_to_x);
+            return slot_conversion::of(verdict::reject);
+        case script_value_type::jai_char_type:
+            if (src == script_value_type::jai_char_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (object_src) return slot_conversion::of(verdict::needs_to_x);
+            return slot_conversion::of(verdict::reject);
+        case script_value_type::jai_string_type:
+            if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (object_src) return slot_conversion::of(verdict::needs_to_x);
+            return slot_conversion::converted_to(script_value(v.to_string(), eng));
+        case script_value_type::jai_bool_type: {
+            // is_truthy minus its object tail (KEEP BYTE-PARALLEL with the backends' is_truthy)
+            if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (object_src) return slot_conversion::of(verdict::needs_to_bool);
+            bool truthy = true;
+            switch (ri) {
+                case script_value::TYPEID_NULL: truthy = false; break;
+                case script_value::TYPEID_INT: truthy = v.unchecked_as_int() != 0; break;
+                case script_value::TYPEID_FLOAT: truthy = v.unchecked_as_float() != 0.0; break;
+                case script_value::TYPEID_STRING: truthy = !v.unchecked_as_string().empty(); break;
+                case script_value::TYPEID_CHAR: truthy = true; break;
+                case script_value::TYPEID_ARRAY: { auto& arr = const_cast<script_value&>(v).get_array_storage(); truthy = arr && !arr->empty(); break; }
+                case script_value::TYPEID_MAP: { auto& map = const_cast<script_value&>(v).get_map_storage(); truthy = map && !map->empty(); break; }
+                case script_value::TYPEID_CPP_BOUND:
+                    if (v.is_bool()) truthy = v.unchecked_as_bool();
+                    else if (v.is_int()) truthy = v.unchecked_as_int() != 0;
+                    else if (v.is_float()) truthy = v.unchecked_as_float() != 0.0;
+                    else if (v.is_string()) truthy = !v.unchecked_as_string().empty();
+                    else truthy = v.is_char() || v.get_cpp_bound_ptr() != nullptr;
+                    break;
+                default: break;
             }
-            return std::move(*outcome.value);
+            return slot_conversion::converted_to(script_value(truthy, eng));
         }
-        if (target == script_value_type::jai_shared_ptr_type || target == script_value_type::jai_weak_ptr_type) {
-            return value;   // keep the value's own tag
-        }
-        script_value tagged(value);
-        tagged.set_type_info(target_type);
-        return tagged;
-    }
-    if (target == script_value_type::jai_int_type) {
-        if (source_type == script_value_type::jai_float_type) {
-            script_value converted(static_cast<script_int>(value.unchecked_as_float()), eng);
-            converted.set_type_info(target_type);
-            return converted;
-        }
-        if (source_type == script_value_type::jai_bool_type) {
-            script_value converted(static_cast<script_int>(value.unchecked_as_bool() ? 1 : 0), eng);
-            converted.set_type_info(target_type);
-            return converted;
-        }
-        return std::nullopt;
-    }
-    if (target == script_value_type::jai_float_type) {
-        if (source_type == script_value_type::jai_int_type) {
-            script_value converted(static_cast<script_float>(value.unchecked_as_int()), eng);
-            converted.set_type_info(target_type);
-            return converted;
-        }
-        if (source_type == script_value_type::jai_bool_type) {
-            script_value converted(static_cast<script_float>(value.unchecked_as_bool() ? 1.0 : 0.0), eng);
-            converted.set_type_info(target_type);
-            return converted;
-        }
-        return std::nullopt;
-    }
-    if (target == script_value_type::jai_bool_type) {
-        // is_truthy minus the object to_bool() tail (that consult runs script; objects
-        // don't convert into bool fields)
-        std::optional<bool> truthy;
-        switch (value.raw_storage_index()) {
-            case script_value::TYPEID_NULL: truthy = false; break;
-            case script_value::TYPEID_INT: truthy = value.unchecked_as_int() != 0; break;
-            case script_value::TYPEID_FLOAT: truthy = value.unchecked_as_float() != 0.0; break;
-            case script_value::TYPEID_STRING: truthy = !value.unchecked_as_string().empty(); break;
-            case script_value::TYPEID_CHAR: truthy = true; break;
-            default: break;
-        }
-        if (!truthy) {
-            return std::nullopt;
-        }
-        script_value converted(*truthy, eng);
-        converted.set_type_info(target_type);
-        return converted;
-    }
-    if (target == script_value_type::jai_string_type) {
-        script_value converted(value.to_string(), eng);
-        converted.set_type_info(target_type);
-        return converted;
-    }
-    if (source_type == script_value_type::jai_null_type) {
-        if (target == script_value_type::jai_object_type ||
-            target == script_value_type::jai_shared_ptr_type ||
-            target == script_value_type::jai_weak_ptr_type) {
-            script_value null_val(std::monostate{}, eng);
-            null_val.set_type_info(target_type);
-            return null_val;
-        }
-        return std::nullopt;
-    }
-    if (target == script_value_type::jai_object_type || target == script_value_type::jai_shared_ptr_type) {
-        // Empty pointer wrappers (shared_ptr<S>()) are null-like: storable as-is
-        if ((source_type == script_value_type::jai_shared_ptr_type ||
-             source_type == script_value_type::jai_weak_ptr_type ||
-             source_type == script_value_type::jai_object_type) &&
-            value.get_object_holder() == nullptr) {
-            return value;
-        }
-        auto holder = value.get_object_holder();
-        if (!holder) {
-            return std::nullopt;
-        }
-        if (target_type->type_name.empty()) {
-            return value;
-        }
-        // shared_ptr targets: a dynamic (var/untagged) holder is ground truth
-        if (target == script_value_type::jai_shared_ptr_type) {
-            auto tag = value.get_type_info();
-            if (!tag || tag->base_type == script_value_type::jai_any_type) {
-                return value;
+        case script_value_type::jai_array_type:
+            if (ri == script_value::TYPEID_ARRAY) return boundary();
+            return slot_conversion::of(verdict::reject);
+        case script_value_type::jai_map_type:
+            if (ri == script_value::TYPEID_MAP) return boundary();
+            return slot_conversion::of(verdict::reject);
+        case script_value_type::jai_object_type: {
+            if (ri == script_value::TYPEID_NULL) return typed_null();
+            if (object_src) {
+                const type_info* tag = v.get_type_info().get();
+                if (tag && !tag->type_name.empty() && !target_type->type_name.empty() && tag->type_name == target_type->type_name) {
+                    return slot_conversion::of(verdict::identity_exact);
+                }
+                auto view = resolve_slot_class(v, eng);
+                if (class_slot_admits(view, v, *target_type, eng)) {
+                    return slot_conversion::of(verdict::identity);
+                }
+                return slot_conversion::of(v.get_object_holder() ? verdict::needs_ctor : verdict::reject_class);
             }
+            if (primitive_src && !target_type->type_name.empty()) return slot_conversion::of(verdict::needs_ctor);
+            return slot_conversion::of(verdict::reject);
         }
-        const class_definition* class_def = nullptr;
-        std::shared_ptr<class_definition> engine_def;
-        if (holder->is_class_instance_wrapper && holder->data) {
-            class_def = std::static_pointer_cast<class_instance>(holder->data)->get_class_definition();
-        } else if (eng) {
-            engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
-                                                       : eng->get_class_definition(holder->type_name);
-            class_def = engine_def.get();
-        }
-        if (class_def && class_def->is_subtype_of(target_type->type_name)) {
-            return value;
-        }
-        if (holder->type_name == target_type->type_name) {
-            return value;
-        }
-        auto tag = value.get_type_info();
-        if (tag && tag->base_type != script_value_type::jai_any_type &&
-            tag->type_name == target_type->type_name) {
-            return value;
-        }
-        // Untagged object values keep the permissive fallback (matches the ref-field gate)
-        if (source_type == script_value_type::jai_object_type && !tag) {
-            return value;
-        }
+        case script_value_type::jai_shared_ptr_type:
+        case script_value_type::jai_weak_ptr_type:
+            if (ri == script_value::TYPEID_NULL) return typed_null();
+            return slot_conversion::of(verdict::handle_target);
+        default:
+            return slot_conversion::of(v.type() == target ? verdict::identity : verdict::reject);
+    }
+}
+
+// The script rows (needs_* verdicts): a TRUE one-parameter ctor whose declared parameter
+// accepts the source directly (no chaining), to_int/to_float/to_char/to_string, to_bool().
+// Declared here so the field kernel below can reach it from class_definition.hpp; the body
+// lives in typed_slot.hpp (defined out of line in environment.cpp).
+checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value, const type_info_ptr& target_type, engine* eng);
+
+// Field-store rows for shared_ptr<T> / weak_ptr<T> declared fields (the handle_target
+// verdict): a same-kind tag stores as-is (its own tag), a live object or handle of T or a
+// subclass stores into a shared_ptr<T> field, a dynamic holder is ground truth there.
+inline std::optional<script_value> field_handle_rows(const script_value& v, const type_info_ptr& declared, engine* eng) {
+    const auto target = declared->base_type;
+    if (v.type() == target) {
+        return v;
+    }
+    if (target != script_value_type::jai_shared_ptr_type) {
         return std::nullopt;
+    }
+    const size_t ri = v.raw_storage_index();
+    if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_CPP_BOUND) {
+        return std::nullopt;
+    }
+    if (v.get_object_holder() == nullptr || declared->type_name.empty()) {
+        return v;
+    }
+    auto tag = v.get_type_info();
+    if (!tag || tag->base_type == script_value_type::jai_any_type) {
+        return v;
+    }
+    auto view = resolve_slot_class(v, eng);
+    if (class_slot_admits(view, v, *declared, eng)) {
+        return v;
     }
     return std::nullopt;
+}
+
+// STORE-READY field value for a resolved verdict: scalars/strings re-tag to the declared
+// type (type_proofs.hpp retags_on_field_write), pointer-ish and container values keep
+// their own tag (objects travel as object OR shared_ptr wrappers over one holder, so a
+// retag would lie about the storage). A needs_* verdict here means the caller runs
+// without script rows: no conversion. nullopt = no conversion.
+inline std::optional<script_value> field_store_value(slot_conversion& out, const script_value& value_in, const type_info_ptr& declared, engine* eng) {
+    using verdict = slot_conversion::verdict;
+    const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
+    std::optional<script_value> stored;
+    switch (out.v) {
+        case verdict::identity:
+        case verdict::identity_exact:
+            stored = v;
+            break;
+        case verdict::converted:
+            stored = std::move(*out.value);
+            break;
+        case verdict::handle_target:
+            stored = field_handle_rows(v, declared, eng);
+            break;
+        default:
+            break;
+    }
+    if (stored) {
+        switch (declared->base_type) {
+            case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+            case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+            case script_value_type::jai_string_type:
+                stored->set_type_info(declared);
+                break;
+            default:
+                break;
+        }
+    }
+    return stored;
+}
+
+// The field store: the full table (script rows included) plus the store-ready shaping.
+// KEEP the same-base head inline - every member store runs it.
+inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng) {
+    {
+        const script_value& v = value.is_reference() ? value.deref() : value;
+        size_t want = script_value::TYPEID_INVALID;
+        switch (declared ? declared->base_type : script_value_type::jai_any_type) {
+            case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;
+            case script_value_type::jai_float_type: want = script_value::TYPEID_FLOAT; break;
+            case script_value_type::jai_string_type: want = script_value::TYPEID_STRING; break;
+            case script_value_type::jai_bool_type: want = script_value::TYPEID_BOOL; break;
+            case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
+            default: break;
+        }
+        if (want != script_value::TYPEID_INVALID && v.raw_storage_index() == want) {
+            script_value stored = v;
+            stored.set_type_info(declared);
+            return stored;
+        }
+    }
+    slot_conversion out = convert_for_typed_slot_core(value, declared, eng);
+    if (out.needs_script()) {
+        auto resolved = convert_typed_slot_script_rows(std::move(out), value, declared, eng);
+        if (!resolved) {
+            return resolved.error_value();
+        }
+        out = std::move(resolved.value());
+    }
+    auto stored = field_store_value(out, value, declared, eng);
+    if (!stored) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
+            "Type mismatch in assignment", declared->id);
+    }
+    return std::move(*stored);
+}
+
+// The no-script table (set_field, hot-reload migration): nullopt where a conversion would
+// have to run script or does not exist.
+inline std::optional<script_value> field_store_convert_no_script(const script_value& value, const type_info_ptr& declared, engine* eng) {
+    slot_conversion out = convert_for_typed_slot_core(value, declared, eng);
+    return field_store_value(out, value, declared, eng);
 }
 
 // Script-surface member access enforcement kernel — the ONE check both backends call
@@ -2208,12 +2479,27 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     } else if (declared->base_type == script_value_type::jai_any_type) {
         return std::move(value);
     }
-    auto converted = detail::try_convert_field_value(value, declared, engine_);
-    if (!converted) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
-            "Type mismatch in assignment", declared->id);
+    return detail::field_store_convert(value, declared, engine_);
+}
+
+inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {
+    auto it = static_declared_types_.find(id);
+    if (it == static_declared_types_.end()) {
+        return std::move(value);
     }
-    return std::move(*converted);
+    type_info_ptr declared = it->second;
+    if (!declared) {
+        const script_value* cur = get_static_field_ptr(id);
+        type_info_ptr tag = (cur && !cur->is_reference()) ? cur->get_type_info() : nullptr;
+        if (!tag || tag->base_type == script_value_type::jai_any_type ||
+            tag->base_type == script_value_type::jai_null_type) {
+            return std::move(value);
+        }
+        declared = tag;
+    } else if (declared->base_type == script_value_type::jai_any_type) {
+        return std::move(value);
+    }
+    return detail::field_store_convert(value, declared, engine_);
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {
@@ -2242,7 +2528,7 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
         }
         if (type_info_ptr declared = class_def_->get_field_declared_type(id);
             declared && declared->base_type != script_value_type::jai_any_type) {
-            auto converted = detail::try_convert_field_value(value, declared, engine_);
+            auto converted = detail::field_store_convert_no_script(value, declared, engine_);
             if (!converted) {
                 throw runtime_error("Type mismatch in assignment");
             }
@@ -2268,11 +2554,12 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             declared && declared->base_type != script_value_type::jai_any_type) {
             // Hot-reload retype ruling (2026-07): a declared-type change CONVERTS the live
             // value wherever the assignment table allows (float->int truncates, int->string
-            // via to_string, subtype objects stay); only a value with NO conversion (object
-            // into int, string into int) falls back to the new initializer default. Reloads
-            // stay permissive and never brick an instance. Same-type fields pass the
+            // via to_string, subtype objects stay); a value with NO conversion (object into
+            // int, string into int) or one that converts only through script (a converting
+            // ctor, to_X()) falls back to the new initializer default. Reloads stay permissive,
+            // never run script and never brick an instance. Same-type fields pass the
             // kernel's same-type fast path and keep their value.
-            if (auto converted = detail::try_convert_field_value(*existing, declared, engine_)) {
+            if (auto converted = detail::field_store_convert_no_script(*existing, declared, engine_)) {
                 *existing = std::move(*converted);
             } else {
                 *existing = default_value.clone();

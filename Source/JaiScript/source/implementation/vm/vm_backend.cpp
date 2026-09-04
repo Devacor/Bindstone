@@ -13,8 +13,10 @@
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
+#include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
+#include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
 
@@ -377,6 +379,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
 		pair_id_ = symbolizer_->intern("pair");
+		base_type_ids_.intern(*symbolizer_);
 
 		builtins_ = {};
 		init_builtin_method_registries(symbolizer_, builtins_);
@@ -974,6 +977,29 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	--current_call_depth_;
+	// Capture and convert while the fiber frame is still on frames_: an error raised by
+	// the coroutine's own segment names the coroutine, not the resume site
+	std::optional<checked_result<script_value>> completed;
+	if (!pending && !yielding_) {
+		if (!*body_result || is_unwinding_) {
+			if (!trace_captured_) capture_stack_trace();
+		} else if (has_return_value_ && return_value_.has_value()) {
+			script_value result = std::move(return_value_.value());
+			if (result.is_reference()) {
+				result = result.deref();
+			}
+			auto function = handle.get_function();
+			if (function && function->return_type && !function->return_type->type_name.empty() &&
+			    function->return_type->type_name != "void" &&
+			    function->return_type->type_name != "auto" &&
+			    function->return_type->base_type != script_value_type::jai_any_type) {
+				completed.emplace(try_convert_for_parameter(result, function->return_type));
+				if (!*completed && !trace_captured_) capture_stack_trace();
+			} else {
+				completed.emplace(std::move(result));
+			}
+		}
+	}
 	frames_.pop_back();
 
 	if (yielding_) {
@@ -1006,10 +1032,6 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	pending_callees_.clear();
 	stack_.clear();
 
-	const bool completed_has_return = has_return_value_;
-	std::optional<script_value> completed_return = std::move(return_value_);
-	auto function = handle.get_function();
-
 	yielding_ = prev_yielding;
 	has_return_value_ = prev_has_return;
 	return_value_ = std::move(prev_return);
@@ -1026,26 +1048,12 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	handle.set_status(coroutine_handle::status::completed);
-	if (!completed_has_return || !completed_return.has_value()) {
+	if (!completed) {
 		// Falling off the end returns null and (like call_script_function) skips return-type
 		// conversion, so a typed coroutine driven to completion by range-for does not error.
 		return make_null();
 	}
-	script_value result = std::move(completed_return.value());
-	if (result.is_reference()) {
-		result = result.deref();
-	}
-	if (function && function->return_type && !function->return_type->type_name.empty() &&
-	    function->return_type->type_name != "void" &&
-	    function->return_type->type_name != "auto" &&
-	    function->return_type->base_type != script_value_type::jai_any_type) {
-		auto conv = try_convert_for_parameter(result, function->return_type);
-		if (!conv) {
-			return conv.error_value();
-		}
-		result = std::move(conv.value());
-	}
-	return result;
+	return std::move(*completed);
 }
 
 void vm_backend::exec_yield(frame& f, const vm_instruction& ins) {
@@ -1104,6 +1112,13 @@ std::string vm_backend::format_stack_trace() const {
 script_value vm_backend::member_target::method(uint64_t id) const {
 	if (class_def) {
 		return class_def->get_method(id, false);
+	}
+	return script_value::make_invalid(nullptr);
+}
+
+script_value vm_backend::member_target::user_accessor(uint64_t id) const {
+	if (class_def) {
+		return class_def->find_user_accessor(id);
 	}
 	return script_value::make_invalid(nullptr);
 }
@@ -1171,7 +1186,8 @@ script_value vm_backend::make_bound_method_thunk(const script_value& this_val, s
 bool vm_backend::object_to_bool_via_method(const script_value& value) {
 	// Class memo: no to_bool() in the chain => truthy, no target resolve / method
 	// probe per test. Extended non-script wrappers keep the resolve (it re-points the
-	// handle at the script layer as a side effect). KEEP BYTE-PARALLEL with the interpreter.
+	// handle at the script layer as a side effect). KEEP BYTE-PARALLEL with the interpreter
+	// and the typed-slot table's bool row (detail::convert_typed_slot_script_rows_impl).
 	if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
 		auto* oh = h->get();
 		if (oh->is_class_instance_wrapper && oh->data) {
@@ -2777,164 +2793,57 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 // Type enforcement + parameter conversion (interpreter parity)
 // ============================================================
 
+// The one typed-slot table (detail::convert_for_typed_slot); this site owns the assignment
+// texts. KEEP BYTE-PARALLEL with interpreter::enforce_type_compatibility.
 checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type) {
-	if (!target_type) {
+	if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
 		return std::move(value);
 	}
-	if (target_type->base_type == script_value_type::jai_any_type) {
-		return std::move(value);
-	}
-
-	auto source_type = value.type();
-	auto target = target_type->base_type;
-
-	if (source_type == target && target != script_value_type::jai_object_type) {
-		// Typed-container boundary: array/map payloads are element-checked with push's
-		// rules before they may sit behind an array<T>/map<K,V> tag (shared kernel,
-		// KEEP BYTE-PARALLEL with interpreter::enforce_type_compatibility)
-		if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
-			auto outcome = detail::enforce_container_boundary(std::move(value), target_type, engine_);
-			if (!outcome.value) {
-				auto* sym = engine_->get_symbolizer();
-				return checked_result<script_value>(
-					make_error_code(runtime_error_code::array_element_type_mismatch),
-					detail::container_boundary_mismatch_text,
-					sym->intern(outcome.offending), sym->intern(outcome.expected));
-			}
-			return std::move(*outcome.value);
+	{   // same-storage scalars are the table's identity row
+		const script_value& seen = value.is_reference() ? value.deref() : value;
+		size_t want = script_value::TYPEID_INVALID;
+		switch (target_type->base_type) {
+			case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;
+			case script_value_type::jai_float_type: want = script_value::TYPEID_FLOAT; break;
+			case script_value_type::jai_string_type: want = script_value::TYPEID_STRING; break;
+			case script_value_type::jai_bool_type: want = script_value::TYPEID_BOOL; break;
+			case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
+			default: break;
 		}
-		return std::move(value);
-	}
-
-	if (target == script_value_type::jai_int_type) {
-		if (source_type == script_value_type::jai_float_type) {
-			return script_value(static_cast<script_int>(value.unchecked_as_float()), engine_);
-		}
-		if (source_type == script_value_type::jai_bool_type) {
-			return script_value(static_cast<script_int>(value.unchecked_as_bool() ? 1 : 0), engine_);
+		if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want) {
+			return std::move(value);
 		}
 	}
-
-	if (target == script_value_type::jai_float_type) {
-		if (source_type == script_value_type::jai_int_type) {
-			return script_value(static_cast<script_float>(value.unchecked_as_int()), engine_);
+	auto outcome = detail::convert_for_typed_slot(value, target_type, engine_);
+	if (!outcome) {
+		return outcome.error_value();
+	}
+	using verdict = detail::slot_conversion::verdict;
+	detail::slot_conversion& out = outcome.value();
+	switch (out.v) {
+		case verdict::identity:
+		case verdict::identity_exact:
+			return std::move(value);
+		case verdict::converted:
+			return std::move(*out.value);
+		case verdict::container_mismatch: {
+			auto* sym = engine_->get_symbolizer();
+			return checked_result<script_value>(
+				make_error_code(runtime_error_code::array_element_type_mismatch),
+				detail::container_boundary_mismatch_text,
+				sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
 		}
-		if (source_type == script_value_type::jai_bool_type) {
-			return script_value(static_cast<script_float>(value.unchecked_as_bool() ? 1.0 : 0.0), engine_);
-		}
-	}
-
-	if (target == script_value_type::jai_bool_type) {
-		return script_value(is_truthy(value), engine_);
-	}
-
-	if (target == script_value_type::jai_string_type) {
-		return script_value(value.to_string(), engine_);
-	}
-
-	if (source_type == script_value_type::jai_null_type) {
-		if (target == script_value_type::jai_object_type ||
-		    target == script_value_type::jai_shared_ptr_type ||
-		    target == script_value_type::jai_weak_ptr_type) {
-			script_value null_val = make_null();
-			null_val.set_type_info(target_type);
-			return null_val;
-		}
-	}
-
-	if (target == script_value_type::jai_object_type && source_type == script_value_type::jai_object_type) {
-		auto source_type_info = value.get_type_info();
-		if (source_type_info && target_type) {
-			const std::string& source_class_name = source_type_info->type_name;
-			const std::string& target_class_name = target_type->type_name;
-
-			if (source_class_name == target_class_name) {
+		case verdict::reject_class:
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
+		case verdict::handle_target:
+			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is (outside the table)
+			if (value.type() == target_type->base_type) {
 				return std::move(value);
 			}
-
-			try {
-				auto instance = value.as<std::shared_ptr<class_instance>>();
-				if (instance) {
-					class_definition* class_def = instance->get_class_definition();
-					if (class_def) {
-						class_definition* current = class_def;
-						while (current) {
-							for (const auto& parent : current->get_parent_classes()) {
-								if (parent && parent->get_name() == target_class_name) {
-									return std::move(value);
-								}
-							}
-							current = current->get_parent().get();
-						}
-					}
-				}
-			} catch (...) {
-			}
-
-			// Ruling: a defaulted-param ctor is NOT a converting ctor - implicit
-			// conversion needs a TRUE 1-param ctor (delegating overload opts in);
-			// without one, skip the dispatcher (whose explicit path keeps the window).
-			auto conv_class_def = engine_ ? engine_->get_class_definition(target_class_name) : nullptr;
-			if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
-			}
-			auto ctor_result = environment_->get(target_class_name);
-			if (ctor_result && ctor_result.value().is_function()) {
-				const script_function& ctor = ctor_result.value().as_function();
-				std::vector<script_value> ctor_args;
-				ctor_args.push_back(value);
-				try {
-					auto result = ctor(ctor_args);
-					if (result.has_value()) {
-						return std::move(result.value());
-					}
-				} catch (const runtime_error& e) {
-					std::string error_msg = e.what();
-					if (error_msg.find("No constructor found") == std::string::npos) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Constructor conversion failed", target_type->id);
-					}
-				}
-			}
-
-			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
-		}
+			[[fallthrough]];
+		default:
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
 	}
-
-	if (target == script_value_type::jai_object_type && target_type && !target_type->type_name.empty()) {
-		bool is_primitive = (source_type == script_value_type::jai_int_type ||
-		                     source_type == script_value_type::jai_float_type ||
-		                     source_type == script_value_type::jai_string_type ||
-		                     source_type == script_value_type::jai_bool_type ||
-		                     source_type == script_value_type::jai_char_type);
-		if (is_primitive) {
-			// Ruling: implicit primitive->object conversion needs a TRUE 1-param ctor
-			// (a defaulted-param ctor is not a converting ctor; delegating overload opts
-			// in) - same error text as the incompatible-types tail below
-			auto conv_class_def = engine_ ? engine_->get_class_definition(target_type->type_name) : nullptr;
-			if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
-			}
-			auto ctor_result = environment_->get(target_type->type_name);
-			if (ctor_result && ctor_result.value().is_function()) {
-				const script_function& ctor = ctor_result.value().as_function();
-				std::vector<script_value> ctor_args;
-				ctor_args.push_back(value);
-				try {
-					auto result = ctor(ctor_args);
-					if (result.has_value()) {
-						return std::move(result.value());
-					}
-				} catch (const runtime_error& e) {
-					std::string error_msg = e.what();
-					if (error_msg.find("No constructor found") == std::string::npos) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Primitive conversion failed", target_type->id);
-					}
-				}
-			}
-		}
-	}
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type ? target_type->id : 0);
 }
 
 // Compound store-back: locked targets convert the promoted result like '=' does; var
@@ -2956,6 +2865,10 @@ op_status vm_backend::compound_typed_store_back(script_value& target, script_val
 	return {};
 }
 
+// The one typed-slot table (detail::convert_for_typed_slot); this site owns the parameter /
+// return texts and the identity return shapes (the arg itself; the derefed arg for exact-name
+// objects - the V-C1 lane and the exact-class lane replicate them).
+// KEEP BYTE-PARALLEL with interpreter::try_convert_for_parameter.
 checked_result<script_value> vm_backend::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
 	if (!target_type) {
 		return arg;
@@ -2963,191 +2876,79 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 
 	// deref() follows chains to a non-reference or throws - no residual-ref case
 	const script_value& derefed_arg = arg.deref();
-	auto source_type = derefed_arg.storage_type();
-	auto target_base_type = target_type->base_type;
-
+	const auto target_base_type = target_type->base_type;
 	if (target_base_type == script_value_type::jai_any_type) return arg;
+	switch (derefed_arg.raw_storage_index()) {   // same-storage scalars and handles bind as-is (the table's identity / handle rows)
+		case script_value::TYPEID_INT: if (target_base_type == script_value_type::jai_int_type) return arg; break;
+		case script_value::TYPEID_FLOAT: if (target_base_type == script_value_type::jai_float_type) return arg; break;
+		case script_value::TYPEID_STRING: if (target_base_type == script_value_type::jai_string_type) return arg; break;
+		case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
+		case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
+		case script_value::TYPEID_SHARED_PTR: if (target_base_type == script_value_type::jai_shared_ptr_type) return arg; break;
+		case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
+		default: break;
+	}
 
-	if (source_type == target_base_type) {
-		if (source_type == script_value_type::jai_object_type) {
-			auto source_type_info = derefed_arg.get_type_info();
-			if (source_type_info && !source_type_info->type_name.empty() &&
-			    source_type_info->type_name == target_type->type_name) {
-				return derefed_arg;
-			}
-			auto resolved = resolve_member_target(derefed_arg);
-			if (resolved) {
-				if (resolved.class_name() == target_type->type_name) {
-					return arg;
-				}
-				if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-					return arg;
-				}
-			}
-		} else {
+	auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_);
+	if (!outcome) {
+		return outcome.error_value();
+	}
+	using verdict = detail::slot_conversion::verdict;
+	detail::slot_conversion& out = outcome.value();
+	switch (out.v) {
+		case verdict::identity:
 			return arg;
+		case verdict::identity_exact:
+			return derefed_arg;
+		case verdict::converted:
+			return std::move(*out.value);
+		case verdict::container_mismatch: {
+			auto* sym = engine_->get_symbolizer();
+			return checked_result<script_value>(
+				make_error_code(runtime_error_code::array_element_type_mismatch),
+				detail::container_boundary_mismatch_text,
+				sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
 		}
-	}
-
-	if (source_type == script_value_type::jai_null_type &&
-	    target_base_type == script_value_type::jai_object_type) {
-		return arg;
-	}
-
-	auto source_type_info = derefed_arg.get_type_info();
-	if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type) {
-		if (target_base_type == script_value_type::jai_shared_ptr_type) {
-			if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+		case verdict::handle_target: {
+			// shared_ptr<T> / weak_ptr<T> parameters and returns (outside the table): a same-kind
+			// payload, a matching or derived handle binds as-is
+			if (derefed_arg.storage_type() == target_base_type) {
 				return arg;
 			}
-			auto resolved = resolve_member_target(derefed_arg);
-			if (resolved) {
-				if (resolved.class_name() == target_type->type_name) {
+			auto source_type_info = derefed_arg.get_type_info();
+			if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
+			    target_base_type == script_value_type::jai_shared_ptr_type) {
+				if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
 					return arg;
 				}
-				if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-					return arg;
+				auto resolved = resolve_member_target(derefed_arg);
+				if (resolved) {
+					if (resolved.class_name() == target_type->type_name) {
+						return arg;
+					}
+					if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
+						return arg;
+					}
 				}
 			}
+			break;
 		}
-		if (target_base_type == script_value_type::jai_object_type) {
-			auto resolved = resolve_member_target(derefed_arg);
-			if (resolved) {
-				if (resolved.class_name() == target_type->type_name) {
-					return arg;
-				}
-				if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-					return arg;
-				}
-			}
-			if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-				return arg;
-			}
-		}
+		default:
+			break;
 	}
 
-	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
-		const std::string& target_class_name = target_type->type_name;
-
-		if (engine_) {
-			auto class_def = engine_->get_class_definition(target_class_name);
-			if (class_def) {
-				auto script_class = std::dynamic_pointer_cast<script_class_definition>(class_def);
-				if (script_class) {
-					const auto& ctor_asts = script_class->get_constructor_asts();
-					bool has_matching_ctor = false;
-
-					std::string source_type_name;
-					class_definition* source_class_def = nullptr;
-					if (source_type == script_value_type::jai_object_type) {
-						auto resolved = resolve_member_target(derefed_arg);
-						if (resolved) {
-							source_type_name = resolved.class_name();
-							source_class_def = resolved.class_def;
-						}
-					}
-
-					for (const auto& ctor_ast : ctor_asts) {
-						if (ctor_ast->parameters.size() != 1) continue;
-						const auto& param = ctor_ast->parameters[0];
-						if (!param.type || param.type->type_name.empty()) {
-							has_matching_ctor = true;
-							break;
-						}
-						if (source_type == script_value_type::jai_object_type) {
-							if (param.type->type_name == source_type_name) {
-								has_matching_ctor = true;
-								break;
-							}
-							if (source_class_def && source_class_def->is_subtype_of(param.type->type_name)) {
-								has_matching_ctor = true;
-								break;
-							}
-						} else {
-							if (param.type->base_type == source_type ||
-							    (source_type == script_value_type::jai_int_type &&
-							     param.type->base_type == script_value_type::jai_float_type) ||
-							    (source_type == script_value_type::jai_float_type &&
-							     param.type->base_type == script_value_type::jai_int_type)) {
-								has_matching_ctor = true;
-								break;
-							}
-						}
-					}
-
-					if (!has_matching_ctor) {
-						return checked_result<script_value>(
-							make_error_code(runtime_error_code::type_mismatch),
-							"Cannot convert {0} to {1} (no suitable single-argument constructor)",
-							derefed_arg.type_id(), target_type->id);
-					}
-				}
-			}
-		}
-
-		auto global = engine_ ? engine_->get_global_environment() : nullptr;
-		auto ctor_result = global ? global->get(target_class_name) : environment_->get(target_class_name);
-		if (ctor_result && ctor_result.value().is_function()) {
-			const script_function& ctor = ctor_result.value().as_function();
-			std::vector<script_value> ctor_args;
-			ctor_args.push_back(arg);
-			auto result = ctor(ctor_args);
-			if (result.has_value()) {
-				return std::move(result.value());
-			}
-		}
-
+	const uint64_t source_id = symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_));
+	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
+	    (out.v == verdict::reject || out.v == verdict::reject_class)) {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::type_mismatch),
 			"Cannot convert {0} to {1} (no suitable single-argument constructor)",
-			derefed_arg.type_id(), target_type->id);
+			source_id, target_type->id);
 	}
-
-	if (source_type == script_value_type::jai_int_type &&
-	    target_base_type == script_value_type::jai_float_type) {
-		return script_value(static_cast<script_float>(derefed_arg.unchecked_as_int()), engine_);
-	}
-	if (source_type == script_value_type::jai_float_type &&
-	    target_base_type == script_value_type::jai_int_type) {
-		return script_value(static_cast<script_int>(derefed_arg.unchecked_as_float()), engine_);
-	}
-
-	if (source_type == script_value_type::jai_object_type) {
-		std::string method_name;
-		if (target_base_type == script_value_type::jai_int_type) {
-			method_name = "to_int";
-		} else if (target_base_type == script_value_type::jai_float_type) {
-			method_name = "to_float";
-		} else if (target_base_type == script_value_type::jai_string_type) {
-			method_name = "to_string";
-		} else if (target_base_type == script_value_type::jai_bool_type) {
-			method_name = "to_bool";
-		} else if (target_base_type == script_value_type::jai_char_type) {
-			method_name = "to_char";
-		}
-
-		if (!method_name.empty()) {
-			auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-			if (instance) {
-				auto method_id = symbolizer_->intern(method_name);
-				auto method_val = instance->get_method(method_id, false);
-				if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
-					script_value bound = make_bound_method(arg, method_val);
-					const script_function& method = bound.as_function();
-					std::vector<script_value> no_args;
-					auto result = method(no_args);
-					if (result.has_value()) {
-						return std::move(result.value());
-					}
-				}
-			}
-		}
-	}
-
 	return checked_result<script_value>(
 		make_error_code(runtime_error_code::type_mismatch),
 		"Type mismatch: expected {0} but got {1}",
-		target_type->id, derefed_arg.type_id());
+		detail::slot_target_symbol(*target_type, *symbolizer_), source_id);
 }
 
 // ============================================================
@@ -3234,6 +3035,15 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 					}
 					return {};
 				}
+				if (member.what == detail::member_probe_hit::kind::cpp_property) {
+					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
+					                                           member.method_value, member.getter_id, sym);
+					if (!read) {
+						return raise_from(read);
+					}
+					stack_.push_back(std::move(read.value()));
+					return {};
+				}
 				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
 					this_field_ic_arm(f, f.ip * 3, member.instance, sym);
 				}
@@ -3272,6 +3082,16 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
+				// A hybrid's C++ property reads through its getter (never a placeholder cell)
+				if (uint64_t getter_id = detail::cpp_property_getter_id(instance.get(), sym)) {
+					auto read = detail::read_bare_cpp_property(this_val, instance.get(),
+					                                           instance->get_method(getter_id, false), getter_id, sym);
+					if (!read) {
+						return raise_from(read);
+					}
+					stack_.push_back(std::move(read.value()));
+					return {};
+				}
 				if (instance->has_field(sym)) {
 					this_field_ic_arm(f, f.ip * 3, instance.get(), sym);
 #ifdef JAISCRIPT_VM_PROFILE
@@ -3384,7 +3204,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
 			                             detail::same_type_payload(value, slot_type.get());
 			if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
-			                  slot_type->base_type == script_value_type::jai_object_type)) {
+			                  slot_type->base_type == script_value_type::jai_object_type ||
+			                  slot_type->base_type == script_value_type::jai_array_type ||
+			                  slot_type->base_type == script_value_type::jai_map_type)) {
 				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
 				if (!enforced) {
 					return raise_from(enforced);
@@ -3424,11 +3246,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				}
 			}
 			if (declared && declared->base_type != script_value_type::jai_any_type) {
-				auto converted = detail::try_convert_field_value(incoming, declared, engine_);
+				auto converted = detail::field_store_convert(incoming, declared, engine_);
 				if (!converted) {
-					return raise_(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", declared->id);
+					return raise_from(converted);
 				}
-				incoming = std::move(*converted);
+				incoming = std::move(converted.value());
 			}
 			if (cell->is_reference()) {
 				cell->deref() = incoming;
@@ -3811,23 +3633,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			if (obj_holder && obj_holder->is_class_instance_wrapper) {
 				auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 				if (instance->has_field(sym)) {
-					auto class_def = instance->get_class_definition();
-					if (class_def) {
-						auto cpp_base = class_def->find_cpp_base_class();
-						if (cpp_base) {
-							uint64_t setter_id = cpp_base->get_property_setter_id(sym);
-							if (setter_id != 0) {
-								auto setter = cpp_base->get_method(setter_id, false);
-								if (setter.is_function()) {
-									std::vector<script_value> args = {this_val, value};
-									auto result = setter.as_function()(args);
-									if (!result) {
-										return raise_from(result);
-									}
-									assigned_to_member = true;
-								}
-							}
-						}
+					// A hybrid's C++ property stores through its setter, exactly like
+					// this.name = v (a same-named script field shadows it)
+					if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), sym)) {
+						VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), setter_id, value));
+						assigned_to_member = true;
 					}
 					// Typed fields enforce like locals (declared type; auto infers)
 					if (!assigned_to_member) {
@@ -3855,21 +3665,25 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					}
 				} else {
 					auto class_def = instance->get_class_definition();
-					if (class_def) {
+					if (class_def && class_def->has_static_field(sym)) {
 						// All-detach (#12): implicit static store snapshots too
 						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 							value = value.detached_for_store();
 						}
+						// Typed statics enforce like fields (shared kernel, interp parity)
 						if (rhs_lvalue) {
-							if (class_def->set_static_field(sym, clone_for_assignment(value))) {
-								assigned_to_member = true;
+							auto stored = detail::store_static_member(*class_def, sym, clone_for_assignment(value));
+							if (!stored) {
+								return raise_from(stored);
 							}
 						} else {
-							if (class_def->set_static_field(sym, std::move(value))) {
-								value = class_def->get_static_field(sym);
-								assigned_to_member = true;
+							auto stored = detail::store_static_member(*class_def, sym, std::move(value));
+							if (!stored) {
+								return raise_from(stored);
 							}
+							value = std::move(stored.value());
 						}
+						assigned_to_member = true;
 					}
 				}
 			}
@@ -3886,15 +3700,18 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				value = value.detached_for_store();
 			}
 			if (rhs_lvalue) {
-				if (f.locals->scope_static->set_static_field(sym, clone_for_assignment(value))) {
-					assigned_to_member = true;
+				auto stored = detail::store_static_member(*f.locals->scope_static, sym, clone_for_assignment(value));
+				if (!stored) {
+					return raise_from(stored);
 				}
 			} else {
-				if (f.locals->scope_static->set_static_field(sym, std::move(value))) {
-					value = f.locals->scope_static->get_static_field(sym);
-					assigned_to_member = true;
+				auto stored = detail::store_static_member(*f.locals->scope_static, sym, std::move(value));
+				if (!stored) {
+					return raise_from(stored);
 				}
+				value = std::move(stored.value());
 			}
+			assigned_to_member = true;
 		}
 	}
 
@@ -4237,7 +4054,17 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			"Undefined variable '{0}' (not a field of 'this')", sym);
 	}
 
-	script_value currentValue = instance->get_field(sym);
+	// A hybrid's C++ property reads through its getter and stores through its setter
+	// (KEEP BYTE-PARALLEL with the interpreter implicit-this compound tail)
+	const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), sym);
+	const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), sym) : 0;
+	script_value currentValue = make_null();
+	if (prop_getter) {
+		VM_TRY_ASSIGN(currentValue, detail::read_bare_cpp_property(this_val, instance.get(),
+			instance->get_method(prop_getter, false), prop_getter, sym));
+	} else {
+		currentValue = instance->get_field(sym);
+	}
 
 	if (currentValue.is_object()) {
 		uint64_t op_symbol_id = 0;
@@ -4252,11 +4079,15 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		if (op_symbol_id != 0) {
 			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_result.has_value()) {
-				auto enforced = instance->enforce_field_write(sym, clone_for_assignment(custom_result.value()));
-				if (!enforced) {
-					return raise_from(enforced);
+				if (prop_setter) {
+					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
+				} else {
+					auto enforced = instance->enforce_field_write(sym, clone_for_assignment(custom_result.value()));
+					if (!enforced) {
+						return raise_from(enforced);
+					}
+					instance->set_field_unchecked(sym, enforced.value());
 				}
-				instance->set_field_unchecked(sym, enforced.value());
 				if (!no_result) { stack_.push_back(std::move(custom_result.value())); }
 				return {};
 			}
@@ -4348,11 +4179,15 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 
 	// Store the enforced (declared-type converted) value; the expression result stays the
 	// promoted value, matching member/element compound semantics
-	auto enforced = instance->enforce_field_write(sym, clone_for_assignment(resultValue));
-	if (!enforced) {
-		return raise_from(enforced);
+	if (prop_setter) {
+		VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
+	} else {
+		auto enforced = instance->enforce_field_write(sym, clone_for_assignment(resultValue));
+		if (!enforced) {
+			return raise_from(enforced);
+		}
+		instance->set_field_unchecked(sym, enforced.value());
 	}
-	instance->set_field_unchecked(sym, enforced.value());
 	if (!no_result) { stack_.push_back(std::move(resultValue)); }
 	return {};
 }
@@ -4441,7 +4276,17 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		script_value this_val = *frame_this;
 		std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 		if (instance && instance->has_field(sym)) {
-			script_value currentVal = instance->get_field(sym);
+			// A hybrid's C++ property reads through its getter and stores through its setter
+			// (KEEP BYTE-PARALLEL with the interpreter ++/-- this-tail)
+			const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), sym);
+			const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), sym) : 0;
+			script_value currentVal = make_null();
+			if (prop_getter) {
+				VM_TRY_ASSIGN(currentVal, detail::read_bare_cpp_property(this_val, instance.get(),
+					instance->get_method(prop_getter, false), prop_getter, sym));
+			} else {
+				currentVal = instance->get_field(sym);
+			}
 			// S8: a bound-alias field decodes live; set_field stores the detached result (§12.5)
 			if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 				currentVal = currentVal.bound_decoded_temp();
@@ -4454,13 +4299,21 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 				} else {
 					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
 				}
-				instance->set_field(sym, script_value(newVal, engine_));
+				if (prop_setter) {
+					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, script_value(newVal, engine_)));
+				} else {
+					instance->set_field(sym, script_value(newVal, engine_));
+				}
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			} else if (ti == script_value::TYPEID_FLOAT) {
 				script_float oldVal = currentVal.unchecked_as_float();
 				script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-				instance->set_field(sym, script_value(newVal, engine_));
+				if (prop_setter) {
+					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, script_value(newVal, engine_)));
+				} else {
+					instance->set_field(sym, script_value(newVal, engine_));
+				}
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			} else {
@@ -4622,6 +4475,16 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					}
 					return &scratch.value();
 				}
+				if (member.what == detail::member_probe_hit::kind::cpp_property) {
+					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
+					                                           member.method_value, member.getter_id, sym);
+					if (!read) {
+						raise_from(read);
+						return nullptr;
+					}
+					scratch.emplace(std::move(read.value()));
+					return &scratch.value();
+				}
 				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
 					this_field_ic_arm(f, cache_slot, member.instance, sym);
 				}
@@ -4657,6 +4520,16 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
+				if (uint64_t getter_id = detail::cpp_property_getter_id(instance.get(), sym)) {
+					auto read = detail::read_bare_cpp_property(this_val, instance.get(),
+					                                           instance->get_method(getter_id, false), getter_id, sym);
+					if (!read) {
+						raise_from(read);
+						return nullptr;
+					}
+					scratch.emplace(std::move(read.value()));
+					return &scratch.value();
+				}
 				if (instance->has_field(sym)) {
 					// The walk above just MISSED and this site resolves a field: bank
 					// the proof so the next access skips the walk while the serial holds
@@ -4749,6 +4622,18 @@ const script_value* vm_backend::fused_subscript_value(frame& f, const fused_oper
 		current = &scratch.value().deref();
 	}
 	return current;
+}
+
+// Register-file sequencing producer: a subscript operand LEFT of a lifting subtree
+// reads (and raises) here, before that subtree computes, and lands RAW in its temp;
+// the outer op reads it back as an ordinary slot operand.
+op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
+	std::optional<script_value> scratch;
+	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
+	if (!v) return op_status::failed;
+	script_value out = *v;
+	frame_slot_set(f, ins.b, std::move(out));
+	return {};
 }
 
 op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
@@ -7165,6 +7050,208 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// Callee-first probe for member callees (the op_probe_callee ruling extended to
+// `recv.m(args)`): the lookup errors exec_call_method's ladder raises post-args fire
+// here, at the pre-args observation point; every other outcome leaves the stack
+// untouched and the call op runs its full ladder unchanged. Lookup only - no getter
+// runs (a member with a real getter defers to the call op), no bound method is minted.
+// b=1 is the computed-callee form: the loaded callee's callable check.
+op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
+	if (ins.b == 1) {
+		if (!stack_.back().is_function()) {
+			return raise_(make_error_code(runtime_error_code::not_a_function));
+		}
+		return {};
+	}
+	const call_site& site = f.code->call_sites[ins.a];
+	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
+	const script_value& objectValue = stack_.back().deref();
+	const uint64_t member_id = member->member_id;
+	if (member->null_safe && objectValue.is_null()) {
+		return {};
+	}
+	// The call op's callable check on a member that resolves to a plain value
+	auto callable = [&](const script_value& v) -> op_status {
+		if (v.is_function() || (v.is_null() && member->null_safe)) { return {}; }
+		return raise_(make_error_code(runtime_error_code::not_a_function));
+	};
+
+	if (member->object && member->object->get_type() == node_type::super_expr) {
+		std::shared_ptr<class_definition> parent_def;
+		if (objectValue.is_object()) {
+			if (auto objHolder = objectValue.get_object_holder(); objHolder && objHolder->data) {
+				if (auto* class_def = std::static_pointer_cast<class_instance>(objHolder->data)->get_class_definition()) {
+					parent_def = class_def->get_parent();
+				}
+			}
+		}
+		if (!parent_def) {
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
+		}
+		if (parent_def->chain_has_nonpublic()) [[unlikely]] {
+			VM_TRY(detail::enforce_member_access(parent_def.get(), member_id, frame_access_context(f)));
+		}
+		try {
+			if (parent_def->get_method(member_id).is_null()) {
+				return raise_(make_error_code(runtime_error_code::member_not_found),
+					"Parent class has no method '{0}'", member_id);
+			}
+		} catch (const runtime_error& e) {
+			raise_script_exception(e.what(), member->location);
+		}
+		return {};
+	}
+
+	const size_t receiver_type = objectValue.raw_storage_index();
+	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
+		const auto holder = objectValue.get_object_holder();
+		if (holder && holder->type_id == coroutine_handle_type_id_) {
+			if (member_id == resume_id_ || member_id == done_id_) { return {}; }
+			return raise_(make_error_code(runtime_error_code::member_not_found),
+				"coroutine_handle has no member '{0}'", member_id);
+		}
+		if (holder && holder->is_class_instance_wrapper && holder->data && member_id != same_as_id_) {
+			auto* inst = static_cast<class_instance*>(holder->data.get());
+			class_definition* cd = inst->get_class_definition();
+			if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+				// Worker verdict (parallel-method-admission ruling): the call op's text
+				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
+					? parallel_method_pins_->find(cd, member_id) : nullptr;
+				if (!pin) {
+					return raise_(make_error_code(runtime_error_code::unsupported_operation),
+						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
+						"public methods on the element's own class touching only element, local, or "
+						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member_id);
+				}
+				return {};
+			}
+			if (cached_global_env_ && cd) {
+				const uint64_t epoch = cd->method_epoch();
+				if ((site.mic_cd == cd && site.mic_epoch == epoch && !mic_field_shadowed(site, *inst, member_id)) ||
+				    (site.probe_cd == cd && site.probe_epoch == epoch && !probe_field_shadowed(site, *inst, member_id))) {
+					return {};
+				}
+			}
+		}
+	}
+
+	// member_access_value's precedence, lookup only (KEEP the texts BYTE-PARALLEL with it)
+	if (objectValue.is_string()) {
+		const bool known = f.code->builtin_indexed
+			? site.bi_string != builtin_method_registries::k_no_builtin
+			: builtins_.string_methods.find(member_id) != builtins_.string_methods.end();
+		if (!known) {
+			raise_script_exception("String has no method '" + std::string(member->member) + "'", member->location);
+		}
+		return {};
+	}
+	if (objectValue.is_array()) {
+		const bool known = f.code->builtin_indexed
+			? site.bi_array != builtin_method_registries::k_no_builtin
+			: builtins_.array_methods.find(member_id) != builtins_.array_methods.end();
+		if (!known) {
+			raise_script_exception("Array has no method '" + std::string(member->member) + "'", member->location);
+		}
+		return {};
+	}
+	if (objectValue.is_map()) {
+		const bool known = f.code->builtin_indexed
+			? site.bi_map != builtin_method_registries::k_no_builtin
+			: builtins_.map_methods.find(member_id) != builtins_.map_methods.end();
+		if (known) { return {}; }
+		auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
+		if (map_storage) {
+			auto found = map_storage->find(script_value(std::string(member->member), engine_));
+			if (found != map_storage->end()) { return callable(found->second); }
+		}
+		return raise_(make_error_code(runtime_error_code::member_not_found),
+			"Map has no method or key '{0}'", member_id);
+	}
+	if (objectValue.is_weak_ptr()) {
+		if (builtins_.weak_ptr_methods.find(member_id) != builtins_.weak_ptr_methods.end()) { return {}; }
+		return raise_(make_error_code(runtime_error_code::member_not_found),
+			"weak_ptr has no method '{0}'", member_id);
+	}
+	if (objectValue.get_type_info() &&
+	    objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
+	    builtins_.shared_ptr_methods.find(member_id) != builtins_.shared_ptr_methods.end()) {
+		bool user_shadows = false;
+		if (auto ci = const_cast<script_value&>(objectValue).get_class_instance()) {
+			if (auto* cd = ci->get_class_definition()) {
+				user_shadows = cd->defines_method(member_id);
+			}
+		}
+		if (!user_shadows) { return {}; }
+	}
+	if (member_id == same_as_id_) {
+		return {};
+	}
+	if (!objectValue.is_object()) {
+		if (objectValue.is_null()) {
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get()), member_id, null_member_receiver_symbol(member->object.get()));
+		}
+		return raise_(make_error_code(runtime_error_code::member_not_found),
+			scalar_member_message, base_type_ids_[objectValue.type()], member_id);
+	}
+
+	auto target = resolve_member_target(objectValue);
+	if (!target) {
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
+	}
+	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+		VM_TRY(detail::enforce_member_access(target.class_def, member_id, frame_access_context(f)));
+	}
+	if (target.class_def && target.class_def->has_property_getters()) {
+		uint64_t getter_id = member->getter_id;
+		if (getter_id == UINT64_MAX) {
+			auto [id, _] = symbolizer_->get_getter_id_with_view(member_id);
+			getter_id = id;
+			member->getter_id = getter_id;
+		}
+		script_value getter = target.method(getter_id);
+		if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+			// An auto accessor reads the backing field; a custom getter runs user code
+			// and defers to the call op (which runs it once, post-args)
+			if (target.class_def->is_auto_accessor(getter_id) && target.has_field(member_id)) {
+				return callable(target.get_field(member_id));
+			}
+			return {};
+		}
+	}
+	if (target.has_field(member_id)) {
+		return callable(target.get_field(member_id));
+	}
+	script_value method = target.method(member_id);
+	if (!method.is_null() && !method.is_invalid()) {
+		if (cached_global_env_ && target.instance && target.class_def && !target.class_def->chain_has_nonpublic()) {
+			if (class_definition* cd = target.instance->get_class_definition()) {
+				site.probe_cd = cd;
+				site.probe_epoch = cd->method_epoch();
+				site.probe_field_free = !cd->chain_declares_field(member_id) &&
+				                        cd->field_slot(member_id) == class_definition::k_no_field_slot;
+			}
+		}
+		return {};
+	}
+	if (target.class_def && target.class_def->is_transparent_wrapper()) {
+		script_value mutable_obj = objectValue;
+		script_value unwrapped = target.class_def->unwrap(mutable_obj);
+		if (!unwrapped.is_null() && unwrapped.is_object()) {
+			if (auto unwrapped_target = resolve_member_target(unwrapped)) {
+				if (unwrapped_target.has_field(member_id)) {
+					return callable(unwrapped_target.get_field(member_id));
+				}
+				script_value unwrapped_method = unwrapped_target.method(member_id);
+				if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
+					return {};
+				}
+			}
+		}
+	}
+	raise_script_exception("Object has no member '" + std::string(member->member) + "'", member->location);
+	return {};
+}
+
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -7919,10 +8006,26 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// same-named GLOBAL over the member. (KEEP BYTE-PARALLEL with the
 				// interpreter's visit_lambda_expr default-capture loop.)
 				script_value* scoped_target = nullptr;
+				std::optional<script_value> property_snapshot;
 				if (f.locals && !f.top_level) {
 					ensure_frame_member_scope(f, environment_.get());
 					if (frame_scope_active(f)) {
 						scoped_target = member_scope_env_lookup(f, var_id, SIZE_MAX);
+						// A hybrid's C++ property has no cell to alias: [=] and [&] both take
+						// the getter snapshot (the field snapshot rule)
+						if (!scoped_target && frame_scope_state(f) == detail::member_scope_state::instance &&
+						    f.locals->scope_this) {
+							auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+							                                         f.locals->scope_static, var_id, /*want_methods*/ true);
+							if (member.what == detail::member_probe_hit::kind::cpp_property) {
+								auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
+								                                           member.method_value, member.getter_id, var_id);
+								if (!read) {
+									return raise_from(read);
+								}
+								property_snapshot = std::move(read.value());
+							}
+						}
 					}
 				}
 				if (scoped_target) {
@@ -7931,6 +8034,8 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					} else {
 						captureEnv->define(var_id, vm_clone_for_capture(scoped_target->deref(), symbolizer_));
 					}
+				} else if (property_snapshot) {
+					captureEnv->define(var_id, vm_clone_for_capture(*property_snapshot, symbolizer_));
 				} else if (!(f.locals && !f.top_level && frame_scope_active(f)) && environment_->contains(var_id)) {
 					if (capture_by_ref_default) {
 						script_value* targetPtr = environment_->get_value_ptr(var_id);
@@ -8460,7 +8565,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (objectValue.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
 		}
-		return raise_(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::member_not_found),
+			scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
 	}
 
 	auto target = resolve_member_target(objectValue);
@@ -8475,6 +8581,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		                                            frame_access_context(f)));
 	}
 
+	// The nearest USER _get_ in the chain wins over the field; the synthesized accessor is
+	// skipped - its body IS the field rung below (KEEP BYTE-PARALLEL with the interpreter)
 	if (target.class_def && target.class_def->has_property_getters()) {
 		try {
 			uint64_t getter_id = expr->getter_id;
@@ -8483,31 +8591,14 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				getter_id = id;
 				expr->getter_id = getter_id;
 			}
-			script_value getter = target.method(getter_id);
+			script_value getter = target.user_accessor(getter_id);
 			if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-				const script_function& func = getter.as_function();
-				// A bound C++ getter on a retired script layer reports (script getters
-				// still see the layer's own fields)
-				if (target.instance && target.instance->script_layer_retired() &&
-				    !func.target<script_method_dispatch>() && !target.class_def->is_auto_accessor(getter_id)) {
-					return raise_(make_error_code(runtime_error_code::script_layer_retired),
-						"Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
-						target.class_def->get_type_id());
-				}
-				std::vector<script_value> args = {objectValue};
-				auto result = func(args);
+				// The shared read (retired-layer report, receiver pin): the bare-name rung
+				// of detail/member_scope.hpp runs the identical kernel
+				auto result = detail::read_cpp_property(objectValue, target.class_def, target.instance.get(),
+				                                        getter, getter_id);
 				if (!result) {
 					return raise_from(result);
-				}
-				// Getter results referencing the receiver must keep the receiver's data alive
-				script_value& getterResult = result.value();
-				if (getterResult.is_non_owning_object()) {
-					auto resultHolder = getterResult.get_object_holder();
-					auto receiverHolder = objectValue.get_object_holder();
-					if (resultHolder && receiverHolder) {
-						resultHolder->keep_alive = receiverHolder->data ? receiverHolder->data
-						                                                : receiverHolder->keep_alive;
-					}
 				}
 				out = std::move(result.value());
 				return {};
@@ -8744,9 +8835,8 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		return {};
 	}
 
-	script_value static_value = class_def->get_static_field(expr->member_id);
-	if (!static_value.is_null()) {
-		out = static_value;
+	if (const script_value* static_value = class_def->get_static_field_ptr(expr->member_id)) {
+		out = *static_value;
 		return {};
 	}
 
@@ -8783,14 +8873,11 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 			getter_id = gid;
 			expr->getter_id = getter_id;
 		}
-		// The SYNTHESIZED accessor is verbatim get_field — only a CUSTOM getter shadows
-		// the slot (stage-5a's has_field trick, field-read edition; registration
-		// reclaims overridden ids).
-		if (!cd->is_auto_accessor(getter_id)) {
-			const script_value getter = cd->get_method(getter_id, false);
-			if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-				return UINT32_MAX;
-			}
+		// The SYNTHESIZED accessor is verbatim get_field; a USER _get_/_set_ anywhere in the
+		// chain takes the field off the fast lanes (the ladder dispatches to it)
+		if (cd->user_accessor(getter_id) ||
+		    cd->user_accessor(symbolizer_->get_setter_id_with_view(expr->member_id).first)) {
+			return UINT32_MAX;
 		}
 	}
 	return fslot;
@@ -8953,7 +9040,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	}
 
 	auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(member_id);
-	script_value setter = target.method(setter_id);
+	script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
 	if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
 		const script_function& func = setter.as_function();
 		std::vector<script_value> args = {object_value, clone_for_assignment(value)};
@@ -9015,7 +9102,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
 	// {class, slot} skips the resolve ladder AND the synthesized setter closure —
 	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
-	// here verbatim through the slot. A CUSTOM _set_ method keeps the site negative;
+	// here verbatim through the slot. A user _get_/_set_ in the chain keeps the site negative;
 	// declared-but-absent cells materialize exactly like set_field_unchecked.
 	if (cached_global_env_ &&
 	    dereferenced.raw_storage_index() == script_value::TYPEID_OBJECT) {
@@ -9046,14 +9133,9 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 						if (fslot != class_definition::k_no_field_slot) {
 							auto [setter_id, setter_view] =
 								symbolizer_->get_setter_id_with_view(member->member_id);
-							bool custom_setter = false;
-							if (!cd->is_auto_accessor(setter_id)) {
-								const script_value setter = cd->get_method(setter_id, false);
-								custom_setter = !setter.is_null() && !setter.is_invalid() &&
-								                setter.is_function();
-							}
-							if (!custom_setter) {
-								slot = fslot;
+							if (!cd->user_accessor(setter_id) &&
+							    !cd->user_accessor(symbolizer_->get_getter_id_with_view(member->member_id).first)) {
+								slot = fslot;   // no user accessor in the chain: the slot IS the ladder's answer
 							}
 						}
 					}
@@ -9075,50 +9157,32 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+op_status vm_backend::store_static_target(frame& f, member_expr* member, const script_value& result) {
+	auto cls = detail::resolve_static_store_class(member, *environment_, *symbolizer_, frame_access_context(f));
+	if (!cls) {
+		return raise_from(cls);
+	}
+	auto stored = detail::store_static_member(*cls.value(), member->member_id, clone_for_assignment(result));
+	if (!stored) {
+		return raise_from(stored);
+	}
+	return {};
+}
+
 op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 
-	if (member->object->get_type() != node_type::identifier_expr) {
-		return raise_(make_error_code(runtime_error_code::type_mismatch),
-			"Static member assignment requires a class name");
+	auto cls = detail::resolve_static_store_class(member, *environment_, *symbolizer_, frame_access_context(f));
+	if (!cls) {
+		return raise_from(cls);
 	}
-	auto* ident_expr = static_cast<identifier_expr*>(member->object.get());
-
-	uint64_t class_name_id = ident_expr->symbol_id;
-	auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(class_name_id);
-	auto class_result = environment_->get(class_var_id);
-	if (!class_result) {
-		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Class '{0}' not found", class_name_id);
+	auto stored = detail::store_static_member(*cls.value(), member->member_id, clone_for_assignment(value));
+	if (!stored) {
+		return raise_from(stored);
 	}
-	script_value class_var = std::move(class_result.value());
-
-	if (!class_var.is_object()) {
-		return raise_(make_error_code(runtime_error_code::type_mismatch),
-			"'{0}' is not a class", class_name_id);
-	}
-
-	auto objHolder = class_var.get_object_holder();
-	if (!objHolder || objHolder->type_name != "class_definition") {
-		return raise_(make_error_code(runtime_error_code::type_mismatch),
-			"'{0}' is not a valid class", class_name_id);
-	}
-
-	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
-
-	if (class_def->chain_has_nonpublic()) [[unlikely]] {
-		VM_TRY(detail::enforce_member_access(class_def.get(), member->member_id,
-		                                            frame_access_context(f)));
-	}
-
-	if (!class_def->set_static_field(member->member_id, value.clone())) {
-		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Cannot assign to static member: field '{0}' not found", member->member_id);
-	}
-
-	stack_.push_back(std::move(value));
+	stack_.push_back(std::move(stored.value()));
 	return {};
 }
 
@@ -9127,8 +9191,11 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
 
-	script_value objectValueRaw = std::move(stack_.back());
-	stack_.pop_back();
+	// A :: target carries no object operand (its class resolves in the write-back)
+	script_value objectValueRaw = member->is_static ? make_null() : std::move(stack_.back());
+	if (!member->is_static) {
+		stack_.pop_back();
+	}
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());
@@ -9155,6 +9222,11 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		if (op_symbol_id != 0) {
 			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_result.has_value()) {
+				if (member->is_static) {
+					VM_TRY(store_static_target(f, member, custom_result.value()));
+					stack_.push_back(std::move(custom_result.value()));
+					return {};
+				}
 				script_value objectValue = objectValueRaw.deref();
 				if (objectValue.is_object()) {
 					VM_TRY(assign_member(f, objectValue, member, custom_result.value()));
@@ -9265,6 +9337,12 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		default:
 			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"Unsupported compound assignment operator");
+	}
+
+	if (member->is_static) {
+		VM_TRY(store_static_target(f, member, resultValue));
+		stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
+		return {};
 	}
 
 	script_value objectValue = objectValueRaw.deref();
@@ -10051,6 +10129,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 
 	std::unordered_map<uint64_t, script_value> new_field_defaults;
 	std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)
+	std::unordered_map<uint64_t, type_info_ptr> new_static_types; // declared static types ('auto' = null entry)
 	std::unordered_map<uint64_t, script_value> new_methods;
 	std::unordered_map<uint64_t, script_value> new_static_methods;
 	std::set<uint64_t> new_static_field_ids;
@@ -10206,6 +10285,22 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 						default_val.set_engine(engine_);
 					}
 				}
+				// Declared type ('auto' parses as null and infers; 'var' stores the any tag);
+				// the initializer converts through the field table like an instance initializer
+				if (field_id != 0) {
+					new_static_types[field_id] = var_decl->type;
+				}
+				if (!preserve_existing && var_decl->type && var_decl->type->base_type != script_value_type::jai_any_type) {
+					if (default_val.is_null()) {
+						default_val.set_type_info(var_decl->type);
+					} else {
+						auto converted = detail::field_store_convert(default_val, var_decl->type, engine_);
+						if (!converted) {
+							return raise_from(converted);
+						}
+						default_val = std::move(converted.value());
+					}
+				}
 
 				if (field_id != 0 && !preserve_existing) {
 					class_def->add_static_field(field_id, default_val);
@@ -10311,6 +10406,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 			field_defaults_with_engine[field_id] = evaluated_value;
 		}
 
+		std::unordered_set<uint64_t> synthesized_accessor_ids;   // a user _get_/_set_ keeps its id
 		for (const auto& [field_id, default_val] : field_defaults_with_engine) {
 			auto getter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
 				if (args.empty()) {
@@ -10321,7 +10417,10 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				return instance->get_field(field_id);
 			};
 			auto [getter_id, getter_view] = symbolizer_->get_getter_id_with_view(field_id);
-			new_methods[getter_id] = script_value::make_function(getter, engine_);
+			if (!new_methods.count(getter_id)) {
+				new_methods[getter_id] = script_value::make_function(getter, engine_);
+				synthesized_accessor_ids.insert(getter_id);
+			}
 
 			auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
 				if (args.size() != 2) {
@@ -10339,12 +10438,16 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				return std::move(enforced.value());
 			};
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
-			new_methods[setter_id] = script_value::make_function(setter, engine_);
+			if (!new_methods.count(setter_id)) {
+				new_methods[setter_id] = script_value::make_function(setter, engine_);
+				synthesized_accessor_ids.insert(setter_id);
+			}
 		}
 
 		// Declared types install first so redefine_class flags a retype as fields_changed
 		// and migrate_fields converts against the NEW types (retype ruling)
 		class_def->replace_field_declared_types(std::move(new_field_types), true);
+		class_def->replace_static_declared_types(std::move(new_static_types));
 
 		// Structural identity (position-insensitive AST key): identical reload adopts the
 		// freshly minted ASTs but skips per-instance migration. Interpreter twin:
@@ -10362,6 +10465,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_,
 		                          structurally_identical);
+		class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
 
 		if (structural_key.empty()) {
 			try {
@@ -10387,6 +10491,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 		environment_->clear_all_parent_caches();
 	} else {
 		class_def->replace_field_declared_types(std::move(new_field_types), false);
+		class_def->replace_static_declared_types(std::move(new_static_types));
 		for (const auto& [field_id, default_val] : new_field_defaults) {
 			std::string field_name(symbolizer_->get_string(field_id));
 			class_def->add_field(field_name, default_val);
@@ -10400,7 +10505,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				return instance->get_field(field_id);
 			};
 			auto [getter_id, getter_view] = symbolizer_->get_getter_id_with_view(field_id);
-			class_def->add_method_by_id(getter_id, getter, true);
+			if (!class_def->has_method(getter_id)) { class_def->add_method_by_id(getter_id, getter, true); }   // a user _get_ keeps its id
 
 			auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
 				if (args.size() != 2) {
@@ -10418,7 +10523,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				return std::move(enforced.value());
 			};
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
-			class_def->add_method_by_id(setter_id, setter, true);  // true = synthesized accessor
+			if (!class_def->has_method(setter_id)) { class_def->add_method_by_id(setter_id, setter, true); }
 		}
 	}
 
@@ -12167,8 +12272,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					return {};
 				}
 				// Function-body chunks end in op_halt: this is an in-loop callee's
-				// implicit-return exit
+				// implicit-return exit. Script unwinding latched by a bind-time conversion
+				// (a converting ctor that threw) falls to the loop bottom while the caller's
+				// try record is still live - `continue` would run its op_try_pop first
 				VM_TRY_OP_SHARED(fall_off_script_frame(fp));
+				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 
 			case opcode::op_const: {
@@ -12255,6 +12363,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, lane));
 				break;
 			}
+			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;
@@ -12279,6 +12388,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
 			case opcode::op_probe_callee:
 				VM_TRY_OP_SHARED(exec_probe_callee(f, ins));
+				break;
+			case opcode::op_probe_member:
+				VM_TRY_OP_SHARED(exec_probe_member(f, ins));
 				break;
 			case opcode::op_call_from_scratch:
 				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
@@ -12460,6 +12572,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					return {};
 				}
 				VM_TRY_OP_SHARED(return_from_script_frame(fp, ins));
+				// A return conversion that set script unwinding falls to the loop bottom while
+				// the caller's try record is still live (see op_halt)
+				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
 
@@ -12472,6 +12587,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					return {};
 				}
 				VM_TRY_OP_SHARED(exec_return_ident(fp, ins));
+				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
 			case opcode::op_return_binary: {
@@ -13398,6 +13514,8 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, bool p
 	// Deref + conversion run while the callee's env/frame are still live (native order)
 	auto conv = convert_return_value(std::move(result), rec.return_type);
 	if (!conv) {
+		// The callee is still the top frame: the trace names the return site
+		if (!trace_captured_) capture_stack_trace();
 		pop_script_frame_core(rec);
 		fp = rec.caller;
 		return raise_from(conv);
@@ -13847,8 +13965,10 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 								                                         caller_frame->locals->scope_static,
 								                                         symbol_id, /*want_methods*/ false);
 								argPtr = member.value_ptr;
+								// A C++ property has no cell to alias: it shadows like a method
+								member_shadowed = member.what == detail::member_probe_hit::kind::cpp_property;
 							}
-							if (!argPtr) {
+							if (!argPtr && !member_shadowed) {
 								if (detail::member_scope_has_method(caller_scope,
 								                                    caller_frame->locals->scope_this,
 								                                    caller_frame->locals->scope_static, symbol_id)) {
@@ -14152,6 +14272,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	if (has_return_value_) {
 		auto conv = convert_return_value(std::move(return_value_.value()), function.return_type);
 		if (!conv) {
+			if (!trace_captured_) capture_stack_trace();
 			cleanup();
 			return conv.error_value();
 		}

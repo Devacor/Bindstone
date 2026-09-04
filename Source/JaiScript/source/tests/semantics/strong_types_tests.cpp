@@ -1510,8 +1510,8 @@ public:
             struct var_row { const char* src; const char* needle; };
             const var_row var_sourced[] = {
                 {"var s = \"s\"; int x = s; x", "Type mismatch in assignment"},
-                {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Type mismatch: expected int but got"},
-                {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Type mismatch: expected int but got"},
+                {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Type mismatch: expected int but got string"},
+                {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Type mismatch: expected int but got array"},
                 {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } var b = B(); f(b)", "Type mismatch"},
                 {"class C { int v = 0; } auto c = C(); var s = \"nope\"; c.v = s; c.v", "Type mismatch in assignment"},
                 {"auto x = 5; var s = \"hello\"; x = s; x", "Type mismatch in assignment"},
@@ -1566,6 +1566,7 @@ public:
             check_both(with_prelude("cast<T&>(T()).t").c_str(), "2", "temporary operand is pinned");
             check_both(with_prelude("array<S> arr = [T(), T()]; cast<T&>(arr[1]).t = 44; var e = arr[1]; to_string(e.t)").c_str(), "44", "subscript operand aliases the element");
             check_both(with_prelude("shared_ptr<T> sp = new T(); T v = cast<T>(sp); v.t = 8; to_string(sp.t)").c_str(), "2", "value form deep-copies a handle");
+            check_both(with_prelude("T t0 = T(); auto& r = t0; T v = cast<T>(r); v.t = 8; to_string(t0.t) + \",\" + to_string(v.t)").c_str(), "2,8", "value form copies a reference operand");
         });
 
         test("cast_upcast_and_null", [this, check_both, with_prelude]() {
@@ -1992,7 +1993,7 @@ public:
             check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok ok Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|false", "shared_ptr field: handle, value, scalar");
             check_quad(q("to_string(o.loopStore(1000)) + \" \" + o.dump()").c_str(), "999 999|999.000000|a|false|10|0|2|true|true", "1000 stores at one site (the cached lane)");
             check_quad(q("to_string(o.chainStore()) + \",\" + to_string(o.storeResult()) + \",\" + to_string(o.storeResultConv()) + \",\" + to_string(o.i)").c_str(), "8,42,3.000000,3", "store as expression: value is the stored (converted) value");
-            check_quad(q("o.setStatic(9) + \" \" + o.setStatic(\"bad\")").c_str(), "ok ok", "static field stores (not the this-field lane)");
+            check_quad(q("o.setStatic(9) + \" \" + o.setStatic(\"bad\") + \" \" + to_string(F::st)").c_str(), "ok Type mismatch in assignment 9", "static field stores enforce like instance fields (not the this-field lane)");
             check_quad(q("auto g = G(); g.setInherited(11) + \" \" + g.setInherited(\"no\") + \" \" + g.dump() + \" \" + g.setG(3.2) + \" \" + to_string(g.g)").c_str(), "ok Type mismatch in assignment 11|1.500000|a|false|10|0|2|true|true ok 3", "inherited field through a derived instance");
             check_quad(q("array<F> fs = [F(), G()]; string acc = \"\"; for (auto& e : fs) { acc = acc + e.setInt(1) + \",\"; } acc = acc + to_string(fs[0].i) + to_string(fs[1].i); acc").c_str(), "ok,ok,11", "one site, two classes (polymorphic site re-arms)");
             check_quad(q("class H { int i = 0; int bump() { for (int k = 0; k < 5; ++k) { i += 1; } return i; } } auto h = H(); to_string(h.bump()) + \" \" + to_string(h.bump())").c_str(), "5 10", "compound field stores");
@@ -2000,6 +2001,125 @@ public:
             check_quad(q("class S { array<int> xs = [1]; void put(array<int> src) { xs = src; } int total() { int t = 0; for (auto q : xs) { t += q; } return t; } } auto sobj = S(); array<int> mine = [1, 2, 3]; sobj.put(mine); mine.push(100); to_string(sobj.total()) + \" \" + to_string(mine.size())").c_str(), "6 4", "lvalue rhs clones (value semantics)");
             check_quad(q("class Q { int i = 1; string setThis(var x) { string r = \"ok\"; try { this.i = x; } catch (err) { r = err; } return r; } } auto q = Q(); q.setThis(4) + \" \" + to_string(q.i) + \" \" + q.setThis(\"z\") + \" \" + to_string(q.i)").c_str(), "ok 4 Type mismatch in assignment 4", "explicit this.field (member path, not the bare lane)");
             check_quad(q("class W { weak_ptr<F> w; string setW(var x) { string r = \"ok\"; try { w = x; } catch (err) { r = err; } return r; } } auto w = W(); auto keep = shared_ptr<F>(); w.setW(keep) + \" \" + w.setW(F()) + \" \" + to_string(w.w == null)").c_str(), "Type mismatch in assignment Type mismatch in assignment true", "weak_ptr field: handle ok, value raises");
+        });
+
+        auto quad_mode = [](const char* src, check_mode mode) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                e->static_checking(mode);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::array<std::string, 2>{out[0], out[1]};
+        };
+        auto check_quad_off = [this, quad_mode](const char* src, const std::string& expected, const char* what) {
+            auto r = quad_mode(src, check_mode::off);
+            check_eq(expected, r[0], std::string("interp/off: ") + what);
+            check_eq(expected, r[1], std::string("vm/off: ") + what);
+        };
+        auto check_quad_error_text = [this, quad_mode](const char* src, const std::string& needle, const char* what) {
+            auto r = quad_mode(src, check_mode::off);
+            check_eq(r[0], r[1], std::string("backend parity: ") + what);
+            check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
+            check(r[0].find(needle) != std::string::npos, std::string("text: ") + what + " (got: " + r[0] + ")");
+        };
+
+        test("static_store_battery", [check_quad]() {
+            // Every supported static-store spelling (C::s anywhere; bare s in instance methods,
+            // constructors and static methods) runs the instance-field store table on both
+            // backends: same conversions, same text, the static untouched on a miss
+            const std::string P = "class C { static int i = 1; static float f = 1.5; static string s = \"a\"; static bool b = false; static auto a = 10; static var v = 0; static array<int> arr = [1, 2]; static C other; static shared_ptr<C> sp; static weak_ptr<C> w; int x = 0; C() {} C(var val) { i = val; } string setQ(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } static string setS(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } string dump() { return to_string(i) + \"|\" + to_string(f) + \"|\" + s + \"|\" + to_string(b) + \"|\" + to_string(a) + \"|\" + to_string(v) + \"|\" + to_string(arr.size()) + \"|\" + to_string(other == null) + \"|\" + to_string(sp == null) + \"|\" + to_string(w == null); } } function setI(var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; } function setF(var val) { string r = \"ok\"; try { C::f = val; } catch (err) { r = err; } return r; } function setStr(var val) { string r = \"ok\"; try { C::s = val; } catch (err) { r = err; } return r; } function setB(var val) { string r = \"ok\"; try { C::b = val; } catch (err) { r = err; } return r; } function setA(var val) { string r = \"ok\"; try { C::a = val; } catch (err) { r = err; } return r; } function setV(var val) { string r = \"ok\"; try { C::v = val; } catch (err) { r = err; } return r; } function setArr(var val) { string r = \"ok\"; try { C::arr = val; } catch (err) { r = err; } return r; } function setOther(var val) { string r = \"ok\"; try { C::other = val; } catch (err) { r = err; } return r; } function setSp(var val) { string r = \"ok\"; try { C::sp = val; } catch (err) { r = err; } return r; } function setW(var val) { string r = \"ok\"; try { C::w = val; } catch (err) { r = err; } return r; } auto o = C(); ";
+            auto q = [&](const char* tail) { return P + tail; };
+            const std::string base = "1|1.500000|a|false|10|0|2|true|true|true";
+            check_quad(q("setI(5) + \" \" + o.dump()").c_str(), "ok 5|1.500000|a|false|10|0|2|true|true|true", "C::i, int");
+            check_quad(q("setI(2.7) + \" \" + o.dump()").c_str(), "ok 2|1.500000|a|false|10|0|2|true|true|true", "C::i, float truncates");
+            check_quad(q("setI(\"x\") + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, string raises, static untouched");
+            check_quad(q("setI(true) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|false|10|0|2|true|true|true", "C::i, bool converts");
+            check_quad(q("setI(null) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, null raises");
+            check_quad(q("setI([1]) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, array raises");
+            check_quad(q("setI(C()) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, object raises");
+            check_quad(q("o.setQ(5) + \" \" + o.setQ(2.7) + \" \" + o.setQ(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Type mismatch in assignment 2", "bare static in an instance method");
+            check_quad(q("C::setS(6) + \" \" + C::setS(3.9) + \" \" + C::setS(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Type mismatch in assignment 3", "bare static in a static method");
+            check_quad(q("C(7); string r = \"ok\"; try { C(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Type mismatch in assignment 7", "bare static in a constructor");
+            check_quad(q("auto lam = [](var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; }; lam(\"x\") + \" \" + lam(3) + \" \" + to_string(C::i)").c_str(), "Type mismatch in assignment ok 3", "C::i inside a lambda");
+            check_quad(q("var vv = 2.9; C::i = vv; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "2|int", "C::i at top level keeps the declared type");
+            check_quad(q("setF(2) + \" \" + setF(\"q\") + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment 1|2.000000|a|false|10|0|2|true|true|true", "float static: int promotes, string raises");
+            check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "ok ok ok 1|1.500000|[object]|false|10|0|2|true|true|true", "string static takes anything through to_string (the instance-field row)");
+            check_quad(q("setB(1) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|true|10|0|2|true|true|true", "bool static: int converts");
+            check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment 1|1.500000|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
+            check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.500000|a|false|10|[array]|2|true|true|true", "var static takes anything");
+            check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment Type mismatch in assignment 1|1.500000|a|false|10|0|3|true|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
+            check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 Type mismatch in assignment", "object static: by-value copy, scalar raises");
+            check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|false|true", "shared_ptr static: handle, value, scalar");
+            check_quad(q("auto keep = shared_ptr<C>(); setW(keep) + \" \" + setW(C()) + \" \" + o.dump()").c_str(), "Type mismatch in assignment Type mismatch in assignment " + base, "weak_ptr static: the instance-field rows");
+            check_quad("class P { int v = 1; } class S { static shared_ptr<P> p; } auto h = shared_ptr<P>(); S::p = h; h.v = 5; to_string(S::p.v)", "5", "shared_ptr static shares the handle on both backends");
+            check_quad(q("int r = (C::i = 42); to_string(r)").c_str(), "42", "store as expression");
+            check_quad(q("float r = (C::i = 3.9); to_string(r) + \"|\" + to_string(C::i)").c_str(), "3.000000|3", "store as expression yields the stored (converted) value");
+        });
+
+        test("static_compound_battery", [check_quad, check_quad_error]() {
+            // `C::s op= v` and ++/-- on a class-qualified static are lvalues on both backends:
+            // C::s = T(C::s op v) with the compound texts; the bare forms keep working
+            const std::string P = "class C { static int i = 1; static float f = 1.5; static string s = \"a\"; static var v = 1; string bumpQ() { i += 2; i++; ++i; return to_string(i); } static string bumpS() { i += 2; i++; ++i; return to_string(i); } } function L(var x) { return x; } ";
+            auto q = [&](const char* tail) { return P + tail; };
+            check_quad(q("C::i += 1; to_string(C::i)").c_str(), "2", "+=");
+            check_quad(q("C::i -= 1; to_string(C::i)").c_str(), "0", "-=");
+            check_quad(q("C::i *= 2; to_string(C::i)").c_str(), "2", "*=");
+            check_quad(q("C::i = 8; C::i /= 2; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "4|int", "/= converts back to the declared int");
+            check_quad(q("C::i = 7; C::i %= 3; to_string(C::i)").c_str(), "1", "%=");
+            check_quad(q("C::i += 1.5; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "2|int", "int static += float truncates back to int");
+            check_quad(q("C::v += 1.5; to_string(C::v) + \"|\" + type_of(C::v)").c_str(), "2.500000|float", "var static += float becomes float");
+            check_quad(q("C::f *= 2; to_string(C::f)").c_str(), "3.000000", "float static *=");
+            check_quad(q("C::s += \"b\"; C::s").c_str(), "ab", "string static concat");
+            check_quad(q("auto old = C::i++; to_string(old) + \",\" + to_string(C::i)").c_str(), "1,2", "postfix ++ yields the old value");
+            check_quad(q("auto nw = ++C::i; to_string(nw) + \",\" + to_string(C::i)").c_str(), "2,2", "prefix ++ yields the new value");
+            check_quad(q("C::i--; --C::i; to_string(C::i)").c_str(), "-1", "-- both forms");
+            check_quad(q("auto o = C(); o.bumpQ() + \" \" + C::bumpS() + \" \" + to_string(C::i)").c_str(), "5 9 9", "bare compound and ++ in instance and static methods");
+            check_quad(q("for (int k = 0; k < 1000; k++) { C::i += 1; } to_string(C::i)").c_str(), "1001", "1000 compound stores at one site");
+            check_quad("class K { int x = 1; K(int v) { x = v; } function operator+(int n) -> K { return K(x + n); } } class H { static K k = K(1); } H::k += 5; to_string(H::k.x)", "6", "object static compound dispatches operator+");
+            check_quad(q("string r = \"ok\"; try { C::i += L(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Invalid operands for += 1", "+= string into an int static raises the compound text, static untouched");
+            check_quad(q("string r = \"ok\"; try { C::i /= L(0); } catch (err) { r = err; } r").c_str(), "Division by zero", "/= 0");
+            check_quad(q("string r = \"ok\"; try { C::i %= L(0); } catch (err) { r = err; } r").c_str(), "Modulo by zero", "%= 0");
+            check_quad(q("C::i = 9223372036854775807; string r = \"ok\"; try { C::i++; } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Integer overflow in '+=' 9223372036854775807", "++ overflow raises, static untouched");
+            check_quad_error(q("C::s++").c_str(), "++ on a string static");
+            check_quad_error(q("C::nosuch = 1").c_str(), "store to a missing static");
+            check_quad_error(q("C::nosuch += 1").c_str(), "compound to a missing static");
+            check_quad_error(q("Nope::x = 1").c_str(), "store to a missing class");
+        });
+
+        test("static_definition_typing", [check_quad, check_quad_error, check_quad_error_text]() {
+            // A static's declared type is recorded at definition and its initializer converts
+            // through the field table; a missing initializer is a readable typed null
+            check_quad("class C { static float f = 3; } type_of(C::f) + \" \" + to_string(C::f)", "float 3.000000", "static float from an int initializer");
+            check_quad("class C { static string t = 5; } C::t + \"|\" + type_of(C::t)", "5|string", "static string from an int initializer");
+            check_quad("class C { static int n = true; } to_string(C::n) + \"|\" + type_of(C::n)", "1|int", "static int from a bool initializer");
+            check_quad_error("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "an unconvertible static initializer raises at definition");
+            check_quad_error_text("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "Type mismatch in assignment", "the definition raises the store text");
+            check_quad("class C { static int s; } to_string(C::s == null)", "true", "typed static without an initializer reads null");
+            check_quad("class C { static var v = null; } to_string(C::v == null)", "true", "null var static reads");
+            check_quad("class P { int a = 0; } class C { static shared_ptr<P> p; } to_string(C::p == null)", "true", "null shared_ptr static reads");
+            check_quad("class P { int a = 0; } class C { static P obj; } to_string(C::obj == null)", "true", "null object static reads");
+            check_quad("function L(var x) { return x; } class C { static int s; } C::s = L(4); string r = \"ok\"; try { C::s = L(\"x\"); } catch (err) { r = err; } to_string(C::s) + \" \" + r", "4 Type mismatch in assignment", "a null-initialized static still enforces its declared type");
+            check_quad("function L(var x) { return x; } class C { static auto a = 2; } C::a = L(2.5); string r = \"ok\"; try { C::a = L(\"str\"); } catch (err) { r = err; } to_string(C::a) + \" \" + r", "2 Type mismatch in assignment", "auto static enforces the inferred int");
+        });
+
+        test("static_spellings_rejected", [check_quad_error, check_quad_off, check_quad_error_text]() {
+            // `C.s` and `this.s` are not static spellings: their read and write errors stay,
+            // byte-identical across backends (the write raises a STRING, never a bool)
+            const std::string P = "class C { static int s = 0; int q = 1; string viaThis() { string r = \"ok\"; try { this.s = 1; } catch (err) { r = type_of(err) + \":\" + to_string(err); } return r; } string readThis() { string r = \"ok\"; try { int t = this.s; } catch (err) { r = to_string(err); } return r; } } ";
+            check_quad_error("class C { static int s = 0; } C.s", "dot read on a class name");
+            check_quad_off("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:Cannot assign to member of non-object type 0", "dot store on a class name");
+            check_quad_error("class C { static int s = 0; } C.s += 1", "dot compound on a class name");
+            check_quad_error("class C { static int s = 0; } C.s++", "dot ++ on a class name");
+            check_quad_off((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to non-existent member 's' 0", "this.s store");
+            check_quad_off((P + "auto o = C(); o.readThis()").c_str(), "Object has no member 's'", "this.s read");
+            check_quad_error_text("class S { private: static int counter = 0; public: static int peek() { return counter; } } S::counter = 5", "Cannot access private member 'counter' of class 'S'", "private static store is refused before any conversion");
         });
 
         test("increment_targets_battery", [check_quad, check_quad_error]() {
@@ -2373,8 +2493,8 @@ public:
             check_proof_run({"int f(int v) { return v + 1; } var use(var a) { return f(a); } to_string(use(2))",
                              "string f(string s) { return s + \"!\"; } to_string(use(\"2\"))",
                              "to_string(use(\"3\"))"}, "3!", "later execute redefines the callee with another signature");
-            check_proof_error({"int f(int v) { return v + 1; } var use() { return f(2); } to_string(use())",
-                               "string f(string s) { return s + \"!\"; } to_string(use())"}, "a stamped int argument meets a string parameter after the redefinition");
+            check_proof_run({"int f(int v) { return v + 1; } var use() { return f(2); } to_string(use())",
+                             "string f(string s) { return s + \"!\"; } to_string(use())"}, "2!", "a stamped int argument meets a string parameter after the redefinition: the guard falls to the string conversion");
             check_proof_run({"class O { int m(int v) { return v; } int m(int a, int b) { return a + b; } int m(string s) { return 100; } }\n"
                              "O o = O(); to_string(o.m(1)) + \":\" + to_string(o.m(1, 2)) + \":\" + to_string(o.m(\"s\"))"}, "1:3:100", "overloaded methods");
             check_proof_run({"int d(int a, int b = 5) { return a + b; } to_string(d(1)) + \":\" + to_string(d(1, 2))"}, "6:3", "defaults");
@@ -2448,6 +2568,450 @@ public:
             check_eq(outcome(*off, use), outcome(*on, use), "switched back on");
             check_ge(on->last_proof_stats().members, (uint32_t)1, "re-stamped at the next execute");
         });
+
+        // ===== USER ACCESSORS ON MEMBER ACCESS =====
+        // expr.x (any receiver) reads through the nearest USER _get_x in the chain and stores
+        // through the nearest USER _set_x; the synthesized field accessors never shadow one.
+        // Bare x inside the chain's methods is the backing field. Both backends, strict mode.
+        test("accessor_member_reads_and_stores", [check_both]() {
+            check_both(
+                "class Q { int b = 1; int _get_b() { return 42; } int _set_b(int v) { b = v * 10; return b; } int raw() { return b; } }\n"
+                "var q = Q();\n"
+                "string r = to_string(q.b);\n"
+                "q.b = 2;\n"
+                "r = r + \":\" + to_string(q.b) + \":\" + to_string(q.raw());\n"
+                "r = r + \":\" + to_string(q._get_b()) + \":\" + to_string(q._set_b(3)) + \":\" + to_string(q.raw());\n"
+                "var y = (q.b = 5);\n"
+                "r + \":\" + to_string(y) + \":\" + to_string(q.raw())",
+                "42:42:20:42:30:30:5:50", "same-class _get_b/_set_b own the member; the store yields the assigned value");
+        });
+
+        test("accessor_bare_access_in_body", [check_both]() {
+            check_both(
+                "class C { int b = 1; int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; }\n"
+                "  int bare() { return b; } int viaThis() { return this.b; } void bareStore(int v) { b = v; } }\n"
+                "var c = C();\n"
+                "string r = to_string(c.b) + \":\" + to_string(c.bare()) + \":\" + to_string(c.viaThis());\n"
+                "c.bareStore(5);\n"
+                "r = r + \":\" + to_string(c.b) + \":\" + to_string(c.bare());\n"
+                "c.b = 7;\n"
+                "r + \":\" + to_string(c.bare()) + \":\" + to_string(c.viaThis())",
+                "101:1:101:105:5:70:170", "bare b is the backing field (no recursion), this.b is the accessor");
+        });
+
+        test("accessor_compound_and_incdec", [check_both]() {
+            check_both(
+                "class C { int b = 1; int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"
+                "var c = C();\n"
+                "c.b += 1;\n"
+                "string r = to_string(c.b) + \":\" + to_string(c.raw());\n"
+                "var old = c.b++;\n"
+                "r = r + \":\" + to_string(old) + \":\" + to_string(c.b) + \":\" + to_string(c.raw());\n"
+                "c.b -= 10;\n"
+                "r = r + \":\" + to_string(c.b) + \":\" + to_string(c.raw());\n"
+                "var pre = --c.b;\n"
+                "r + \":\" + to_string(pre) + \":\" + to_string(c.b) + \":\" + to_string(c.raw())",
+                "1120:1020:1120:11310:11210:113100:113000:113099:1131090:1130990",
+                "compound reads through _get_b and writes through _set_b; postfix yields the old getter value");
+        });
+
+        test("accessor_child_over_parent_field", [check_both]() {
+            // no `override` needed over a base's SYNTHESIZED accessor; `override` still accepted
+            check_both(
+                "class P { int b = 1; }\n"
+                "class C : P { int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"
+                "var c = C();\n"
+                "string r = \"\";\n"
+                "for (int i = 0; i < 3; ++i) { r = r + to_string(c.b) + \",\"; }\n"
+                "for (int i = 0; i < 3; ++i) { c.b = i + 2; r = r + to_string(c.b) + \",\"; }\n"
+                "int hot() { int s = 0; for (int i = 0; i < 5; ++i) { s += c.b; } return s; }\n"
+                "r = r + to_string(hot()) + \",\" + to_string(hot()) + \",\";\n"
+                "void hots(int v) { for (int i = 0; i < 3; ++i) { c.b = v; } }\n"
+                "hots(7); r = r + to_string(c.raw()) + \",\"; hots(9); r + to_string(c.raw())",
+                "101,101,101,120,130,140,700,700,70,90", "child accessor over a parent field: every read/store dispatches (no armed slot)");
+            check_both(
+                "class P { int b = 1; } class C : P { override int _get_b() { return b + 100; } } var c = C(); to_string(c.b)",
+                "101", "override spelling accepted");
+        });
+
+        test("accessor_parent_over_child_field", [check_both]() {
+            check_both(
+                "class P { int log = 0; int _get_b() { return 42; } void _set_b(int v) { log = log + v; } }\n"
+                "class C : P { int b = 1; int raw() { return b; } }\n"
+                "var c = C();\n"
+                "string r = to_string(c.b);\n"
+                "c.b = 2;\n"
+                "r + \":\" + to_string(c.b) + \":\" + to_string(c.raw()) + \":\" + to_string(c.log)",
+                "42:42:1:2", "the parent's USER accessor wins over the child's synthesized one");
+        });
+
+        test("accessor_proofs_on_off_identical", [this, check_proof_run, thrice_then]() {
+            const std::string unit =
+                "class Q { int b = 1; int plain = 2; int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"
+                "class P { int b = 1; } class C : P { int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"
+                "class PP { int log = 0; int _get_b() { return 42; } void _set_b(int v) { log = log + v; } } class CC : PP { int b = 1; }\n"
+                "string probe(Q q, C c, CC cc) { q.b = 2; c.b = 3; cc.b = 4; q.plain = q.plain + 1; q.b += 1;\n"
+                "  return to_string(q.b) + \":\" + to_string(q.raw()) + \":\" + to_string(c.b) + \":\" + to_string(c.raw()) + \":\" + to_string(cc.b) + \":\" + to_string(cc.log) + \":\" + to_string(q.plain); }\n"
+                "Q q = Q(); C c = C(); CC cc = CC();\n"
+                "probe(q, c, cc)";
+            // by-value class parameters copy the instance, so every probe sees fresh receivers
+            check_proof_run(thrice_then(unit, "probe(q, c, cc)"), "1310:1210:130:30:42:4:3", "typed receivers with user accessors: all four lanes agree");
+            // an accessor-bearing field never carries a field proof; a sibling plain field still does
+            auto members_after_two = [](const std::string& src) {
+                auto e = jai::engine::make();
+                e->execute(src);
+                e->execute(src);
+                return e->last_proof_stats().members;
+            };
+            check_eq((uint32_t)0, members_after_two("class Q { int b = 1; int _get_b() { return 7; } } int probe(Q q) { return q.b; } Q q = Q(); probe(q)"), "user getter: member site refused");
+            check_eq((uint32_t)1, members_after_two("class Q { int b = 1; int plain = 2; int _get_b() { return 7; } } int probe(Q q) { return q.b + q.plain; } Q q = Q(); probe(q)"), "only the plain sibling proves");
+            check_eq((uint32_t)1, members_after_two("class Q { int b = 1; int plain = 2; void _set_b(int v) { } } int probe(Q q) { q.b = 3; return q.b + q.plain; } Q q = Q(); probe(q)"), "user setter: read and write sites refused, the sibling proves");
+        });
+
+        test("accessor_hot_reload_adds_and_removes", [this]() {
+            for (bool use_vm : {false, true}) {
+                const std::string tag = use_vm ? "vm: " : "interp: ";
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(
+                    "class R { int f = 1; int log = 0; int raw() { return f; } }\n"
+                    "var r = R();\n"
+                    "int hot() { int s = 0; for (int i = 0; i < 5; ++i) { s += r.f; } return s; }\n"
+                    "void hots(int v) { for (int i = 0; i < 5; ++i) { r.f = v; } }");
+                check_eq((int64_t)5, e->execute("hot()").as_int(), tag + "plain field");
+                e->execute("hots(2);");
+                check_eq((int64_t)10, e->execute("hot()").as_int(), tag + "armed read site");
+                e->execute("class R { int f = 1; int log = 0; int raw() { return f; } int _get_f() { return f * 10; } void _set_f(int v) { log = log + 1; } }");
+                check_eq((int64_t)100, e->execute("hot()").as_int(), tag + "the reload's getter serves the hot read site");
+                e->execute("hots(3);");
+                check_eq((int64_t)5, e->execute("r.log").as_int(), tag + "the reload's setter fires at the hot store site");
+                check_eq((int64_t)2, e->execute("r.raw()").as_int(), tag + "the setter only logged");
+                check_eq((int64_t)20, e->execute("r.f").as_int(), tag + "plain member read through the getter");
+                e->execute("class R { int f = 1; int log = 0; int raw() { return f; } }");
+                check_eq((int64_t)10, e->execute("hot()").as_int(), tag + "accessor removed: the raw field again");
+                e->execute("hots(4);");
+                check_eq((int64_t)20, e->execute("hot()").as_int(), tag + "raw store again");
+                check_eq((int64_t)5, e->execute("r.log").as_int(), tag + "log untouched by raw stores");
+                // a parent gaining an accessor reaches existing child instances
+                e->execute(
+                    "class P { int b = 1; } class C : P { int raw() { return b; } } var c = C();\n"
+                    "int hotc() { int s = 0; for (int i = 0; i < 5; ++i) { s += c.b; } return s; }");
+                check_eq((int64_t)5, e->execute("hotc()").as_int(), tag + "child reads the parent field");
+                check_eq((int64_t)5, e->execute("hotc()").as_int(), tag + "armed");
+                e->execute("class P { int b = 1; int _get_b() { return b + 100; } }");
+                check_eq((int64_t)505, e->execute("hotc()").as_int(), tag + "the parent's new getter serves the child's hot site");
+                check_eq((int64_t)1, e->execute("c.raw()").as_int(), tag + "bare read in the child is the field");
+            }
+        });
+
+        test("accessor_field_keeps_ic_off", [check_both]() {
+            // a getter with a side effect: an armed member slot IC would sum the raw field (0)
+            check_both(
+                "class C { int b = 0; int n = 0; int _get_b() { n = n + 1; return n; } }\n"
+                "var c = C();\n"
+                "int sum() { int s = 0; for (int i = 0; i < 5; ++i) { s += c.b; } return s; }\n"
+                "string r = to_string(sum()) + \":\" + to_string(sum());\n"
+                "class D { int b = 0; int cnt = 0; void _set_b(int v) { cnt = cnt + 1; } int raw() { return b; } }\n"
+                "var d = D();\n"
+                "void fill() { for (int i = 0; i < 5; ++i) { d.b = i; } }\n"
+                "fill(); fill();\n"
+                "r + \":\" + to_string(d.cnt) + \":\" + to_string(d.b) + \":\" + to_string(d.raw())",
+                "15:40:10:0:0", "every hot read/store dispatches to the accessor");
+        });
+
+        test("accessor_setter_error_text_parity", [this, both]() {
+            auto [i_out, v_out] = both(
+                "class C { int b = 1; void _set_b(int v) { if (v < 0) { throw \"negative\"; } b = v * 10; } int raw() { return b; } }\n"
+                "var c = C();\n"
+                "var m1 = \"\"; try { c.b = -1; m1 = \"stored\"; } catch (err1) { m1 = err1; }\n"
+                "var m2 = \"\"; try { c.b = \"str\"; m2 = \"stored\"; } catch (err2) { m2 = err2; }\n"
+                "var m3 = \"\"; try { c.b = 1.5; m3 = \"stored\"; } catch (err3) { m3 = err3; }\n"
+                "m1 + \"|\" + m2 + \"|\" + m3 + \"|\" + to_string(c.raw()) + \"|\" + to_string(c.b)");
+            check_eq(i_out, v_out, "setter error texts agree across backends");
+            check_eq(std::string("negative|No matching overload found|stored|10|10"), i_out, "script throw, overload rejection, float->int conversion");
+        });
+
+        test("accessor_ref_binding_is_non_lvalue", [check_both]() {
+            check_both(
+                "class C { int b = 1; int plain = 2; int _get_b() { return b; } }\n"
+                "var c = C();\n"
+                "void f(int& r) { r = 9; }\n"
+                "var m = \"\"; try { f(c.b); m = \"bound\"; } catch (err) { m = err; }\n"
+                "f(c.plain);\n"
+                "m + \":\" + to_string(c.plain) + \":\" + to_string(c.b)",
+                "Cannot pass non-lvalue to reference parameter:9:1", "an accessor-bearing field is a computed property to a reference");
+        });
+        // ===== ONE CONVERSION TABLE FOR EVERY TYPED SLOT (detail::convert_for_typed_slot) =====
+        // declaration/initializer, `=`, by-value parameter binding, typed return and field store
+        // all run the assignment table (docs/static_checking.md rule table); each site owns its
+        // rejection text. Every row is byte-identical across backends.
+
+        test("typed_slot_string_accepts_anything_everywhere", [check_both]() {
+            check_both(R"JAI(
+                string s = 5;
+                string fp(string t) { return "param: " + t; }
+                string g() { return 5; }
+                class H { string s = ""; }
+                auto h = H(); h.s = 5;
+                s + "|" + fp(5) + "|" + g() + "|" + h.s
+            )JAI", "5|param: 5|5|5", "the item: string slots take an int on every path");
+            check_both(R"JAI(
+                string f(string t) { return t; }
+                var n = null;
+                f(2.5) + "|" + f(true) + "|" + f('a') + "|" + f(n) + "|" + f(null) + "|" + f([1]) + "|" + f({"k": 1})
+            )JAI", "2.500000|true|a|null|null|[array]|[map]", "string parameter: every primitive and container row");
+            check_both(R"JAI(
+                class X { string to_string() { return "X!"; } }
+                class D {}
+                string f(string t) { return t; }
+                string g() { return X(); }
+                string g2() { return 2.5; }
+                class H { string s = ""; }
+                auto h = H(); h.s = X();
+                string a = X(); string b; b = X();
+                f(X()) + "|" + f(D()) + "|" + g() + "|" + g2() + "|" + h.s + "|" + a + "|" + b
+            )JAI", "X!|[object]|X!|2.500000|X!|X!|X!", "objects render through their script to_string() on every path");
+        });
+
+        test("typed_slot_bool_is_truthiness_everywhere", [check_both]() {
+            check_both(R"JAI(
+                class D {} class B { bool to_bool() { return false; } } class C { int a = 0; }
+                bool b(bool x) { return x; }
+                string j(bool v) { return to_string(v) + ","; }
+                j(b(5)) + j(b(0)) + j(b(2.5)) + j(b("")) + j(b("a")) + j(b(null)) + j(b([])) + j(b([1])) + j(b(D())) + j(b(B())) + j(b(shared_ptr<C>()))
+            )JAI", "true,false,true,false,true,false,false,true,true,false,true,", "bool parameter: is_truthy rows incl. to_bool()");
+            check_both(R"JAI(
+                class D {} class B { bool to_bool() { return false; } }
+                bool r1() { return 5; } bool r2() { return ""; } bool r3() { return D(); } bool r4() { return B(); } bool r5() { return [1]; }
+                to_string(r1()) + "," + to_string(r2()) + "," + to_string(r3()) + "," + to_string(r4()) + "," + to_string(r5())
+            )JAI", "true,false,true,false,true", "bool return: is_truthy rows");
+            check_both(R"JAI(
+                class D {} class B { bool to_bool() { return false; } }
+                class H { bool f = false; }
+                auto h = H();
+                h.f = [1]; string acc = to_string(h.f);
+                h.f = D(); acc = acc + "," + to_string(h.f);
+                h.f = B(); acc = acc + "," + to_string(h.f);
+                h.f = {"k": 1}; acc = acc + "," + to_string(h.f);
+                h.f = []; acc = acc + "," + to_string(h.f);
+                acc
+            )JAI", "true,true,false,true,false", "bool field: containers and objects convert like a bool local");
+            check_both(R"JAI(
+                class B { bool to_bool() { return false; } }
+                bool p(bool x) { return x; }
+                var v = B();
+                string r = "";
+                if (v) { r = "T"; } else { r = "F"; }
+                bool d = v;
+                r + to_string(d) + to_string(p(v))
+            )JAI", "Ffalsefalse", "bool slots agree with if (x)");
+        });
+
+        test("typed_slot_numeric_from_bool_everywhere", [check_both]() {
+            check_both(R"JAI(
+                int i(int x) { return x; } float fl(float x) { return x; } int r() { return true; } float rf() { return false; }
+                to_string(i(true)) + "," + to_string(fl(true)) + "," + to_string(r()) + "," + to_string(rf()) + "," + to_string(i(false))
+            )JAI", "1,1.000000,1,0.000000,0", "bool into int/float parameters and returns");
+        });
+
+        test("typed_slot_object_to_x_methods_everywhere", [check_both, check_quad]() {
+            const char* var_sourced = R"JAI(
+                class X { int to_int() { return 7; } float to_float() { return 1.5; } char to_char() { return 'x'; } }
+                class H { int i = 0; float f = 0.0; char c = 'a'; }
+                var xs = X();
+                int a = xs; float b = xs; char c = xs; int d; d = xs;
+                auto h = H(); h.i = xs; h.f = xs; h.c = xs;
+                int r() { return xs; } int p(int v) { return v; }
+                to_string(a) + "," + to_string(b) + "," + to_string(c) + "," + to_string(d) + "," + to_string(h.i) + "," + to_string(h.f) + "," + to_string(h.c) + "," + to_string(r()) + "," + to_string(p(xs))
+            )JAI";
+            check_quad(var_sourced, "7,1.500000,x,7,7,1.500000,x,7,7", "to_int/to_float/to_char on decl, assign, field, return, param");
+            check_both(R"JAI(
+                class X { int to_int() { return 7; } float to_float() { return 1.5; } char to_char() { return 'x'; } }
+                int a = X(); float b = X(); char c = X();
+                to_string(a) + "," + to_string(b) + "," + to_string(c)
+            )JAI", "7,1.500000,x", "the checker admits to_X() sources under strict");
+            check_both(R"JAI(
+                class X { int to_int() { return 7; } }
+                class Y { auto to_int() { return X(); } }
+                var y = Y();
+                string r = ""; try { int v = y; r = "ok"; } catch (e) { r = e; }
+                int p(int v) { return v; }
+                string r2 = ""; try { p(y); r2 = "ok"; } catch (e) { r2 = e; }
+                r + "|" + r2
+            )JAI", "Type mismatch in assignment|Type mismatch: expected int but got Y", "an object result of to_X() never converts again");
+            check_both(R"JAI(
+                class Q { int to_int() { return 1; } }
+                var q = Q();
+                string r = ""; try { char c = q; r = "ok"; } catch (e) { r = e; }
+                r
+            )JAI", "Type mismatch in assignment", "no to_char(): char slot rejects");
+        });
+
+        test("typed_slot_handle_into_value_slot", [this, check_both, both]() {
+            check_both(R"JAI(
+                class C { int a = 0; C() {} C(int v) { a = v; } }
+                C v = new C(2); C w; w = new C(3); C e = shared_ptr<C>();
+                var h = new C(4); C shared = h; shared.a = 9;
+                to_string(v.a) + "," + to_string(w.a) + "," + to_string(e.a) + "," + to_string(h.a)
+            )JAI", "2,3,0,9", "a shared_ptr<C> handle binds to a C slot and stays a handle (parameter parity)");
+            auto [i_out, v_out] = both(R"JAI(
+                class C { int a = 0; C() {} C(int v) { a = v; } }
+                string pt(C c) { return type_of(c) + ":" + to_string(c == null); }
+                C d1 = new C(2); C d2 = shared_ptr<C>();
+                string decl = type_of(d1) + ":" + to_string(d1 == null) + "|" + type_of(d2) + ":" + to_string(d2 == null);
+                string param = pt(new C(2)) + "|" + pt(shared_ptr<C>());
+                to_string(decl == param) + " " + decl
+            )JAI");
+            check_eq(i_out, v_out, "handle-into-value-slot shape parity");
+            check_true(i_out.rfind("true ", 0) == 0, "decl and param agree on the bound shape (got: " + i_out + ")");
+        });
+
+        test("typed_slot_null_into_handle_params_and_returns", [check_both]() {
+            check_both(R"JAI(
+                class C { int a = 0; }
+                string p(shared_ptr<C> x) { return to_string(x == null) + ":" + type_of(x); }
+                shared_ptr<C> g() { return null; }
+                string pw(weak_ptr<C> x) { return to_string(x == null) + ":" + type_of(x); }
+                weak_ptr<C> gw() { return null; }
+                shared_ptr<C> q = null; weak_ptr<C> qw; qw = null;
+                p(null) + "|" + to_string(g() == null) + ":" + type_of(g()) + "|" + pw(null) + "|" + to_string(gw() == null) + ":" + type_of(gw()) + "|" + type_of(q) + "|" + type_of(qw)
+            )JAI", "true:object|true:object|true:weak_ptr|true:weak_ptr|object|weak_ptr", "null binds to shared_ptr/weak_ptr parameters and returns as the typed null `=` stores");
+        });
+
+        test("typed_slot_no_chained_conversion_anywhere", [check_both]() {
+            check_both(R"JAI(
+                class TA { int v = 1; } class TB { int v = 0; TB(TA a) { v = a.v * 2; } } class TC { int v = 0; TC(TB b) { v = b.v * 3; } }
+                class H { TC t; } class X { int to_int() { return 7; } } class C { int a = 0; C() {} C(int v) { a = v; } }
+                var ta = TA(); var xs = X();
+                string r1 = ""; try { TC c = ta; r1 = "ok"; } catch (e) { r1 = e; }
+                string r2 = ""; try { TC c2; c2 = ta; r2 = "ok"; } catch (e) { r2 = e; }
+                string r3 = ""; try { auto h = H(); h.t = ta; r3 = "ok"; } catch (e) { r3 = e; }
+                int pc(TC c) { return c.v; }
+                string r4 = ""; try { pc(ta); r4 = "ok"; } catch (e) { r4 = e; }
+                TC rc() { return ta; }
+                string r5 = ""; try { rc(); r5 = "ok"; } catch (e) { r5 = e; }
+                string r6 = ""; try { C c = xs; r6 = "ok"; } catch (e) { r6 = e; }
+                r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6
+            )JAI", "Incompatible class types|Incompatible class types|Type mismatch in assignment|Cannot convert TA to TC (no suitable single-argument constructor)|Cannot convert TA to TC (no suitable single-argument constructor)|Incompatible class types",
+                "TA->TB->TC and X->to_int->C are never implicit");
+            check_both(R"JAI(
+                class TA { int v = 1; } class TB { int v = 0; TB(TA a) { v = a.v * 2; } }
+                class HB { TB t; }
+                var ta = TA();
+                TB b = ta; TB b2; b2 = ta; auto hb = HB(); hb.t = ta;
+                int pb(TB b) { return b.v; } TB rb() { return ta; }
+                to_string(b.v) + to_string(b2.v) + to_string(hb.t.v) + to_string(pb(ta)) + to_string(rb().v)
+            )JAI", "22222", "exactly one user conversion works on every path");
+        });
+
+        test("typed_slot_field_ctor_conversion", [this, check_both]() {
+            check_both(R"JAI(
+                class C { int a = 0; C() {} C(int v) { a = v; } } class D {} class H { C c; } class G { D d; }
+                auto h = H(); h.c = 5; string r = to_string(h.c.a); h.c = 2.5; r = r + "," + to_string(h.c.a);
+                var t = true;
+                try { h.c = t; r = r + ",ok"; } catch (e) { r = r + "," + e; }
+                auto g = G(); var c1 = C(1); try { g.d = c1; r = r + ",ok"; } catch (e) { r = r + "," + e; }
+                r
+            )JAI", "5,2,Type mismatch in assignment,Type mismatch in assignment", "field stores construct through a true 1-param ctor; bool needs int<->float or same base");
+            // host set_field runs the table without its script rows; hot reload likewise falls back
+            // to the initializer default when the live value converts only through script
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute("class C { int a = 0; C() {} C(int v) { a = v; } } class H { C c; string s = \"\"; } auto h = H();");
+                auto instance = e->execute("h").as<std::shared_ptr<jai::class_instance>>();
+                check_not_null(instance.get());
+                bool threw = false;
+                try { instance->set_field(e->symbolize("c"), jai::script_value((int64_t)5, e.get())); }
+                catch (const std::exception& ex) { threw = std::string(ex.what()).find("Type mismatch in assignment") != std::string::npos; }
+                check(threw, "set_field: ctor conversion is a script row, refused from C++");
+                instance->set_field(e->symbolize("s"), jai::script_value((int64_t)5, e.get()));
+                check_eq(std::string("5"), e->execute("h.s").as<std::string>(), "set_field: to_string row still converts");
+                e->execute("class R { int f = 0; } R r = R(); r.f = 5; class X { int to_int() { return 7; } } class R2 { X f = X(); } R2 r2 = R2();");
+                e->execute("class R { C f; }");
+                check_eq(std::string("true"), e->execute("r.f == null").to_string(), "reload int->C: ctor-only conversion adopts the default");
+                e->execute("class R2 { int f = 3; }");
+                check_eq(std::string("3"), e->execute("r2.f").to_string(), "reload X->int: to_int-only conversion adopts the default");
+            }
+        });
+
+        test("typed_slot_container_boundary_on_params_and_returns", [this, check_both, both]() {
+            check_both(R"JAI(
+                void pa(array<int> a) {}
+                string r1 = ""; try { pa(["x"]); r1 = "ok"; } catch (e) { r1 = e; }
+                array<int> ga() { return ["x"]; }
+                string r2 = ""; try { ga(); r2 = "ok"; } catch (e) { r2 = e; }
+                string pb(array<int> a) { return type_of(a[1]) + to_string(a[1]); }
+                string r3 = pb([1, 2.5]);
+                array<int> g = [1, 2];
+                string pt(array<int> a) { return to_string(a.size()) + type_of(a[0]); }
+                r1 + "|" + r2 + "|" + r3 + "|" + pt(g)
+            )JAI", "Cannot store 'string' in 'array<int>'|Cannot store 'string' in 'array<int>'|int2|2int", "array<int> parameters and returns run the element boundary");
+            auto [i_out, v_out] = both(R"JAI(
+                void pc(array<int> a) { a.push("zz"); }
+                string r4 = ""; try { pc([1]); r4 = "ok"; } catch (e) { r4 = e; }
+                string r5 = ""; try { array<int> x = [1]; x.push("zz"); r5 = "ok"; } catch (e) { r5 = e; }
+                void pm(map<string,int> m) {}
+                string r6 = ""; try { pm({"k": "v"}); r6 = "ok"; } catch (e) { r6 = e; }
+                string r7 = ""; try { map<string,int> m = {"k": "v"}; r7 = "ok"; } catch (e) { r7 = e; }
+                to_string(r4 == r5) + ":" + r4 + "|" + to_string(r6 == r7) + ":" + r6
+            )JAI");
+            check_eq(i_out, v_out, "container parameter texts agree across backends");
+            check_true(i_out.rfind("true:Cannot push", 0) == 0 && i_out.find("|true:Cannot store") != std::string::npos,
+                "a bound array<int>/map<string,int> parameter is the declared representation (got: " + i_out + ")");
+        });
+
+        test("typed_slot_local_container_assign_checks_elements", [check_both]() {
+            check_both(R"JAI(
+                string f() { array<int> v = [1]; var s = ["x"]; try { v = s; } catch (e) { return e; } return type_of(v[0]); }
+                f()
+            )JAI", "Cannot store 'string' in 'array<int>'", "a slot-local `=` into array<int> runs the boundary like the global path");
+            check_both(R"JAI(
+                string f() { map<string,int> m = {"a": 1}; var s = {"k": "v"}; string r = ""; try { m = s; r = "ok"; } catch (e) { r = e; } return r + ":" + to_string(m.size()); }
+                f()
+            )JAI", "Cannot store 'string' in 'map<string,int>':1", "a slot-local `=` into map<string,int> runs the boundary");
+        });
+
+        test("typed_slot_rejection_texts", [check_both]() {
+            check_both(R"JAI(
+                void i(int x) {} var n = null; string r1 = ""; try { i(n); } catch (e) { r1 = e; }
+                class A {} class B {} void fa(A a) {} var b = B(); string r2 = ""; try { fa(b); } catch (e) { r2 = e; }
+                class C { int a = 0; } void sp(shared_ptr<C> p) {} var five = 5; string r3 = ""; try { sp(five); } catch (e) { r3 = e; }
+                var s = "s"; int r() { return s; } string r4 = ""; try { r(); } catch (e) { r4 = e; }
+                void wp(weak_ptr<C> p) {} string r5 = ""; try { wp(five); } catch (e) { r5 = e; }
+                void pa(array<int> a) {} string r6 = ""; try { pa(five); } catch (e) { r6 = e; }
+                var arr = [1]; string r7 = ""; try { i(arr); } catch (e) { r7 = e; }
+                r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7
+            )JAI", "Type mismatch: expected int but got null|Cannot convert B to A (no suitable single-argument constructor)|Type mismatch: expected shared_ptr<C> but got int|Type mismatch: expected int but got string|Type mismatch: expected weak_ptr<C> but got int|Type mismatch: expected array<int> but got int|Type mismatch: expected int but got array",
+                "source spellings are the payload's type, targets their canonical name");
+        });
+
+        test("typed_slot_throwing_conversion_propagates", [check_both]() {
+            check_both(R"JAI(
+                class T { int v = 0; T(int x) { throw "boom"; } }
+                var five = 5;
+                string r1 = ""; try { T t = five; } catch (e) { r1 = e; }
+                string r2 = ""; try { T t2; t2 = five; } catch (e) { r2 = e; }
+                class H { T t; } string r3 = ""; try { auto h = H(); h.t = five; } catch (e) { r3 = e; }
+                void p(T t) {} string r4 = ""; try { p(five); } catch (e) { r4 = e; }
+                T g() { return five; } string r5 = ""; try { g(); } catch (e) { r5 = e; }
+                r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5
+            )JAI", "boom|boom|boom|boom|boom", "a converting constructor's own error surfaces on every path");
+            check_both(R"JAI(
+                class X { int to_int() { throw "bang"; } }
+                var xs = X();
+                string r1 = ""; try { int a = xs; } catch (e) { r1 = e; }
+                int p(int v) { return v; } string r2 = ""; try { p(xs); } catch (e) { r2 = e; }
+                r1 + "|" + r2
+            )JAI", "bang|bang", "a throwing to_X() surfaces on every path");
+        });
+
+        test("typed_slot_proof_lanes", [check_proof_run]() {
+            check_proof_run({"string f(string t) { return t + \"!\"; } string r = f(5); r = r + f(2.5); r"}, "5!2.500000!", "string parameter bound from an int under every lane");
+            check_proof_run({"int sum(array<int> a) { int s = 0; for (auto x : a) { s += x; } return s; } to_string(sum([1, 2.5, 3]))"}, "6", "array<int> parameter bound from a hetero literal under every lane");
+            check_proof_run({"bool b(bool x) { return x; } to_string(b(5)) + to_string(b(0))"}, "truefalse", "bool parameter bound from an int under every lane");
+        });
+
     }
 };
 

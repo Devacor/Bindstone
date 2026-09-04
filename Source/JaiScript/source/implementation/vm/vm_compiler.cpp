@@ -118,6 +118,7 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_operand_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -136,6 +137,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
+			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
 			case opcode::op_return_binary:
@@ -232,6 +234,7 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_operand_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -250,6 +253,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
+			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
 			case opcode::op_return_binary:
@@ -466,6 +470,28 @@ uint32_t vm_compiler::identifier_slot_operand(identifier_expr* ident) const {
 
 bool vm_compiler::symbol_is_env_only(uint64_t symbol_id) const {
 	return !callable_.active || callable_.declared.find(symbol_id) == callable_.declared.end();
+}
+
+// Callee-first (C++17 [expr.call]): the callee's lookup error must beat any argument
+// error or side effect. Literals, this and frame-slot locals can do neither, so a call
+// whose arguments are all of that shape keeps its exact old code; anything else gets
+// the callee probed before the arguments.
+bool vm_compiler::call_args_need_probe(const call_expr& call) const {
+	for (const auto& arg : call.arguments) {
+		switch (arg->get_type()) {
+			case node_type::literal_expr:
+			case node_type::this_expr:
+				break;
+			case node_type::identifier_expr: {
+				auto* ident = static_cast<identifier_expr*>(arg.get());
+				if (ident->global_qualified || identifier_slot_operand(ident) == k_invalid_u32) return true;
+				break;
+			}
+			default:
+				return true;
+		}
+	}
+	return false;
 }
 
 // A subscript chain fusable as a binary operand: `base[i][j]...[k]` where base is an
@@ -1768,11 +1794,12 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// into compiler temps (frame slots above local_count) and the outer binary rides
 	// the fused kernel with temps as ordinary slot operands — no pushes, no unfused
 	// op_binary. Sub-lifts emit left-then-right (subtree evaluation order preserved);
-	// an operand-shape side resolves at op time AFTER any lifted computation, which can
-	// reorder WHICH error fires when both sides would error — Dev ruling 2026-07-13:
-	// error ORDER is not contractual, only error correctness (pure operands run no user
-	// code, so nothing else is observable). Gated to real function-body chunks (top
-	// level and default-arg chunks have no window of their own).
+	// a subscript operand LEFT of a lifting right subtree materializes into a temp first
+	// (op_operand_temp) so its read - and any index error - keeps the interpreter's
+	// left-to-right place (fuzz seed 100991); an identifier or literal there still
+	// resolves at op time (only an undefined name or a getter-backed field could observe
+	// that, and the shape is the method-body hot path). Gated to real function-body
+	// chunks (top level and default-arg chunks have no window of their own).
 	if (temps_active_ && chunk_->is_function_body) {
 		auto operand_shape = [](const expression* e) -> bool {
 			return e->get_type() == node_type::identifier_expr ||
@@ -1811,6 +1838,19 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// left subtree before right (subtree evaluation order preserved; the temp
 			// dst may alias a released child slot — the kernel resolves both operands
 			// before the sink writes).
+			auto sequence_left = [&](fused_operand& lo, const expression* r) {
+				if (!lo.is_subscript() || operand_shape(r)) { return; }
+				fused_binary_proto p;
+				p.left = std::move(lo);
+				chunk_->fused_binary_protos.push_back(std::move(p));
+				const uint32_t t = static_cast<uint32_t>(temp_next_);
+				++temp_next_;
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t);
+				lo = fused_operand{};
+				lo.slot = t;
+				lo.symbol = temp_symbol_index();
+			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
 				if (operand_shape(e.get())) { return make_fused_operand(e); }
 				const auto* b = static_cast<const binary_expr*>(e.get());
@@ -1818,6 +1858,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				p.op = static_cast<uint8_t>(b->op.type);
 				const size_t mark = temp_next_;
 				p.left = side(b->left);
+				sequence_left(p.left, b->right.get());
 				p.right = side(b->right);
 				chunk_->fused_binary_protos.push_back(p);
 				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
@@ -1835,6 +1876,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto outer;
 			outer.op = static_cast<uint8_t>(expr->op.type);
 			outer.left = side(expr->left);
+			sequence_left(outer.left, expr->right.get());
 			outer.right = side(expr->right);
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
@@ -2084,8 +2126,11 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_get_member, add_node(member));
 			}
 			compile_expression(expr->value);
-			// Interpreter re-evaluates the object expression for the write-back
-			compile_expression(member->object);
+			// Interpreter re-evaluates the object expression for the write-back; a :: target
+			// resolves its class inside op_member_compound instead
+			if (!member->is_static) {
+				compile_expression(member->object);
+			}
 			uint32_t kind;
 			switch (expr->op.type) {
 			case token_type::plus_equal: kind = compound_plus; break;
@@ -2144,6 +2189,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			if (member->null_safe) {
 				null_guard = emit(opcode::op_null_guard, k_invalid_u32);
 			}
+			// Probe ip sits outside the call_arg_zone (site index patched after push_back)
+			size_t probe_ip = SIZE_MAX;
+			if (call_args_need_probe(*expr)) {
+				probe_ip = emit(opcode::op_probe_member, 0, 0);
+			}
 			call_site site;
 			site.member_node = add_node(member);
 			site.call_node = add_node(expr);
@@ -2186,6 +2236,9 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 			}
 			chunk_->call_sites.push_back(std::move(site));
+			if (probe_ip != SIZE_MAX) {
+				chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+			}
 			emit(opcode::op_call_method, static_cast<uint32_t>(expr->arguments.size()),
 			     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
 			if (null_guard != SIZE_MAX) {
@@ -2205,6 +2258,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		probe_ip = emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(expr->arguments.size()));
 	} else {
 		compile_expression(expr->callee);
+		// Computed callees (index/call/static-member results) take the loaded value's
+		// callable check at the same observation point
+		if (call_args_need_probe(*expr)) {
+			emit(opcode::op_probe_member, k_invalid_u32, 1);
+		}
 	}
 	call_site site;
 	site.call_node = add_node(expr);

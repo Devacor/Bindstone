@@ -5,7 +5,7 @@
 // genuinely violate declared types must produce zero error diagnostics. Anywhere
 // the static story is uncertain (var, unknown classes, includes, builtin methods,
 // element types, host object conversions) the checker goes silent, mirroring the
-// runtime conversion rules in interpreter::enforce_type_compatibility.
+// runtime conversion rules in detail::convert_for_typed_slot (the one typed-slot table).
 
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -351,6 +351,8 @@ private:
     struct var_entry {
         ctype type;
         bool dynamic = false;             // var (or untyped) — assignments never checked
+        bool is_reference = false;        // T&/auto&/var& decl, & parameter, auto& loop variable
+        bool is_handle = false;           // declared shared_ptr<T> / shared_ptr<auto>
         const type_info* declared = nullptr;   // for message text; null for auto-inferred
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
@@ -809,6 +811,27 @@ private:
         return miss;
     }
 
+    // A user _get_/_set_ for `member` anywhere in cls's chain: modeled classes through their
+    // method maps, registered ancestors through the engine's definitions. Such a member is
+    // known, its static type is the accessor's business (unknown), and it is never a proof.
+    bool chain_has_user_accessor(std::string_view cls, std::string_view member, int depth = 0) {
+        if (depth > 32) { return false; }
+        if (const sclass* c = find_sclass(cls)) {
+            const std::string getter = "_get_" + std::string(member), setter = "_set_" + std::string(member);
+            if (c->methods.count(getter) || c->methods.count(setter)) { return true; }
+            for (auto base : c->decl->base_classes) {
+                if (chain_has_user_accessor(base, member, depth + 1)) { return true; }
+            }
+            return false;
+        }
+        auto def = engine_class(cls);
+        if (!def) { return false; }
+        const uint64_t id = eng_.symbolize(member);
+        auto* sym = eng_.get_symbolizer();
+        return def->user_accessor(sym->get_getter_id_with_view(id).first) != nullptr ||
+               def->user_accessor(sym->get_setter_id_with_view(id).first) != nullptr;
+    }
+
     bool chain_open(std::string_view cls, int depth = 0) {
         if (depth > 32) { return true; }
         const sclass* c = find_sclass(cls);   // models a table class (marking it open) before the test
@@ -875,6 +898,52 @@ private:
     // Proof certainty: the payload guard (detail::same_type_payload) is TOTAL for these kinds -
     // every dynamic value the site can hold is either the identity case or falls to the ladder.
     bool known_class(std::string_view name) { return classes_.count(name) || engine_class(name) != nullptr; }
+
+    // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
+    // runtime is right); the warning names the aliasing spellings. Warning severity: never gates.
+    enum class cast_source : uint8_t { plain, handle, reference };
+    var_entry* cast_operand_local(const expression* operand) {
+        if (!operand || operand->get_type() != node_type::identifier_expr) { return nullptr; }
+        auto* id = static_cast<const identifier_expr*>(operand);
+        return id->global_qualified ? nullptr : find_local(id->name);
+    }
+    cast_source cast_operand_source(const expression* operand, const ctype& t) {
+        if (t.ti && t.ti->base_type == script_value_type::jai_shared_ptr_type) { return cast_source::handle; }
+        var_entry* local = cast_operand_local(operand);
+        if (!local || (!local->type.is_unknown() && local->type.kind != ctype::object_k)) { return cast_source::plain; }
+        if (local->is_reference) { return cast_source::reference; }
+        return local->is_handle ? cast_source::handle : cast_source::plain;
+    }
+    static std::string cast_operand_spelling(const expression* e) {
+        std::string tail;
+        while (e && e->get_type() == node_type::member_expr) {
+            auto* m = static_cast<const member_expr*>(e);
+            if (m->is_static) { return "..."; }
+            tail = std::string(m->null_safe ? "?." : m->is_arrow ? "->" : ".") + std::string(m->member) + tail;
+            e = m->object.get();
+        }
+        if (e && e->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<const identifier_expr*>(e);
+            return (id->global_qualified ? "::" : "") + std::string(id->name) + tail;
+        }
+        if (e && e->get_type() == node_type::this_expr) { return "this" + tail; }
+        return "...";
+    }
+    void warn_cast_copy(const cast_expr* c, const ctype& operand_t) {
+        const expression* operand = c->operand.get();
+        if (cast_operand_source(operand, operand_t) == cast_source::plain) { return; }
+        size_t related_line = 0, related_column = 0;
+        if (var_entry* local = cast_operand_local(operand)) {
+            related_line = local->line;
+            related_column = local->column;
+        }
+        const std::string cls = c->target->canonical_name();
+        const std::string src = cast_operand_spelling(operand);
+        diag(diag_level::warning, c->location,
+             "cast<" + cls + ">(" + src + ") copies the instance - use cast<" + cls + "&>(" + src +
+             ") to alias it or cast<shared_ptr<" + cls + ">>(" + src + ") to share it",
+             related_line, related_column);
+    }
     static bool certain_scalar(const ctype& t) {
         return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k ||
                                 t.kind == ctype::char_k || t.kind == ctype::string_k);
@@ -941,12 +1010,11 @@ private:
         const uint32_t slot = def->field_slot(id);
         if (slot == class_definition::k_no_field_slot) { return std::nullopt; }
         const uint64_t getter_id = eng_.get_symbolizer()->get_getter_id_with_view(id).first;
-        if (!def->is_auto_accessor(getter_id) && !def->get_method(getter_id, false).is_invalid()) { return std::nullopt; }   // custom _get_
         const uint64_t setter_id = eng_.get_symbolizer()->get_setter_id_with_view(id).first;
-        const bool custom_setter = !def->is_auto_accessor(setter_id) && !def->get_method(setter_id, false).is_invalid();
+        if (def->user_accessor(getter_id) || def->user_accessor(setter_id)) { return std::nullopt; }   // a user _get_/_set_ in the chain owns the member: off the lanes, reads and writes
         type_info* declared = def->get_field_declared_type(id).get();
         if (hit.field && hit.field->type.get() != declared) { return std::nullopt; }   // class also declared in THIS unit: spellings must agree (interned pointers)
-        bool write_ok = !custom_setter;
+        bool write_ok = true;
         if (declared) {
             switch (declared->base_type) {
                 case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
@@ -1005,8 +1073,9 @@ private:
 
     // -------------------------------------------------------------- assignability
 
-    // Mirrors interpreter::enforce_type_compatibility: what a store into a `dst`-typed
-    // slot accepts (with conversion). Unknown on either side accepts.
+    // Mirrors detail::convert_for_typed_slot (the one runtime table for declarations,
+    // assignment, parameters, returns and fields): what a store into a `dst`-typed slot
+    // accepts (with conversion). Unknown on either side accepts.
     bool assignable(const ctype& src, const ctype& dst) {
         if (dst.is_unknown() || src.is_unknown()) { return true; }
         if (dst.kind == ctype::class_ref_k || dst.kind == ctype::enum_ref_k ||
@@ -1015,12 +1084,14 @@ private:
         }
         switch (dst.kind) {
             case ctype::int_k:
-                return src.kind == ctype::int_k || src.kind == ctype::float_k || src.kind == ctype::bool_k;
+                return src.kind == ctype::int_k || src.kind == ctype::float_k || src.kind == ctype::bool_k ||
+                       may_convert_via_method(src, "to_int");
             case ctype::float_k:
-                return src.kind == ctype::float_k || src.kind == ctype::int_k || src.kind == ctype::bool_k;
+                return src.kind == ctype::float_k || src.kind == ctype::int_k || src.kind == ctype::bool_k ||
+                       may_convert_via_method(src, "to_float");
             case ctype::bool_k: return true;     // truthy conversion accepts anything
             case ctype::string_k: return true;   // to_string conversion accepts anything
-            case ctype::char_k: return src.kind == ctype::char_k;
+            case ctype::char_k: return src.kind == ctype::char_k || may_convert_via_method(src, "to_char");
             case ctype::array_k: return src.kind == ctype::array_k;
             case ctype::map_k: return src.kind == ctype::map_k;
             case ctype::function_k: return true;   // function slots: lenient in v1
@@ -1055,11 +1126,36 @@ private:
             // only TRUE one-parameter constructors convert (matches the runtime gate)
             if (ctor->parameters.size() != 1) { continue; }
             const parameter& p = ctor->parameters[0];
-            if (assignable(src, ctype_from_type_info(p.type.get()))) {
+            if (ctor_param_takes(src, ctype_from_type_info(p.type.get()))) {
                 return true;
             }
         }
         return false;
+    }
+
+    // The runtime's single-step gate: the converting ctor's declared parameter takes the
+    // source DIRECTLY - untyped, its own class or a base of it, the same primitive base or
+    // int<->float. Never another conversion (no chaining, no to_X() on the way in).
+    bool ctor_param_takes(const ctype& src, const ctype& param) {
+        if (param.is_unknown() || src.is_unknown()) { return true; }
+        if (param.kind == ctype::object_k) {
+            return src.kind == ctype::object_k && class_relation(src.cls, param.cls) != 0;
+        }
+        if (src.kind == ctype::object_k) { return false; }
+        if (param.kind == src.kind) { return true; }
+        return (param.kind == ctype::int_k && src.kind == ctype::float_k) ||
+               (param.kind == ctype::float_k && src.kind == ctype::int_k);
+    }
+
+    // Object -> primitive through a script to_int/to_float/to_char (the table's to_X() row):
+    // checkable for in-script sources; engine-registered classes stay lenient.
+    bool may_convert_via_method(const ctype& src, std::string_view method) {
+        if (src.kind != ctype::object_k) { return false; }
+        if (!find_sclass(src.cls)) {
+            return engine_class(src.cls) != nullptr;
+        }
+        member_hit hit = lookup_member(src.cls, method, false);
+        return !hit.certain || (hit.found && hit.methods != nullptr);
     }
 
     static std::pair<size_t, size_t> arity_range(const function_decl* fn) {
@@ -1415,11 +1511,14 @@ private:
                 // store proof (tentative, like every reference); cast<shared_ptr<T>>(e): the handle
                 // spelling. The operand is the explicit typed boundary - never checked against T.
                 auto* c = static_cast<cast_expr*>(e);
-                infer(c->operand.get());
+                ctype operand_t = infer(c->operand.get());
                 ctype t = ctype_from_type_info(c->target.get());
                 if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_globals_.count(std::string(t.cls))) {
                     diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
                     return {};
+                }
+                if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
+                    warn_cast_copy(c, operand_t);
                 }
                 if (c->by_reference) { t.tentative = true; }
                 return t;
@@ -1528,6 +1627,7 @@ private:
         std::string_view cls = recv.cls;
         member_hit hit = lookup_member(cls, m->member, want_static);
         if (hit_out) { *hit_out = hit; }
+        if (!want_static && chain_has_user_accessor(cls, m->member)) { return {}; }   // a user _get_/_set_ answers: known member, type unknown, never a proof
         if (hit.found) {
             if (typed_field_out && hit.field && hit.field->type) { *typed_field_out = hit.field; }
             if (recv.kind == ctype::object_k && !m->null_safe && !m->is_static &&
@@ -1632,6 +1732,7 @@ private:
             if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) {
                 bool want_static = (recv.kind == ctype::class_ref_k);
                 member_hit hit = lookup_member(recv.cls, m->member, want_static);
+                if (!hit.found && !want_static && chain_has_user_accessor(recv.cls, m->member)) { return {}; }   // calling what a user _get_ returns
                 if (hit.found) {
                     if (hit.methods) {
                         if (hit.provable) { ov = hit.methods; }
@@ -1841,6 +1942,8 @@ private:
                 entry.type = ctype_from_type_info(f->element_type.get());
                 entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
                                 f->is_reference;
+                entry.is_reference = f->is_reference;
+                entry.is_handle = f->element_type && f->element_type->base_type == script_value_type::jai_shared_ptr_type;
                 entry.declared = f->element_type.get();
                 entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
                 entry.line = f->location.line;
@@ -1858,6 +1961,7 @@ private:
                 var_entry entry;
                 entry.type = ctype_from_type_info(f->loop_param.type.get());
                 entry.dynamic = true;   // by-ref element: dynamic like ref range-for
+                entry.is_reference = f->loop_param.is_reference;
                 entry.declared = f->loop_param.type.get();
                 entry.display = f->loop_param.type ? f->loop_param.type->canonical_name() : "auto";
                 entry.line = f->location.line;
@@ -2066,6 +2170,7 @@ private:
             } else {
                 entry.type = init;      // object(cls), or unknown -> lenient
                 entry.dynamic = init.is_unknown();
+                entry.is_handle = true;
                 entry.display = "shared_ptr<" + ctype_name(init) + ">";
             }
             warn_shadow("local", decl->name, decl->location);
@@ -2079,6 +2184,8 @@ private:
             entry.display = decl->type->canonical_name();
             entry.type = ctype_from_type_info(decl->type.get());
             entry.dynamic = decl->type->base_type == script_value_type::jai_any_type || is_reference_decl;
+            entry.is_reference = is_reference_decl;
+            entry.is_handle = decl->type->base_type == script_value_type::jai_shared_ptr_type;
             const bool plain_kind = decl->type->base_type != script_value_type::jai_shared_ptr_type &&
                                     decl->type->base_type != script_value_type::jai_weak_ptr_type &&
                                     decl->type->base_type != script_value_type::jai_reference_type &&
@@ -2166,6 +2273,8 @@ private:
             var_entry entry;
             entry.type = pt;
             entry.dynamic = pt.is_unknown() || p.is_reference;
+            entry.is_reference = p.is_reference;
+            entry.is_handle = p.type && p.type->base_type == script_value_type::jai_shared_ptr_type;
             entry.declared = p.type.get();
             entry.display = p.type ? p.type->canonical_name() : "auto";
             entry.line = fn_loc.line;

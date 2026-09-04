@@ -3730,9 +3730,8 @@ public:
 		});
 
 		test("fused_member_index_getter_and_shadow", [this, run_both_backends]() {
-			// A custom getter for a NON-field name fires per access (the fused site stays
-			// negative and rides the ladder); a getter for a DECLARED field is unreachable
-			// (auto-accessor contract) so the raw field wins at the fused site
+			// A user getter fires per access whether the name is a NON-field or a DECLARED
+			// field (the fused site stays negative and rides the ladder to the getter)
 			auto [i1, v1] = run_both_backends(R"(
 				class G {
 					var arr = [1, 2, 3];
@@ -3743,10 +3742,10 @@ public:
 				var g = G();
 				int s = 0;
 				for (int i = 0; i < 3; ++i) { s += g.virt[i]; }
-				var declared = g.arr[2];
+				var declared = g.arr[0];
 				"" + s + ":" + g.calls + ":" + declared;
 			)");
-			check_eq(std::string("24:3:3"), i1, "interp: getter fires per access, declared field stays raw");
+			check_eq(std::string("24:3:666"), i1, "interp: getter fires per access, the declared field's getter owns the fused site");
 			check_eq(i1, v1, "getter/shadow parity at fused member sites");
 		});
 

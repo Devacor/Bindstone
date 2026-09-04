@@ -13,14 +13,19 @@
 //   1. slots / catch var (unchanged)
 //   2. own_scope_lookup: the env chain from environment_ up to (exclusive)
 //      scope_floor, OWN storage only - block/capture cells keep beating members
-//   3. probe_member_scope: fields -> methods -> statics (instance scopes),
-//      static fields -> static methods (static scopes)
+//   3. probe_member_scope: fields -> C++ properties -> methods -> statics (instance
+//      scopes), static fields -> static methods (static scopes)
 //   4. the walk from scope_floor onward (definition env -> global), caches intact
+//
+// A hybrid's (script class : bound C++ class) C++ property is a member like any other:
+// the bare name reads through its _get_ and stores through its _set_ exactly as
+// this.name does; a same-named script field shadows it for every spelling.
 //
 // Frames with scope_state none keep their original ladder byte-for-byte.
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 
 namespace jai::detail {
@@ -48,16 +53,112 @@ struct member_scope_ctx {
 };
 
 struct member_probe_hit {
-    enum class kind : uint8_t { miss, field, static_field, method };
+    enum class kind : uint8_t { miss, field, static_field, method, cpp_property };
     kind what = kind::miss;
     script_value* value_ptr = nullptr;   // field/static_field: stable storage
-    // method: the stored (unbound) value (null-engine monostate until a hit fills it)
+    // method: the stored (unbound) value; cpp_property (want_methods): the chain's _get_
+    // accessor (null-engine monostate until a hit fills it)
     script_value method_value{std::monostate{}, static_cast<engine*>(nullptr)};
-    class_instance* instance = nullptr;  // field: owning instance (write kernels)
+    uint64_t getter_id = 0;              // cpp_property: the _get_ id
+    class_instance* instance = nullptr;  // field/cpp_property: owning instance (write kernels)
     class_definition* class_def = nullptr;
 
+    // A hit with no cell answers the pointer form as nullptr (a shadow, never a global)
     explicit operator bool() const { return what != kind::miss; }
 };
+
+// A hybrid's C++ property rung: sym is a dynamic_binder .property() of the chain's C++
+// base and NOT a script field of the chain (a same-named script field shadows it for
+// every spelling) - class_definition::slot_is_cpp_property. The _get_ / _set_ id, 0
+// otherwise (0 also for a setter-less property).
+inline uint64_t cpp_property_getter_id(const class_instance* instance, uint64_t sym) {
+    class_definition* class_def = instance->get_class_definition();
+    if (!class_def) return 0;
+    const uint32_t slot = class_def->field_slot(sym);
+    if (slot == class_definition::k_no_field_slot || !class_def->slot_is_cpp_property(slot)) return 0;
+    auto cpp_base = class_def->find_cpp_base_class();
+    return cpp_base ? cpp_base->get_property_getter_id(sym) : 0;
+}
+
+inline uint64_t cpp_property_setter_id(const class_instance* instance, uint64_t sym) {
+    class_definition* class_def = instance->get_class_definition();
+    if (!class_def) return 0;
+    const uint32_t slot = class_def->field_slot(sym);
+    if (slot == class_definition::k_no_field_slot || !class_def->slot_is_cpp_property(slot)) return 0;
+    auto cpp_base = class_def->find_cpp_base_class();
+    return cpp_base ? cpp_base->get_property_setter_id(sym) : 0;
+}
+
+// The C++ property READ every spelling shares (this.name, the bare name, a [=]
+// snapshot): the _get_ accessor called on the receiver; a bound getter on a retired
+// script layer reports; a non-owning result is pinned to the receiver's data (the same
+// anchor chained method returns get). Both member ladders funnel here so the texts
+// cannot drift.
+inline checked_result<script_value> read_cpp_property(const script_value& receiver,
+                                                      class_definition* class_def,
+                                                      class_instance* instance,
+                                                      const script_value& getter,
+                                                      uint64_t getter_id) {
+    const script_function& func = getter.as_function();
+    if (instance && instance->script_layer_retired() &&
+        !func.target<script_method_dispatch>() && !class_def->is_auto_accessor(getter_id)) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::script_layer_retired),
+            "Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
+            class_def->get_type_id());
+    }
+    std::vector<script_value> args = {receiver};
+    auto result = func(args);
+    if (!result) {
+        return result;
+    }
+    script_value& value = result.value();
+    if (value.is_non_owning_object()) {
+        auto result_holder = value.get_object_holder();
+        auto receiver_holder = receiver.get_object_holder();
+        if (result_holder && receiver_holder) {
+            result_holder->keep_alive = receiver_holder->data ? receiver_holder->data
+                                                              : receiver_holder->keep_alive;
+        }
+    }
+    return result;
+}
+
+// The bare-name read (kernel rung cpp_property, non-scope this-tails, [=] captures):
+// read_cpp_property through the chain's getter (the probe's method_value, or
+// instance->get_method(getter_id, false)), degrading on a C++ throw to the placeholder
+// cell exactly as the this.name ladder does.
+inline checked_result<script_value> read_bare_cpp_property(const script_value& receiver,
+                                                           class_instance* instance,
+                                                           const script_value& getter,
+                                                           uint64_t getter_id,
+                                                           uint64_t sym) {
+    try {
+        return read_cpp_property(receiver, instance->get_class_definition(), instance, getter, getter_id);
+    } catch (const std::exception&) {
+        if (instance->script_layer_retired()) { throw; }
+    }
+    return instance->get_field(sym);
+}
+
+// The C++ property STORE the bare landings share with this.name = v: the chain's _set_
+// (a script override wins, like the getter's) called with receiver + value. setter_id
+// from cpp_property_setter_id (non-zero).
+inline checked_result<void> write_cpp_property(const script_value& receiver,
+                                               class_definition* class_def,
+                                               uint64_t setter_id,
+                                               const script_value& value) {
+    script_value setter = class_def->get_method(setter_id, false);
+    if (setter.is_invalid() || !setter.is_function()) {
+        return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+            "Method '{0}' not found", setter_id);
+    }
+    std::vector<script_value> args = {receiver, value};
+    auto result = setter.as_function()(args);
+    if (!result) {
+        return result.error_value();
+    }
+    return {};
+}
 
 // The class-scope boundary in a lexical chain: the first method/static env.
 inline environment* find_member_boundary(environment* from) {
@@ -100,12 +201,44 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
             this_type != script_value_type::jai_shared_ptr_type) return hit;
         auto instance = this_val.get_class_instance();
         if (!instance) return hit;
-        script_value& field_ref = instance->get_field(sym, false);
-        if (!field_ref.is_invalid()) {
+        class_definition* class_def = instance->get_class_definition();
+        const uint32_t slot = class_def ? class_def->field_slot(sym) : class_definition::k_no_field_slot;
+        if (slot != class_definition::k_no_field_slot) {
+            // A binder property's placeholder slot answers as cpp_property, never as its
+            // (null) cell - the C++ object holds the truth, reached through _get_/_set_
+            if (class_def->slot_is_cpp_property(slot)) [[unlikely]] {
+                if (auto cpp_base = class_def->find_cpp_base_class()) {
+                    if (uint64_t getter_id = cpp_base->get_property_getter_id(sym)) {
+                        script_value getter = want_methods ? class_def->get_method(getter_id, false)
+                                                           : script_value::make_invalid(nullptr);
+                        if (!want_methods || !getter.is_invalid()) {
+                            hit.what = member_probe_hit::kind::cpp_property;
+                            hit.getter_id = getter_id;
+                            hit.method_value = std::move(getter);
+                            hit.instance = instance.get();
+                            hit.class_def = class_def;
+                            return hit;
+                        }
+                    }
+                }
+            }
+            script_value* cell = instance->field_slot_value(slot);
+            if (!cell) {
+                script_value& field_ref = instance->get_field(sym, false);   // declared, default not yet materialized
+                if (!field_ref.is_invalid()) cell = &field_ref;
+            }
+            if (cell) {
+                hit.what = member_probe_hit::kind::field;
+                hit.value_ptr = cell;
+                hit.instance = instance.get();
+                hit.class_def = class_def;
+                return hit;
+            }
+        } else if (script_value* present = instance->find_field_value(sym)) {   // runtime-added field
             hit.what = member_probe_hit::kind::field;
-            hit.value_ptr = &field_ref;
+            hit.value_ptr = present;
             hit.instance = instance.get();
-            hit.class_def = instance->get_class_definition();
+            hit.class_def = class_def;
             return hit;
         }
         if (want_methods) {

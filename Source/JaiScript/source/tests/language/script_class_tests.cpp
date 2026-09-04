@@ -1522,11 +1522,11 @@ public:
                 e->execute("class P { int y = 1; }");
                 removed[use_vm ? 1 : 0] = e->execute(
                     "var msg = \"\"; try { var t = hot(); msg = \"ran\"; } catch (err) { msg = err; } msg").as<std::string>();
-                check_eq(std::string("V:Object has no member 'x'"), e->execute(
+                check_eq(std::string("V:P has no member 'x'"), e->execute(
                     "var m3 = \"\"; try { var t3 = p.x; m3 = \"ran\"; } catch (err3) { m3 = \"V:\" + err3; } m3").as<std::string>(),
                     use_vm ? "vm plain removed-field read errors" : "interp plain removed-field read errors");
             }
-            check_eq(std::string("Object has no member 'x'"), removed[1],
+            check_eq(std::string("P has no member 'x'"), removed[1],
                      "vm removed-field text at the hot site");
             check_eq(removed[0], removed[1],
                      "backends agree at the hot site (compound-RHS error fix)");
@@ -1539,7 +1539,7 @@ public:
             // target, subscript target — the constrained-ref branch had the unwinding
             // check, its siblings didn't); the vm was correct throughout. Every shape
             // asserts the exact text on BOTH backends.
-            const char* expected = "V:Object has no member 'x'";
+            const char* expected = "V:R2 has no member 'x'";
             const std::pair<const char*, const char*> shapes[] = {
                 {"fn-only",
                  "int f1() { return r2.x; } var m = \"\"; try { var t = f1(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},

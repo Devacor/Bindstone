@@ -160,6 +160,91 @@ inline checked_result<void> write_cpp_property(const script_value& receiver,
     return {};
 }
 
+// The binder .property() `sym` names on a receiver of ANY kind - a hybrid layer (a
+// same-named script field shadows), a plain wrapper of a bound C++ class, or a raw
+// non-owning handle - with the class its accessors resolve on. getter_id 0 = not a C++
+// property of this receiver. One resolver for the reference mint and every per-touch
+// re-resolution (docs/reference_model.md CPP-MEMBER / PROPERTY).
+struct cpp_property_site {
+    slot_class_view view;
+    uint64_t getter_id = 0;
+    uint64_t setter_id = 0;
+    class_definition* accessor_class = nullptr;   // the binder class holding the member accessors
+    explicit operator bool() const { return getter_id != 0; }
+};
+
+inline cpp_property_site resolve_cpp_property(const script_value& receiver, uint64_t sym, engine* eng) {
+    cpp_property_site site;
+    site.view = resolve_slot_class(receiver, eng);
+    class_definition* def = site.view.def;
+    if (!def) return site;
+    if (site.view.instance && !def->is_cpp_class()) {
+        site.getter_id = cpp_property_getter_id(site.view.instance.get(), sym);
+        if (!site.getter_id) return site;
+        site.setter_id = cpp_property_setter_id(site.view.instance.get(), sym);
+        site.accessor_class = def->find_cpp_base_class().get();
+    } else if (def->is_cpp_class()) {
+        site.getter_id = def->get_property_getter_id(sym);
+        if (!site.getter_id) return site;
+        site.setter_id = def->get_property_setter_id(sym);
+        site.accessor_class = def;
+    }
+    return site;
+}
+
+// A script _get_/_set_ override anywhere in the chain makes the property computed from
+// the outside: a member binding would bypass it
+inline bool cpp_property_has_script_override(const cpp_property_site& site) {
+    class_definition* def = site.view.def;
+    if (!def || def->is_cpp_class()) return false;
+    auto is_script = [&](uint64_t id) {
+        if (!id) return false;
+        script_value method = def->get_method(id, false);
+        return !method.is_invalid() && method.is_function() &&
+               method.as_function().target<script_method_dispatch>() != nullptr;
+    };
+    return is_script(site.getter_id) || is_script(site.setter_id);
+}
+
+// The property READ a reference touch or a bind-time chain step performs. A bind point
+// sits mid-call-sequence where re-entering script is illegal: a script _get_ override
+// (and a throwing getter) answer invalid_reference there; touches propagate throws.
+inline checked_result<script_value> read_cpp_property_site(const script_value& receiver,
+                                                           const cpp_property_site& site,
+                                                           bool bind_point) {
+    script_value getter = site.view.def->get_method(site.getter_id, false);
+    if (getter.is_invalid() || !getter.is_function()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found),
+            "Method '{0}' not found", site.getter_id);
+    }
+    if (bind_point && getter.as_function().target<script_method_dispatch>()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+            "Cannot pass non-lvalue to reference parameter");
+    }
+    try {
+        return read_cpp_property(receiver, site.view.def, site.view.instance.get(), getter, site.getter_id);
+    } catch (const std::exception&) {
+        if (!bind_point) throw;
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+            "Cannot pass non-lvalue to reference parameter");
+    }
+}
+
+// The C++ object behind a receiver, pinned: the instance's _cpp_object (an extended
+// object's weak handle locked), a raw holder's data, else the anchor a non-owning handle
+// carries. Null = the reference is exactly as safe as the handle it was bound on.
+inline std::shared_ptr<void> pin_cpp_object(const script_value& receiver, const class_instance* instance) {
+    auto holder = receiver.get_object_holder();
+    if (instance) {
+        const script_value* held = instance->find_field_value(instance->get_cpp_object_field_id());
+        holder = held ? held->get_object_holder() : nullptr;
+    }
+    if (!holder) return nullptr;
+    if (holder->data) return holder->data;
+    if (auto locked = holder->weak_data.lock()) return locked;
+    return holder->keep_alive;
+}
+
 // The class-scope boundary in a lexical chain: the first method/static env.
 inline environment* find_member_boundary(environment* from) {
     for (environment* e = from; e; e = e->parent_raw()) {

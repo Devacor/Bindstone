@@ -6,6 +6,7 @@
 #include "engine.hpp"
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/slot_site.hpp>
 #include <set>
 #include <algorithm>
 #include <memory>
@@ -15,12 +16,18 @@ namespace jai {
 
 class function_decl;
 class environment;
+class class_definition;
 
 namespace detail {
     // Typed-slot conversion table (defined below class_definition): the ONE table for every
     // declared-type slot; the field store and the C++ set_field API enter through these.
-    inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng);
+    inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng,
+                                                            uint64_t field_id = 0, const class_definition* owner = nullptr,
+                                                            bool is_static = false);
     inline std::optional<script_value> field_store_convert_no_script(const script_value& value, const type_info_ptr& declared, engine* eng);
+    // Overload-miss text (docs/diagnostics.md family C), defined below with the slot texts
+    inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc,
+                                          engine* eng, bool constructor = false);
 }
 
 enum class access_level {
@@ -457,9 +464,8 @@ public:
                     auto& overloads_for_name = class_def_ptr->cpp_method_overloads_[name_id];
                     auto it = overloads_for_name.find(script_arg_count);
                     if (it == overloads_for_name.end() || it->second.empty()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                            "Method argument count mismatch: no overload accepts this number of arguments",
-                                                            name_id);
+                        return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
+                                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
                     }
 
                     auto& entries = it->second;
@@ -474,9 +480,8 @@ public:
                     }
                     int best = args[0].get_engine()->select_cpp_overload(args, sigs);
                     if (best < 0) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                            "No method overload matches the argument types",
-                                                            name_id);
+                        return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
+                                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
                     }
                     return entries[static_cast<size_t>(best)].func(args);
                 },
@@ -1272,6 +1277,32 @@ public:
         return property_setter_ids_.find(field_id) != property_setter_ids_.end();
     }
 
+    // Member-pointer property whose type the cpp_bound box decodes: the address a
+    // by-reference binding aims its box at (docs/reference_model.md CPP-MEMBER). Encoded
+    // exactly as script_value::cpp_bound_encoding / make_cpp_bound.
+    struct cpp_member_accessor {
+        std::function<void*(const script_value& receiver)> address;
+        uint8_t size_and_sign = 0;
+        uint8_t semantic_index = 0;
+    };
+    void register_property_member(uint64_t field_id, cpp_member_accessor accessor) {
+        property_member_accessors_[field_id] = std::move(accessor);
+        bump_field_shape_epoch();
+    }
+    // Chain-aware like the getter/setter ids
+    const cpp_member_accessor* get_property_member_accessor(uint64_t field_id) const {
+        auto it = property_member_accessors_.find(field_id);
+        if (it != property_member_accessors_.end()) {
+            return &it->second;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (const auto* inherited = parent->get_property_member_accessor(field_id)) { return inherited; }
+            }
+        }
+        return nullptr;
+    }
+
     bool is_transparent_wrapper() const { return is_transparent_wrapper_; }
 
     script_value unwrap(script_value& wrapper_value) const {
@@ -1863,6 +1894,7 @@ private:
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
     std::unordered_map<uint64_t, uint64_t> property_getter_ids_;
+    std::unordered_map<uint64_t, cpp_member_accessor> property_member_accessors_;
 
     bool has_property_getters_ = false;
 
@@ -2394,9 +2426,147 @@ inline std::optional<script_value> field_store_value(slot_conversion& out, const
     return stored;
 }
 
+// ---- Diagnostic spellings shared by every typed-boundary and overload site (docs/diagnostics.md) ----
+
+// Source spelling for rejection texts: the payload's own type - a class name for objects
+// and handles, "null", the primitive names, "array" / "map" - never a var tag. Every spelling
+// is already interned (base names at backend init, class names at definition), so an error
+// path may intern it even while the symbolizer is frozen.
+inline std::string slot_source_type_name(const script_value& value_in, engine* eng) {
+    const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
+    const type_info* tag = v.get_type_info().get();
+    const bool named_tag = tag && tag->base_type != script_value_type::jai_any_type && !tag->type_name.empty();
+    switch (v.raw_storage_index()) {
+        case script_value::TYPEID_NULL: return "null";
+        case script_value::TYPEID_OBJECT:
+        case script_value::TYPEID_CPP_BOUND: {
+            if (v.raw_storage_index() == script_value::TYPEID_CPP_BOUND && v.current_type() != script_value_type::jai_null_type) {
+                return container_base_type_name(v.current_type());
+            }
+            if (named_tag) return tag->type_name;
+            auto view = resolve_slot_class(v, eng);
+            if (view.def) return view.def->get_name();
+            if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) return holder->type_name;
+            return "object";
+        }
+        default:
+            return container_base_type_name(v.current_type());
+    }
+}
+
+// Declared-type spelling: the canonical name, shared_ptr<T> spelled in full
+inline std::string slot_type_spelling(const type_info& t) {
+    if (t.base_type == script_value_type::jai_shared_ptr_type) { return "shared_ptr<" + t.type_name + ">"; }
+    return t.canonical_name();
+}
+
+// "(int, string)" for an overload miss: at most 6 spelled, then "..."
+inline std::string argument_type_list(const script_value* args, size_t argc, engine* eng) {
+    std::string out = "(";
+    const size_t shown = argc < 6 ? argc : 6;
+    for (size_t i = 0; i < shown; ++i) {
+        if (i) { out += ", "; }
+        out += slot_source_type_name(args[i], eng);
+    }
+    if (argc > shown) { out += ", ..."; }
+    return out + ")";
+}
+
+// No overload / constructor takes these arguments: {0} = the callee, {1} = the argument list,
+// composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
+inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc,
+                                      engine* eng, bool constructor) {
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    if (symbols && !symbols->frozen()) {
+        return {ec, constructor ? "No constructor of '{0}' takes {1}" : "No overload of '{0}' takes {1}",
+                name_id, symbols->intern(argument_type_list(args, argc, eng))};
+    }
+    return {ec, constructor ? "No constructor of '{0}' matches this call" : "No overload of '{0}' matches this call", name_id, 0};
+}
+
+// Typed-boundary rejections (detail/slot_site.hpp): the site names its slot; the shape
+// follows the site kind.
+inline std::string callee_spelling(std::string_view callee) {
+    return callee == "<lambda>" ? std::string("lambda") : "'" + std::string(callee) + "'";
+}
+
+inline std::string slot_description(const slot_site& site, const type_info& target) {
+    const std::string declared = slot_type_spelling(target);
+    switch (site.kind) {
+        case slot_kind::parameter: {
+            std::string out = "parameter '" + std::string(site.name) + "'";
+            if (!site.owner.empty()) { out += " of " + callee_spelling(site.owner); }
+            return out + " (declared " + declared + ")";
+        }
+        case slot_kind::return_value:
+            return callee_spelling(site.owner) + " (declared -> " + declared + ")";
+        case slot_kind::field:
+        case slot_kind::static_field: {
+            std::string out = std::string(site.kind == slot_kind::field ? "field '" : "static '") + std::string(site.name) + "'";
+            if (!site.owner.empty()) { out += " of " + std::string(site.owner); }
+            return out + " (declared " + declared + ")";
+        }
+        default:
+            return "'" + std::string(site.name) + "' (declared " + declared + ")";
+    }
+}
+
+// {0} = the source type, {1} = the slot description
+inline std::string_view slot_rejection_message(slot_kind kind) {
+    switch (kind) {
+        case slot_kind::parameter: return "Cannot pass {0} to {1}";
+        case slot_kind::return_value: return "Cannot return {0} from {1}";
+        case slot_kind::declaration: return "Cannot initialize {1} with {0}";
+        default: return "Cannot assign {0} to {1}";
+    }
+}
+
+// Slot-less shapes ({1} = the declared type): an unnamed site, or a frozen symbolizer
+inline std::string_view slot_rejection_message_unnamed(slot_kind kind, std::string_view declared) {
+    const char c = declared.empty() ? 'x' : static_cast<char>(declared.front() | 0x20);
+    const bool vowel = c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+    switch (kind) {
+        case slot_kind::parameter: return vowel ? "Cannot pass {0} to an {1} parameter" : "Cannot pass {0} to a {1} parameter";
+        case slot_kind::return_value: return "Cannot return {0} from a function declared -> {1}";
+        case slot_kind::declaration: return "Cannot initialize a variable declared {1} with {0}";
+        case slot_kind::field: return "Cannot assign {0} to a field declared {1}";
+        case slot_kind::static_field: return "Cannot assign {0} to a static declared {1}";
+        default: return "Cannot assign {0} to a variable declared {1}";
+    }
+}
+
+inline bool slot_site_named(const slot_site& site) {
+    return site.kind == slot_kind::return_value ? !site.owner.empty() : !site.name.empty();
+}
+
+inline error_propagator typed_slot_rejection(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
+    const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    if (!symbols) {
+        return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), 0, target.id};
+    }
+    const uint64_t source_id = symbols->intern(slot_source_type_name(source, eng));
+    if (slot_site_named(site) && !symbols->frozen()) {
+        return {ec, slot_rejection_message(site.kind), source_id, symbols->intern(slot_description(site, target))};
+    }
+    return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), source_id, target.id};
+}
+
+// The same text as one string (host-side throws)
+inline std::string typed_slot_rejection_text(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
+    const std::string src = slot_source_type_name(source, eng);
+    if (slot_site_named(site)) {
+        return format_error_message(slot_rejection_message(site.kind), src, slot_description(site, target));
+    }
+    const std::string declared = target.canonical_name();
+    return format_error_message(slot_rejection_message_unnamed(site.kind, declared), src, declared);
+}
+
 // The field store: the full table (script rows included) plus the store-ready shaping.
-// KEEP the same-base head inline - every member store runs it.
-inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng) {
+// KEEP the same-base head inline - every member store runs it. field_id / owner / is_static
+// only name the slot in the rejection text (resolved on the error path alone).
+inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng,
+                                                        uint64_t field_id, const class_definition* owner, bool is_static) {
     {
         const script_value& v = value.is_reference() ? value.deref() : value;
         size_t want = script_value::TYPEID_INVALID;
@@ -2424,8 +2594,11 @@ inline checked_result<script_value> field_store_convert(const script_value& valu
     }
     auto stored = field_store_value(out, value, declared, eng);
     if (!stored) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
-            "Type mismatch in assignment", declared->id);
+        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+        return typed_slot_rejection(value, *declared,
+            slot_site{is_static ? slot_kind::static_field : slot_kind::field,
+                      field_id && symbols ? symbols->get_string(field_id) : std::string_view{},
+                      owner ? std::string_view(owner->get_name()) : std::string_view{}}, eng);
     }
     return std::move(*stored);
 }
@@ -2479,7 +2652,7 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     } else if (declared->base_type == script_value_type::jai_any_type) {
         return std::move(value);
     }
-    return detail::field_store_convert(value, declared, engine_);
+    return detail::field_store_convert(value, declared, engine_, id, class_def_);
 }
 
 inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {
@@ -2499,7 +2672,7 @@ inline checked_result<script_value> class_definition::enforce_static_write(uint6
     } else if (declared->base_type == script_value_type::jai_any_type) {
         return std::move(value);
     }
-    return detail::field_store_convert(value, declared, engine_);
+    return detail::field_store_convert(value, declared, engine_, id, this, true);
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {
@@ -2530,7 +2703,11 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
             declared && declared->base_type != script_value_type::jai_any_type) {
             auto converted = detail::field_store_convert_no_script(value, declared, engine_);
             if (!converted) {
-                throw runtime_error("Type mismatch in assignment");
+                string_symbolizer* symbols = engine_ ? engine_->get_symbolizer() : nullptr;
+                throw runtime_error(detail::typed_slot_rejection_text(value, *declared,
+                    detail::slot_site{detail::slot_kind::field,
+                                      symbols ? symbols->get_string(id) : std::string_view{},
+                                      class_def_->get_name()}, engine_));
             }
             set_field_unchecked(id, *converted);
             return;

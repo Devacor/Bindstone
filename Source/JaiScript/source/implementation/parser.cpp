@@ -2253,10 +2253,13 @@ checked_result<declaration_ptr> parser::declaration_body() {
     }
 
     if (match(token_type::coroutine_keyword)) {
-        bool was_in_coroutine = in_coroutine_;
+        const bool was_in_coroutine = in_coroutine_;
         in_coroutine_ = true;
-        JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
+        coroutine_body_pending_ = true;
+        auto parsed = bare_coroutine_head() ? bare_coroutine_declaration() : function_declaration();
         in_coroutine_ = was_in_coroutine;
+        coroutine_body_pending_ = false;
+        JAISCRIPT_TRY_ASSIGN(auto result, std::move(parsed));
         auto* func = static_cast<function_decl*>(result.get());
         func->is_coroutine = true;
         // A suspended fiber's return channel is a value channel: ref returns are
@@ -2632,7 +2635,9 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
         }
     }
 
-    // Parse body
+    // Parse body (never a coroutine body: `yield` inside a lambda is the ordinary parse error)
+    struct coroutine_scope { bool& flag; bool saved; ~coroutine_scope() { flag = saved; } } body_scope{in_coroutine_, in_coroutine_};
+    in_coroutine_ = false;
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error
         report_error("Expected '{' for lambda body", peek());
@@ -3101,6 +3106,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
         // Error-recovery `continue`s below can leave in_coroutine_ armed; every member
         // starts from the class-entry state
         in_coroutine_ = class_entry_in_coroutine;
+        coroutine_body_pending_ = false;
 
         // Check for visibility specifiers
         if (match(token_type::public_keyword)) {
@@ -3131,12 +3137,22 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             continue;
         }
 
-        // Coroutine methods: 'coroutine' precedes a typed or 'function'-keyword method
-        // (free-function syntax parity); constructors/destructors/fields reject below
+        // Coroutine methods: `coroutine` prefixes every method spelling, in any order with
+        // static/override (`static coroutine` reads as `coroutine static`); the whole run
+        // is consumed here so each branch below sees the plain head. Ctors/dtors/fields
+        // reject at the tail.
         bool member_is_coroutine = false;
-        if (match(token_type::coroutine_keyword)) {
-            member_is_coroutine = true;
+        bool leading_static = false;
+        bool leading_override = false;
+        if (coroutine_modifier_run()) {
             in_coroutine_ = true;
+            coroutine_body_pending_ = true;
+            for (;;) {
+                if (match(token_type::coroutine_keyword)) { member_is_coroutine = true; }
+                else if (match(token_type::static_keyword)) { leading_static = true; }
+                else if (match(token_type::override_keyword)) { leading_override = true; }
+                else { break; }
+            }
         }
 
         // Parse member declaration
@@ -3162,14 +3178,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 // Currently no support for constructor chaining
             } else {
                 // This is a field with the class type, fall through to regular member parsing
-                bool is_static = match(token_type::static_keyword);
-                bool is_override = match(token_type::override_keyword);
-
-                if (is_static && check(token_type::coroutine_keyword)) {
-                    report_error("static coroutine methods are not supported", peek());
-                    synchronize_class_member(class_open_index);
-                    continue;
-                }
+                bool is_static = leading_static || match(token_type::static_keyword);
+                bool is_override = leading_override || match(token_type::override_keyword);
 
                 auto type_result = parse_type();
                 if (!type_result) {
@@ -3370,10 +3380,11 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             }
             auto var_decl = std::make_shared<variable_decl>(name.location, nullptr, name.lexeme, get_symbol_id(name), init);
             member = var_decl;
-        } else if (match(token_type::function_keyword)) {
-            // Method declaration with 'function' keyword: function name(...) or function operator=(...)
-            bool is_static = false;
-            bool is_override = false;
+        } else if (match(token_type::function_keyword) || (member_is_coroutine && bare_coroutine_head())) {
+            // Method declaration with 'function' keyword: function name(...) or function operator=(...);
+            // the bare coroutine head (coroutine name(...) / coroutine operator+(...)) lands here too
+            bool is_static = leading_static;
+            bool is_override = leading_override;
 
             // Check for static/override modifiers after function keyword
             while (check(token_type::static_keyword) || check(token_type::override_keyword)) {
@@ -3418,14 +3429,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             member = std::move(body_result.value());
         } else {
             // Regular member (variable or function)
-            bool is_static = match(token_type::static_keyword);
-            bool is_override = match(token_type::override_keyword);
-
-            if (is_static && check(token_type::coroutine_keyword)) {
-                report_error("static coroutine methods are not supported", peek());
-                synchronize_class_member(class_open_index);
-                continue;
-            }
+            bool is_static = leading_static || match(token_type::static_keyword);
+            bool is_override = leading_override || match(token_type::override_keyword);
 
             auto type_result = parse_type();
             if (!type_result) {
@@ -3591,14 +3596,14 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 synchronize_class_member(class_open_index);
                 continue;
             }
-            if (func_member->is_static) {
-                report_error("static coroutine methods are not supported", peek());
-                synchronize_class_member(class_open_index);
-                continue;
-            }
             if (func_member->name == className.lexeme ||
                 (!func_member->name.empty() && func_member->name[0] == '~')) {
                 report_error("constructors and destructors cannot be coroutines", peek());
+                synchronize_class_member(class_open_index);
+                continue;
+            }
+            if (func_member->return_type && func_member->return_type->base_type == script_value_type::jai_reference_type) {
+                report_error("Coroutines cannot return references", peek());
                 synchronize_class_member(class_open_index);
                 continue;
             }
@@ -3975,6 +3980,29 @@ type_info_ptr parser::wrap_reference_return_type(type_info_ptr return_type) {
     return store_type_info(std::move(refType));
 }
 
+// `coroutine name(` / `coroutine operator+(`: no leading type and no `function` keyword.
+// `coroutine IDENT (` never parsed (parse_type ate the name), so claiming it changes no
+// valid program; `coroutine T name(` and `coroutine function name(` keep their paths.
+bool parser::bare_coroutine_head() const {
+    if (!check(token_type::identifier)) return false;
+    return peek().lexeme == "operator" ||
+           (current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren);
+}
+
+bool parser::coroutine_modifier_run() const {
+    for (size_t i = current_; i < tokens_.size(); ++i) {
+        if (tokens_[i].type == token_type::coroutine_keyword) return true;
+        if (tokens_[i].type != token_type::static_keyword && tokens_[i].type != token_type::override_keyword) return false;
+    }
+    return false;
+}
+
+checked_result<declaration_ptr> parser::bare_coroutine_declaration() {
+    const token& name = advance();
+    auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
+    return parse_function_body(name_view, name_id, nullptr);
+}
+
 checked_result<declaration_ptr> parser::function_declaration() {
     JAISCRIPT_TRY_ASSIGN(type_info_ptr return_type, parse_type());
     return_type = wrap_reference_return_type(return_type);
@@ -3986,6 +4014,10 @@ checked_result<declaration_ptr> parser::function_declaration() {
 
 checked_result<declaration_ptr> parser::parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type, bool allow_ctor_initializers) {
     auto func = std::make_shared<function_decl>(previous().location, name, name_id);
+    // Only the body a coroutine head armed may yield: a nested function inherits nothing
+    struct coroutine_scope { bool& flag; bool saved; ~coroutine_scope() { flag = saved; } } body_scope{in_coroutine_, in_coroutine_};
+    in_coroutine_ = coroutine_body_pending_;
+    coroutine_body_pending_ = false;
 
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());

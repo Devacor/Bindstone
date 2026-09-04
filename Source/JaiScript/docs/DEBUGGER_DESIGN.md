@@ -408,7 +408,7 @@ off-cycle, at the same two points as the script-timeout clock. The implementatio
   its own thread (`accept` there), and DAP `attach` just flips `enabled_` — which the script
   thread notices at the sync points above. Constructing a `debug_connector` opens no thread
   until `engine::set_debug_connector` calls `start()`; no ambient threads exist when unused.
-- **Call frames** carry one unconditional pointer store (`call_frame::debug_function`, used to
+- **Call frames** carry one unconditional pointer store (`call_frame::function`, used to
   name slot locals at a stop) — within the "one cached test per call-frame push" budget.
 - **`engine::execute` path:** the (sourcePath, content) parse-cache key is built in a reused
   member buffer — no per-execute allocation for the key (debugger-era plumbing had introduced

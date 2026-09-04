@@ -845,6 +845,18 @@ private:
             class_def_->register_property_setter(field_id, setter_id);
         }
 
+        // A box-decodable member binds BY REFERENCE as the member itself (reference_model.md
+        // CPP-MEMBER): record its address accessor beside the getter/setter
+        if constexpr (script_value::cpp_bound_encoding<P>::capable) {
+            using encoding = script_value::cpp_bound_encoding<P>;
+            class_def_->register_property_member(engine_.symbolize(name), class_definition::cpp_member_accessor{
+                [member](const script_value& receiver) -> void* {
+                    T* cpp_obj = detail::extract_cpp_object_ptr<T>(receiver);
+                    return cpp_obj ? static_cast<void*>(&(cpp_obj->*member)) : nullptr;
+                },
+                encoding::size_and_sign, encoding::semantic_index});
+        }
+
         // Register bound_cpp_vector<T> if this property is a std::vector
         if constexpr (is_specialization_v<P, std::vector>) {
             using element_type = typename P::value_type;

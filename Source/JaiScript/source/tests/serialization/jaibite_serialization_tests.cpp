@@ -172,14 +172,50 @@ public:
             )");
         });
 
+        // Method coroutines, a field-held handle, yields in expression positions and the
+        // completion-value conversion must survive save/load exactly like a fresh parse.
+        test("roundtrip_coroutine_methods_and_expression_yields", [check_roundtrip]() {
+            check_roundtrip(R"(
+                class Gen {
+                    int base = 10;
+                    var h = null;
+                    coroutine int steps(int n) {
+                        for (int i = 0; i < n; ++i) { yield base + i; }
+                        return -1;
+                    }
+                    coroutine function mixed() -> auto {
+                        var t = ((yield 1) == null ? 10 : 0) + 1;
+                        yield t;
+                        return 2.5;
+                    }
+                }
+                var g = Gen();
+                g.h = g.steps(3);
+                int total = 0;
+                for (auto v : g.steps(2)) { total += v; }
+                string s = to_string(g.h.resume()) + "," + to_string(g.h.resume());
+                auto m = g.mixed();
+                s += "|" + to_string(m.resume()) + "," + to_string(m.resume()) + "," + to_string(m.resume()) + "," + to_string(m.done());
+                coroutine int typed() { yield 1; return 2.7; }
+                auto t = typed();
+                t.resume();
+                var last = t.resume();
+                string e = "";
+                try { t.resume(); } catch (err) { e = to_string(err); }
+                to_string(total) + "|" + s + "|" + type_of(last) + ":" + to_string(last) + "|" + e;
+            )");
+        });
+
         test("roundtrip_coroutines_range_for", [check_roundtrip]() {
             check_roundtrip(R"(
                 coroutine int gen(int n) {
                     for (int i = 0; i < n; ++i) { yield i * i; }
                     return -1;
                 }
+                coroutine sq() -> auto { yield 4; yield 9; return -1; }
                 int total = 0;
                 for (auto v : gen(5)) { total += v; }
+                for (auto v : sq()) { total += v; }
                 auto c = gen(3);
                 int manual = 0;
                 while (!c.done()) { manual += c.resume(); }
@@ -307,7 +343,7 @@ public:
                 check_false(load_engine->last_check_diagnostics().has_errors());
                 run_output out = run_once(loaded);
                 check_true(out.threw);
-                check_true(out.error.find("Type mismatch") == 0, "got: " + out.error);
+                check_true(out.error.find("Cannot initialize") == 0, "got: " + out.error);
             }
             // a strict region survives the trip too: it gates a warn-mode loading engine
             auto off_saver = fresh_engine(false, {});

@@ -97,9 +97,11 @@ carried across the boundary.
   (locals → members → globals, `detail/member_scope.hpp`): it reads through `_get_name` and
   stores through `_set_name` exactly like `this.name` — plain, compound and `++`/`--` — with
   the same texts; a same-named script field shadows it for both spellings. No field is ever
-  materialized on the instance for a C++ property. A property has no cell to alias: `[=]`
-  and `[&]` both snapshot it, and a by-reference binding (`auto& r = name`, `f(name)` into a
-  `&` parameter) is `Cannot take reference of undefined variable`, as for a method name.
+  materialized on the instance for a C++ property. By-reference bindings (`auto& r = name`,
+  `f(name)` into a `&` parameter, `return name` from a `-> T&` method, `[&]` captures) bind
+  the MEMBER ITSELF for a box-decodable member-pointer property and the accessor pair for
+  every other property (docs/reference_model.md CPP-MEMBER / PROPERTY); `[=]` snapshots.
+  A member METHOD name stays `Cannot take reference of undefined variable`.
 
 ## 3. Decisions
 

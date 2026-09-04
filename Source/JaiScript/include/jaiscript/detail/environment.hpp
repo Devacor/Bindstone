@@ -338,6 +338,8 @@ namespace jai {
         return target.clone();
     }
 
+    struct script_defined_function;
+
     /// Stack-based call frame for fast function parameter access - avoids hash map
     /// overhead for the most frequently accessed variables.
     /// Defined at namespace scope so coroutine_handle can reference it without circular includes.
@@ -374,11 +376,11 @@ namespace jai {
         std::string_view function_name;
         const ast_node* current_node = nullptr;
 
-        // Debug-only: the detail::script_defined_function this frame is executing, used to
-        // name the slot-based locals below when a debugger stops here. Typed as void* to
-        // avoid a header ordering dependency; the interpreter casts it back. Null for frames
-        // not pushed by call_function. One pointer store per call — no measurable cost.
-        const void* debug_function = nullptr;
+        // The detail::script_defined_function this frame executes: the return site reads
+        // its declared return type (the typed-return conversion runs at the `return`) and
+        // a debugger names the slot-based locals below from it. Null for frames not pushed
+        // by call_function. One pointer store per call — no measurable cost.
+        const script_defined_function* function = nullptr;
 
         /// O(1) access by slot index - much faster than hash map or linear search
         std::vector<script_value> locals;
@@ -483,11 +485,10 @@ namespace jai {
         // filled through const refs on the call path; per-engine, single backend.
         mutable std::shared_ptr<void> backend_body_cache;
 
-        // Backend-cached return-type classification (vm flat-stack stage 1): values are
-        // vm_backend's return_conv enum, 0 = not yet classified. Derived purely from
-        // return_type on first call; mutable like backend_body_cache (workers hold
-        // private function copies, so lazy fills never cross threads). Interpreter
-        // ignores it.
+        // Cached return-type classification (detail::return_conv, filled through
+        // detail::return_conv_of on both backends; 0 = not yet classified). Derived purely
+        // from return_type on first call; mutable like backend_body_cache (workers hold
+        // private function copies, so lazy fills never cross threads).
         mutable uint8_t backend_return_conv = 0;
 
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build

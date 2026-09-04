@@ -55,7 +55,7 @@ function make_equipment(int floor) -> var {
 			var suffix = SUFFIXES[RNG.next(SUFFIXES.size())];
 			item.name = `${item.name} ${suffix["name"]}`;
 			// hoisted: passing a container-element read to a script-class METHOD's
-			// typed param throws "No matching overload found" (both backends, 2026-07)
+			// typed param throws "No overload of '...' takes (...)" (both backends, 2026-07)
 			var bonus_key = suffix["bonus"];
 			if (bonus_key == "atk") { item.atk = item.atk + suffix["power"]; }
 			else if (bonus_key == "def") { item.def = item.def + suffix["power"]; }

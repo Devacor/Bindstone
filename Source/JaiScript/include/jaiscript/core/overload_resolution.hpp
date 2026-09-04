@@ -221,9 +221,10 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
     if (best) {
         return best;
     }
-    return checked_result<const std::shared_ptr<function_decl>*>(ec,
-        ec == make_error_code(runtime_error_code::member_not_found) ? "No method overloads found" : "No matching overload found",
-        name_id);
+    if (ec == make_error_code(runtime_error_code::member_not_found)) {
+        return checked_result<const std::shared_ptr<function_decl>*>(ec, "No overload of '{0}' exists", name_id);
+    }
+    return detail::overload_miss(ec, name_id, args, argc, get_engine());
 }
 
 inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(
@@ -233,9 +234,10 @@ inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_
     if (best) {
         return *best;
     }
-    return checked_result<std::shared_ptr<function_decl>>(ec,
-        ec == make_error_code(runtime_error_code::member_not_found) ? "No method overloads found" : "No matching overload found",
-        name_id);
+    if (ec == make_error_code(runtime_error_code::member_not_found)) {
+        return checked_result<std::shared_ptr<function_decl>>(ec, "No overload of '{0}' exists", name_id);
+    }
+    return detail::overload_miss(ec, name_id, args, argc, get_engine());
 }
 
 inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(

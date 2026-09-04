@@ -7,7 +7,7 @@ load-bearing rules live in `invariants.md` §3, the runtime shapes in
 ## A reference is an owner-pinned handle
 
 `script_value` variant index 10 holds `strong_ptr<reference_holder>` (value.hpp). The
-holder is in exactly ONE of four modes, each of which OWNS or PINS what it refers to —
+holder is in exactly ONE of six modes, each of which OWNS or PINS what it refers to —
 there is no raw-pointer mode and no "is my target still alive?" question:
 
 | mode | pin | resolution per touch |
@@ -16,6 +16,23 @@ there is no raw-pointer mode and no "is my target still alive?" question:
 | ELEMENT | `strong_ptr` to the owning vector + index | recompute address, bounds-check (shrink ⇒ "removed array element") |
 | FIELD | `shared_ptr` to the owning instance + field id | `find_field_value(id)` (removed field errors; hot-reload safe) |
 | MAP-ENTRY | `strong_ptr` to the owning map + key in the inline storage | `find(key)` (erased entry errors) |
+| CPP-MEMBER | the receiver handle + the C++ object (`_cpp_object`, an extended object's weak handle locked, a raw holder's data or anchor) | the inline storage holds a `cpp_bound` box aimed at the C++ member itself: reads decode it live, writes are the box's typed memory store |
+| PROPERTY | the receiver handle + the property's field id | the getter, re-run into the inline scratch (`materialize_property`); assignment re-resolves and runs the setter (none ⇒ the silent no-op `obj.name = v` is) |
+
+CPP-MEMBER / PROPERTY are the two shapes a `dynamic_binder` `.property()` binds to
+(`detail/ref_lvalue.hpp` `bind_cpp_property_ref`, one kernel for both backends). A
+member-pointer property whose type the box decodes (`script_value::cpp_bound_encoding`:
+the integer widths, bool, float/double, `std::string`) is CPP-MEMBER — the binder records
+a member-address accessor beside the getter/setter
+(`class_definition::register_property_member`) — unless a script `_get_`/`_set_` override
+sits in the chain; lambda / member-function accessor pairs, class-, container- and
+`script_value`-typed member pointers, and read-only properties are PROPERTY. A same-named
+script field shadows the property for the reference exactly as it does for reads and
+stores (FIELD mint). Both modes re-resolve the receiver's class per touch (a reload that
+adds a shadowing script field re-points a PROPERTY reference at that field; a retired
+script layer reports at bind and on PROPERTY touches, while a CPP-MEMBER pin keeps the
+object alive). `resolve_target()` answers null for both — a missed immediate-use consumer
+fails loudly instead of detaching the box or writing the scratch.
 
 Copying a reference copies the handle (aliases share the holder). Binding never
 allocates except the first boxing of a variable.
@@ -32,6 +49,11 @@ allocates except the first boxing of a variable.
 - **`arr[i]` / `obj.field` / chains** resolve to ELEMENT/FIELD refs via the shared
   `detail/ref_lvalue.hpp` resolver (ref args, ref returns) or the subscript-lvalue
   paths. **`m[k]`** lvalues mint MAP-ENTRY refs.
+- **C++ properties** (`obj.prop`, `this.prop`, the bare `prop` inside a hybrid's methods and
+  lambdas, chains ending in one, `[&]` captures of one) mint CPP-MEMBER / PROPERTY refs on
+  every receiver kind: hybrid layers, script-constructed C++ objects, plain wrappers of
+  extended objects, raw non-owning handles (`T&` returns, `add_global_ref` objects). A
+  chain may pass THROUGH a property (`f(this.child.x)`) when its getter is native.
 
 ## What binds (decls, ref params, ref returns)
 
@@ -53,11 +75,11 @@ Binding is two-tiered; both tiers land in the same four holder modes:
   field reads evaluate to copies.
 
 What stays a non-lvalue: rvalues (arithmetic, calls, literals), string subscripts
-(chars are values), map KEYS (`kv.first` — ordering invariant), computed properties
-(a field with a user `_get_`/`_set_` anywhere in its chain included) and C++-backed
-members whose accessors return copies, missing map keys (reads never
-insert), and member-final chains over COMPUTED subscripts (`objs[i+1].v` — bind a
-`var&` row first).
+(chars are values), map KEYS (`kv.first` — ordering invariant), script fields with a
+user `_get_`/`_set_` anywhere in their chain, member METHOD names, missing map keys
+(reads never insert), member-final chains over COMPUTED subscripts (`objs[i+1].v` —
+bind a `var&` row first), and any property bind inside a parallel region (workers reach
+neither accessors nor raw member memory).
 - **Ref returns** (`int& f()`, `-> auto&`): the return operand binds like a ref arg
   (ident ⇒ share/box; chain ⇒ resolver; call ⇒ pass-through) and the epilogue hands
   the HANDLE out via `detail::ref_return_pass_through` — non-lvalues and referent
@@ -86,7 +108,12 @@ ELEMENT/FIELD/MAP-ENTRY refs carry their container's element / declared field / 
 value type as `container_element_type`; stores through the ref enforce it with the
 same text as the direct store (`ref_store_through`, route-independence). CELL refs of
 plain locals are unconstrained (plain-local parity); the typed enforcement for a boxed
-NAME rides the store path, not the holder.
+NAME rides the store path, not the holder. CPP-MEMBER refs are constrained by the box:
+a store converts with the bound-variable rules (`as<script_int>()` etc. — a mistyped
+store raises the same conversion text the direct `obj.prop = v` setter raises and
+leaves the member alone; narrow integer widths truncate like an `add_global_ref` int32
+does, where the direct setter range-checks). PROPERTY refs are constrained by the
+setter alone.
 
 ## The consumption contract
 
@@ -95,4 +122,7 @@ chained refs collapse) or, for the immediate-use assignment twins,
 `reference_holder::resolve_target()` (single-level, mode-based). Never cache a
 `script_value*` obtained from a reference across anything that can touch the owner —
 push/erase/hot-reload between resolve and use is exactly what the modes exist to
-survive. New consumers use these three entry points, nothing else.
+survive. New consumers use these three entry points, nothing else. In-place mutators
+(`++`/`--` on an identifier) that write the deref'd value must `commit_scratch()` when
+`scratch_ref_holder()` answers (typed elements and PROPERTY refs hand back a scratch);
+compound assignment routes those refs through `ref_compound_store_constrained`.

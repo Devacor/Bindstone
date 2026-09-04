@@ -380,6 +380,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
 		pair_id_ = symbolizer_->intern("pair");
 		base_type_ids_.intern(*symbolizer_);
+		arity_count_ids_.intern(*symbolizer_);
 
 		builtins_ = {};
 		init_builtin_method_registries(symbolizer_, builtins_);
@@ -800,17 +801,10 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		}
 
 		{
-			size_t required_params = 0;
-			for (const auto& p : function->parameters) {
-				if (!p.default_value) { ++required_params; } else { break; }
-			}
-			const auto& args = handle.get_args();
-			if (args.size() < required_params || args.size() > function->parameters.size()) {
+			const size_t argc = handle.get_args().size();
+			if (argc != function->parameters.size() && !arity_accepts(function->parameters, argc)) {
 				handle.set_status(coroutine_handle::status::failed);
-				return checked_result<script_value>(
-					make_error_code(runtime_error_code::argument_count_mismatch),
-					"Function expected {0} arguments but got {1}",
-					static_cast<uint64_t>(function->parameters.size()), static_cast<uint64_t>(args.size()));
+				return detail::arity_error(function->name, function->parameters.size(), argc, arity_count_ids_, *symbolizer_);
 			}
 		}
 
@@ -845,6 +839,8 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.f.window_live = 0;
 		state.f.stack_base = 0;
 		state.f.top_level = false;
+		state.f.return_type = function->return_type;
+		state.f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(*function));
 	}
 
 	return run_fiber(handle, state);
@@ -931,7 +927,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				frame_slot_set(state.f, param.slot_index, std::move(default_val));
 				continue;
 			}
-			auto converted_result = try_convert_for_parameter(args[i], param.type);
+			auto converted_result = try_convert_for_parameter(args[i], param.type,
+				detail::slot_site{detail::slot_kind::parameter, param.name, function->name});
 			if (!converted_result) {
 				environment_ = prev_env;
 				active_coroutine_ = prev_active;
@@ -977,27 +974,15 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	--current_call_depth_;
-	// Capture and convert while the fiber frame is still on frames_: an error raised by
-	// the coroutine's own segment names the coroutine, not the resume site
+	// Capture while the fiber frame is still on frames_: an error raised by the
+	// coroutine's own segment names the coroutine, not the resume site (a failed
+	// return conversion is one - the door raised it in-frame)
 	std::optional<checked_result<script_value>> completed;
 	if (!pending && !yielding_) {
 		if (!*body_result || is_unwinding_) {
 			if (!trace_captured_) capture_stack_trace();
 		} else if (has_return_value_ && return_value_.has_value()) {
-			script_value result = std::move(return_value_.value());
-			if (result.is_reference()) {
-				result = result.deref();
-			}
-			auto function = handle.get_function();
-			if (function && function->return_type && !function->return_type->type_name.empty() &&
-			    function->return_type->type_name != "void" &&
-			    function->return_type->type_name != "auto" &&
-			    function->return_type->base_type != script_value_type::jai_any_type) {
-				completed.emplace(try_convert_for_parameter(result, function->return_type));
-				if (!*completed && !trace_captured_) capture_stack_trace();
-			} else {
-				completed.emplace(std::move(result));
-			}
+			completed.emplace(std::move(return_value_.value()));   // converted at the return door
 		}
 	}
 	frames_.pop_back();
@@ -2795,7 +2780,8 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 
 // The one typed-slot table (detail::convert_for_typed_slot); this site owns the assignment
 // texts. KEEP BYTE-PARALLEL with interpreter::enforce_type_compatibility.
-checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type) {
+checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type,
+                                                                    std::string_view var_name, detail::slot_kind kind) {
 	if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
 		return std::move(value);
 	}
@@ -2833,8 +2819,6 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 				detail::container_boundary_mismatch_text,
 				sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
 		}
-		case verdict::reject_class:
-			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
 		case verdict::handle_target:
 			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is (outside the table)
 			if (value.type() == target_type->base_type) {
@@ -2842,17 +2826,17 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 			}
 			[[fallthrough]];
 		default:
-			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
+			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, var_name, {}}, engine_);
 	}
 }
 
 // Compound store-back: locked targets convert the promoted result like '=' does; var
 // targets keep the promoted result and re-tag it 'any' so the variable stays dynamic.
 // KEEP BYTE-PARALLEL with interpreter::compound_typed_store_back.
-op_status vm_backend::compound_typed_store_back(script_value& target, script_value promoted) {
+op_status vm_backend::compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name) {
 	type_info_ptr tag = target.get_type_info();
 	if (tag && tag->base_type != script_value_type::jai_any_type) {
-		auto enforced = enforce_type_compatibility(std::move(promoted), tag);
+		auto enforced = enforce_type_compatibility(std::move(promoted), tag, var_name);
 		if (!enforced) {
 			return raise_from(enforced);
 		}
@@ -2869,7 +2853,8 @@ op_status vm_backend::compound_typed_store_back(script_value& target, script_val
 // return texts and the identity return shapes (the arg itself; the derefed arg for exact-name
 // objects - the V-C1 lane and the exact-class lane replicate them).
 // KEEP BYTE-PARALLEL with interpreter::try_convert_for_parameter.
-checked_result<script_value> vm_backend::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
+checked_result<script_value> vm_backend::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
+                                                                   const detail::slot_site& site) {
 	if (!target_type) {
 		return arg;
 	}
@@ -2937,18 +2922,14 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			break;
 	}
 
-	const uint64_t source_id = symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_));
 	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
 	    (out.v == verdict::reject || out.v == verdict::reject_class)) {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::type_mismatch),
 			"Cannot convert {0} to {1} (no suitable single-argument constructor)",
-			source_id, target_type->id);
+			symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_)), target_type->id);
 	}
-	return checked_result<script_value>(
-		make_error_code(runtime_error_code::type_mismatch),
-		"Type mismatch: expected {0} but got {1}",
-		detail::slot_target_symbol(*target_type, *symbolizer_), source_id);
+	return detail::typed_slot_rejection(derefed_arg, *target_type, site, engine_);
 }
 
 // ============================================================
@@ -3207,7 +3188,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type)) {
-				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
+				auto enforced = enforce_type_compatibility(std::move(value), slot_type, symbolizer_->get_string(sym));
 				if (!enforced) {
 					return raise_from(enforced);
 				}
@@ -3246,7 +3227,8 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				}
 			}
 			if (declared && declared->base_type != script_value_type::jai_any_type) {
-				auto converted = detail::field_store_convert(incoming, declared, engine_);
+				auto converted = detail::field_store_convert(incoming, declared, engine_, sym,
+					static_cast<const class_definition*>(f.code->env_lookup_cache[f.ip * 3].this_field_class));
 				if (!converted) {
 					return raise_from(converted);
 				}
@@ -3591,7 +3573,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		// V-S2: same_type proof + payload guard = identity conversion
 		if (!((ins.c & store_flag_same_type) && target_type &&
 		      detail::same_type_payload(value, target_type.get()))) {
-			auto enforced = enforce_type_compatibility(std::move(value), target_type);
+			auto enforced = enforce_type_compatibility(std::move(value), target_type, symbolizer_->get_string(sym));
 			if (!enforced) {
 				return raise_from(enforced);
 			}
@@ -3741,10 +3723,12 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
-		// so the compound result honors the constraint like subscript compounds do
+		// so the compound result honors the constraint like subscript compounds do. A
+		// C++ PROPERTY ref takes the same route: its deref is a scratch, the write must
+		// reach the setter.
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
-			if (refHolder && refHolder->container_element_type) {
+			if (refHolder && (refHolder->container_element_type || refHolder->property_ref())) {
 				token_type op;
 				const char* opName;
 				switch (kind) {
@@ -3932,7 +3916,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				default: return raise_(make_error_code(runtime_error_code::unknown_operator));
 			}
 			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight));
-			VM_TRY(compound_typed_store_back(target, std::move(promoted)));
+			VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
 			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 			return {};
 		}
@@ -3947,7 +3931,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() += derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
 				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
 					// engine::memory_cap chokepoint: deny the append before it exists
 					if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
@@ -3961,7 +3945,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 					// error, unlike binary +, by pinned design). KEEP
 					// BYTE-PARALLEL with the interpreter's in-place switch.
 					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
-					VM_TRY(compound_typed_store_back(target, std::move(joined)));
+					VM_TRY(compound_typed_store_back(target, std::move(joined), symbolizer_->get_string(sym)));
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
@@ -3976,7 +3960,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() -= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
@@ -3991,7 +3975,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() *= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
@@ -4012,7 +3996,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() /= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
@@ -4023,7 +4007,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
 				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
-				VM_TRY(compound_typed_store_back(target, std::move(promoted)));
+				VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
 				break;
 			}
 			default:
@@ -4201,10 +4185,10 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		? engine_->get_global_environment()->get_value_ptr(sym)
 		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
-		// TYPED array element ref: deref hands back the holder scratch - the in-place
-		// mutation below must commit it to the raw buffer (KEEP BYTE-PARALLEL with the
-		// interpreter ++/-- twin)
-		auto* typed_elem = varPtr->typed_element_holder();
+		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
+		// scratch - the in-place mutation below must commit it (buffer store / setter)
+		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
+		auto* scratch_ref = varPtr->scratch_ref_holder();
 		script_value& target = varPtr->deref();
 		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
 		// back through assign_through (the type() switch below would mutate a dead shadow).
@@ -4244,7 +4228,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
 				}
 				tref = newVal;
-				if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
+				if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			}
@@ -4258,7 +4242,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 					else target.unchecked_as_float_ref() -= 1.0;
 					stack_.push_back(script_value(target.unchecked_as_float(), engine_));
 				}
-				if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
+				if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
 				return {};
 			}
 			default:
@@ -6860,7 +6844,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		// reference-semantics tag must survive the decl instead of flattening to 'any'
 		if (has_init && !(decl->static_init_proof == proof_same_type &&
 		                  detail::same_type_payload(value, effective_decl_type.get()))) {   // V-D1
-			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type);
+			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name, detail::slot_kind::declaration);
 			if (!enforced) {
 				return raise_from(enforced);
 			}
@@ -6890,6 +6874,21 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 }
 
+// `env` = a CALLER env at a ref-arg bind (environment_ already points at the callee's chain)
+std::optional<checked_result<script_value>> vm_backend::bind_bare_cpp_property_ref(frame& f, uint64_t sym, environment* env) {
+	script_value* this_ptr = (f.locals && f.locals->is_method && f.locals->this_object_ptr)
+		? &f.locals->get_this()
+		: (env ? env : environment_.get())->get_value_ptr(this_id_);
+	if (!this_ptr || !this_ptr->is_object() || this_ptr->is_null()) {
+		return std::nullopt;
+	}
+	auto instance = this_ptr->get_class_instance();
+	if (!instance || !detail::cpp_property_getter_id(instance.get(), sym)) {
+		return std::nullopt;
+	}
+	return detail::bind_cpp_property_ref(*this_ptr, sym, engine_, symbolizer_);
+}
+
 op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const uint64_t target_sym = f.code->symbols[ins.b];
@@ -6912,6 +6911,14 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		targetPtr = frame_this_member_ptr(f, target_sym);   // method-lazy: bare field targets
 	}
 	if (!targetPtr) {
+		// A hybrid's bare C++ property: the member itself / its accessors
+		// (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
+		if (auto minted = bind_bare_cpp_property_ref(f, target_sym)) {
+			if (!*minted) {
+				return raise_from(*minted);
+			}
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(minted->value()));
+		}
 		return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 	}
 
@@ -6944,8 +6951,8 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		// so the evaluated result can't alias - resolve the chain through the shared
 		// kernel into an owner-pinned FIELD reference instead (route-independence with
 		// ref params/returns; Dev ruling 2026-07-12). Access/removed-field errors
-		// surface as-is; the kernel's generic non-lvalue verdict (computed property,
-		// C++-backed field, non-instance receiver) keeps the decl's own error text.
+		// surface as-is; the kernel's generic non-lvalue verdict (computed script
+		// property, non-object receiver) keeps the decl's own error text.
 		// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 		ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
 		auto resolved = detail::resolve_ref_lvalue(decl->initializer.get(), caller_view(&f),
@@ -6964,8 +6971,8 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
 		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-		"subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
-		"computed properties and C++-backed members are not ref-bindable)");
+		"subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+		"computed script properties are not ref-bindable)");
 }
 
 op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
@@ -6995,6 +7002,15 @@ op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
 // register stack - no value-stack copy. The not-callable check ALSO fires here, at
 // the ruled observation point (the interpreter always checked before args; the vm's
 // old post-args check was a latent divergence, pinned by callee_first_* tests).
+op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& callee) {
+	const script_value& v = callee.deref();
+	auto target = resolve_member_target(v);
+	auto text = not_callable_diagnostic(name_id, v.type(), base_type_ids_[v.type()],
+	                                    target.class_def ? std::string_view(target.class_def->get_name()) : std::string_view{},
+	                                    target.class_def ? target.class_def->get_type_id() : 0);
+	return raise_(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
+}
+
 op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_p0 = __rdtsc();
@@ -7010,7 +7026,11 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	if (!resolved) return op_status::failed;
 	const script_value& calleeVal = *resolved;
 	if (!calleeVal.is_function()) {
-		return raise_(make_error_code(runtime_error_code::not_a_function));
+		uint64_t name_id = site.callee.symbol != k_invalid_u32 ? f.code->symbols[site.callee.symbol] : 0;
+		if (name_id == 0 && site.call_node != k_invalid_u32) {
+			name_id = callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get());
+		}
+		return raise_not_callable(name_id, calleeVal);
 	}
 	JAI_PROBE_SECTION(0);
 	pending_callee pc;
@@ -7059,7 +7079,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (ins.b == 1) {
 		if (!stack_.back().is_function()) {
-			return raise_(make_error_code(runtime_error_code::not_a_function));
+			return raise_not_callable(0, stack_.back());
 		}
 		return {};
 	}
@@ -7073,7 +7093,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	// The call op's callable check on a member that resolves to a plain value
 	auto callable = [&](const script_value& v) -> op_status {
 		if (v.is_function() || (v.is_null() && member->null_safe)) { return {}; }
-		return raise_(make_error_code(runtime_error_code::not_a_function));
+		return raise_not_callable(member_id, v);
 	};
 
 	if (member->object && member->object->get_type() == node_type::super_expr) {
@@ -7094,7 +7114,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		try {
 			if (parent_def->get_method(member_id).is_null()) {
 				return raise_(make_error_code(runtime_error_code::member_not_found),
-					"Parent class has no method '{0}'", member_id);
+					"parent class {0} has no member '{1}'", parent_def->get_type_id(), member_id);
 			}
 		} catch (const runtime_error& e) {
 			raise_script_exception(e.what(), member->location);
@@ -7141,7 +7161,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			? site.bi_string != builtin_method_registries::k_no_builtin
 			: builtins_.string_methods.find(member_id) != builtins_.string_methods.end();
 		if (!known) {
-			raise_script_exception("String has no method '" + std::string(member->member) + "'", member->location);
+			raise_script_exception("string has no member '" + std::string(member->member) + "'", member->location);
 		}
 		return {};
 	}
@@ -7150,7 +7170,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			? site.bi_array != builtin_method_registries::k_no_builtin
 			: builtins_.array_methods.find(member_id) != builtins_.array_methods.end();
 		if (!known) {
-			raise_script_exception("Array has no method '" + std::string(member->member) + "'", member->location);
+			raise_script_exception("array has no member '" + std::string(member->member) + "'", member->location);
 		}
 		return {};
 	}
@@ -7165,12 +7185,12 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			if (found != map_storage->end()) { return callable(found->second); }
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
-			"Map has no method or key '{0}'", member_id);
+			"map has no member or key '{0}'", member_id);
 	}
 	if (objectValue.is_weak_ptr()) {
 		if (builtins_.weak_ptr_methods.find(member_id) != builtins_.weak_ptr_methods.end()) { return {}; }
 		return raise_(make_error_code(runtime_error_code::member_not_found),
-			"weak_ptr has no method '{0}'", member_id);
+			"weak_ptr has no member '{0}'", member_id);
 	}
 	if (objectValue.get_type_info() &&
 	    objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
@@ -7188,7 +7208,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	}
 	if (!objectValue.is_object()) {
 		if (objectValue.is_null()) {
-			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get()), member_id, null_member_receiver_symbol(member->object.get()));
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get(), true), member_id, null_member_receiver_symbol(member->object.get()));
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			scalar_member_message, base_type_ids_[objectValue.type()], member_id);
@@ -7248,7 +7268,10 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
-	raise_script_exception("Object has no member '" + std::string(member->member) + "'", member->location);
+	{
+		const std::string& cls = target.class_name();
+		raise_script_exception((cls.empty() ? "object" : cls) + " has no member '" + std::string(member->member) + "'", member->location);
+	}
 	return {};
 }
 
@@ -7672,7 +7695,9 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 
 	if (!callee.is_function()) {
-		return raise_(make_error_code(runtime_error_code::not_a_function));
+		const uint64_t name_id = site.call_node != k_invalid_u32
+			? callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get()) : 0;
+		return raise_not_callable(name_id, callee);
 	}
 
 	// Inline the invoke tail: an extra callee frame per script call would blow the
@@ -8006,24 +8031,27 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// same-named GLOBAL over the member. (KEEP BYTE-PARALLEL with the
 				// interpreter's visit_lambda_expr default-capture loop.)
 				script_value* scoped_target = nullptr;
-				std::optional<script_value> property_snapshot;
+				std::optional<script_value> property_capture;
 				if (f.locals && !f.top_level) {
 					ensure_frame_member_scope(f, environment_.get());
 					if (frame_scope_active(f)) {
 						scoped_target = member_scope_env_lookup(f, var_id, SIZE_MAX);
-						// A hybrid's C++ property has no cell to alias: [=] and [&] both take
-						// the getter snapshot (the field snapshot rule)
+						// A hybrid's C++ property follows the field rule: [=] snapshots through
+						// the getter, [&] shares the member itself / its accessors
+						// (reference_model.md CPP-MEMBER / PROPERTY)
 						if (!scoped_target && frame_scope_state(f) == detail::member_scope_state::instance &&
 						    f.locals->scope_this) {
 							auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 							                                         f.locals->scope_static, var_id, /*want_methods*/ true);
 							if (member.what == detail::member_probe_hit::kind::cpp_property) {
-								auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
-								                                           member.method_value, member.getter_id, var_id);
+								auto read = capture_by_ref_default
+									? detail::bind_cpp_property_ref(*f.locals->scope_this, var_id, engine_, symbolizer_)
+									: detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
+									                                 member.method_value, member.getter_id, var_id);
 								if (!read) {
 									return raise_from(read);
 								}
-								property_snapshot = std::move(read.value());
+								property_capture = std::move(read.value());
 							}
 						}
 					}
@@ -8034,8 +8062,9 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					} else {
 						captureEnv->define(var_id, vm_clone_for_capture(scoped_target->deref(), symbolizer_));
 					}
-				} else if (property_snapshot) {
-					captureEnv->define(var_id, vm_clone_for_capture(*property_snapshot, symbolizer_));
+				} else if (property_capture) {
+					captureEnv->define(var_id, capture_by_ref_default ? std::move(*property_capture)
+					                                                  : vm_clone_for_capture(*property_capture, symbolizer_));
 				} else if (!(f.locals && !f.top_level && frame_scope_active(f)) && environment_->contains(var_id)) {
 					if (capture_by_ref_default) {
 						script_value* targetPtr = environment_->get_value_ptr(var_id);
@@ -8315,7 +8344,8 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-op_status vm_backend::member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out) {
+op_status vm_backend::member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out,
+                                          bool as_callee) {
 	script_value objectValue = raw_object.deref();
 
 	if (expr->null_safe && objectValue.is_null()) {
@@ -8376,7 +8406,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 		if (method.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_not_found),
-				"Parent class has no method '{0}'", expr->member_id);
+				"parent class {0} has no member '{1}'", parent_def->get_type_id(), expr->member_id);
 		}
 		out = make_bound_method(objectValue, method);
 		return {};
@@ -8421,7 +8451,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return {};
 		}
 		std::string member_str(expr->member);
-		raise_script_exception("String has no method '" + member_str + "'", expr->location);
+		raise_script_exception("string has no member '" + member_str + "'", expr->location);
 		out = make_null();
 		return {};
 	}
@@ -8438,7 +8468,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return {};
 		}
 		std::string member_str(expr->member);
-		raise_script_exception("Array has no method '" + member_str + "'", expr->location);
+		raise_script_exception("array has no member '" + member_str + "'", expr->location);
 		out = make_null();
 		return {};
 	}
@@ -8464,7 +8494,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			}
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
-			"Map has no method or key '{0}'", expr->member_id);
+			"map has no member or key '{0}'", expr->member_id);
 	}
 
 	if (objectValue.is_weak_ptr()) {
@@ -8479,7 +8509,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return {};
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
-			"weak_ptr has no method '{0}'", expr->member_id);
+			"weak_ptr has no member '{0}'", expr->member_id);
 	}
 
 	if (objectValue.get_type_info() &&
@@ -8563,7 +8593,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	if (!objectValue.is_object()) {
 		if (objectValue.is_null()) {
-			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
@@ -8638,8 +8668,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
-	std::string member_str(expr->member);
-	raise_script_exception("Object has no member '" + member_str + "'", expr->location);
+	{
+		const std::string& cls = target.class_name();
+		raise_script_exception((cls.empty() ? "object" : cls) + " has no member '" + std::string(expr->member) + "'", expr->location);
+	}
 	out = make_null();
 	return {};
 }
@@ -8780,9 +8812,9 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 					}
 				}
 
-				return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-					"No matching overload in namespace '{0}' for {1} arguments",
-					namespace_id, static_cast<uint64_t>(args.size()));
+				(void)namespace_id;
+				return detail::overload_miss(make_error_code(runtime_error_code::not_a_function),
+					member_id, args.data(), args.size(), eng);
 			};
 
 			out = script_value::make_function(namespace_func, engine_);
@@ -8854,7 +8886,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	}
 
 	return raise_(make_error_code(runtime_error_code::static_member_not_found),
-		"Class '{0}' has no static member '{1}'", name_id, expr->member_id);
+		"class {0} has no static member '{1}'", name_id, expr->member_id);
 }
 
 uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* expr) {
@@ -9056,8 +9088,8 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		}
 		target.instance->set_field_unchecked(member_id, enforced.value());
 	} else {
-		std::string member_str(member->member);
-		raise_script_exception("Cannot assign to non-existent member '" + member_str + "'", member->location);
+		const std::string& cls = target.class_name();
+		raise_script_exception("Cannot assign to '" + std::string(member->member) + "': " + (cls.empty() ? "object" : cls) + " has no such member", member->location);
 		return {};
 	}
 	return {};
@@ -9797,7 +9829,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	}
 
 	script_value callee = make_null();
-	VM_TRY(member_access_value(f, object, member, callee));
+	VM_TRY(member_access_value(f, object, member, callee, true));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -9807,7 +9839,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 	if (!callee.is_function()) {
-		return raise_(make_error_code(runtime_error_code::not_a_function));
+		return raise_not_callable(member->member_id, callee);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_call_method_paths_[5]++;
@@ -10294,7 +10326,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 					if (default_val.is_null()) {
 						default_val.set_type_info(var_decl->type);
 					} else {
-						auto converted = detail::field_store_convert(default_val, var_decl->type, engine_);
+						auto converted = detail::field_store_convert(default_val, var_decl->type, engine_, field_id, class_def.get(), true);
 						if (!converted) {
 							return raise_from(converted);
 						}
@@ -10699,7 +10731,10 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 		if (auto this_result = method_env->get(this_id_)) {
 			this_obj = std::move(this_result.value());
 		}
-		auto coro_env = std::make_shared<environment>(method_env->get_parent(), symbolizer_, this_obj);
+		auto static_class = method_env->get_class_definition();
+		auto coro_env = static_class
+			? std::make_shared<environment>(method_env->get_parent(), symbolizer_, static_class)
+			: std::make_shared<environment>(method_env->get_parent(), symbolizer_, this_obj);
 		coro_env->set_access_context(method_env->get_access_context());
 		coro_env->define(this_id_, this_obj);
 		auto handle = std::make_shared<coroutine_handle>(engine_);
@@ -10876,8 +10911,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	}
 
 	if (!matching_ctor) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-			"No constructor found with matching arguments");
+		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+			class_def->get_type_id(), args.data(), args.size(), engine_, true);
 	}
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -10997,8 +11032,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 												if (ancestor_ctor) {
 													ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
 												} else if (!ancestor_ctors.empty()) {
-													return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-														"No matching constructor for ancestor class");
+													return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+														ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
 												}
 											} else {
 												auto cpp_name = ancestor->get_name();
@@ -11122,8 +11157,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 			}
 
 			if (!target_ctor) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-					"No matching constructor found for this() delegation");
+				return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+					class_def->get_type_id(), init_args.data(), init_args.size(), engine_, true);
 			}
 
 			// Declared defaults BEFORE the delegated-to ctor body so the target can override
@@ -11767,6 +11802,14 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 		storage = frame_this_member_ptr(f, symbol_id);   // method-lazy: bare field targets
 	}
 	if (!storage) {
+		// A hybrid's bare C++ property (KEEP BYTE-PARALLEL with the interpreter's visit_return_stmt)
+		if (auto minted = bind_bare_cpp_property_ref(f, symbol_id)) {
+			if (!*minted) {
+				return raise_from(*minted);
+			}
+			stack_.push_back(std::move(minted->value()));
+			return {};
+		}
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot take reference of undefined variable", symbol_id);
 	}
@@ -11809,7 +11852,15 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				targetPtr = frame_this_member_ptr(f, target_sym);
 			}
 			if (!targetPtr) {
-				return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+				auto minted = bind_bare_cpp_property_ref(f, target_sym);
+				if (!minted) {
+					return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+				}
+				if (!*minted) {
+					return raise_from(*minted);
+				}
+				operand = std::move(minted->value());
+				break;
 			}
 			if (targetPtr->is_reference()) {
 				auto aliased = vm_decl_ref_alias(*targetPtr, engine_);
@@ -11910,6 +11961,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_try_push: return exec_try_push(f, ins);
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
 		case opcode::op_catch_end: return exec_catch_end(f, ins);
+		case opcode::op_return_convert: return exec_return_convert(f, ins);
 		case opcode::op_case_eq: return exec_case_eq(f, ins);
 		case opcode::op_iter_init: return exec_iter_init(f, ins);
 		case opcode::op_iter_next: return exec_iter_next(f, ins);
@@ -12492,6 +12544,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_math:
 			case opcode::op_parallel_for:
 			case opcode::op_cast:
+			case opcode::op_return_convert:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -12562,13 +12615,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {
+					script_value v = ins.a ? std::move(stack_.back()) : make_null();
 					if (ins.a) {
-						return_value_ = std::move(stack_.back());
 						stack_.pop_back();
-					} else {
-						return_value_ = make_null();
 					}
-					has_return_value_ = true;
+					VM_TRY_OP_SHARED(entry_return_finish(f, std::move(v), ins.b));
 					return {};
 				}
 				VM_TRY_OP_SHARED(return_from_script_frame(fp, ins));
@@ -13441,10 +13492,10 @@ op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction&
 	if (ins.a) {
 		stack_.pop_back();
 	}
-	return return_with_result(fp, std::move(result), ins.b != 0);
+	return return_with_result(fp, std::move(result), ins.b);
 }
 
-op_status vm_backend::return_with_result(frame*& fp, script_value result, bool proven) {
+op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32_t mode) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_p0 = __rdtsc();
 	++profile_call_ret_count_;
@@ -13487,11 +13538,16 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, bool p
 			break;
 	}
 	// V-R1: a proven return whose payload guard holds is the identity - the deref-only
-	// route yields exactly what convert_return_value's identity try_convert would
-	if (!deref_only && proven && rec.return_type &&
+	// route yields exactly what convert_return_value's identity try_convert would; so is
+	// a value already converted at its in-region return site (return_mode_converted)
+	if (!deref_only && mode != 0 && rec.return_type &&
 	    rec.return_type->base_type != script_value_type::jai_reference_type) {
-		const script_value& probe = result.is_reference() ? result.deref() : result;
-		deref_only = detail::same_type_payload(probe, rec.return_type.get());
+		if (mode == return_mode_converted) {
+			deref_only = true;
+		} else {
+			const script_value& probe = result.is_reference() ? result.deref() : result;
+			deref_only = detail::same_type_payload(probe, rec.return_type.get());
+		}
 	}
 	if (deref_only) {
 		if (result.is_reference()) {
@@ -13511,8 +13567,11 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, bool p
 		JAI_CALL_RET_SECTION(2);
 		return {};
 	}
-	// Deref + conversion run while the callee's env/frame are still live (native order)
-	auto conv = convert_return_value(std::move(result), rec.return_type);
+	// Deref + conversion run while the callee's env/frame are still live (native order);
+	// a reference return validated at its in-region site passes its handle through
+	auto conv = mode == return_mode_converted
+		? checked_result<script_value>(std::move(result))
+		: convert_return_value(std::move(result), rec.return_type, rec.f.code->function_name);
 	if (!conv) {
 		// The callee is still the top frame: the trace names the return site
 		if (!trace_captured_) capture_stack_trace();
@@ -13549,7 +13608,7 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) != 0);
+	return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
 }
 
 op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
@@ -13561,9 +13620,7 @@ op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& in
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	return_value_ = script_value(*resolved);
-	has_return_value_ = true;
-	return {};
+	return entry_return_finish(f, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
 }
 
 // Fused `return <a op b>;` (stage 6): computes exactly like exec_binary (same fast
@@ -13587,7 +13644,7 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 			if (!*fast) {
 				return raise_from(*fast);
 			}
-			return return_with_result(fp, std::move(fast->value()), ins.c != 0);
+			return return_with_result(fp, std::move(fast->value()), ins.c);
 		}
 	}
 
@@ -13601,7 +13658,7 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
-	return return_with_result(fp, std::move(result.value()), ins.c != 0);
+	return return_with_result(fp, std::move(result.value()), ins.c);
 }
 
 op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
@@ -13619,9 +13676,7 @@ op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& i
 			if (!*fast) {
 				return raise_from(*fast);
 			}
-			return_value_ = std::move(fast->value());
-			has_return_value_ = true;
-			return {};
+			return entry_return_finish(f, std::move(fast->value()), ins.c);
 		}
 	}
 
@@ -13633,9 +13688,7 @@ op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& i
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
-	return_value_ = std::move(result.value());
-	has_return_value_ = true;
-	return {};
+	return entry_return_finish(f, std::move(result.value()), ins.c);
 }
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
@@ -13746,33 +13799,85 @@ script_value vm_backend::implicit_this_result(call_frame& locals) {
 	return make_null();
 }
 
-// Stage-1 classification for the return epilogue: derived once per function from its
-// return_type (cached on script_defined_function::backend_return_conv). Mirrors
-// convert_return_value's decision EXACTLY: ref-typed returns take the pass-through
-// kernel; any/void/auto/unnamed types convert nothing (deref-only); primitive base
-// types may pass a storage-matching result through verbatim; everything else runs the
-// full conversion.
-vm_backend::return_conv vm_backend::classify_return_conv(const type_info_ptr& t) {
-	if (!t || t->base_type == script_value_type::jai_any_type) {
-		return return_conv::none;
+// Return-site conversion, one routine for every door (op_return_convert inside try
+// regions, the native-entry / fiber completion door): none derefs, ref validates the
+// handle through the pass-through kernel, a storage-matching prim_* or a proven same-type
+// payload is the identity, everything else runs the one table. KEEP BYTE-PARALLEL with
+// the interpreter's visit_return_stmt.
+checked_result<script_value> vm_backend::convert_return_at_site(script_value result, const type_info_ptr& return_type,
+                                                                return_conv conv, bool proven, std::string_view callee) {
+	if (conv == return_conv::unclassified) {
+		conv = classify_return_conv(return_type);
 	}
-	if (t->base_type == script_value_type::jai_reference_type) {
-		return return_conv::ref;
+	if (conv == return_conv::ref) {
+		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_);
 	}
-	if (t->type_name.empty() || t->type_name == "void" || t->type_name == "auto") {
-		return return_conv::none;
+	if (result.is_reference()) {
+		result = result.deref();
 	}
-	switch (t->base_type) {
-		case script_value_type::jai_int_type: return return_conv::prim_int;
-		case script_value_type::jai_float_type: return return_conv::prim_float;
-		case script_value_type::jai_bool_type: return return_conv::prim_bool;
-		case script_value_type::jai_char_type: return return_conv::prim_char;
-		case script_value_type::jai_string_type: return return_conv::prim_string;
-		default: return return_conv::check;
+	if (conv == return_conv::none || detail::return_conv_identity(conv, result) ||
+	    (proven && detail::same_type_payload(result, return_type.get()))) {
+		return result;
 	}
+	auto converted = try_convert_for_parameter(result, return_type,
+		detail::slot_site{detail::slot_kind::return_value, {}, callee});
+	if (!converted) {
+		return converted.error_value();
+	}
+	return std::move(converted.value());
 }
 
-checked_result<script_value> vm_backend::convert_return_value(script_value result, const type_info_ptr& return_type) {
+// In-region `return` (a try/catch is open): the conversion runs HERE, before the region
+// exits pop this frame's try records, so a catch around the failing return sees it; the
+// op_return after the exits lands the value as return_mode_converted
+op_status vm_backend::exec_return_convert(frame& f, const vm_instruction& ins) {
+	const type_info_ptr* return_type = &f.return_type;
+	auto conv = static_cast<return_conv>(f.return_conv_class);
+	if (call_records_top_ > 0) {
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		if (&rec.f == &f) {
+			return_type = &rec.return_type;
+			conv = static_cast<return_conv>(rec.return_conv_class);
+		}
+	}
+	if (conv == return_conv::none || (conv == return_conv::unclassified && !*return_type)) {
+		return {};
+	}
+	// Moved off the stack: a converting ctor / to_X() may grow it (the slot stays reserved)
+	script_value value = std::move(stack_.back());
+	auto converted = convert_return_at_site(std::move(value), *return_type, conv, ins.a != 0, f.code->function_name);
+	if (!converted) {
+		return raise_from(converted);
+	}
+	if (is_unwinding_) [[unlikely]] {
+		return {};   // the conversion threw: the loop bottom unwinds with this frame's record live
+	}
+	stack_.back() = std::move(converted.value());
+	return {};
+}
+
+// Native-entry / fiber completion door: converts with the frame live (a failure raises
+// in-frame, so the trace names the return line) unless the value was converted at an
+// in-region return site (return_mode_converted); class 0 = no declared type on this frame
+op_status vm_backend::entry_return_finish(frame& f, script_value result, uint32_t mode) {
+	if (mode != return_mode_converted && f.return_conv_class != 0) {
+		auto converted = convert_return_at_site(std::move(result), f.return_type,
+		                                        static_cast<return_conv>(f.return_conv_class), mode != 0, f.code->function_name);
+		if (!converted) {
+			return raise_from(converted);
+		}
+		if (is_unwinding_) [[unlikely]] {
+			return {};   // a converting ctor / to_X() threw: the throw wins, no result lands
+		}
+		result = std::move(converted.value());
+	}
+	return_value_ = std::move(result);
+	has_return_value_ = true;
+	return {};
+}
+
+checked_result<script_value> vm_backend::convert_return_value(script_value result, const type_info_ptr& return_type,
+                                                              std::string_view callee) {
 	if (return_type && return_type->base_type == script_value_type::jai_reference_type) {
 		// Reference return (int& f()): the HANDLE passes through - the holder's
 		// owner pin is the lifetime, so escaping the frame is legal. KEEP BYTE-
@@ -13789,7 +13894,8 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	    !return_type->type_name.empty() &&
 	    return_type->type_name != "void" &&
 	    return_type->type_name != "auto") {
-		auto conv = try_convert_for_parameter(result, return_type);
+		auto conv = try_convert_for_parameter(result, return_type,
+			detail::slot_site{detail::slot_kind::return_value, {}, callee});
 		if (!conv) {
 			return conv.error_value();
 		}
@@ -13953,6 +14059,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					// (KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter.)
 					script_value* argPtr = nullptr;
 					bool member_shadowed = false;
+					bool property_bound = false;
 					if (caller_frame && caller_frame->locals) {
 						ensure_frame_member_scope(*caller_frame, caller_env.get());
 						if (frame_scope_active(*caller_frame)) {
@@ -13965,10 +14072,18 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 								                                         caller_frame->locals->scope_static,
 								                                         symbol_id, /*want_methods*/ false);
 								argPtr = member.value_ptr;
-								// A C++ property has no cell to alias: it shadows like a method
-								member_shadowed = member.what == detail::member_probe_hit::kind::cpp_property;
+								// A C++ property binds the member itself / its accessors (reference_model.md)
+								if (member.what == detail::member_probe_hit::kind::cpp_property) {
+									auto minted = detail::bind_cpp_property_ref(*caller_frame->locals->scope_this,
+									                                            symbol_id, engine_, symbolizer_);
+									if (!minted) {
+										return raise_from(minted);
+									}
+									frame_slot_set(callee, param.slot_index, std::move(minted.value()));
+									property_bound = true;
+								}
 							}
-							if (!argPtr && !member_shadowed) {
+							if (!argPtr && !property_bound) {
 								if (detail::member_scope_has_method(caller_scope,
 								                                    caller_frame->locals->scope_this,
 								                                    caller_frame->locals->scope_static, symbol_id)) {
@@ -13981,6 +14096,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 							}
 						}
 					}
+					if (property_bound) {
+						continue;
+					}
 					if (!argPtr && !member_shadowed &&
 					    !(caller_frame && caller_frame->locals && frame_scope_active(*caller_frame))) {
 						argPtr = caller_env->get_value_ptr(symbol_id);
@@ -13989,6 +14107,16 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						}
 					}
 					if (!argPtr) {
+						// A hybrid's C++ property reached through the env's 'this' (lambdas made
+						// in methods); KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter
+						if (auto minted = caller_frame && !member_shadowed
+						        ? bind_bare_cpp_property_ref(*caller_frame, symbol_id, caller_env.get()) : std::nullopt) {
+							if (!*minted) {
+								return raise_from(*minted);
+							}
+							frame_slot_set(callee, param.slot_index, std::move(minted->value()));
+							continue;
+						}
 						return raise_(
 							make_error_code(runtime_error_code::undefined_variable),
 							"Cannot take reference of undefined variable");
@@ -14104,7 +14232,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				converted_arg = (!untyped && param.type->base_type == script_value_type::jai_object_type)
 				                ? script_value(arg_shield.deref()) : script_value(arg_shield);
 			} else {
-				auto converted_result = try_convert_for_parameter(arg_shield, param.type);
+				auto converted_result = try_convert_for_parameter(arg_shield, param.type,
+					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name});
 				if (!converted_result) {
 					return raise_from(converted_result);
 				}
@@ -14169,21 +14298,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		~call_depth_guard() { --depth; }
 	} depth_guard(current_call_depth_);
 
-	if (args.size() != function.parameters().size()) {   // exact arity: no default-arg scan needed
-		size_t required_params = 0;
-		for (const auto& p : function.parameters()) {
-			if (!p.default_value) {
-				++required_params;
-			} else {
-				break;
-			}
-		}
-		if (args.size() < required_params || args.size() > function.parameters().size()) {
-			return checked_result<script_value>(
-				make_error_code(runtime_error_code::argument_count_mismatch),
-				"Function expected {0} arguments but got {1}",
-				static_cast<uint64_t>(function.parameters().size()), static_cast<uint64_t>(args.size()));
-		}
+	if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
+		return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *symbolizer_);
 	}
 
 	auto body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
@@ -14220,6 +14336,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.window_live = 0;
 	f.stack_base = stack_.size();
 	f.top_level = false;
+	f.return_type = function.return_type;
+	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
 
 	frame_guard guard(this, &f);
 
@@ -14270,13 +14388,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	script_value result = make_null();
 
 	if (has_return_value_) {
-		auto conv = convert_return_value(std::move(return_value_.value()), function.return_type);
-		if (!conv) {
-			if (!trace_captured_) capture_stack_trace();
-			cleanup();
-			return conv.error_value();
-		}
-		result = std::move(conv.value());
+		result = std::move(return_value_.value());   // converted at the return door (entry_return_finish)
 	} else {
 		result = implicit_this_result(locals);
 	}

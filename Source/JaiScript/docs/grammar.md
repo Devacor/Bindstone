@@ -199,8 +199,11 @@ ctorInitializer = "super" "(" argumentList? ")"
 
 destructorDeclaration = "~" IDENTIFIER "(" ")" blockStatement
 
+// `coroutine` prefixes every method spelling and may sit anywhere in the leading
+// static/override run (`static coroutine int f()` reads as `coroutine static int f()`).
 methodDeclaration = "coroutine"? "static"? "override"? type (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? "override"? blockStatement
                   | "coroutine"? "function" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
+                  | "coroutine" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
 
 operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "[]" | "<" | ">" | "<=" | ">=" | "==" | "!=")
 
@@ -214,6 +217,7 @@ fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
 // was given.
 functionDeclaration = "coroutine"? ( "function" IDENTIFIER "(" parameterList? ")" ("->" type)? blockStatement
                                    | type "&"? IDENTIFIER "(" parameterList? ")" ("->" type)? blockStatement )
+                    | "coroutine" IDENTIFIER "(" parameterList? ")" ("->" type)? blockStatement   // bare: coroutine name(...) [-> T]
 
 parameterList = parameter ("," parameter)*
 
@@ -524,8 +528,8 @@ print(Vec::count());
 Static fields are class state, spelled `Class::name` anywhere or bare `name` inside the
 class's methods, constructors and static methods (statics are not inherited: qualify with the
 declaring class; `Class.name` is not a spelling). A static's declared type is enforced on every
-store spelling exactly like an instance field — the same conversion table, the same
-`Type mismatch in assignment` — and its initializer converts the same way (`static float f = 3`
+store spelling exactly like an instance field — the same conversion table, the same rejection
+shape (`Cannot assign string to static 'n' of C (declared int)`) — and its initializer converts the same way (`static float f = 3`
 holds `3.0`; `static int n;` is a readable typed null). `Class::name op= v` and `++`/`--` are
 lvalues; `static auto` infers from its initializer, `static var` stays dynamic.
 
@@ -555,7 +559,8 @@ int f() -> int { return 4; }                // leading + matching trailing: redu
 int f() -> { return 4; }                    // leading + bare arrow: keeps the leading type
 coroutine function f() { yield 1; }         // coroutine variants of every form above
 coroutine int f() { yield 1; }              //   (top level and class methods; NOT
-                                            //    yet inside namespaces)
+coroutine f() -> auto { yield 1; }          //    yet inside namespaces); the bare form
+coroutine f() { yield 1; }                  //    needs neither a type nor `function`
 ```
 
 The same catalog applies verbatim INSIDE CLASSES — including `var`/`auto` returns.
@@ -627,9 +632,10 @@ auto& r = leak(); r = r + 1;           // into a cell the returned handle keeps 
 
 Rules: the returned operand must be an lvalue (a variable, `arr[i]`, `obj.field`, a
 chain, or a call that itself returns a reference) — returning a temporary raises
-"Function with reference return type must return an lvalue reference". The referent's
-type must match the declared referent exactly (no int/float conversion applies through
-a reference). Coroutines cannot return references (parse error). At top level
+"Function with reference return type must return an lvalue reference" at the `return`
+statement, where a `try` around it can catch it (like every typed-return conversion). The
+referent's type must match the declared referent exactly (no int/float conversion applies
+through a reference). Coroutines cannot return references (parse error). At top level
 `ClassName& name(` reads as a function declaration, like `ClassName name(` — spell a
 bitwise-and of a class value as `(ClassName) & name()`.
 
@@ -648,17 +654,17 @@ parameter (`Money(float a, int _ignored = 0)`) - the explicit keyword is unneces
 
 ### Coroutines
 ```cpp
-coroutine function counter(int limit) {      // typed-first spellings work too:
-    for (int i = 0; i < limit; i++) {         //   coroutine int counter(...) { ... }
+coroutine counter(int limit) -> int {        // `coroutine` prefixes any function spelling:
+    for (int i = 0; i < limit; i++) {         //   coroutine int counter(...), coroutine function
         yield i;                       // yield is an expression; bare `yield` also legal
-    }
+    }                                         //   counter(...) -> int, coroutine counter(...)
 }
 // Coroutines are NOT yet supported inside namespace bodies (parse error).
 
 for (auto n : counter(3)) { print(n); }   // range-for drives the coroutine
 
 class Spawner {
-    coroutine function waves(int count) {     // coroutine METHODS work too
+    coroutine function waves(int count) {     // coroutine METHODS work too, static ones included
         for (int i = 0; i < count; i++) { yield spawnWave(i); }
     }
 }

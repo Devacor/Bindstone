@@ -832,6 +832,64 @@ private:
                def->user_accessor(sym->get_setter_id_with_view(id).first) != nullptr;
     }
 
+    // The ONE user accessor `name` (_get_x / _set_x) across cls's modeled chain: null when the
+    // chain declares none or several, or reaches a registered ancestor carrying one (its
+    // declared signature is not visible). Diagnostics only - never consulted for a proof.
+    const function_decl* single_user_accessor(std::string_view cls, std::string_view name) {
+        const function_decl* found = nullptr;
+        int count = 0;
+        if (!count_user_accessors(cls, name, found, count, 0) || count != 1) { return nullptr; }
+        return found;
+    }
+
+    bool count_user_accessors(std::string_view cls, std::string_view name, const function_decl*& found, int& count, int depth) {
+        if (depth > 32) { return false; }
+        if (const sclass* c = find_sclass(cls)) {
+            if (auto m = c->methods.find(name); m != c->methods.end()) {
+                for (const auto* fn : m->second) { found = fn; ++count; }
+            }
+            for (auto base : c->decl->base_classes) {
+                if (!count_user_accessors(base, name, found, count, depth + 1)) { return false; }
+            }
+            return true;
+        }
+        auto def = engine_class(cls);
+        if (!def) { return true; }
+        return def->user_accessor(eng_.symbolize(std::string(name))) == nullptr;
+    }
+
+    // An accessor-bearing member reads as the getter's declared return type when the chain has
+    // exactly one user _get_x, parameterless, non-coroutine, declaring a non-var type; tentative,
+    // so nothing downstream is proven from it.
+    ctype accessor_read_type(std::string_view cls, std::string_view member) {
+        const std::string getter = "_get_" + std::string(member);
+        const function_decl* fn = single_user_accessor(cls, getter);
+        if (!fn || fn->is_coroutine || !fn->parameters.empty() || !fn->return_type) { return {}; }
+        ctype t = ctype_from_type_info(fn->return_type.get());
+        t.tentative = true;
+        return t;
+    }
+
+    // Stores through exactly one user _set_x taking one by-value parameter check against that
+    // parameter's declared type; a compound store needs the getter's type too (x op= v is x = T(x op v)).
+    void check_accessor_store(std::string_view cls, std::string_view member, const ctype& rhs, bool compound,
+                              token_type base_op, const source_location& loc) {
+        const std::string setter = "_set_" + std::string(member);
+        const function_decl* fn = single_user_accessor(cls, setter);
+        if (!fn || fn->parameters.size() != 1 || fn->parameters[0].is_reference || !fn->parameters[0].type) { return; }
+        const type_info* pt = fn->parameters[0].type.get();
+        ctype target = ctype_from_type_info(pt);
+        if (target.is_unknown()) { return; }
+        ctype stored = rhs;
+        if (compound) {
+            ctype gt = accessor_read_type(cls, member);
+            if (gt.is_unknown()) { return; }
+            stored = binary_result(gt, base_op, rhs);
+        }
+        check_store(stored, /*compound=*/false, base_op, target, pt->canonical_name(),
+                    "property '" + std::string(member) + "'", loc, 0, 0);
+    }
+
     bool chain_open(std::string_view cls, int depth = 0) {
         if (depth > 32) { return true; }
         const sclass* c = find_sclass(cls);   // models a table class (marking it open) before the test
@@ -1627,7 +1685,7 @@ private:
         std::string_view cls = recv.cls;
         member_hit hit = lookup_member(cls, m->member, want_static);
         if (hit_out) { *hit_out = hit; }
-        if (!want_static && chain_has_user_accessor(cls, m->member)) { return {}; }   // a user _get_/_set_ answers: known member, type unknown, never a proof
+        if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
         if (hit.found) {
             if (typed_field_out && hit.field && hit.field->type) { *typed_field_out = hit.field; }
             if (recv.kind == ctype::object_k && !m->null_safe && !m->is_static &&
@@ -1842,7 +1900,9 @@ private:
             const variable_decl* typed_field = nullptr;
             std::optional<field_proof> fp;
             member_hit hit;
-            infer_member(static_cast<member_expr*>(target), /*writing=*/true, &typed_field, nullptr, &hit, &fp);
+            auto* m = static_cast<member_expr*>(target);
+            ctype recv;
+            infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
             if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
             if (typed_field && typed_field->type) {
                 ctype ft = member_type(hit);
@@ -1853,6 +1913,7 @@ private:
                 }
                 return ft;
             }
+            if (recv.kind == ctype::object_k && !m->is_static) { check_accessor_store(recv.cls, m->member, rhs, compound, base_op, a->location); }
             return rhs;
         }
         infer(target);   // subscripts and other lvalues: element types stay lenient

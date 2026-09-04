@@ -107,7 +107,7 @@ public:
                 } catch (const std::exception& e) {
                     text = e.what();
                 }
-                check_true(text.find("Type mismatch") == 0, "runtime rejects the store (got: " + text + ")");
+                check_true(text.find("Cannot initialize") == 0, "runtime rejects the store (got: " + text + ")");
                 auto warn = make_engine();
                 warn->static_checking(check_mode::warn);
                 std::string warn_text;
@@ -1281,7 +1281,7 @@ public:
                 std::string("strict rejects the field store at load, got: ") + i_out);
             auto [w_out, wv_out] = both_in(check_mode::warn, typed_mismatch);
             check_eq(w_out, wv_out, "string-into-int field error parity");
-            check_true(w_out.find("ERROR") == 0 && w_out.find("Type mismatch in assignment") != std::string::npos,
+            check_true(w_out.find("ERROR") == 0 && w_out.find("Cannot assign string to field 'v' of C (declared int)") != std::string::npos,
                 std::string("locals-identical error text, got: ") + w_out);
             auto [d_out, dv_out] = both(R"(
                 class C { int v = 0; }
@@ -1291,7 +1291,7 @@ public:
                 c.v
             )");
             check_eq(d_out, dv_out, "var-sourced string-into-int field error parity");
-            check_true(d_out.find("ERROR") == 0 && d_out.find("Type mismatch in assignment") != std::string::npos,
+            check_true(d_out.find("ERROR") == 0 && d_out.find("Cannot assign string to field 'v' of C (declared int)") != std::string::npos,
                 std::string("var-sourced store keeps the runtime text under strict, got: ") + d_out);
         });
 
@@ -1482,17 +1482,17 @@ public:
             struct row { const char* src; const char* strict_needle; const char* warn_needle; };
             const row typed_mismatches[] = {
                 {"int x = \"s\"; x",
-                 "cannot initialize 'x' declared 'int' with 'string'", "Type mismatch in assignment"},
+                 "cannot initialize 'x' declared 'int' with 'string'", "Cannot initialize 'x' (declared int) with string"},
                 {"function bad() -> int { return \"nope\"; } bad()",
-                 "cannot return 'string' from 'bad' declared to return 'int'", "Type mismatch: expected int but got string"},
+                 "cannot return 'string' from 'bad' declared to return 'int'", "Cannot return string from 'bad' (declared -> int)"},
                 {"function takes(int x) -> int { return x; } takes([1, 2])",
-                 "argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'", "Type mismatch: expected int but got array"},
+                 "argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'", "Cannot pass array to parameter 'x' of 'takes' (declared int)"},
                 {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } f(B())",
                  "argument 1 of 'f': cannot pass 'B' to 'v' declared 'A'", "Type mismatch"},
                 {"class C { int v = 0; } auto c = C(); c.v = \"nope\"; c.v",
-                 "cannot assign 'string' to field 'v' declared 'int'", "Type mismatch in assignment"},
+                 "cannot assign 'string' to field 'v' declared 'int'", "Cannot assign string to field 'v' of C (declared int)"},
                 {"auto x = 5; x = \"hello\"; x",
-                 "cannot assign 'string' to 'x' declared 'int'", "Type mismatch in assignment"},
+                 "cannot assign 'string' to 'x' declared 'int'", "Cannot assign string to 'x' (declared int)"},
                 {"int x = 1; x += \"s\"; x",
                  "cannot assign 'string' to 'x' declared 'int'", "Type mismatch"},
             };
@@ -1509,13 +1509,13 @@ public:
             }
             struct var_row { const char* src; const char* needle; };
             const var_row var_sourced[] = {
-                {"var s = \"s\"; int x = s; x", "Type mismatch in assignment"},
-                {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Type mismatch: expected int but got string"},
-                {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Type mismatch: expected int but got array"},
+                {"var s = \"s\"; int x = s; x", "Cannot initialize 'x' (declared int) with string"},
+                {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Cannot return string from 'bad' (declared -> int)"},
+                {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Cannot pass array to parameter 'x' of 'takes' (declared int)"},
                 {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } var b = B(); f(b)", "Type mismatch"},
-                {"class C { int v = 0; } auto c = C(); var s = \"nope\"; c.v = s; c.v", "Type mismatch in assignment"},
-                {"auto x = 5; var s = \"hello\"; x = s; x", "Type mismatch in assignment"},
-                {"var caught = \"\"; var s = \"s\"; try { int x = s; } catch (e) { caught = e; } caught", "Type mismatch in assignment"},
+                {"class C { int v = 0; } auto c = C(); var s = \"nope\"; c.v = s; c.v", "Cannot assign string to field 'v' of C (declared int)"},
+                {"auto x = 5; var s = \"hello\"; x = s; x", "Cannot assign string to 'x' (declared int)"},
+                {"var caught = \"\"; var s = \"s\"; try { int x = s; } catch (e) { caught = e; } caught", "Cannot initialize 'x' (declared int) with string"},
             };
             for (const var_row& r : var_sourced) {
                 auto [si, sv] = both_in(check_mode::strict, r.src);
@@ -1527,7 +1527,7 @@ public:
                     std::string("var-sourced runtime text: ") + r.src + " (got: " + si + ")");
             }
             const char* last_var = var_sourced[6].src;
-            check_eq(std::string("Type mismatch in assignment"), both_in(check_mode::strict, last_var).first,
+            check_eq(std::string("Cannot initialize 'x' (declared int) with string"), both_in(check_mode::strict, last_var).first,
                 "the var-sourced runtime error is catchable in script under strict");
             struct clean_row { const char* src; const char* expected; };
             const clean_row clean[] = {
@@ -1618,7 +1618,7 @@ public:
             check_both("var b = true; var c = \"\"; try { var bad = cast<char>(b); } catch (e) { c = e; } c", "Cannot cast 'bool' to 'char'", "bool -> char stays refused");
             check_both("var f = 66.5; var c = \"\"; try { var bad = cast<char>(f); } catch (e) { c = e; } c", "Cannot cast 'float' to 'char'", "float -> char stays refused");
             check_both("var i = 97; var c = \"\"; try { cast<char&>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char&'", "reference form never converts");
-            check_both("var v = 65; var c = \"\"; try { char bad = v; } catch (e) { c = e; } c", "Type mismatch in assignment", "plain assignment still has no int -> char rule");
+            check_both("var v = 65; var c = \"\"; try { char bad = v; } catch (e) { c = e; } c", "Cannot initialize 'bad' (declared char) with int", "plain assignment still has no int -> char rule");
             auto [si, sv] = both("char c = 65;");
             check_eq(si, sv, "static rejection parity: char c = 65");
             check(si.find("ERROR: ") == 0 && si.find("cannot initialize 'c' declared 'char' with 'int'") != std::string::npos,
@@ -1661,7 +1661,7 @@ public:
                 bool threw = false;
                 try { instance->set_field(v_id, jai::script_value(std::string("bad"), e.get())); }
                 catch (const std::exception& ex) {
-                    threw = std::string(ex.what()).find("Type mismatch in assignment") != std::string::npos;
+                    threw = std::string(ex.what()).find("Cannot assign string to field 'v' of C (declared int)") != std::string::npos;
                 }
                 check(threw, "set_field rejects an inconvertible value");
             }
@@ -1978,29 +1978,29 @@ public:
             auto q = [&](const char* tail) { return P + tail; };
             check_quad(q("o.setInt(5) + \" \" + o.dump()").c_str(), "ok 5|1.500000|a|false|10|0|2|true|true", "typed int field, int");
             check_quad(q("o.setInt(2.7) + \" \" + o.dump()").c_str(), "ok 2|1.500000|a|false|10|0|2|true|true", "typed int field, float truncates");
-            check_quad(q("o.setInt(\"x\") + \" \" + o.dump()").c_str(), "Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|true", "typed int field, string raises, field untouched");
+            check_quad(q("o.setInt(\"x\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'i' of F (declared int) 1|1.500000|a|false|10|0|2|true|true", "typed int field, string raises, field untouched");
             check_quad(q("o.setInt(true) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|false|10|0|2|true|true", "typed int field, bool converts");
-            check_quad(q("o.setInt(null) + \" \" + o.dump()").c_str(), "Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|true", "typed int field, null raises");
+            check_quad(q("o.setInt(null) + \" \" + o.dump()").c_str(), "Cannot assign null to field 'i' of F (declared int) 1|1.500000|a|false|10|0|2|true|true", "typed int field, null raises");
             check_quad(q("o.setFloat(2) + \" \" + o.dump()").c_str(), "ok 1|2.000000|a|false|10|0|2|true|true", "typed float field, int promotes");
-            check_quad(q("o.setFloat(\"q\") + \" \" + o.dump()").c_str(), "Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|true", "typed float field, string raises");
+            check_quad(q("o.setFloat(\"q\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'f' of F (declared float) 1|1.500000|a|false|10|0|2|true|true", "typed float field, string raises");
             check_quad(q("o.setStr(12) + \" \" + o.dump()").c_str(), "ok 1|1.500000|12|false|10|0|2|true|true", "typed string field, int converts via to_string");
             check_quad(q("o.setBool(1) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|true|10|0|2|true|true", "typed bool field, int converts");
             check_quad(q("o.setAuto(2.5) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|false|2|0|2|true|true", "auto field infers int from its initializer, float truncates");
-            check_quad(q("o.setAuto(\"str\") + \" \" + o.dump()").c_str(), "Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|true", "auto field rejects a string");
+            check_quad(q("o.setAuto(\"str\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'a' of F (declared int) 1|1.500000|a|false|10|0|2|true|true", "auto field rejects a string");
             check_quad(q("o.setVar(\"anything\") + \" \" + o.setVar([1,2,3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.500000|a|false|10|[array]|2|true|true", "var field takes anything");
-            check_quad(q("o.setArr([4,5,6]) + \" \" + o.setArr([\"a\"]) + \" \" + o.setArr(7) + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment Type mismatch in assignment 1|1.500000|a|false|10|0|3|true|true", "typed array field: typed array ok, wrong element type and scalar raise");
-            check_quad(q("auto o2 = F(); string r1 = o.setOther(o2); o2.i = 99; r1 + \" \" + to_string(o.other.i) + \" \" + o.setOther(5)").c_str(), "ok 1 Type mismatch in assignment", "object field: by-value copy, scalar raises");
-            check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok ok Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|false", "shared_ptr field: handle, value, scalar");
+            check_quad(q("o.setArr([4,5,6]) + \" \" + o.setArr([\"a\"]) + \" \" + o.setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to field 'arr' of F (declared array<int>) Cannot assign int to field 'arr' of F (declared array<int>) 1|1.500000|a|false|10|0|3|true|true", "typed array field: typed array ok, wrong element type and scalar raise");
+            check_quad(q("auto o2 = F(); string r1 = o.setOther(o2); o2.i = 99; r1 + \" \" + to_string(o.other.i) + \" \" + o.setOther(5)").c_str(), "ok 1 Cannot assign int to field 'other' of F (declared F)", "object field: by-value copy, scalar raises");
+            check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to field 'sp' of F (declared shared_ptr<F>) 1|1.500000|a|false|10|0|2|true|false", "shared_ptr field: handle, value, scalar");
             check_quad(q("to_string(o.loopStore(1000)) + \" \" + o.dump()").c_str(), "999 999|999.000000|a|false|10|0|2|true|true", "1000 stores at one site (the cached lane)");
             check_quad(q("to_string(o.chainStore()) + \",\" + to_string(o.storeResult()) + \",\" + to_string(o.storeResultConv()) + \",\" + to_string(o.i)").c_str(), "8,42,3.000000,3", "store as expression: value is the stored (converted) value");
-            check_quad(q("o.setStatic(9) + \" \" + o.setStatic(\"bad\") + \" \" + to_string(F::st)").c_str(), "ok Type mismatch in assignment 9", "static field stores enforce like instance fields (not the this-field lane)");
-            check_quad(q("auto g = G(); g.setInherited(11) + \" \" + g.setInherited(\"no\") + \" \" + g.dump() + \" \" + g.setG(3.2) + \" \" + to_string(g.g)").c_str(), "ok Type mismatch in assignment 11|1.500000|a|false|10|0|2|true|true ok 3", "inherited field through a derived instance");
+            check_quad(q("o.setStatic(9) + \" \" + o.setStatic(\"bad\") + \" \" + to_string(F::st)").c_str(), "ok Cannot assign string to static 'st' of F (declared int) 9", "static field stores enforce like instance fields (not the this-field lane)");
+            check_quad(q("auto g = G(); g.setInherited(11) + \" \" + g.setInherited(\"no\") + \" \" + g.dump() + \" \" + g.setG(3.2) + \" \" + to_string(g.g)").c_str(), "ok Cannot assign string to field 'i' of G (declared int) 11|1.500000|a|false|10|0|2|true|true ok 3", "inherited field through a derived instance");
             check_quad(q("array<F> fs = [F(), G()]; string acc = \"\"; for (auto& e : fs) { acc = acc + e.setInt(1) + \",\"; } acc = acc + to_string(fs[0].i) + to_string(fs[1].i); acc").c_str(), "ok,ok,11", "one site, two classes (polymorphic site re-arms)");
             check_quad(q("class H { int i = 0; int bump() { for (int k = 0; k < 5; ++k) { i += 1; } return i; } } auto h = H(); to_string(h.bump()) + \" \" + to_string(h.bump())").c_str(), "5 10", "compound field stores");
             check_quad(q("class R { int x = 1; int y = 2; void swap() { int t = x; x = y; y = t; } string dump() { return to_string(x) + \",\" + to_string(y); } } auto r = R(); r.swap(); r.swap(); r.swap(); r.dump()").c_str(), "2,1", "two fields swapped through a local");
             check_quad(q("class S { array<int> xs = [1]; void put(array<int> src) { xs = src; } int total() { int t = 0; for (auto q : xs) { t += q; } return t; } } auto sobj = S(); array<int> mine = [1, 2, 3]; sobj.put(mine); mine.push(100); to_string(sobj.total()) + \" \" + to_string(mine.size())").c_str(), "6 4", "lvalue rhs clones (value semantics)");
-            check_quad(q("class Q { int i = 1; string setThis(var x) { string r = \"ok\"; try { this.i = x; } catch (err) { r = err; } return r; } } auto q = Q(); q.setThis(4) + \" \" + to_string(q.i) + \" \" + q.setThis(\"z\") + \" \" + to_string(q.i)").c_str(), "ok 4 Type mismatch in assignment 4", "explicit this.field (member path, not the bare lane)");
-            check_quad(q("class W { weak_ptr<F> w; string setW(var x) { string r = \"ok\"; try { w = x; } catch (err) { r = err; } return r; } } auto w = W(); auto keep = shared_ptr<F>(); w.setW(keep) + \" \" + w.setW(F()) + \" \" + to_string(w.w == null)").c_str(), "Type mismatch in assignment Type mismatch in assignment true", "weak_ptr field: handle ok, value raises");
+            check_quad(q("class Q { int i = 1; string setThis(var x) { string r = \"ok\"; try { this.i = x; } catch (err) { r = err; } return r; } } auto q = Q(); q.setThis(4) + \" \" + to_string(q.i) + \" \" + q.setThis(\"z\") + \" \" + to_string(q.i)").c_str(), "ok 4 Cannot assign string to field 'i' of Q (declared int) 4", "explicit this.field (member path, not the bare lane)");
+            check_quad(q("class W { weak_ptr<F> w; string setW(var x) { string r = \"ok\"; try { w = x; } catch (err) { r = err; } return r; } } auto w = W(); auto keep = shared_ptr<F>(); w.setW(keep) + \" \" + w.setW(F()) + \" \" + to_string(w.w == null)").c_str(), "Cannot assign F to field 'w' of W (declared weak_ptr<F>) Cannot assign F to field 'w' of W (declared weak_ptr<F>) true", "weak_ptr field: handle ok, value raises");
         });
 
         auto quad_mode = [](const char* src, check_mode mode) {
@@ -2039,25 +2039,25 @@ public:
             const std::string base = "1|1.500000|a|false|10|0|2|true|true|true";
             check_quad(q("setI(5) + \" \" + o.dump()").c_str(), "ok 5|1.500000|a|false|10|0|2|true|true|true", "C::i, int");
             check_quad(q("setI(2.7) + \" \" + o.dump()").c_str(), "ok 2|1.500000|a|false|10|0|2|true|true|true", "C::i, float truncates");
-            check_quad(q("setI(\"x\") + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, string raises, static untouched");
+            check_quad(q("setI(\"x\") + \" \" + o.dump()").c_str(), "Cannot assign string to static 'i' of C (declared int) " + base, "C::i, string raises, static untouched");
             check_quad(q("setI(true) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|false|10|0|2|true|true|true", "C::i, bool converts");
-            check_quad(q("setI(null) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, null raises");
-            check_quad(q("setI([1]) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, array raises");
-            check_quad(q("setI(C()) + \" \" + o.dump()").c_str(), "Type mismatch in assignment " + base, "C::i, object raises");
-            check_quad(q("o.setQ(5) + \" \" + o.setQ(2.7) + \" \" + o.setQ(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Type mismatch in assignment 2", "bare static in an instance method");
-            check_quad(q("C::setS(6) + \" \" + C::setS(3.9) + \" \" + C::setS(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Type mismatch in assignment 3", "bare static in a static method");
-            check_quad(q("C(7); string r = \"ok\"; try { C(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Type mismatch in assignment 7", "bare static in a constructor");
-            check_quad(q("auto lam = [](var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; }; lam(\"x\") + \" \" + lam(3) + \" \" + to_string(C::i)").c_str(), "Type mismatch in assignment ok 3", "C::i inside a lambda");
+            check_quad(q("setI(null) + \" \" + o.dump()").c_str(), "Cannot assign null to static 'i' of C (declared int) " + base, "C::i, null raises");
+            check_quad(q("setI([1]) + \" \" + o.dump()").c_str(), "Cannot assign array to static 'i' of C (declared int) " + base, "C::i, array raises");
+            check_quad(q("setI(C()) + \" \" + o.dump()").c_str(), "Cannot assign C to static 'i' of C (declared int) " + base, "C::i, object raises");
+            check_quad(q("o.setQ(5) + \" \" + o.setQ(2.7) + \" \" + o.setQ(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Cannot assign string to static 'i' of C (declared int) 2", "bare static in an instance method");
+            check_quad(q("C::setS(6) + \" \" + C::setS(3.9) + \" \" + C::setS(\"x\") + \" \" + to_string(C::i)").c_str(), "ok ok Cannot assign string to static 'i' of C (declared int) 3", "bare static in a static method");
+            check_quad(q("C(7); string r = \"ok\"; try { C(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Cannot assign string to static 'i' of C (declared int) 7", "bare static in a constructor");
+            check_quad(q("auto lam = [](var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; }; lam(\"x\") + \" \" + lam(3) + \" \" + to_string(C::i)").c_str(), "Cannot assign string to static 'i' of C (declared int) ok 3", "C::i inside a lambda");
             check_quad(q("var vv = 2.9; C::i = vv; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "2|int", "C::i at top level keeps the declared type");
-            check_quad(q("setF(2) + \" \" + setF(\"q\") + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment 1|2.000000|a|false|10|0|2|true|true|true", "float static: int promotes, string raises");
+            check_quad(q("setF(2) + \" \" + setF(\"q\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'f' of C (declared float) 1|2.000000|a|false|10|0|2|true|true|true", "float static: int promotes, string raises");
             check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "ok ok ok 1|1.500000|[object]|false|10|0|2|true|true|true", "string static takes anything through to_string (the instance-field row)");
             check_quad(q("setB(1) + \" \" + o.dump()").c_str(), "ok 1|1.500000|a|true|10|0|2|true|true|true", "bool static: int converts");
-            check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment 1|1.500000|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
+            check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'a' of C (declared int) 1|1.500000|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
             check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.500000|a|false|10|[array]|2|true|true|true", "var static takes anything");
-            check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Type mismatch in assignment Type mismatch in assignment 1|1.500000|a|false|10|0|3|true|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
-            check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 Type mismatch in assignment", "object static: by-value copy, scalar raises");
-            check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Type mismatch in assignment 1|1.500000|a|false|10|0|2|true|false|true", "shared_ptr static: handle, value, scalar");
-            check_quad(q("auto keep = shared_ptr<C>(); setW(keep) + \" \" + setW(C()) + \" \" + o.dump()").c_str(), "Type mismatch in assignment Type mismatch in assignment " + base, "weak_ptr static: the instance-field rows");
+            check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to static 'arr' of C (declared array<int>) Cannot assign int to static 'arr' of C (declared array<int>) 1|1.500000|a|false|10|0|3|true|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
+            check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 Cannot assign int to static 'other' of C (declared C)", "object static: by-value copy, scalar raises");
+            check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to static 'sp' of C (declared shared_ptr<C>) 1|1.500000|a|false|10|0|2|true|false|true", "shared_ptr static: handle, value, scalar");
+            check_quad(q("auto keep = shared_ptr<C>(); setW(keep) + \" \" + setW(C()) + \" \" + o.dump()").c_str(), "Cannot assign C to static 'w' of C (declared weak_ptr<C>) Cannot assign C to static 'w' of C (declared weak_ptr<C>) " + base, "weak_ptr static: the instance-field rows");
             check_quad("class P { int v = 1; } class S { static shared_ptr<P> p; } auto h = shared_ptr<P>(); S::p = h; h.v = 5; to_string(S::p.v)", "5", "shared_ptr static shares the handle on both backends");
             check_quad(q("int r = (C::i = 42); to_string(r)").c_str(), "42", "store as expression");
             check_quad(q("float r = (C::i = 3.9); to_string(r) + \"|\" + to_string(C::i)").c_str(), "3.000000|3", "store as expression yields the stored (converted) value");
@@ -2100,13 +2100,13 @@ public:
             check_quad("class C { static string t = 5; } C::t + \"|\" + type_of(C::t)", "5|string", "static string from an int initializer");
             check_quad("class C { static int n = true; } to_string(C::n) + \"|\" + type_of(C::n)", "1|int", "static int from a bool initializer");
             check_quad_error("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "an unconvertible static initializer raises at definition");
-            check_quad_error_text("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "Type mismatch in assignment", "the definition raises the store text");
+            check_quad_error_text("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "Cannot assign string to static 's' of C (declared int)", "the definition raises the store text");
             check_quad("class C { static int s; } to_string(C::s == null)", "true", "typed static without an initializer reads null");
             check_quad("class C { static var v = null; } to_string(C::v == null)", "true", "null var static reads");
             check_quad("class P { int a = 0; } class C { static shared_ptr<P> p; } to_string(C::p == null)", "true", "null shared_ptr static reads");
             check_quad("class P { int a = 0; } class C { static P obj; } to_string(C::obj == null)", "true", "null object static reads");
-            check_quad("function L(var x) { return x; } class C { static int s; } C::s = L(4); string r = \"ok\"; try { C::s = L(\"x\"); } catch (err) { r = err; } to_string(C::s) + \" \" + r", "4 Type mismatch in assignment", "a null-initialized static still enforces its declared type");
-            check_quad("function L(var x) { return x; } class C { static auto a = 2; } C::a = L(2.5); string r = \"ok\"; try { C::a = L(\"str\"); } catch (err) { r = err; } to_string(C::a) + \" \" + r", "2 Type mismatch in assignment", "auto static enforces the inferred int");
+            check_quad("function L(var x) { return x; } class C { static int s; } C::s = L(4); string r = \"ok\"; try { C::s = L(\"x\"); } catch (err) { r = err; } to_string(C::s) + \" \" + r", "4 Cannot assign string to static 's' of C (declared int)", "a null-initialized static still enforces its declared type");
+            check_quad("function L(var x) { return x; } class C { static auto a = 2; } C::a = L(2.5); string r = \"ok\"; try { C::a = L(\"str\"); } catch (err) { r = err; } to_string(C::a) + \" \" + r", "2 Cannot assign string to static 'a' of C (declared int)", "auto static enforces the inferred int");
         });
 
         test("static_spellings_rejected", [check_quad_error, check_quad_off, check_quad_error_text]() {
@@ -2117,8 +2117,8 @@ public:
             check_quad_off("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:Cannot assign to member of non-object type 0", "dot store on a class name");
             check_quad_error("class C { static int s = 0; } C.s += 1", "dot compound on a class name");
             check_quad_error("class C { static int s = 0; } C.s++", "dot ++ on a class name");
-            check_quad_off((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to non-existent member 's' 0", "this.s store");
-            check_quad_off((P + "auto o = C(); o.readThis()").c_str(), "Object has no member 's'", "this.s read");
+            check_quad_off((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to 's': C has no such member 0", "this.s store");
+            check_quad_off((P + "auto o = C(); o.readThis()").c_str(), "C has no member 's'", "this.s read");
             check_quad_error_text("class S { private: static int counter = 0; public: static int peek() { return counter; } } S::counter = 5", "Cannot access private member 'counter' of class 'S'", "private static store is refused before any conversion");
         });
 
@@ -2728,7 +2728,7 @@ public:
                 "var m3 = \"\"; try { c.b = 1.5; m3 = \"stored\"; } catch (err3) { m3 = err3; }\n"
                 "m1 + \"|\" + m2 + \"|\" + m3 + \"|\" + to_string(c.raw()) + \"|\" + to_string(c.b)");
             check_eq(i_out, v_out, "setter error texts agree across backends");
-            check_eq(std::string("negative|No matching overload found|stored|10|10"), i_out, "script throw, overload rejection, float->int conversion");
+            check_eq(std::string("negative|No overload of '_set_b' takes (string)|stored|10|10"), i_out, "script throw, overload rejection, float->int conversion");
         });
 
         test("accessor_ref_binding_is_non_lvalue", [check_both]() {
@@ -2838,13 +2838,13 @@ public:
                 int p(int v) { return v; }
                 string r2 = ""; try { p(y); r2 = "ok"; } catch (e) { r2 = e; }
                 r + "|" + r2
-            )JAI", "Type mismatch in assignment|Type mismatch: expected int but got Y", "an object result of to_X() never converts again");
+            )JAI", "Cannot initialize 'v' (declared int) with Y|Cannot pass Y to parameter 'v' of 'p' (declared int)", "an object result of to_X() never converts again");
             check_both(R"JAI(
                 class Q { int to_int() { return 1; } }
                 var q = Q();
                 string r = ""; try { char c = q; r = "ok"; } catch (e) { r = e; }
                 r
-            )JAI", "Type mismatch in assignment", "no to_char(): char slot rejects");
+            )JAI", "Cannot initialize 'c' (declared char) with Q", "no to_char(): char slot rejects");
         });
 
         test("typed_slot_handle_into_value_slot", [this, check_both, both]() {
@@ -2892,7 +2892,7 @@ public:
                 string r5 = ""; try { rc(); r5 = "ok"; } catch (e) { r5 = e; }
                 string r6 = ""; try { C c = xs; r6 = "ok"; } catch (e) { r6 = e; }
                 r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6
-            )JAI", "Incompatible class types|Incompatible class types|Type mismatch in assignment|Cannot convert TA to TC (no suitable single-argument constructor)|Cannot convert TA to TC (no suitable single-argument constructor)|Incompatible class types",
+            )JAI", "Cannot initialize 'c' (declared TC) with TA|Cannot assign TA to 'c2' (declared TC)|Cannot assign TA to field 't' of H (declared TC)|Cannot convert TA to TC (no suitable single-argument constructor)|Cannot convert TA to TC (no suitable single-argument constructor)|Cannot initialize 'c' (declared C) with X",
                 "TA->TB->TC and X->to_int->C are never implicit");
             check_both(R"JAI(
                 class TA { int v = 1; } class TB { int v = 0; TB(TA a) { v = a.v * 2; } }
@@ -2912,7 +2912,7 @@ public:
                 try { h.c = t; r = r + ",ok"; } catch (e) { r = r + "," + e; }
                 auto g = G(); var c1 = C(1); try { g.d = c1; r = r + ",ok"; } catch (e) { r = r + "," + e; }
                 r
-            )JAI", "5,2,Type mismatch in assignment,Type mismatch in assignment", "field stores construct through a true 1-param ctor; bool needs int<->float or same base");
+            )JAI", "5,2,Cannot assign bool to field 'c' of H (declared C),Cannot assign C to field 'd' of G (declared D)", "field stores construct through a true 1-param ctor; bool needs int<->float or same base");
             // host set_field runs the table without its script rows; hot reload likewise falls back
             // to the initializer default when the live value converts only through script
             for (bool use_vm : {false, true}) {
@@ -2923,7 +2923,7 @@ public:
                 check_not_null(instance.get());
                 bool threw = false;
                 try { instance->set_field(e->symbolize("c"), jai::script_value((int64_t)5, e.get())); }
-                catch (const std::exception& ex) { threw = std::string(ex.what()).find("Type mismatch in assignment") != std::string::npos; }
+                catch (const std::exception& ex) { threw = std::string(ex.what()).find("Cannot assign int to field 'c' of H (declared C)") != std::string::npos; }
                 check(threw, "set_field: ctor conversion is a script row, refused from C++");
                 instance->set_field(e->symbolize("s"), jai::script_value((int64_t)5, e.get()));
                 check_eq(std::string("5"), e->execute("h.s").as<std::string>(), "set_field: to_string row still converts");
@@ -2946,7 +2946,7 @@ public:
                 array<int> g = [1, 2];
                 string pt(array<int> a) { return to_string(a.size()) + type_of(a[0]); }
                 r1 + "|" + r2 + "|" + r3 + "|" + pt(g)
-            )JAI", "Cannot store 'string' in 'array<int>'|Cannot store 'string' in 'array<int>'|int2|2int", "array<int> parameters and returns run the element boundary");
+            )JAI", "Cannot store string in array<int>|Cannot store string in array<int>|int2|2int", "array<int> parameters and returns run the element boundary");
             auto [i_out, v_out] = both(R"JAI(
                 void pc(array<int> a) { a.push("zz"); }
                 string r4 = ""; try { pc([1]); r4 = "ok"; } catch (e) { r4 = e; }
@@ -2965,11 +2965,11 @@ public:
             check_both(R"JAI(
                 string f() { array<int> v = [1]; var s = ["x"]; try { v = s; } catch (e) { return e; } return type_of(v[0]); }
                 f()
-            )JAI", "Cannot store 'string' in 'array<int>'", "a slot-local `=` into array<int> runs the boundary like the global path");
+            )JAI", "Cannot store string in array<int>", "a slot-local `=` into array<int> runs the boundary like the global path");
             check_both(R"JAI(
                 string f() { map<string,int> m = {"a": 1}; var s = {"k": "v"}; string r = ""; try { m = s; r = "ok"; } catch (e) { r = e; } return r + ":" + to_string(m.size()); }
                 f()
-            )JAI", "Cannot store 'string' in 'map<string,int>':1", "a slot-local `=` into map<string,int> runs the boundary");
+            )JAI", "Cannot store string in map<string,int>:1", "a slot-local `=` into map<string,int> runs the boundary");
         });
 
         test("typed_slot_rejection_texts", [check_both]() {
@@ -2982,7 +2982,7 @@ public:
                 void pa(array<int> a) {} string r6 = ""; try { pa(five); } catch (e) { r6 = e; }
                 var arr = [1]; string r7 = ""; try { i(arr); } catch (e) { r7 = e; }
                 r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5 + "|" + r6 + "|" + r7
-            )JAI", "Type mismatch: expected int but got null|Cannot convert B to A (no suitable single-argument constructor)|Type mismatch: expected shared_ptr<C> but got int|Type mismatch: expected int but got string|Type mismatch: expected weak_ptr<C> but got int|Type mismatch: expected array<int> but got int|Type mismatch: expected int but got array",
+            )JAI", "Cannot pass null to parameter 'x' of 'i' (declared int)|Cannot convert B to A (no suitable single-argument constructor)|Cannot pass int to parameter 'p' of 'sp' (declared shared_ptr<C>)|Cannot return string from 'r' (declared -> int)|Cannot pass int to parameter 'p' of 'wp' (declared weak_ptr<C>)|Cannot pass int to parameter 'a' of 'pa' (declared array<int>)|Cannot pass array to parameter 'x' of 'i' (declared int)",
                 "source spellings are the payload's type, targets their canonical name");
         });
 

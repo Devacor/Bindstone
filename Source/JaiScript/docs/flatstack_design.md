@@ -357,7 +357,7 @@ to today's path (parity: the cache is an identity shortcut, never a semantic cha
 9. **Interpreter parity (behavioral, not structural).** The interpreter keeps
    `call_stack_` + env frames. Every observable that must stay byte-identical:
    - **Error text & codes**: recursion depth (both triggers), budget, memory cap, arity
-     ("Function expected {0} arguments but got {1}"), undefined variable, non-lvalue ref
+     ("'f' expects 1 argument, got 2"), undefined variable, non-lvalue ref
      args, conversion/type-mismatch texts, overflow texts naming the real op.
    - **Stack traces**: same function names/file/line frames, caller ip parked on the
      call op, `<anonymous>` naming, trace captured once at first unwind.

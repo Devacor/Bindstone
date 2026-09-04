@@ -314,7 +314,7 @@ namespace jai::detail {
 	}
 
 	// The one message both backends raise at a failed boundary (byte-identical errors).
-	inline constexpr const char* container_boundary_mismatch_text = "Cannot store '{0}' in '{1}'";
+	inline constexpr const char* container_boundary_mismatch_text = "Cannot store {0} in {1}";
 
 	struct container_boundary_outcome {
 		std::optional<script_value> value;  // engaged on success

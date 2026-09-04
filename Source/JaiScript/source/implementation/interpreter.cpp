@@ -106,7 +106,34 @@ namespace {
         }
         return *state;
     }
+
+    // Replay parking for the generic call lane: the callee ahead of the arguments
+    std::vector<script_value> parked_with_head(const script_value& head, std::vector<script_value> rest) {
+        rest.insert(rest.begin(), head);
+        return rest;
+    }
 }
+
+// An operand site inside an expression visitor: on the yield signal, park what this node
+// had produced (evaluation order) and the suspended child's ordinal, then keep unwinding
+#define JAISCRIPT_TRY_OPERAND(expr, node, phase, ordinal, partial) \
+    do { \
+        auto __result = (expr); \
+        if (!__result) [[unlikely]] { \
+            if (is_yield_signal(__result)) park_operands(node, phase, ordinal, partial); \
+            return __result.error_value(); \
+        } \
+    } while(0)
+
+// A statement's one expression: the signal makes the statement the replay root
+#define JAISCRIPT_TRY_ROOT(stmt, root) \
+    do { \
+        auto __result = eval_root<Replaying>(root); \
+        if (!__result) [[unlikely]] { \
+            if (is_yield_signal(__result)) { note_statement_yield(stmt, root); return {}; } \
+            return __result.error_value(); \
+        } \
+    } while(0)
 
 // Element compatibility/conversion live in the shared kernel (detail/container_enforce.hpp,
 // used verbatim by both backends and the field kernel). These forwards keep the
@@ -2413,6 +2440,7 @@ interpreter::interpreter()
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     base_type_ids_.intern(*string_symbolizer_);
+    arity_count_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2481,6 +2509,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     base_type_ids_.intern(*string_symbolizer_);
+    arity_count_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2549,6 +2578,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     base_type_ids_.intern(*string_symbolizer_);
+    arity_count_ids_.intern(*string_symbolizer_);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2650,7 +2680,6 @@ void interpreter::prepare_for_execution() {
     valueStack_.clear();
     returnValue_.reset();  // No need to create a value - value_or() will create it if needed
     hasReturnValue_ = false;
-    return_proven_ = false;
 
     // Clear coroutine state — unless re-entered from inside a RUNNING coroutine
     // (include/import, or a host callback calling execute() mid-resume): clearing
@@ -2728,7 +2757,6 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         script_valueStack saved_values;
         std::optional<script_value> saved_return;
         bool saved_has_return = false;
-        bool saved_return_proven = false;
         detail::member_scope_ctx saved_member_scope{};
 
         explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->execute_depth_ != 0) {
@@ -2740,7 +2768,6 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_.clear();
                 saved_return = std::move(self->returnValue_);
                 saved_has_return = self->hasReturnValue_;
-                saved_return_proven = self->return_proven_;
                 if (!self->pending_instance_env_) {
                     self->environment_ = self->get_global_environment();
                 }
@@ -2759,7 +2786,6 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_ = std::move(saved_values);
                 self->returnValue_ = std::move(saved_return);
                 self->hasReturnValue_ = saved_has_return;
-                self->return_proven_ = saved_return_proven;
                 self->member_scope_ = saved_member_scope;
             }
             --self->execute_depth_;
@@ -2768,7 +2794,6 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 
     script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
-    return_proven_ = false;
     captured_trace_.clear();
     trace_captured_ = false;
     top_level_node_ = nullptr;
@@ -3097,15 +3122,21 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     return checked_result<void>();
 }
 
-checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const replay_point* rs) {
     // Track if we've pre-fetched values to avoid duplicate lookups
     bool already_have_values = false;
     std::optional<script_value> pre_fetched_left, pre_fetched_right;
+    // Replay: an operand evaluated before the yield is parked (left as partial[0]); the
+    // identifier/identifier fast head cannot hold a yield, so replay skips it
+    if constexpr (Replaying) {
+        if (rs && rs->index == 1) { pre_fetched_left = rs->partial[0]; }
+    }
 
 	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
 	// Skip logical operators - they need short-circuit evaluation
 	// Skip if we're in a catch block - catch variables need special handling
-	if (expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe && current_catch_var_id_ == 0) {
+	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe && current_catch_var_id_ == 0) {
 		if (expr->left->get_type() == node_type::identifier_expr) {
 			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
 			if (expr->right->get_type() == node_type::identifier_expr) {
@@ -3487,8 +3518,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     // Handle logical operators specially for short-circuit evaluation
     // Return proper boolean values (not JavaScript-style operand values)
     if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
-        JAISCRIPT_TRY(dispatch_expr(expr->left.get()));
-        script_value left = pop_value();
+        if (!parked<Replaying>(rs, 0)) {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+        }
+        script_value left = parked<Replaying>(rs, 0) ? *pre_fetched_left : pop_value();
 
         bool leftTruthy = is_truthy(left);
 
@@ -3498,7 +3531,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 return {};
             }
             // Left is truthy, evaluate right and return its boolean value
-            JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{left}));
             script_value right = pop_value();
             push_value(make_value(is_truthy(right)));
             return {};
@@ -3508,7 +3541,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 return {};
             }
             // Left is falsy, evaluate right and return its boolean value
-            JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{left}));
             script_value right = pop_value();
             push_value(make_value(is_truthy(right)));
             return {};
@@ -3531,11 +3564,15 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         right_opt = std::move(*pre_fetched_right);
     } else {
         // Normal path: evaluate via AST traversal
-        JAISCRIPT_TRY(dispatch_expr(expr->left.get()));
-        left_raw_opt = pop_value();  // Keep raw value for subscript handling
+        if (parked<Replaying>(rs, 0)) {
+            left_raw_opt = *pre_fetched_left;   // evaluated before the yield, never re-run
+        } else {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            left_raw_opt = pop_value();  // Keep raw value for subscript handling
+        }
         left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
 
-        JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{*left_raw_opt}));
         // Check if we're unwinding due to an exception in the right expression
         if (is_unwinding_) {
             // Don't try to pop a value that wasn't pushed due to the exception
@@ -3836,7 +3873,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     }
     return {};
 }
-checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const replay_point* rs) {
     // Fast path for literal unary operations
     if (expr->operand->get_type() == node_type::literal_expr) {
         auto* literal = static_cast<literal_expr*>(expr->operand.get());
@@ -3873,7 +3911,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     }
 
     // Generic path - evaluate operand and use existing logic
-    JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
+    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->operand.get(), rs, 0), expr, rp_operand, 0, {});
     // Operand raised a script exception (e.g. ++obj.missing member read): propagate it
     // instead of clobbering it with invalid_assignment_target below (vm parity)
     if (is_unwinding_) {
@@ -3939,10 +3977,10 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 // live in call-frame slots, not the environment), then environment
                 script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (varPtr) {
-                    // TYPED array element ref: deref hands back the holder scratch - the
-                    // in-place mutation below must commit it to the raw buffer (KEEP
-                    // BYTE-PARALLEL with the VM exec_incdec twin)
-                    auto* typed_elem = varPtr->typed_element_holder();
+                    // Scratch-backed ref (typed element, C++ property): deref hands back the
+                    // holder scratch - the in-place mutation below must commit it (buffer
+                    // store / setter) (KEEP BYTE-PARALLEL with the VM exec_incdec twin)
+                    auto* scratch_ref = varPtr->scratch_ref_holder();
                     // Fast path: direct in-place mutation for local variables
                     script_value& target = varPtr->deref();
 
@@ -3985,7 +4023,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                                 if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
                             }
                             tref = newVal;
-                            if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
+                            if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
                             push_value(make_value(expr->is_postfix ? oldVal : newVal));
                             return {};
                         }
@@ -3999,7 +4037,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                                 else target.unchecked_as_float_ref() -= 1.0;
                                 push_value(make_value(target.unchecked_as_float()));
                             }
-                            if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
+                            if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
                             return {};
                         }
                         default:
@@ -4138,16 +4176,18 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         }
         target.instance->set_field_unchecked(member_id, enforced.value());
     } else {
-        std::string member_str(memberExpr->member);
-        active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
-        current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
+        const std::string& cls = target.class_name();
+        std::string text = "Cannot assign to '" + std::string(memberExpr->member) + "': " + (cls.empty() ? "object" : cls) + " has no such member";
+        active_exception_value_ = make_value(text);
+        current_exception_ = script_exception(text, memberExpr->location);
         is_unwinding_ = true;
         return {};
     }
     return {};
 }
 
-checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs) {
     // Non-lvalue targets fail before ANY evaluation (the vm rejects them at compile time)
     {
         const node_type target_kind = expr->target->get_type();
@@ -4173,11 +4213,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (varPtr) {
                 // Constrained element/field ref (Tier 1 bind): route through the shared
                 // helper so the compound result honors the constraint like subscript
-                // compounds do (vm parity)
+                // compounds do (vm parity). A C++ PROPERTY ref takes the same route: its
+                // deref is a scratch, the write must reach the setter.
                 if (varPtr->is_reference()) {
                     const auto* refHolder = varPtr->get_reference_holder();
-                    if (refHolder && refHolder->container_element_type) {
-                        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref())) {
+                        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                         if (is_unwinding_) {
                             push_value(make_value());
                             return {};
@@ -4329,7 +4370,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // Evaluate the right-hand side (general path)
-                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                 if (is_unwinding_) {
                     // The RHS raised: surface the ORIGINAL exception instead of running the
                     // compound arithmetic on the placeholder, whose follow-on type error
@@ -4620,7 +4661,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // VM parity (C++17 sequencing): the rhs of a compound assignment is
                 // evaluated BEFORE the target resolves, so rhs errors and side effects
                 // (e.g. an undefined rhs identifier) surface first
-                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                 if (is_unwinding_) {
                     push_value(make_value());
                     return {};
@@ -4796,15 +4837,22 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 return {};
             };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
-            // First, get the current value of the property
-            JAISCRIPT_TRY(dispatch_expr(memberExpr));
-            script_value currentValue = pop_value().deref();
-            if (is_unwinding_) {
-                // Target read raised: surface it, not the ++/-- gate's error on the placeholder
-                push_value(make_value());
-                return {};
+            // First, get the current value of the property (replay: parked, read once)
+            script_value currentValue;
+            script_value postfix_old;
+            if (parked<Replaying>(rs, 0)) {
+                currentValue = rs->partial[0];
+                postfix_old = rs->partial[1];
+            } else {
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 0), expr, rp_asg_member_compound, 0, {});
+                currentValue = pop_value().deref();
+                if (is_unwinding_) {
+                    // Target read raised: surface it, not the ++/-- gate's error on the placeholder
+                    push_value(make_value());
+                    return {};
+                }
+                postfix_old = expr->postfix_old_result ? currentValue : make_value();
             }
-            script_value postfix_old = expr->postfix_old_result ? currentValue : make_value();
             if (expr->incdec_desugar) {
                 const size_t ci = currentValue.raw_storage_index();
                 if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
@@ -4813,7 +4861,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Evaluate the right-hand side
-            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{currentValue, postfix_old}));
             if (is_unwinding_) {
                 // RHS raised: surface the original exception, don't run the compound
                 // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
@@ -5031,7 +5079,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // commit); 2b gives them a raw load-op-store fast path
                         if (index && storage && !storage->is_typed() && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
                             // RHS after target probing (general path's order); callout_free
-                            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                             if (is_unwinding_) {
                                 push_value(make_value());
                                 return {};
@@ -5079,14 +5127,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
 
-            // First, evaluate the target expression to get current value
-            JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
-            script_value currentValue = pop_value();
-            if (is_unwinding_) {
-                push_value(make_value());
-                return {};
+            // First, evaluate the target expression to get current value (replay: parked)
+            script_value currentValue;
+            script_value postfix_old;
+            if (parked<Replaying>(rs, 0)) {
+                currentValue = rs->partial[0];
+                postfix_old = rs->partial[1];
+            } else {
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 0), expr, rp_asg_general, 0, {});
+                currentValue = pop_value();
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
+                postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
             }
-            script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
             if (expr->incdec_desugar) {
                 // ++/-- gate: numeric targets only, the identifier path's exact error
                 const size_t ci = currentValue.deref().raw_storage_index();
@@ -5096,7 +5151,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Evaluate the right-hand side
-            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{currentValue, postfix_old}));
             if (is_unwinding_) {
                 // RHS raised: surface the original exception, don't run the compound
                 // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
@@ -5216,6 +5271,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
                 }
                 push_value(std::move(returnValue));
+            } else if (expr->target->get_type() == node_type::binary_expr && currentValue.is_reference()) {
+                // The target read minted the element reference: store through it, never
+                // re-evaluate the subscript (its side effects, and any yield, ran once)
+                JAISCRIPT_TRY(store_through_subscript_reference(currentValue, std::move(resultValue)));
+                if (expr->postfix_old_result) {
+                    valueStack_.discard();
+                    push_value(std::move(postfix_old));
+                }
             } else {
                 // Fall back to AST creation for complex lvalues
                 auto regularAssignment = std::make_shared<assignment_expr>(
@@ -5235,13 +5298,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
     } else {
         // Regular assignment
 
-        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
-        // Check if we're unwinding due to an exception in the value expression
-        if (is_unwinding_) {
-            // Don't try to pop a value that wasn't pushed due to the exception
-            return {};
+        script_value value;
+        if (parked<Replaying>(rs, 0)) {
+            value = rs->partial[0];   // evaluated before the yield: the rhs runs once
+        } else {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_regular, 0, {});
+            // Check if we're unwinding due to an exception in the value expression
+            if (is_unwinding_) {
+                // Don't try to pop a value that wasn't pushed due to the exception
+                return {};
+            }
+            value = pop_value();
         }
-        script_value value = pop_value();
 
         // Element/subscript reads arrive as reference wrappers (rhs-lvalue read shape);
         // assignment consumes the VALUE - normalize like every other consumer, or the
@@ -5875,12 +5943,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (!cls) {
                     return cls.error_value();
                 }
-                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
-                script_value value = pop_value();
-                if (is_unwinding_) {
-                    push_value(make_value());
-                    return {};
-                }
+                // The rhs is the one evaluated at the top of this branch: re-dispatching it
+                // here ran every side effect twice (and fired a yield twice)
                 auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, clone_for_assignment(value));
                 if (!stored) {
                     return stored.error_value();
@@ -5889,8 +5953,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 return {};
             }
 
-            // Regular member assignment - evaluate the object
-            JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
+            // Regular member assignment - evaluate the object (replay ordinal 1: the rhs is parked as partial[0])
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 1), expr, rp_asg_regular, 1, (std::vector<script_value>{value}));
             script_value objectValue = pop_value();
             if (is_unwinding_) {
                 push_value(make_value());
@@ -5957,9 +6021,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Mark this as an assignment-target subscript so a map key is
                 // auto-inserted (visit_binary clears the flag for nested reads).
                 lvalue_target_context_ = true;
-                auto target_eval = dispatch_expr(expr->target.get());
+                auto target_eval = eval_child<Replaying>(expr->target.get(), rs, 1);
                 lvalue_target_context_ = false;
-                JAISCRIPT_TRY(target_eval);
+                if (!target_eval) [[unlikely]] {
+                    if (is_yield_signal(target_eval)) park_operands(expr, rp_asg_regular, 1, {value});
+                    return target_eval.error_value();
+                }
                 script_value target_ref = pop_value();
                 if (is_unwinding_) {
                     push_value(make_value());
@@ -5968,53 +6035,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 
                 // Check if we got a reference
                 if (target_ref.is_reference()) {
-                    // Mode-based re-resolution (never a cached address): realloc/erase
-                    // between mint and write can't corrupt the heap. TYPED elements:
-                    // scratch target + buffer commit (KEEP BYTE-PARALLEL with
-                    // vm_backend::exec_index_assign)
-                    auto refHolder = target_ref.get_reference_holder();
-                    const bool typed_element = refHolder && refHolder->typed_element();
-                    script_value* target_ptr;
-                    if (typed_element) {
-                        if (refHolder->container_index >= refHolder->container->size()) {
-                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
-                        }
-                        target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
-                    } else {
-                        target_ptr = refHolder->resolve_target();
-                        if (!target_ptr) {
-                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
-                        }
-                    }
-
-                    // Validate element type if this is a container subscript reference
-                    type_info_ptr element_type = refHolder->container_element_type;
-                    if (element_type) {
-                        // Validate element type compatibility
-                        if (!is_element_type_compatible(value, element_type, *target_ptr)) {
-                            // Get type names for error message
-                            std::string value_type = get_value_type_name(value);
-                            std::string expected_type = get_type_info_name(element_type);
-                            // Intern the type names for the error message
-                            uint64_t value_type_id = string_symbolizer_->intern(value_type);
-                            uint64_t expected_type_id = string_symbolizer_->intern(expected_type);
-                            return checked_result<void>(
-                                make_error_code(runtime_error_code::array_element_type_mismatch),
-                                "Cannot assign '{0}' to element of type '{1}'",
-                                value_type_id, expected_type_id);
-                        }
-                        // Convert element if needed (e.g., int -> float for array<float>)
-                        script_value converted = convert_array_element(engine_, value, element_type);
-                        *target_ptr = std::move(converted);
-                    } else {
-                        // No element type constraint - values deep-copy, shared_ptr
-                        // handles share
-                        *target_ptr = clone_for_assignment(value);
-                    }
-                    if (typed_element) {
-                        refHolder->container->set(refHolder->container_index, *target_ptr);
-                    }
-                    push_value(std::move(value));  // Assignment expressions return the assigned value
+                    JAISCRIPT_TRY(store_through_subscript_reference(target_ref, std::move(value)));
                 } else {
                     // Not a reference - this means the subscript expression didn't
                     // return an lvalue (e.g., trying to assign to a function call result)
@@ -6030,15 +6051,69 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
     return {};
 }
 
+// Store through the reference a subscript target read minted. Mode-based re-resolution
+// (never a cached address): realloc/erase between mint and write can't corrupt the heap.
+// TYPED elements: scratch target + buffer commit (KEEP BYTE-PARALLEL with
+// vm_backend::exec_index_assign). Leaves the assigned value on the stack.
+checked_result<void> interpreter::store_through_subscript_reference(script_value& target_ref, script_value value) {
+    auto refHolder = target_ref.get_reference_holder();
+    const bool typed_element = refHolder && refHolder->typed_element();
+    script_value* target_ptr;
+    if (typed_element) {
+        if (refHolder->container_index >= refHolder->container->size()) {
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+        }
+        target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
+    } else {
+        target_ptr = refHolder->resolve_target();
+        if (!target_ptr) {
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+        }
+    }
+
+    // Validate element type if this is a container subscript reference
+    type_info_ptr element_type = refHolder->container_element_type;
+    if (element_type) {
+        if (!is_element_type_compatible(value, element_type, *target_ptr)) {
+            std::string value_type = get_value_type_name(value);
+            std::string expected_type = get_type_info_name(element_type);
+            uint64_t value_type_id = string_symbolizer_->intern(value_type);
+            uint64_t expected_type_id = string_symbolizer_->intern(expected_type);
+            return checked_result<void>(
+                make_error_code(runtime_error_code::array_element_type_mismatch),
+                "Cannot assign '{0}' to element of type '{1}'",
+                value_type_id, expected_type_id);
+        }
+        // Convert element if needed (e.g., int -> float for array<float>)
+        script_value converted = convert_array_element(engine_, value, element_type);
+        *target_ptr = std::move(converted);
+    } else {
+        // No element type constraint - values deep-copy, shared_ptr handles share
+        *target_ptr = clone_for_assignment(value);
+    }
+    if (typed_element) {
+        refHolder->container->set(refHolder->container_index, *target_ptr);
+    }
+    push_value(std::move(value));  // Assignment expressions return the assigned value
+    return {};
+}
+
 // statement visitors
-checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_expression_stmt_t(expression_stmt* stmt) {
     // Tell assignment expressions they can skip deep-cloning the result
     bool prev = expression_result_needed_;
     expression_result_needed_ = false;
 
-    JAISCRIPT_TRY(dispatch_expr(stmt->expression.get()));
-
+    auto result = eval_root<Replaying>(stmt->expression.get());
     expression_result_needed_ = prev;
+    if (!result) [[unlikely]] {
+        if (is_yield_signal(result)) {
+            note_statement_yield(stmt, stmt->expression.get());
+            return {};
+        }
+        return result.error_value();
+    }
 
     // Early exit if exception is propagating
     if (is_unwinding_) return {};
@@ -6078,8 +6153,12 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     }
 
     try {
+        // The resumed statement consumes its own frames (expression replay); the rest run cold
+        bool resume_entry = resuming;
         for (size_t i = start_index; i < stmt->declarations.size(); ++i) {
-            auto result = dispatch_decl(stmt->declarations[i].get());
+            auto result = resume_entry ? dispatch_decl_resuming(stmt->declarations[i].get())
+                                       : dispatch_decl(stmt->declarations[i].get());
+            resume_entry = false;
 
             // IMPORTANT: Clear value stack after each declaration to prevent accumulation
             // This ensures objects are destroyed at statement boundaries, not just at block exit
@@ -6144,7 +6223,8 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     return {};
 }
 
-checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
     // Helper to store value in slot (local) or environment (global)
     auto define_variable = [&](script_value value) {
         // Escape-marked declarations box into a cell (reference_holder cell mode):
@@ -6191,7 +6271,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             define_variable(std::move(weak));
         } else {
             // Evaluate initializer
-            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+            JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             script_value value = pop_value();
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
@@ -6282,7 +6362,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             define_variable(std::move(null_ptr));
         } else {
             // Evaluate initializer
-            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+            JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             script_value value = pop_value();
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
@@ -6382,6 +6462,15 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // the share below boxes into an escape-legal cell immediately.
             script_value* targetPtr = resolve_local_or_env(identExpr->slot_index, targetSymbolId, identExpr->global_qualified);
             if (!targetPtr) {
+                // A hybrid's bare C++ property: the member itself / its accessors
+                // (KEEP BYTE-PARALLEL with the vm's exec_decl_ref_ident)
+                if (auto minted = bind_bare_cpp_property_ref(targetSymbolId, identExpr->global_qualified)) {
+                    if (!*minted) {
+                        return minted->error_value();
+                    }
+                    define_variable(std::move(minted->value()));
+                    return {};
+                }
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
             }
             
@@ -6399,7 +6488,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
-            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+            JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             script_value result = pop_value();
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
             
@@ -6416,8 +6505,8 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 // the shared kernel into an owner-pinned FIELD reference instead (route-
                 // independence with ref params/returns; Dev ruling 2026-07-12). Access/
                 // removed-field errors surface as-is; the kernel's generic non-lvalue
-                // verdict (computed property, C++-backed field, non-instance receiver)
-                // keeps the decl's own error text below.
+                // verdict (computed script property, non-object receiver) keeps the
+                // decl's own error text below.
                 // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
                 auto resolved = detail::resolve_ref_lvalue(decl->initializer.get(),
                     detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
@@ -6434,22 +6523,22 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
                         "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-                        "subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
-                        "computed properties and C++-backed members are not ref-bindable)");
+                        "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+                        "computed script properties are not ref-bindable)");
                 }
             } else {
                 // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
                     "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-                    "subscript chains like arr[i] or grid[y][x], map entries, and object fields like obj.field; "
-                    "computed properties and C++-backed members are not ref-bindable)");
+                    "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+                    "computed script properties are not ref-bindable)");
             }
         }
     } else {
         // Regular variable declaration
         script_value value = make_value();
         if (decl->initializer) {
-            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+            JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             value = std::move(pop_value());
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
@@ -6587,7 +6676,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // (int d = 4.7 truncates instead of storing a mistagged float payload)
             if (decl->initializer && !(decl->static_init_proof == proof_same_type &&
                                        detail::same_type_payload(value, effective_decl_type.get()))) {
-                auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name);
+                auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name, detail::slot_kind::declaration);
                 if (!enforced) {
                     return enforced.error_value();
                 }
@@ -6636,7 +6725,8 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 checked_result<script_value> interpreter::enforce_type_compatibility(
     script_value value,
     type_info_ptr target_type,
-    std::string_view var_name
+    std::string_view var_name,
+    detail::slot_kind kind
 ) {
     // nullptr target (auto x;) locks to the source type; any (var x) takes anything
     if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
@@ -6676,8 +6766,6 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                 detail::container_boundary_mismatch_text,
                 sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
         }
-        case verdict::reject_class:
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
         case verdict::handle_target:
             // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is (outside the table)
             if (value.type() == target_type->base_type) {
@@ -6685,7 +6773,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
             }
             [[fallthrough]];
         default:
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
+            return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, var_name, {}}, engine_);
     }
 }
 
@@ -6852,7 +6940,8 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
 
 
 // Placeholder implementations for remaining visitors
-checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const replay_point* rs) {
     // math:: language intrinsics (detail/math_intrinsics.hpp): evaluate args, one
     // shared-kernel call - no namespace lookup, no call machinery (KEEP BYTE-PARALLEL
     // with vm_backend::exec_math; parity by the shared kernel).
@@ -6862,8 +6951,18 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             const detail::math_fn fn = detail::math_intrinsic_for_call(member_callee);
             if (fn != detail::math_fn::none && expr->arguments.size() <= 8) {
                 const size_t argc = expr->arguments.size();
-                for (const auto& arg : expr->arguments) {
-                    JAISCRIPT_TRY(dispatch_expr(arg.get()));
+                size_t math_start = 0;
+                if constexpr (Replaying) {
+                    // args evaluated before the yield are re-pushed in order, never re-run
+                    if (rs) { for (const auto& v : rs->partial) push_value(script_value(v)); math_start = rs->partial.size(); }
+                }
+                for (size_t ai = math_start; ai < argc; ++ai) {
+                    auto stacked = [&]() {   // the args already on the stack, in evaluation order (cold: park only)
+                        std::vector<script_value> done;
+                        for (size_t k = 0; k < ai; ++k) done.push_back(valueStack_.peek(ai - 1 - k));
+                        return done;
+                    };
+                    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_call_math, ai, stacked());
                     if (is_unwinding_) {
                         push_value(make_value());
                         return {};
@@ -6958,8 +7057,9 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                     // Evaluate arguments
                     std::vector<script_value> arguments;
                     arguments.reserve(expr->arguments.size());
-                    for (const auto& argExpr : expr->arguments) {
-                        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+                    if constexpr (Replaying) { if (rs) arguments = rs->partial; }
+                    for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
+                        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_call_string, ai, arguments);
                         arguments.emplace_back(std::move(pop_value()));
                         if (is_unwinding_) {
                             push_value(make_value());
@@ -7139,9 +7239,13 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                 // Evaluate arguments (same order/unwind semantics as the generic loop)
                 std::vector<script_value> arguments;
                 arguments.reserve(expr->arguments.size());
-                for (const auto& argExpr : expr->arguments) {
+                // Replay: the receiver and method resolution above are pure (identifier/this
+                // receiver), so they re-run; the args evaluated before the yield are parked
+                if constexpr (Replaying) { if (rs) arguments = rs->partial; }
+                for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
+                    const auto& argExpr = expr->arguments[ai];
                     try {
-                        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+                        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai), expr, rp_call_direct, ai, arguments);
                         arguments.emplace_back(std::move(pop_value()));
                         if (is_unwinding_) {
                             push_value(make_value());
@@ -7193,9 +7297,10 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                         const script_method_dispatch* d = method_val.is_function()
                             ? method_val.as_function().target<script_method_dispatch>() : nullptr;
                         if (!d || d->eng != engine_) {
-                            std::string member_str(member->member);
-                            active_exception_value_ = make_value("Object has no member '" + member_str + "'");
-                            current_exception_ = script_exception("Object has no member '" + member_str + "'", member->location);
+                            const std::string& cls = target.class_name();
+                            std::string text = (cls.empty() ? "object" : cls) + " has no member '" + std::string(member->member) + "'";
+                            active_exception_value_ = make_value(text);
+                            current_exception_ = script_exception(text, member->location);
                             is_unwinding_ = true;
                             push_value(make_value());
                             return {};
@@ -7288,12 +7393,25 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         }
     }
 
-    // Evaluate the callee expression
-    JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
-    script_value callee = pop_value();
-    if (is_unwinding_) {
-        push_value(make_value());
-        return {};
+    // Evaluate the callee expression (a member callee's lookup errors take the call shape).
+    // Replay: partial[0] is the callee resolved BEFORE the yield - the parked callee is the
+    // one invoked, exactly like the vm's pending_callee (callee_first_rebind_in_args).
+    script_value callee;
+    if (parked<Replaying>(rs, 0)) {
+        callee = rs->partial[0];
+    } else {
+        member_callee_lookup_ = expr->callee->get_type() == node_type::member_expr;
+        auto callee_result = eval_child<Replaying>(expr->callee.get(), rs, 0);
+        member_callee_lookup_ = false;
+        if (!callee_result) [[unlikely]] {
+            if (is_yield_signal(callee_result)) park_operands(expr, rp_call_generic, 0, {});
+            return callee_result.error_value();
+        }
+        callee = pop_value();
+        if (is_unwinding_) {
+            push_value(make_value());
+            return {};
+        }
     }
 
     // Handle null-safe method calls: obj?.method() returns null if obj was null
@@ -7307,17 +7425,26 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
     // Check if the callee is a function
     if (!callee.is_function()) {
-        return checked_result<void>(make_error_code(runtime_error_code::not_a_function));  // [ErrorText] Not a function
+        const script_value& callee_value = callee.deref();
+        auto callee_target = resolve_member_target(callee_value);
+        auto text = not_callable_diagnostic(callee_name_symbol(expr->callee.get()), callee_value.type(), base_type_ids_[callee_value.type()],
+                                            callee_target.class_def ? std::string_view(callee_target.class_def->get_name()) : std::string_view{},
+                                            callee_target.class_def ? callee_target.class_def->get_type_id() : 0);
+        return checked_result<void>(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
     }
     
     // Use a local vector for arguments to avoid issues with nested calls
     std::vector<script_value> arguments;
     arguments.reserve(expr->arguments.size());
+    // Replay ordinals: 0 is the callee, argument i is i+1 (partial[0] is the parked callee)
+    if constexpr (Replaying) { if (rs && rs->index >= 1) arguments.assign(rs->partial.begin() + 1, rs->partial.end()); }
 
-    for (const auto& argExpr : expr->arguments) {
+    for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
+        const auto& argExpr = expr->arguments[ai];
         // Evaluate argument with exception handling
         try {
-            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai + 1), expr, rp_call_generic, ai + 1,
+                                  parked_with_head(callee, arguments));
             arguments.emplace_back(std::move(pop_value()));
             if (is_unwinding_) {
                 push_value(make_value());
@@ -7394,7 +7521,11 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     return {};
 }
 
-checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const replay_point* rs) {
+    // Consumed at entry: a nested receiver's own member reads are accesses
+    const bool as_callee = member_callee_lookup_;
+    member_callee_lookup_ = false;
     // Check if this is a static member access (::)
     if (expr->is_static) {
         // For static access, the object should be an identifier (class or namespace name)
@@ -7575,9 +7706,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     }
 
                     // Neither namespace nor class has matching method
-                    return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-                        "No matching overload in namespace '{0}' for {1} arguments",
-                        namespace_id, static_cast<uint64_t>(args.size()));
+                    (void)namespace_id;
+                    return detail::overload_miss(make_error_code(runtime_error_code::not_a_function),
+                        member_id, args.data(), args.size(), eng);
                 };
 
                 push_value(script_value::make_function(namespace_func, engine_));
@@ -7667,16 +7798,15 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return {};
         }
 
-        // Class has no static member
         return checked_result<void>(make_error_code(runtime_error_code::static_member_not_found),
-            "Class '{0}' has no static member '{1}'", name_id, expr->member_id);
+            "class {0} has no static member '{1}'", name_id, expr->member_id);
     }
 
     // Check if this is a super:: member access
     bool is_super_access = expr->object->get_type() == node_type::super_expr;
 
     // Evaluate the object expression
-    JAISCRIPT_TRY(dispatch_expr(expr->object.get()));
+    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->object.get(), rs, 0), expr, rp_operand, 0, {});
     script_value objectValue = pop_value();
     if (is_unwinding_) {
         push_value(make_value());
@@ -7745,9 +7875,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // Look for the method in the parent class (use pre-computed member_id from parser)
         script_value method = parent_def->get_method(expr->member_id);
         if (method.is_null()) {
-            // Parent class has no method
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "Parent class has no method '{0}'", expr->member_id);
+                "parent class {0} has no member '{1}'", parent_def->get_type_id(), expr->member_id);
         }
 
         // Return a bound method that calls the parent's implementation
@@ -7821,9 +7950,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // Set exception state instead of throwing
-            std::string member_str(expr->member);
-            active_exception_value_ = make_value("String has no method '" + member_str + "'");
-            current_exception_ = script_exception("String has no method '" + member_str + "'", expr->location);
+            std::string text = "string has no member '" + std::string(expr->member) + "'";
+            active_exception_value_ = make_value(text);
+            current_exception_ = script_exception(text, expr->location);
             is_unwinding_ = true;
             push_value(make_value());
             return {};
@@ -7848,9 +7977,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // Set exception state instead of throwing
-            std::string member_str(expr->member);
-            active_exception_value_ = make_value("Array has no method '" + member_str + "'");
-            current_exception_ = script_exception("Array has no method '" + member_str + "'", expr->location);
+            std::string text = "array has no member '" + std::string(expr->member) + "'";
+            active_exception_value_ = make_value(text);
+            current_exception_ = script_exception(text, expr->location);
             is_unwinding_ = true;
             push_value(make_value());
             return {};
@@ -7885,7 +8014,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 }
             }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "Map has no method or key '{0}'", expr->member_id);
+                "map has no member or key '{0}'", expr->member_id);
         }
     }
 
@@ -7906,9 +8035,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return {};
         }
         else {
-            // weak_ptr has no method
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "weak_ptr has no method '{0}'", expr->member_id);
+                "weak_ptr has no member '{0}'", expr->member_id);
         }
     }
 
@@ -8022,7 +8150,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
     if (!objectValue.is_object()) {
         if (objectValue.is_null()) {
-            return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get()), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+            return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
         }
         return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
             scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
@@ -8108,10 +8236,10 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
     }
 
-    // Set exception state instead of throwing
-    std::string member_str(expr->member);
-    active_exception_value_ = make_value("Object has no member '" + member_str + "'");
-    current_exception_ = script_exception("Object has no member '" + member_str + "'", expr->location);
+    const std::string& cls = target.class_name();
+    std::string text = (cls.empty() ? "object" : cls) + " has no member '" + std::string(expr->member) + "'";
+    active_exception_value_ = make_value(text);
+    current_exception_ = script_exception(text, expr->location);
     is_unwinding_ = true;
     push_value(make_value());  // Push null for failed member access
     return {};
@@ -8611,20 +8739,23 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // a same-named GLOBAL over the member.
                     script_value* scoped_target = member_scope_.active()
                         ? scoped_env_lookup(var_id) : nullptr;
-                    // A hybrid's C++ property has no cell to alias: [=] and [&] both take the
-                    // getter snapshot (the field snapshot rule)
-                    std::optional<script_value> property_snapshot;
+                    // A hybrid's C++ property follows the field rule: [=] snapshots through
+                    // the getter, [&] shares the member itself / its accessors
+                    // (reference_model.md CPP-MEMBER / PROPERTY)
+                    std::optional<script_value> property_capture;
                     if (!scoped_target && member_scope_.state == detail::member_scope_state::instance &&
                         member_scope_.this_storage) {
                         auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                                  member_scope_.statics, var_id, /*want_methods*/ true);
                         if (member.what == detail::member_probe_hit::kind::cpp_property) {
-                            auto read = detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
-                                                                       member.method_value, member.getter_id, var_id);
+                            auto read = capture_by_ref
+                                ? detail::bind_cpp_property_ref(*member_scope_.this_storage, var_id, engine_, string_symbolizer_)
+                                : detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
+                                                                 member.method_value, member.getter_id, var_id);
                             if (!read) {
                                 return read.error_value();
                             }
-                            property_snapshot = std::move(read.value());
+                            property_capture = std::move(read.value());
                         }
                     }
                     if (scoped_target) {
@@ -8633,8 +8764,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         } else {
                             captureEnv->define(var_id, clone_for_capture(scoped_target->deref(), string_symbolizer_));
                         }
-                    } else if (property_snapshot) {
-                        captureEnv->define(var_id, clone_for_capture(*property_snapshot, string_symbolizer_));
+                    } else if (property_capture) {
+                        captureEnv->define(var_id, capture_by_ref ? std::move(*property_capture)
+                                                                  : clone_for_capture(*property_capture, string_symbolizer_));
                     } else if (!member_scope_.active() && environment_->contains(var_id)) {
                         if (capture_by_ref) {
                             script_value* targetPtr = environment_->get_value_ptr(var_id);
@@ -8861,7 +8993,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     return {};
 }
 
-checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_point* rs) {
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
     // The new_expr contains a type and arguments
 
@@ -8916,7 +9049,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             push_value(script_value::make_empty_weak_ptr(expr->type, engine_));
         } else if (expr->arguments.size() == 1) {
             // One argument - create weak_ptr from object
-            JAISCRIPT_TRY(dispatch_expr(expr->arguments[0].get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[0].get(), rs, 0), expr, rp_new_weak, 0, {});
             script_value obj = pop_value();
 
             // Handle null objects
@@ -9050,8 +9183,9 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
         // Evaluate all arguments
         std::vector<script_value> args;
-        for (const auto& argExpr : expr->arguments) {
-            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+        if constexpr (Replaying) { if (rs) args = rs->partial; }
+        for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(std::move(pop_value()));
         }
 
@@ -9082,8 +9216,9 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
     // Evaluate all arguments
     std::vector<script_value> args;
-    for (const auto& argExpr : expr->arguments) {
-        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+    if constexpr (Replaying) { if (rs) args = rs->partial; }
+    for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(std::move(pop_value()));
     }
 
@@ -9107,10 +9242,13 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         "No constructor found for class '{0}'", expr->type->id);
 }
 
-checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
-    // Evaluate the condition
-    JAISCRIPT_TRY(dispatch_expr(expr->condition.get()));
-    script_value conditionValue = pop_value();
+template<bool Replaying>
+checked_result<void> interpreter::visit_ternary_expr_t(ternary_expr* expr, const replay_point* rs) {
+    // Evaluate the condition (a replay of the chosen arm carries it as partial[0])
+    if (!parked<Replaying>(rs, 0)) {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->condition.get(), rs, 0), expr, rp_operand, 0, {});
+    }
+    script_value conditionValue = parked<Replaying>(rs, 0) ? rs->partial[0] : pop_value();
 
     // A script throw unwinding out of the condition leaves a null PLACEHOLDER, not a
     // bool: the unchecked read below would deref get_if<BOOL>()'s nullptr (fuzz seed
@@ -9130,19 +9268,25 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
 
     // Evaluate only the selected branch (short-circuit evaluation)
     if (conditionIsTruthy) {
-        JAISCRIPT_TRY(dispatch_expr(expr->then_expression.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->then_expression.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{conditionValue}));
     } else {
-        JAISCRIPT_TRY(dispatch_expr(expr->else_expression.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->else_expression.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{conditionValue}));
     }
     return {};
 }
 
-checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_array_literal_expr_t(array_literal_expr* expr, const replay_point* rs) {
     // Create array script_value with no element type constraint
     // Untyped array literals (e.g., [1, 2, 3]) allow any element type
     // The type will be set by the variable declaration if one exists (e.g., array<int> arr = [...])
     type_info_ptr element_type = nullptr;  // No constraint - allows any type
     script_value arrayValue = script_value::make_array(element_type, engine_);
+    size_t element_start = 0;
+    if constexpr (Replaying) {
+        // the literal under construction rides the frame as partial[0]
+        if (rs) { arrayValue = rs->partial[0]; element_start = rs->index; }
+    }
 
     // Get the internal vector to populate
     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
@@ -9158,8 +9302,8 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
     // null for them). Copy out through a temp: assigning deref() straight into elem
     // destroys the holder that owns the deref target. (KEEP BYTE-PARALLEL with
     // vm_backend::exec_array)
-    for (const auto& element : expr->elements) {
-        JAISCRIPT_TRY(dispatch_expr(element.get()));
+    for (size_t ei = element_start; ei < expr->elements.size(); ++ei) {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->elements[ei].get(), rs, ei), expr, rp_operand, ei, (std::vector<script_value>{arrayValue}));
         script_value elem = pop_value();
         if (elem.is_reference()) [[unlikely]] {
             script_value derefed = elem.deref();
@@ -9175,25 +9319,42 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
     return {};
 }
 
-checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_map_literal_expr_t(map_literal_expr* expr, const replay_point* rs) {
     // Create map script_value with no key/value type constraints
     // Untyped map literals (e.g., {"a": 1}) allow any key/value types
     // The type will be set by the variable declaration if one exists (e.g., map<string,int> m = {...})
     type_info_ptr keyType = nullptr;    // No constraint - allows any key type
     type_info_ptr valueType = nullptr;  // No constraint - allows any value type
     script_value mapValue = script_value::make_map(keyType, valueType, engine_);
+    // Replay: the map under construction rides the frame as partial[0]; a suspended value
+    // expression also parks its evaluated key as partial[1] (ordinals: 2i key, 2i+1 value)
+    size_t entry_start = 0;
+    std::optional<script_value> parked_key;
+    if constexpr (Replaying) {
+        if (rs) {
+            mapValue = rs->partial[0];
+            entry_start = rs->index / 2;
+            if (rs->index % 2 == 1) parked_key = rs->partial[1];
+        }
+    }
 
     // Get the internal map to populate
     auto& map = const_cast<script_map&>(mapValue.as_map());
 
     // Evaluate each key-value pair and add to map
-    for (const auto& entry : expr->entries) {
+    for (size_t ei = entry_start; ei < expr->entries.size(); ++ei) {
+        const auto& entry = expr->entries[ei];
         // Evaluate key
-        JAISCRIPT_TRY(dispatch_expr(entry.first.get()));
-        script_value key = pop_value();
+        bool key_parked = false;
+        if constexpr (Replaying) { key_parked = parked_key.has_value() && ei == entry_start; }
+        if (!key_parked) {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(entry.first.get(), rs, 2 * ei), expr, rp_operand, 2 * ei, (std::vector<script_value>{mapValue}));
+        }
+        script_value key = key_parked ? std::move(*parked_key) : pop_value();
 
         // Evaluate value
-        JAISCRIPT_TRY(dispatch_expr(entry.second.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(entry.second.get(), rs, 2 * ei + 1), expr, rp_operand, 2 * ei + 1, (std::vector<script_value>{mapValue, key}));
         script_value value = pop_value();
 
         // All-detach ruling (2026-07, #12): literal construction is a store boundary -
@@ -9271,7 +9432,8 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
 // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): operand shape, class verdict and
 // class-target outcomes come from detail/cast_kernel.hpp; primitive/container targets
 // convert through the assignment table. KEEP BYTE-PARALLEL with vm_backend::exec_cast.
-checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const replay_point* rs) {
     script_value operand;
     switch (detail::cast_operand_mode_of(expr)) {
         case detail::cast_operand_mode::identifier: {
@@ -9280,7 +9442,15 @@ checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) {
             const uint64_t targetSymbolId = string_symbolizer_->intern(ident->name);
             script_value* targetPtr = resolve_local_or_env(ident->slot_index, targetSymbolId, ident->global_qualified);
             if (!targetPtr) {
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
+                auto minted = bind_bare_cpp_property_ref(targetSymbolId, ident->global_qualified);
+                if (!minted) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
+                }
+                if (!*minted) {
+                    return minted->error_value();
+                }
+                operand = std::move(minted->value());
+                break;
             }
             if (targetPtr->is_reference()) {
                 auto aliased = decl_ref_alias(*targetPtr, engine_);
@@ -9307,7 +9477,7 @@ checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) {
             break;
         }
         case detail::cast_operand_mode::value:
-            JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->operand.get(), rs, 0), expr, rp_operand, 0, {});
             operand = pop_value();
             if (is_unwinding_) {
                 push_value(make_value());
@@ -9362,10 +9532,11 @@ checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) {
     return {};
 }
 
-checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const replay_point* rs) {
     if (expr->value) {
         // Evaluate the expression to throw
-        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         script_value val = pop_value();
 
         // Store the exception value and convert to string for exception message
@@ -9385,7 +9556,8 @@ checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
     return {};
 }
 
-checked_result<void> interpreter::visit_yield_expr(yield_expr* expr) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const replay_point* rs) {
     if (!active_coroutine_) {
         return checked_result<void>(make_error_code(runtime_error_code::evaluation_failed),
             "yield used outside of coroutine");
@@ -9394,37 +9566,43 @@ checked_result<void> interpreter::visit_yield_expr(yield_expr* expr) {
     // Evaluate the yield value (if any)
     script_value value = make_value();
     if (expr->value) {
-        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         value = pop_value();
     }
 
-    // Always yield - store value and set the request flag
+    // Publish the value and suspend HERE: the signal unwinds the enclosing expression (each
+    // visitor parks its operands), the owning statement consumes it, and the resume
+    // substitutes null for this yield (vm exec_yield parity)
     active_coroutine_->do_yield(std::move(value));
     hasYieldRequest_ = true;
-
-    // Push null onto value stack (yield is an expression, result on resume is null)
-    push_value(make_value());
-    return {};
+    return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
 }
 
 checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     bool is_true;
     bool resuming = false;
+    bool resume_cond = false;
 
     // Check if we're resuming into a branch from a coroutine yield
     if (active_coroutine_) {
         auto& coro_state = coroutine_state(*active_coroutine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
+            resume_cond = cont->phase == rp_cond;   // suspended in the condition itself
             is_true = (cont->index == 0);  // 0=then branch, 1=else branch
             coro_state.pop_continuation();
-            resuming = true;
+            resuming = !resume_cond;
         }
     }
 
     if (!resuming) {
         // Evaluate the condition
-        JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
+        auto cond_result = resume_cond ? replay_expression(stmt->condition.get())
+                                       : dispatch_expr(stmt->condition.get());
+        if (!cond_result) [[unlikely]] {
+            if (is_yield_signal(cond_result)) { park_operands(stmt, rp_cond, 0, {}); return {}; }
+            return cond_result.error_value();
+        }
         script_value conditionValue = pop_value();
 
         // Throw unwinding out of the condition: the popped value is a null
@@ -9442,16 +9620,16 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
         }
     }
 
-    // Execute appropriate branch based on truthiness
-    if (is_true) {
-        JAISCRIPT_TRY(dispatch_stmt(stmt->then_statement.get()));
+    // Execute appropriate branch based on truthiness. On yield the branch owns the frames;
+    // a brace-less branch that completed AT the yield left none, and the if is done too.
+    statement* branch = is_true ? stmt->then_statement.get() : stmt->else_statement.get();
+    if (branch) {
+        JAISCRIPT_TRY(resuming ? dispatch_stmt_resuming(branch) : dispatch_stmt(branch));
         if (hasYieldRequest_ && active_coroutine_) {
-            coroutine_state(*active_coroutine_).push_continuation(stmt, 0);  // then branch
-        }
-    } else if (stmt->else_statement) {
-        JAISCRIPT_TRY(dispatch_stmt(stmt->else_statement.get()));
-        if (hasYieldRequest_ && active_coroutine_) {
-            coroutine_state(*active_coroutine_).push_continuation(stmt, 1);  // else branch
+            auto& coro_state = coroutine_state(*active_coroutine_);
+            if (coro_state.has_continuations()) {
+                coro_state.push_continuation(stmt, is_true ? 0 : 1);
+            }
         }
     }
     return {};
@@ -9463,11 +9641,16 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 
     // Check if we're resuming into this while loop from a coroutine yield
     bool skip_first_condition = false;
+    bool replay_condition = false;
+    bool resume_body = false;
     if (active_coroutine_) {
         auto& coro_state = coroutine_state(*active_coroutine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
-            skip_first_condition = true;
+            replay_condition = cont->phase == rp_cond;   // suspended in the condition itself
+            // a brace-less body that completed at the yield: the next step is the condition
+            skip_first_condition = cont->phase == rp_none;
+            resume_body = skip_first_condition;
             coro_state.pop_continuation();
         }
     }
@@ -9481,7 +9664,13 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
             skip_first_condition = false;  // Only skip once
         } else {
             // Evaluate the condition
-            JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
+            auto cond_result = replay_condition ? replay_expression(stmt->condition.get())
+                                                : dispatch_expr(stmt->condition.get());
+            replay_condition = false;
+            if (!cond_result) [[unlikely]] {
+                if (is_yield_signal(cond_result)) { park_operands(stmt, rp_cond, 0, {}); return {}; }
+                return cond_result.error_value();
+            }
 
             // Throw unwinding out of the condition: placeholder on the stack, not a
             // bool (fuzz seed 285 AV) - stop the loop, the unwind propagates
@@ -9508,7 +9697,8 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         }
 
         // Execute the loop body
-        auto result = dispatch_stmt(stmt->body.get());
+        auto result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
+        resume_body = false;
         if (!result) return result;
 
         // A script `throw` sets is_unwinding_ and the body short-circuits
@@ -9537,7 +9727,9 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         // On yield: record continuation and return
         if (hasYieldRequest_) {
             if (active_coroutine_) {
-                coroutine_state(*active_coroutine_).push_continuation(stmt, 0);
+                auto& coro_state = coroutine_state(*active_coroutine_);
+                if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0);
+                else coro_state.push_replay(stmt, rp_body_done, 0);
             }
             return {};
         }
@@ -9943,11 +10135,13 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Check if we're resuming into this for-loop from a coroutine yield
     bool resuming_loop = false;
+    uint32_t resume_phase = rp_none;
     if (active_coroutine_) {
         auto& coro_state = coroutine_state(*active_coroutine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             resuming_loop = true;
+            resume_phase = cont->phase;
             // Restore the for-loop's environment (includes loop variable scope)
             if (cont->saved_env) {
                 environment_ = cont->saved_env;
@@ -9977,22 +10171,56 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 environment_ = previous;
                 return result;
             }
+            if (hasYieldRequest_) [[unlikely]] {
+                // the initializer suspended: its own frames are parked, keep the loop scope
+                if (active_coroutine_) {
+                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_init, 0, {}, environment_);
+                }
+                environment_ = previous;
+                return {};
+            }
+        }
+    } else if (resume_phase == rp_init && stmt->initializer) {
+        auto result = dispatch_decl_resuming(stmt->initializer.get());
+        if (!result) {
+            environment_ = previous;
+            return result;
+        }
+        if (hasYieldRequest_) [[unlikely]] {
+            if (active_coroutine_) {
+                coroutine_state(*active_coroutine_).push_replay(stmt, rp_init, 0, {}, environment_);
+            }
+            environment_ = previous;
+            return {};
         }
     }
 
     // Error capture for lambdas (avoid throwing from hot path)
     std::optional<checked_result<void>> error;
+    // A condition/update suspension keeps the loop scope alive for the resume
+    bool park_loop_env = false;
 
     // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
     // This allows us to skip is_truthy() type dispatch entirely
     const bool condition_returns_bool = stmt->condition && expression_returns_bool(stmt->condition.get());
 
     // Lambda helpers (ChaiScript-style) for cleaner, more optimizable code
+    bool replay_condition = resume_phase == rp_cond;
+    bool replay_update = resume_phase == rp_update;
     auto eval_condition = [&]() -> bool {
         if (!stmt->condition) return true;  // No condition = infinite loop
 
-        auto result = dispatch_expr(stmt->condition.get());
+        auto result = replay_condition ? replay_expression(stmt->condition.get())
+                                       : dispatch_expr(stmt->condition.get());
+        replay_condition = false;
         if (!result) {
+            if (is_yield_signal(result)) {
+                if (active_coroutine_) {
+                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_cond, 0, {}, environment_);
+                }
+                park_loop_env = true;
+                return false;
+            }
             error = result;  // Capture error, signal loop termination
             return false;
         }
@@ -10023,8 +10251,17 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     auto eval_update = [&]() {
         if (!stmt->update) return;
 
-        auto result = dispatch_expr(stmt->update.get());
+        auto result = replay_update ? replay_expression(stmt->update.get())
+                                    : dispatch_expr(stmt->update.get());
+        replay_update = false;
         if (!result) {
+            if (is_yield_signal(result)) {
+                if (active_coroutine_) {
+                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_update, 0, {}, environment_);
+                }
+                park_loop_env = true;
+                return;
+            }
             error = result;  // Capture error, loop will terminate on next condition check
             return;
         }
@@ -10035,8 +10272,19 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         }
     };
 
+    // Resuming inside the update (or after a brace-less body that completed at the yield):
+    // finish the update before this iteration's condition
+    if (replay_update || resume_phase == rp_body_done) {
+        eval_update();
+        if (park_loop_env || error) {
+            environment_ = previous;
+            return error ? *error : checked_result<void>{};
+        }
+    }
+
     // Skip first condition if resuming (we were mid-iteration when yield happened)
-    bool skip_condition = resuming_loop;
+    bool skip_condition = resuming_loop && resume_phase == rp_none;
+    bool resume_body = skip_condition;
 
     // Native C++ for-loop structure
     while (true) {
@@ -10053,10 +10301,11 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         } else {
             if (!eval_condition()) break;
         }
-        if (error) break;
+        if (error || park_loop_env) break;
 
         // Execute the loop body
-        auto result = dispatch_stmt(stmt->body.get());
+        auto result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
+        resume_body = false;
         if (!result) {
             if (owns_scope) {
                 release_environment(environment_);
@@ -10087,7 +10336,9 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Save the current environment (for-loop scope or deeper) so we can
                 // restore it on resume. For-loop variables are environment-based
                 // (not slot-based) and must be accessible.
-                coroutine_state(*active_coroutine_).push_continuation(stmt, 0, environment_);
+                auto& coro_state = coroutine_state(*active_coroutine_);
+                if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0, environment_);
+                else coro_state.push_replay(stmt, rp_body_done, 0, {}, environment_);
             }
             // Restore environment_ to previous so parent scope is correct
             environment_ = previous;
@@ -10101,8 +10352,9 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         eval_update();
     }
 
-    // Release the loop environment to destroy all loop variables (only if we created it)
-    if (owns_scope) {
+    // Release the loop environment to destroy all loop variables (only if we created it).
+    // A parked condition/update keeps it: the resume runs in that same scope.
+    if (owns_scope && !park_loop_env) {
         release_environment(environment_);
     }
 
@@ -10129,23 +10381,33 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     // Coroutine resume replay: continue the SUSPENDED iteration - restoring the
     // evaluated container and position - instead of re-evaluating the container
     // (which would re-mint an inner coroutine or restart the sequence).
-    bool replaying = false;
+    bool replaying = false;          // mid-iteration: the loop variable is already bound
+    bool have_container = false;     // the evaluated container rides the frame
+    bool replay_container = false;
     size_t resume_index = 0;
     script_value container = make_value();
     if (active_coroutine_) {
         auto& coro_state = coroutine_state(*active_coroutine_);
         if (auto* cont = coro_state.peek_continuation(stmt)) {
+            replay_container = cont->phase == rp_container;   // suspended in the source expression
             if (cont->saved_container) {
-                replaying = true;
+                have_container = true;
+                // a brace-less body that completed at the yield: bind the next element normally
+                replaying = cont->phase != rp_body_done;
                 resume_index = cont->index;
                 container = *cont->saved_container;
             }
             coro_state.pop_continuation();
         }
     }
-    if (!replaying) {
+    if (!have_container) {
         // Evaluate the container expression
-        JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
+        auto container_result = replay_container ? replay_expression(stmt->container.get())
+                                                 : dispatch_expr(stmt->container.get());
+        if (!container_result) [[unlikely]] {
+            if (is_yield_signal(container_result)) { park_operands(stmt, rp_container, 0, {}); return {}; }
+            return container_result.error_value();
+        }
         container = pop_value();
         // A script exception here (e.g. a reload-removed method as the container) must
         // unwind the statement with the ORIGINAL exception, not fall into the
@@ -10203,6 +10465,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     return execution_limit_failure();
                 }
 
+                const bool resume_body = replaying;
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -10234,7 +10497,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 // Execute loop body
-                auto body_result = dispatch_stmt(stmt->body.get());
+                auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
                 if (!body_result) {
                     pop_scope();
                     return body_result;
@@ -10265,7 +10528,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 // iteration instead of re-evaluating the container from scratch.
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        coroutine_state(*active_coroutine_).push_continuation(stmt, i, nullptr, container);
+                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        if (coro_state.has_continuations()) coro_state.push_continuation(stmt, i, nullptr, container);
+                        else coro_state.push_replay(stmt, rp_body_done, i + 1, {}, nullptr, container);
                     }
                     return {};
                 }
@@ -10320,6 +10585,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     return execution_limit_failure();
                 }
 
+                const bool resume_body = replaying;
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -10349,7 +10615,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 // Execute loop body
-                auto body_result = dispatch_stmt(stmt->body.get());
+                auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
                 if (!body_result) {
                     pop_scope();
                     return body_result;
@@ -10378,7 +10644,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 // On yield: don't pop scope, let environment stay for coroutine to save
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        coroutine_state(*active_coroutine_).push_continuation(stmt, entry_index, nullptr, container);
+                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        if (coro_state.has_continuations()) coro_state.push_continuation(stmt, entry_index, nullptr, container);
+                        else coro_state.push_replay(stmt, rp_body_done, entry_index + 1, {}, nullptr, container);
                     }
                     return {};
                 }
@@ -10405,6 +10673,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
 
             while (replaying || !handle->done()) {
+                const bool resume_body = replaying;
                 if (replaying) {
                     // First replayed iteration: the current element is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -10420,7 +10689,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     *loop_var_ptr = std::move(resume_result.value());
                 }
 
-                auto body_result = dispatch_stmt(stmt->body.get());
+                auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
                 if (!body_result) {
                     pop_scope();
                     return body_result;
@@ -10432,7 +10701,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (hasReturnValue_) break;
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        coroutine_state(*active_coroutine_).push_continuation(stmt, 0, nullptr, container);
+                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0, nullptr, container);
+                        else coro_state.push_replay(stmt, rp_body_done, 0, {}, nullptr, container);
                     }
                     return {};
                 }
@@ -10451,7 +10722,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     return {};
 }
 
-checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
+template<bool Replaying>
+checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
+    std::optional<script_value> out;
     if (stmt->value) {
         if (stmt->binds_reference) {
             // Ref-return producer: bind the operand as a reference instead of
@@ -10470,39 +10743,81 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
                     storage = environment_->get_value_ptr(ident->symbol_id);
                 }
                 if (!storage) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Cannot take reference of undefined variable", ident->symbol_id);
+                    // A hybrid's bare C++ property (KEEP BYTE-PARALLEL with the vm's exec_ref_return_bind)
+                    if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, false)) {
+                        if (!*minted) {
+                            return minted->error_value();
+                        }
+                        out.emplace(std::move(minted->value()));
+                    } else {
+                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                            "Cannot take reference of undefined variable", ident->symbol_id);
+                    }
+                } else {
+                    out.emplace(share_boxed_env_storage(*storage, engine_));
                 }
-                returnValue_ = share_boxed_env_storage(*storage, engine_);
-                hasReturnValue_ = true;
-                return_proven_ = false;
-                return {};
-            }
-            if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
+            } else if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
                 auto resolved = detail::resolve_ref_lvalue(stmt->value.get(),
                     detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
                     environment_.get(), engine_, string_symbolizer_);
                 if (!resolved) {
                     return resolved.error_value();
                 }
-                returnValue_ = std::move(resolved.value());
-                hasReturnValue_ = true;
-                return_proven_ = false;
-                return {};
+                out.emplace(std::move(resolved.value()));
             }
             // Fall through: calls that already yield a reference pass; anything else
-            // rejects at the call_function epilogue's ref-return branch
+            // rejects in the ref-return conversion below
         }
-        // Evaluate the return expression
-        JAISCRIPT_TRY(dispatch_expr(stmt->value.get()));
-        returnValue_ = std::move(pop_value());
+        if (!out) {
+            JAISCRIPT_TRY_ROOT(stmt, stmt->value.get());
+            out.emplace(pop_value());
+        }
     } else {
-        // Return null if no expression
-        returnValue_ = make_value();
+        out.emplace(make_value());
     }
 
+    if (is_unwinding_) [[unlikely]] {
+        // The operand threw: the return never completes (vm parity - op_return does not
+        // run); the flag unwinds the body and a catch resumes past the statement
+        return {};
+    }
+
+    // The typed-return conversion is part of the statement (C++ semantics): it runs here,
+    // inside the callee's try regions, so a catch around the `return` sees its failure.
+    // KEEP BYTE-PARALLEL with the vm's convert_return_at_site.
+    if (!call_stack_.empty()) {
+        if (const script_defined_function* fn = call_stack_.back().function) {
+            const auto conv = detail::return_conv_of(*fn);
+            if (conv == detail::return_conv::ref) {
+                auto passed = detail::ref_return_pass_through(std::move(*out), fn->return_type, string_symbolizer_);
+                if (!passed) {
+                    return passed.error_value();
+                }
+                out = std::move(passed.value());
+            } else if (conv != detail::return_conv::none) {
+                if (out->is_reference()) {
+                    *out = out->deref();
+                }
+                // A storage-matching primitive or a proven same-type payload is the identity (I-R1)
+                if (!detail::return_conv_identity(conv, *out) &&
+                    !(stmt->value && stmt->static_return_proof == proof_same_type &&
+                      detail::same_type_payload(*out, fn->return_type.get()))) {
+                    auto converted = try_convert_for_parameter(*out, fn->return_type,
+                        detail::slot_site{detail::slot_kind::return_value, {}, fn->name});
+                    if (!converted) {
+                        return converted.error_value();
+                    }
+                    if (is_unwinding_) [[unlikely]] {
+                        return {};   // a converting ctor / to_X() threw: the throw wins
+                    }
+                    out = std::move(converted.value());
+                }
+            }
+        }
+    }
+
+    returnValue_ = std::move(*out);
     hasReturnValue_ = true;
-    return_proven_ = stmt->value && stmt->static_return_proof == proof_same_type;
     return {};
 }
 
@@ -10523,17 +10838,39 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     auto saved_exception_value = active_exception_value_;
     auto saved_catch_var_id = current_catch_var_id_;
 
+    // Coroutine resume inside the CATCH block: re-enter the catch with its exception
+    // restored - the try block already ran and must not run again
+    bool resuming_catch = false;
+    if (active_coroutine_) {
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        if (auto* cont = coro_state.peek_continuation(stmt)) {
+            if (cont->phase == rp_catch) {
+                resuming_catch = true;
+                active_exception_value_ = cont->saved_container ? *cont->saved_container : make_value();
+                current_exception_ = script_exception(active_exception_value_->to_string(), stmt->location);
+            }
+            coro_state.pop_continuation();
+        }
+    }
+
     // Reset state for try block
     // Don't reset exception state if we're in a catch block (allows re-throw)
-    if (current_catch_var_id_ == 0) {
-        current_exception_.reset();
-        active_exception_value_ = make_value();
+    if (!resuming_catch) {
+        if (current_catch_var_id_ == 0) {
+            current_exception_.reset();
+            active_exception_value_ = make_value();
+        }
+        is_unwinding_ = false; trace_captured_ = false;
+        current_catch_var_id_ = 0;
     }
-    is_unwinding_ = false; trace_captured_ = false;
-    current_catch_var_id_ = 0;
 
-    // Execute try block
-    auto try_result = dispatch_stmt(stmt->try_block.get());
+    // Execute try block (a catch resume skips it: it completed before the suspension)
+    auto try_result = resuming_catch ? checked_result<void>{} : dispatch_stmt(stmt->try_block.get());
+    if (!resuming_catch && hasYieldRequest_) [[unlikely]] {
+        // The try block suspended: its own frames carry the position, this statement adds none
+        current_catch_var_id_ = saved_catch_var_id;
+        return {};
+    }
 
     // Terminal errors (budget overrun, escalated memory cap) can NEVER be caught from
     // script: restore the catch-var and let the failure keep unwinding to the host
@@ -10547,7 +10884,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     }
 
     // Check if an error occurred (either checked_result error or exception unwinding)
-    bool caught_error = false;
+    bool caught_error = resuming_catch;
 
     if (!try_result) {
         // Checked_result error - treat as catchable exception
@@ -10570,11 +10907,23 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         }
 
         // Execute catch block
-        auto catch_result = dispatch_stmt(stmt->catch_block.get());
+        auto catch_result = resuming_catch ? dispatch_stmt_resuming(stmt->catch_block.get())
+                                           : dispatch_stmt(stmt->catch_block.get());
         // Propagate errors from catch block
         if (!catch_result) {
             current_catch_var_id_ = saved_catch_var_id;
             return catch_result;
+        }
+
+        // The catch suspended: park the caught value so the resume re-enters the catch
+        // instead of re-running the try block
+        if (hasYieldRequest_) [[unlikely]] {
+            if (active_coroutine_) {
+                coroutine_state(*active_coroutine_).push_replay(stmt, rp_catch, 0, {}, nullptr,
+                    active_exception_value_ ? *active_exception_value_ : make_value());
+            }
+            current_catch_var_id_ = saved_catch_var_id;
+            return {};
         }
 
         // Clear catch variable
@@ -10603,9 +10952,34 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
+    // Coroutine resume: re-enter the matched body (or the suspended condition / case value)
+    // instead of re-evaluating the condition and the case values (each runs once)
+    uint32_t resume_phase = rp_none;
+    size_t resume_case = 0;
+    script_value switch_value;
+    std::shared_ptr<environment> resumed_case_env;
+    if (active_coroutine_) {
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        if (auto* cont = coro_state.peek_continuation(stmt)) {
+            resume_phase = cont->phase;
+            resume_case = cont->index;
+            if (!cont->partial.empty()) switch_value = cont->partial[0];
+            resumed_case_env = cont->saved_env;
+            coro_state.pop_continuation();
+        }
+    }
+
     // Evaluate the switch condition
-    JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
-    script_value switch_value = pop_value();
+    if (resume_phase == rp_none || resume_phase == rp_cond) {
+        auto cond_result = resume_phase == rp_cond ? replay_expression(stmt->condition.get())
+                                                   : dispatch_expr(stmt->condition.get());
+        if (!cond_result) [[unlikely]] {
+            if (is_yield_signal(cond_result)) { park_operands(stmt, rp_cond, 0, {}); return {}; }
+            return cond_result.error_value();
+        }
+        switch_value = pop_value();
+        resume_phase = rp_none;
+    }
 
     // Save and set switch state
     bool old_in_switch = in_switch_;
@@ -10617,24 +10991,39 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
         bool matched = false;
         bool executed_case = false;
 
-        // Check each case
-        for (const auto& case_stmt : stmt->cases) {
-            // Evaluate case value
-            auto result = dispatch_expr(case_stmt->value.get());
-            if (!result) {
-                in_switch_ = old_in_switch;
-                should_fallthrough_ = old_should_fallthrough;
-                return result;
-            }
-            script_value case_value = pop_value();
-
-            // Check if values match using operator==
+        // Check each case. A resume into a case body enters it directly: neither the
+        // condition nor any case value is evaluated a second time.
+        const bool resuming_body = resume_phase == rp_case_body;
+        const size_t case_start = (resume_phase == rp_default_body) ? stmt->cases.size()
+                                : (resume_phase == rp_none) ? 0 : resume_case;
+        for (size_t case_idx = case_start; case_idx < stmt->cases.size(); ++case_idx) {
+            const auto& case_stmt = stmt->cases[case_idx];
             bool case_matches = false;
-            try {
-                case_matches = (switch_value == case_value);
-            } catch (const std::exception&) {
-                // If comparison fails, treat as non-match
-                case_matches = false;
+            if (resuming_body && case_idx == resume_case) {
+                case_matches = true;   // the suspended case: straight back into its body
+            } else {
+                // Evaluate case value
+                auto result = (resume_phase == rp_case_value && case_idx == resume_case)
+                    ? replay_expression(case_stmt->value.get())
+                    : dispatch_expr(case_stmt->value.get());
+                if (!result) {
+                    in_switch_ = old_in_switch;
+                    should_fallthrough_ = old_should_fallthrough;
+                    if (is_yield_signal(result)) {
+                        park_operands(stmt, rp_case_value, case_idx, {switch_value});
+                        return {};
+                    }
+                    return result;
+                }
+                script_value case_value = pop_value();
+
+                // Check if values match using operator==
+                try {
+                    case_matches = (switch_value == case_value);
+                } catch (const std::exception&) {
+                    // If comparison fails, treat as non-match
+                    case_matches = false;
+                }
             }
 
             // Execute case if it matches OR if we're falling through from a previous case
@@ -10645,9 +11034,11 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 // Reset fallthrough flag for this case (will be set again if case contains fallthrough statement)
                 should_fallthrough_ = false;
 
-                // Create a new scope for the case body (like an if statement)
+                // Create a new scope for the case body (like an if statement); a resume
+                // re-enters the scope its suspension parked
                 auto previous = environment_;
-                auto case_env = get_pooled_environment(environment_);  // Use pool!
+                auto case_env = (resuming_body && case_idx == resume_case && resumed_case_env)
+                    ? resumed_case_env : get_pooled_environment(environment_);  // Use pool!
                 environment_ = case_env;
 
                 try {
@@ -10663,9 +11054,16 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                     // Release the case scope (runs case-local destructors) and restore.
                     // On yield the scope must survive for coroutine resume — skip the release.
-                    if (!hasYieldRequest_) {
-                        release_environment(case_env);
+                    if (hasYieldRequest_) {
+                        if (active_coroutine_) {
+                            coroutine_state(*active_coroutine_).push_replay(stmt, rp_case_body, case_idx, {switch_value}, case_env);
+                        }
+                        environment_ = previous;
+                        in_switch_ = old_in_switch;
+                        should_fallthrough_ = old_should_fallthrough;
+                        return {};
                     }
+                    release_environment(case_env);
                     environment_ = previous;
 
                     // An explicit `break;` inside a case terminates the switch
@@ -10700,7 +11098,8 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
         if ((!matched || (executed_case && should_fallthrough_)) && stmt->default_case) {
             // Create a new scope for the default body
             auto previous = environment_;
-            auto default_env = get_pooled_environment(environment_);  // Use pool!
+            auto default_env = (resume_phase == rp_default_body && resumed_case_env)
+                ? resumed_case_env : get_pooled_environment(environment_);  // Use pool!
             environment_ = default_env;
 
             try {
@@ -10715,9 +11114,16 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                 // Release the default scope (runs its destructors) and restore.
                 // On yield the scope must survive for coroutine resume — skip the release.
-                if (!hasYieldRequest_) {
-                    release_environment(default_env);
+                if (hasYieldRequest_) {
+                    if (active_coroutine_) {
+                        coroutine_state(*active_coroutine_).push_replay(stmt, rp_default_body, 0, {switch_value}, default_env);
+                    }
+                    environment_ = previous;
+                    in_switch_ = old_in_switch;
+                    should_fallthrough_ = old_should_fallthrough;
+                    return {};
                 }
+                release_environment(default_env);
                 environment_ = previous;
 
                 // Consume an explicit `break;` in default so it does not leak to
@@ -10742,11 +11148,23 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
     return {};
 }
 
-checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
-    // Execute all statements in the case body
-    // Note: The scope is created by visit_switch_stmt when it decides to execute this case
-    for (const auto& s : stmt->body) {
-        auto result = dispatch_stmt(s.get());
+// Case/default bodies: statement lists in the scope visit_switch_stmt created; a yield
+// records the statement index exactly like a block (re-enter when an inner frame exists,
+// skip a completed statement otherwise)
+checked_result<void> interpreter::run_case_body(ast_node* self, const std::vector<statement_ptr>& body) {
+    size_t start_index = 0;
+    bool resume_entry = false;
+    if (active_coroutine_) {
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        if (auto* cont = coro_state.peek_continuation(self)) {
+            start_index = cont->index;
+            coro_state.pop_continuation();
+            resume_entry = true;
+        }
+    }
+    for (size_t i = start_index; i < body.size(); ++i) {
+        auto result = resume_entry ? dispatch_stmt_resuming(body[i].get()) : dispatch_stmt(body[i].get());
+        resume_entry = false;
         if (!result) return result;
 
         // Stop the case body on return, exception unwind, OR a break/continue request:
@@ -10755,23 +11173,23 @@ checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
         if (hasReturnValue_ || is_unwinding_ || hasBreakRequest_ || hasContinueRequest_) {
             break;
         }
+        if (hasYieldRequest_) {
+            if (active_coroutine_) {
+                auto& coro_state = coroutine_state(*active_coroutine_);
+                coro_state.push_continuation(self, coro_state.has_continuations() ? i : i + 1);
+            }
+            return {};
+        }
     }
     return {};
 }
 
-checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
-    // Execute all statements in the default body
-    // Note: The scope is created by visit_switch_stmt when it decides to execute the default
-    for (const auto& s : stmt->body) {
-        auto result = dispatch_stmt(s.get());
-        if (!result) return result;
+checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
+    return run_case_body(stmt, stmt->body);
+}
 
-        // See visit_case_stmt: stop on break/continue as well as return/unwind.
-        if (hasReturnValue_ || is_unwinding_ || hasBreakRequest_ || hasContinueRequest_) {
-            break;
-        }
-    }
-    return {};
+checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
+    return run_case_body(stmt, stmt->body);
 }
 
 checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt) {
@@ -11174,7 +11592,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     if (default_val.is_null()) {
                         default_val.set_type_info(var_decl->type);
                     } else {
-                        auto converted = detail::field_store_convert(default_val, var_decl->type, engine_);
+                        auto converted = detail::field_store_convert(default_val, var_decl->type, engine_, field_id, class_def.get(), true);
                         if (!converted) {
                             return converted.error_value();
                         }
@@ -11729,10 +12147,12 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
     return {};
 }
 
-checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) {
-    // Evaluate the expression and leave the result on the stack
-    // This allows top-level expressions to return values
-    return dispatch_expr(decl->expression.get());
+// The block-level statement form (the parser wraps every `expr;` inside a block as an
+// expression_decl): the value stays on the stack for a top-level implicit return
+template<bool Replaying>
+checked_result<void> interpreter::visit_expression_decl_t(expression_decl* decl) {
+    JAISCRIPT_TRY_ROOT(decl, decl->expression.get());
+    return {};
 }
 
 // One include body for BOTH positions: statement (include_decl, value discarded by the
@@ -11855,7 +12275,10 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
         if (auto this_result = method_env->get(this_id)) {
             this_obj = std::move(this_result.value());
         }
-        auto coro_env = std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, this_obj);
+        auto static_class = method_env->get_class_definition();
+        auto coro_env = static_class
+            ? std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, static_class)
+            : std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, this_obj);
         coro_env->set_access_context(method_env->get_access_context());
         coro_env->define(this_id, this_obj);
         auto handle = std::make_shared<coroutine_handle>(engine_);
@@ -12068,10 +12491,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     }
 
     if (!matching_ctor) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-            "No constructor found with matching arguments");
+        return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+            class_def->get_type_id(), args.data(), args.size(), engine_, true);
     }
-    
+
     // Create instance
     auto instance = class_def->create_instance();
     // Instance created
@@ -12223,8 +12646,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                                 if (ancestor_ctor) {
                                                     ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
                                                 } else if (!ancestor_ctors.empty()) {
-                                                    return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                                                        "No matching constructor for ancestor class");
+                                                    return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+                                                        ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
                                                 }
                                             } else {
                                                 // Ancestor is a C++ class - call its constructor NOW
@@ -12386,8 +12809,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             }
             
             if (!target_ctor) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                    "No matching constructor found for this() delegation");
+                return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+                    class_def->get_type_id(), init_args.data(), init_args.size(), engine_, true);
             }
             
             // Apply this class's field initializers (declared defaults) BEFORE the
@@ -12552,6 +12975,27 @@ checked_result<void> interpreter::bind_reference_to_storage(script_value& storag
     return {};
 }
 
+// KEEP BYTE-PARALLEL with vm_backend::bind_bare_cpp_property_ref: the member scope's
+// receiver, else the env's 'this' (lambdas made in methods reach it through the chain).
+// `env` = a CALLER env at a ref-arg bind (the current frame's scope is the callee's).
+std::optional<checked_result<script_value>> interpreter::bind_bare_cpp_property_ref(uint64_t symbol_id, bool global_qualified,
+                                                                                    environment* env) {
+    if (global_qualified) {
+        return std::nullopt;
+    }
+    script_value* this_ptr = !env && member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage
+        ? member_scope_.this_storage
+        : (env ? env : environment_.get())->get_value_ptr(string_symbolizer_->get_this_id());
+    if (!this_ptr || !this_ptr->is_object() || this_ptr->is_null()) {
+        return std::nullopt;
+    }
+    auto instance = this_ptr->get_class_instance();
+    if (!instance || !detail::cpp_property_getter_id(instance.get(), symbol_id)) {
+        return std::nullopt;
+    }
+    return detail::bind_cpp_property_ref(*this_ptr, symbol_id, engine_, string_symbolizer_);
+}
+
 // Stateless ref-param binding straight from the call-site arg expression. Kept out of
 // call_function so its locals stay off the per-recursion-level native frame (Debug
 // stack ceiling). KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch.
@@ -12608,9 +13052,17 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             if (member.value_ptr) {
                 return bind_reference_to_storage(*member.value_ptr, frame_index, param.slot_index);
             }
-            // A C++ property has no cell to alias: it shadows like a method (never a global)
-            if (member.what == detail::member_probe_hit::kind::cpp_property ||
-                detail::member_scope_has_method(caller_state, caller_locals->scope_this,
+            // A C++ property binds the member itself / its accessors (reference_model.md)
+            if (member.what == detail::member_probe_hit::kind::cpp_property) {
+                auto minted = detail::bind_cpp_property_ref(*caller_locals->scope_this, symbol_id, engine_, string_symbolizer_);
+                if (!minted) {
+                    return minted.error_value();
+                }
+                call_stack_[frame_index].set_local(param.slot_index, std::move(minted.value()));
+                return {};
+            }
+            // A member METHOD shadows (never a global)
+            if (detail::member_scope_has_method(caller_state, caller_locals->scope_this,
                                                 caller_locals->scope_static, symbol_id)) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::undefined_variable),
@@ -12631,6 +13083,15 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
 
         script_value* argPtr = caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
         if (!argPtr) {
+            // A hybrid's C++ property reached through the env's 'this' (lambdas made in
+            // methods); KEEP BYTE-PARALLEL with vm_backend::bind_parameters
+            if (auto minted = caller_env ? bind_bare_cpp_property_ref(symbol_id, false, caller_env.get()) : std::nullopt) {
+                if (!*minted) {
+                    return minted->error_value();
+                }
+                call_stack_[frame_index].set_local(param.slot_index, std::move(minted->value()));
+                return {};
+            }
             return checked_result<void>(
                 make_error_code(runtime_error_code::undefined_variable),
                 "Cannot take reference of undefined variable"
@@ -12743,7 +13204,7 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame
     std::vector<std::pair<std::string, script_value>> out;
     if (call_stack_.empty()) return out;                 // global scope: caller falls back to env
     const call_frame& frame = call_stack_.back();
-    const auto* fn = static_cast<const script_defined_function*>(frame.debug_function);
+    const script_defined_function* fn = frame.function;
     if (!fn) return out;
 
     // slot -> name for this frame: parameters, then every declaration reachable in the body.
@@ -12811,22 +13272,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         arg_proofs = call_ctx->site->static_arg_proofs.data();
     }
 
-    {
-        size_t required_params = 0;
-        for (const auto& p : function.parameters()) {
-            if (!p.default_value) {
-                ++required_params;
-            } else {
-                break;  // All parameters after first default also have defaults (parser validated)
-            }
-        }
-        if (args.size() < required_params || args.size() > function.parameters().size()) {
-            return checked_result<script_value>(
-                make_error_code(runtime_error_code::argument_count_mismatch),
-                "Function expected {0} arguments but got {1}",
-                static_cast<uint64_t>(function.parameters().size()), static_cast<uint64_t>(args.size())
-            );
-        }
+    if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
+        return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *string_symbolizer_);
     }
 
     // ============================================================
@@ -12846,7 +13293,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     call_stack_.emplace_back();
     const size_t frame_index = call_stack_.size() - 1;
     call_stack_[frame_index].function_name = function.name;
-    call_stack_[frame_index].debug_function = &function;   // for naming slot locals at a breakpoint
+    call_stack_[frame_index].function = &function;   // the return site + debugger read it
 
     // Pre-allocate locals for all slots (params + local variables)
     // Slot indices are assigned by the parser at parse time
@@ -12941,9 +13388,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
     std::optional<script_value> previousReturn = returnValue_;
-    const bool previousReturnProven = return_proven_;
     hasReturnValue_ = false;
-    return_proven_ = false;
 
     // Helper lambda to cleanup and restore state
     auto cleanup = [&](bool clear_this = true) {
@@ -12970,7 +13415,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         release_environment(function_env, false);
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
-        return_proven_ = previousReturnProven;
     };
 
     // ============================================================
@@ -13070,7 +13514,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 converted_arg = (!untyped_param && param.type->base_type == script_value_type::jai_object_type)
                                 ? script_value(arg.deref()) : script_value(arg);
             } else {
-                auto convert_result = try_convert_for_parameter(arg, param.type);
+                auto convert_result = try_convert_for_parameter(arg, param.type,
+                    detail::slot_site{detail::slot_kind::parameter, param.name, function.name});
                 if (!convert_result) {
                     cleanup();
                     return convert_result.error_value();
@@ -13135,9 +13580,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Get return value
     script_value result = make_value();
 
-    // If yielding, save state for coroutine resume instead of cleaning up
-    if (hasYieldRequest_) {
-        if (active_coroutine_) {
+    // If yielding, save state for coroutine resume instead of cleaning up. The flag is this
+    // frame's suspension only when the body running is the coroutine's own (a callee can no
+    // longer be entered with it set - the yield unwinds its expression first).
+    if (hasYieldRequest_ && active_coroutine_ &&
+        active_coroutine_->get_function() && active_coroutine_->get_function()->body == function.body) {
+        {
             result = active_coroutine_->last_value();
             auto& coro_state = coroutine_state(*active_coroutine_);
             // Record where to resume in the function body.
@@ -13159,7 +13607,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
             coro_state.saved_return_value = std::move(returnValue_);
             coro_state.saved_has_return = hasReturnValue_;
-            coro_state.saved_return_proven = return_proven_;
             coro_state.saved_member_scope = member_scope_;
         }
         call_stack_.erase(call_stack_.begin() + frame_index, call_stack_.end());
@@ -13169,57 +13616,20 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         member_scope_ = previousScope;
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
-        return_proven_ = previousReturnProven;
         return result;
     }
 
-    // Unwinding through a return statement leaves a junk return slot: running the typed
-    // return conversion on it would replace the in-flight exception (VM parity: unwinding
-    // frames complete with their implicit result, conversion skipped)
+    // The return site (visit_return_stmt) validated a reference return / ran the typed
+    // conversion inside the callee's try regions; value returns flatten BEFORE cleanup
+    // destroys the call frame: a plain function's result is a copy, never an alias
     if (hasReturnValue_ && !is_unwinding_) {
         if (function.return_type && function.return_type->base_type == script_value_type::jai_reference_type) {
-            // Reference return (int& f()): the HANDLE passes through - the holder's
-            // owner pin is the lifetime, so escaping the frame is legal. KEEP BYTE-
-            // PARALLEL with the vm's convert_return_value ref branch.
-            auto passed = detail::ref_return_pass_through(std::move(returnValue_.value()),
-                                                          function.return_type, string_symbolizer_);
-            if (!passed) {
-                // The returning frame is still live: the trace names the return site
-                if (!trace_captured_) capture_stack_trace();
-                cleanup();
-                return passed.error_value();
-            }
-            result = std::move(passed.value());
+            result = std::move(returnValue_.value());
+        } else if (returnValue_.value().is_reference()) {
+            // Copy the target - can't move since target might be in outer scope
+            result = returnValue_.value().deref();
         } else {
-            // Value returns flatten BEFORE cleanup destroys the call frame: a plain
-            // function's result is a copy, never an alias.
-            if (returnValue_.value().is_reference()) {
-                // Copy the target - can't move since target might be in outer scope
-                result = returnValue_.value().deref();
-            } else {
-                // Not a reference - safe to move directly
-                result = std::move(returnValue_.value());
-            }
-
-            // Apply return type conversion if needed
-            // Skip conversion for void, auto, or any type (implicit return type accepts any value)
-            if (function.return_type && !function.return_type->type_name.empty() &&
-                function.return_type->type_name != "void" &&
-                function.return_type->type_name != "auto" &&
-                function.return_type->base_type != script_value_type::jai_any_type) {
-                // cleanup before propagating: leaking hasReturnValue_/frame/env here poisons the
-                // rest of the run once the caller catches (vm pop_script_frame_core ordering).
-                // A proven return whose payload guard holds is the identity (I-R1).
-                if (!(return_proven_ && detail::same_type_payload(result, function.return_type.get()))) {
-                    auto convert_result = try_convert_for_parameter(result, function.return_type);
-                    if (!convert_result) {
-                        if (!trace_captured_) capture_stack_trace();
-                        cleanup();
-                        return convert_result.error_value();
-                    }
-                    result = std::move(convert_result.value());
-                }
-            }
+            result = std::move(returnValue_.value());
         }
     } else {
         // Check if this is a constructor (method with no explicit return)
@@ -13248,15 +13658,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Cleanup and return success
     cleanup();
     return result;
-}
-
-void interpreter::validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args) {
-    if (params.size() != args.size()) {
-        throw runtime_error("Function expected " + std::to_string(params.size()) +
-                         " arguments but got " + std::to_string(args.size()));
-    }
-
-    // Type checking is now done in call_function via try_convert_for_parameter
 }
 
 bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr target_type) const {
@@ -13351,7 +13752,8 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
 // return texts and the identity return shapes (the arg itself; the derefed arg for exact-name
 // objects - the I-C1 lane and the exact-class lane replicate them).
 // KEEP BYTE-PARALLEL with vm_backend::try_convert_for_parameter.
-checked_result<script_value> interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
+checked_result<script_value> interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
+                                                                    const detail::slot_site& site) {
     if (!target_type) {
         return arg;  // No type specified = any type accepted
     }
@@ -13419,18 +13821,14 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
             break;
     }
 
-    const uint64_t source_id = string_symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_));
     if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
         (out.v == verdict::reject || out.v == verdict::reject_class)) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::type_mismatch),
             "Cannot convert {0} to {1} (no suitable single-argument constructor)",
-            source_id, target_type->id);
+            string_symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_)), target_type->id);
     }
-    return checked_result<script_value>(
-        make_error_code(runtime_error_code::type_mismatch),
-        "Type mismatch: expected {0} but got {1}",
-        detail::slot_target_symbol(*target_type, *string_symbolizer_), source_id);
+    return detail::typed_slot_rejection(derefed_arg, *target_type, site, engine_);
 }
 
 script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle) {
@@ -13473,7 +13871,9 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         // the creation-site lvalues, so reference binding is meaningless here.
         std::vector<parameter> value_params = function->parameters;
         for (auto& p : value_params) { p.is_reference = false; }
-        script_defined_function scriptFunc(
+        // Owned by the coroutine state, not this stack: the saved frames point at it
+        // across every later resume (return-site conversion, debugger locals)
+        state.function.emplace(
             function->name,
             value_params,
             function->return_type,
@@ -13484,7 +13884,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
         // A first resume nested inside another call's argument list must not see that
         // call's in-flight arg metadata (a zero-arg .resume() never saves/clears it)
-        auto call_result = call_function(scriptFunc, handle.get_args());
+        auto call_result = call_function(*state.function, handle.get_args());
 
         if (hasYieldRequest_) {
             // call_function already saved state into this coroutine
@@ -13506,7 +13906,6 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         auto caller_env = environment_;
         auto caller_return_value = std::move(returnValue_);
         bool caller_has_return = hasReturnValue_;
-        const bool caller_return_proven = return_proven_;
         const detail::member_scope_ctx caller_member_scope = member_scope_;
 
         // The coroutine's frames go ABOVE the resumer's (vm frames_ parity): a trace taken
@@ -13528,7 +13927,6 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         environment_ = state.saved_environment;
         returnValue_ = std::move(state.saved_return_value);
         hasReturnValue_ = state.saved_has_return;
-        return_proven_ = state.saved_return_proven;
         member_scope_ = state.saved_member_scope;
 
         // The continuations are consumed LIFO (outermost first).
@@ -13549,7 +13947,14 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             // are still on the stack and will be consumed by visit_block_stmt,
             // visit_if_stmt, visit_while_stmt, etc. to fast-forward to the
             // exact point where yield occurred.
-            checked_result<void> decl_result = dispatch_decl(function->body->declarations[i].get());
+            checked_result<void> decl_result = i == start_index
+                ? dispatch_decl_resuming(function->body->declarations[i].get())
+                : dispatch_decl(function->body->declarations[i].get());
+            // Statement boundary (visit_block_stmt parity): partial operands never
+            // accumulate across the resumed body
+            if (valueStack_.size() > 0) {
+                valueStack_.clear();
+            }
 
             if (!decl_result) {
                 if (decl_result.error() != std::error_code()) {
@@ -13586,32 +13991,15 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 detach_frames(state.saved_call_stack);
                 state.saved_return_value = std::move(returnValue_);
                 state.saved_has_return = hasReturnValue_;
-                state.saved_return_proven = return_proven_;
                 state.saved_member_scope = member_scope_;
                 handle.set_status(coroutine_handle::status::suspended);
             } else if (hasReturnValue_) {
                 handle.set_status(coroutine_handle::status::completed);
                 if (returnValue_) {
-                    // call_function epilogue parity: deref, then apply the typed-return
-                    // conversion the replay used to skip (vm converts the final return)
-                    script_value final_result = returnValue_.value().is_reference()
+                    // call_function epilogue parity: the return site already converted; deref
+                    handle.yield_value_ = returnValue_.value().is_reference()
                         ? returnValue_.value().deref()
                         : std::move(returnValue_.value());
-                    if (function->return_type && !function->return_type->type_name.empty() &&
-                        function->return_type->type_name != "void" &&
-                        function->return_type->type_name != "auto" &&
-                        function->return_type->base_type != script_value_type::jai_any_type) {
-                        auto convert_result = try_convert_for_parameter(final_result, function->return_type);
-                        if (!convert_result) {
-                            if (!trace_captured_) capture_stack_trace();
-                            handle.set_status(coroutine_handle::status::failed);
-                            error_result.emplace(convert_result.error_value());
-                        } else {
-                            handle.yield_value_ = std::move(convert_result.value());
-                        }
-                    } else {
-                        handle.yield_value_ = std::move(final_result);
-                    }
                 }
                 state.saved_environment.reset();
                 detach_frames(dying_frames);
@@ -13628,7 +14016,6 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         environment_ = caller_env;
         returnValue_ = std::move(caller_return_value);
         hasReturnValue_ = caller_has_return;
-        return_proven_ = caller_return_proven;
         member_scope_ = caller_member_scope;
     }
 
@@ -13774,8 +14161,9 @@ checked_result<void> interpreter::visit_extern_decl(extern_decl*) {
     return {};
 }
 
-checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* decl) {
-    JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+template<bool Replaying>
+checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl* decl) {
+    JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
     script_value source = pop_value();
 
     if (!source.is_array()) {
@@ -13803,6 +14191,109 @@ checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* d
 // These functions use a switch on node_type enum instead of
 // virtual method dispatch, eliminating vtable lookup overhead.
 // ============================================================
+
+void interpreter::park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial) {
+    if (active_coroutine_) {
+        coroutine_state(*active_coroutine_).push_replay(node, phase, index, std::move(partial));
+    }
+}
+
+// A statement whose expression suspended: it owns the replay root, so the enclosing block
+// re-enters THIS statement on resume (has_continuations() is true) and hands it to
+// dispatch_decl_resuming. A bare `yield x;` parks nothing - the block skips it as before.
+void interpreter::note_statement_yield(ast_node* stmt, expression* root) {
+    if (!active_coroutine_) return;
+    auto& coro_state = coroutine_state(*active_coroutine_);
+    const node_type kind = stmt->get_type();
+    if ((kind == node_type::expression_stmt || kind == node_type::expression_decl) &&
+        root->get_type() == node_type::yield_expr && coro_state.back_node() != root) {
+        return;   // the statement IS the yield and its value is discarded: nothing to continue
+    }
+    coro_state.push_replay(stmt, rp_root, 0, {});
+}
+
+// Resume side: run the suspended child of a parked expression node. A child with no frame
+// of its own is the recorded yield - consumed exactly once, its operand never re-evaluated.
+checked_result<void> interpreter::replay_expression(expression* expr) {
+    auto& coro_state = coroutine_state(*active_coroutine_);
+    if (coro_state.back_node() != expr) {
+        if (expr->get_type() == node_type::yield_expr) {
+            push_value(make_value());   // vm exec_yield: the yield expression is null on resume
+            return {};
+        }
+        return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
+    }
+    const replay_point frame = *coro_state.peek_continuation(expr);
+    coro_state.pop_continuation();
+    switch (expr->get_type()) {
+        case node_type::binary_expr:        return visit_binary_expr_t<true>(static_cast<binary_expr*>(expr), &frame);
+        case node_type::unary_expr:         return visit_unary_expr_t<true>(static_cast<unary_expr*>(expr), &frame);
+        case node_type::assignment_expr:    return visit_assignment_expr_t<true>(static_cast<assignment_expr*>(expr), &frame);
+        case node_type::call_expr:          return visit_call_expr_t<true>(static_cast<call_expr*>(expr), &frame);
+        case node_type::member_expr:        return visit_member_expr_t<true>(static_cast<member_expr*>(expr), &frame);
+        case node_type::new_expr:           return visit_new_expr_t<true>(static_cast<new_expr*>(expr), &frame);
+        case node_type::ternary_expr:       return visit_ternary_expr_t<true>(static_cast<ternary_expr*>(expr), &frame);
+        case node_type::array_literal_expr: return visit_array_literal_expr_t<true>(static_cast<array_literal_expr*>(expr), &frame);
+        case node_type::map_literal_expr:   return visit_map_literal_expr_t<true>(static_cast<map_literal_expr*>(expr), &frame);
+        case node_type::cast_expr:          return visit_cast_expr_t<true>(static_cast<cast_expr*>(expr), &frame);
+        case node_type::throw_expr:         return visit_throw_expr_t<true>(static_cast<throw_expr*>(expr), &frame);
+        case node_type::yield_expr:         return visit_yield_expr_t<true>(static_cast<yield_expr*>(expr), &frame);
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
+    }
+}
+
+// The one statement/declaration a resume re-enters: it consumes its own replay root, every
+// other statement runs cold
+checked_result<void> interpreter::dispatch_stmt_resuming(statement* stmt) {
+    if (!active_coroutine_) return dispatch_stmt(stmt);
+    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto* cont = coro_state.peek_continuation(stmt);
+    if (!cont || cont->phase != rp_root) return dispatch_stmt(stmt);
+    coro_state.pop_continuation();
+    switch (stmt->get_type()) {
+        case node_type::expression_stmt: return visit_expression_stmt_t<true>(static_cast<expression_stmt*>(stmt));
+        case node_type::return_stmt:     return visit_return_stmt_t<true>(static_cast<return_stmt*>(stmt));
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
+    }
+}
+
+checked_result<void> interpreter::dispatch_decl_resuming(declaration* decl) {
+    if (!active_coroutine_) return dispatch_decl(decl);
+    if (decl->get_type() == node_type::statement_decl) {
+        return dispatch_stmt_resuming(static_cast<statement_decl*>(decl)->statement.get());
+    }
+    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto* cont = coro_state.peek_continuation(decl);
+    if (!cont || cont->phase != rp_root) return dispatch_decl(decl);
+    coro_state.pop_continuation();
+    switch (decl->get_type()) {
+        case node_type::variable_decl:        return visit_variable_decl_t<true>(static_cast<variable_decl*>(decl));
+        case node_type::destructuring_decl:   return visit_destructuring_decl_t<true>(static_cast<destructuring_decl*>(decl));
+        case node_type::expression_decl:      return visit_expression_decl_t<true>(static_cast<expression_decl*>(decl));
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::coroutine_suspended));
+    }
+}
+
+checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) { return visit_binary_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) { return visit_unary_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) { return visit_assignment_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_call_expr(call_expr* expr) { return visit_call_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_member_expr(member_expr* expr) { return visit_member_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_new_expr(new_expr* expr) { return visit_new_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) { return visit_ternary_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* expr) { return visit_array_literal_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr) { return visit_map_literal_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_cast_expr(cast_expr* expr) { return visit_cast_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) { return visit_throw_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_yield_expr(yield_expr* expr) { return visit_yield_expr_t<false>(expr, nullptr); }
+checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) { return visit_expression_stmt_t<false>(stmt); }
+checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) { return visit_return_stmt_t<false>(stmt); }
+checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) { return visit_variable_decl_t<false>(decl); }
+checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* decl) { return visit_destructuring_decl_t<false>(decl); }
+checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) { return visit_expression_decl_t<false>(decl); }
 
 checked_result<void> interpreter::dispatch_expr(expression* expr) {
     switch (expr->get_type()) {

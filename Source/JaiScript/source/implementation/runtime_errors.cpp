@@ -20,6 +20,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Script execution budget exceeded";
         case runtime_error_code::memory_cap_exceeded:
             return "Script memory cap exceeded";
+        case runtime_error_code::coroutine_suspended:
+            return "Coroutine suspended inside an expression the replay does not cover";
 
         // Type errors
         case runtime_error_code::type_mismatch:

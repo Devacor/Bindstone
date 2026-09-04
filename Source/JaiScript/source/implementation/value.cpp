@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/member_scope.hpp>
 #include <atomic>
 #include <sstream>
 #include <thread>
@@ -58,7 +59,8 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
 
 
 script_value::reference_holder::~reference_holder() {
-    if (has_cell || has_map_key || has_elem_scratch) {
+    if (has_cell || has_map_key || has_elem_scratch ||
+        (property && (property->live_member || property->has_scratch))) {
         cell()->~script_value();
         has_cell = false;
         has_map_key = false;
@@ -75,6 +77,72 @@ const script_value& script_value::reference_holder::materialize_typed_element(en
         has_elem_scratch = true;
     }
     return *cell();
+}
+
+// PROPERTY mode touches re-resolve the receiver's class and accessor every time (a
+// reload that adds a same-named script field re-points the reference at that field; a
+// retired layer reports). Touch points throw like the other modes do; bind points take
+// the checked twin.
+checked_result<script_value> script_value::reference_holder::read_property(engine* eng, bool bind_point) const {
+    script_value receiver(property->receiver, property->receiver_tag, eng);
+    auto site = detail::resolve_cpp_property(receiver, property->field_id, eng);
+    if (!site) {
+        if (site.view.instance) {
+            if (const script_value* field = site.view.instance->find_field_value(property->field_id)) {
+                return script_value(field->deref());
+            }
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
+    }
+    return detail::read_cpp_property_site(receiver, site, bind_point);
+}
+
+const script_value& script_value::reference_holder::materialize_property(engine* eng) {
+    auto read = read_property(eng, /*bind_point*/ false);
+    if (!read) {
+        throw runtime_error(format_error(read, *eng->get_symbolizer()));
+    }
+    if (property->has_scratch) {
+        *cell() = std::move(read.value());
+    } else {
+        new (cell_storage) script_value(std::move(read.value()));
+        property->has_scratch = true;
+    }
+    return *cell();
+}
+
+void script_value::reference_holder::store_property(const script_value& value, engine* eng) {
+    script_value receiver(property->receiver, property->receiver_tag, eng);
+    auto site = detail::resolve_cpp_property(receiver, property->field_id, eng);
+    if (!site) {
+        if (site.view.instance) {
+            if (script_value* field = site.view.instance->find_field_value(property->field_id)) {
+                *field = value;
+                return;
+            }
+        }
+        throw runtime_error("Reference to a removed field");
+    }
+    if (site.view.instance && site.view.instance->script_layer_retired()) {
+        site.view.instance->throw_retired_script_layer();
+    }
+    if (!site.setter_id) {
+        return;   // read-only: the silent no-op `receiver.name = v` is today
+    }
+    auto stored = detail::write_cpp_property(receiver, site.view.def, site.setter_id, value);
+    if (!stored) {
+        throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+    }
+}
+
+void script_value::reference_holder::commit_scratch() {
+    if (has_elem_scratch && container && container_index < container->size()) {
+        container->set(container_index, *cell());
+        return;
+    }
+    if (property && property->has_scratch) {
+        store_property(*cell(), cell()->get_engine());
+    }
 }
 
 script_value* script_value::reference_holder::resolve_target() {
@@ -97,7 +165,7 @@ script_value* script_value::reference_holder::resolve_target() {
     if (owner_instance) {
         return owner_instance->find_field_value(field_id);
     }
-    return nullptr;   // unreachable: every factory sets a mode
+    return nullptr;   // CPP-MEMBER / PROPERTY (no addressable cell); else unreachable: every factory sets a mode
 }
 
 // Per-engine free-list of reference_holder control blocks: a mint is a pop +
@@ -470,6 +538,61 @@ script_value script_value::make_field_reference(const std::shared_ptr<class_inst
     ref->owner_instance = owner;          // pins the instance for the reference's lifetime
     ref->field_id = field_id;
     ref->container_element_type = field_type;
+    v.storage_ = ref;
+    return v;
+}
+
+type_info_ptr script_value::cpp_bound_type_info(engine* eng, uint8_t semantic_index) {
+    switch (semantic_index) {
+        case TYPEID_INT: return eng->get_type_info_int();
+        case TYPEID_FLOAT: return eng->get_type_info_float();
+        case TYPEID_BOOL: return eng->get_type_info_bool();
+        case TYPEID_STRING: return eng->get_type_info_string();
+        case TYPEID_CHAR: return eng->get_type_info_char();
+        default: return nullptr;
+    }
+}
+
+script_value script_value::make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
+                                                     void* address, uint8_t size_and_sign, uint8_t semantic_index,
+                                                     uint64_t field_id, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    if (!address || !receiver.get_object_holder()) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value box(std::monostate{}, eng);
+    box.type_info_ = cpp_bound_type_info(eng, semantic_index);
+    box.storage_ = make_strong<cpp_bound_holder>(address, size_and_sign, semantic_index);
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(box.type_info_);
+    auto ref = acquire_reference_holder(eng);
+    ref->property = std::make_unique<property_binding>();
+    ref->property->receiver = receiver.get_object_holder();
+    ref->property->receiver_tag = receiver.get_type_info();
+    ref->property->object_pin = std::move(object_pin);
+    ref->property->field_id = field_id;
+    ref->property->live_member = true;
+    new (ref->cell_storage) script_value(std::move(box));
+    v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_property_reference(const script_value& receiver, uint64_t field_id, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    if (!receiver.get_object_holder()) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(nullptr);
+    auto ref = acquire_reference_holder(eng);
+    ref->property = std::make_unique<property_binding>();
+    ref->property->receiver = receiver.get_object_holder();
+    ref->property->receiver_tag = receiver.get_type_info();
+    ref->property->field_id = field_id;
     v.storage_ = ref;
     return v;
 }
@@ -990,6 +1113,11 @@ const script_value& script_value::deref_slow() const {
             }
             return field_value->deref();
         }
+        if (refHolder->property) {
+            // CPP-MEMBER: the live bound box (readers decode index 14 per touch);
+            // PROPERTY: the getter result, refreshed on every touch
+            return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(engine_);
+        }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
     // For C++ references, we don't deref here - they need special handling
@@ -1033,6 +1161,12 @@ script_value& script_value::deref_slow() {
                 throw runtime_error("Reference to a removed field");
             }
             return field_value->deref();
+        }
+        if (refHolder->property) {
+            // PROPERTY hands back a materialized VIEW like typed elements do: writers go
+            // through assign_through / commit_scratch, never through this deref
+            return refHolder->property->live_member ? *refHolder->cell()
+                                                    : const_cast<script_value&>(refHolder->materialize_property(engine_));
         }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
@@ -1083,6 +1217,16 @@ void script_value::assign_through(const script_value& value) {
                 throw runtime_error("Reference to a removed field");
             }
             *field_value = value;
+            return;
+        }
+        if (refHolder->property) {
+            // CPP-MEMBER: the box's typed memory write (never a memberwise replace, which
+            // would detach the box); PROPERTY: the setter
+            if (refHolder->property->live_member) {
+                refHolder->cell()->assign_through(value);
+            } else {
+                refHolder->store_property(value, engine_);
+            }
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
@@ -1174,6 +1318,14 @@ void script_value::assign_through(script_value&& value) {
                 throw runtime_error("Reference to a removed field");
             }
             *field_value = std::move(value);
+            return;
+        }
+        if (refHolder->property) {
+            if (refHolder->property->live_member) {
+                refHolder->cell()->assign_through(value);
+            } else {
+                refHolder->store_property(value, engine_);
+            }
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode

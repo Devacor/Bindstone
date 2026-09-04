@@ -295,7 +295,9 @@ engine stays usable", not by `check_throws`.
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,
   field-init in **declaration order**, static members/methods, hot reload with instance migration.
-- Coroutines: `coroutine`/`yield`, drivable by range-`for`.
+- Coroutines: `coroutine`/`yield`, drivable by range-`for`; `coroutine` prefixes every function
+  spelling (`coroutine name(...) [-> T]`, `coroutine function name(...) [-> T]`, `coroutine T name(...)`),
+  free, method or static method, and produces the same declaration node.
 - stdlib: `print`, `to_string`, `type_of`, `to_json`/`from_json` (full-precision floats via
   `std::to_chars`).
 - **Parse-time type proofs** (`docs/static_checking.md` "Proofs"): the static checker's walk runs
@@ -308,6 +310,13 @@ engine stays usable", not by `check_throws`.
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.
+- **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
+  on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
+  action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no
+  member 'x'`, `'fib' expects 1 argument, got 2`, `Cannot pass string to parameter 'n' of 'fib'
+  (declared int)`); kernels `null_member_diagnostic.hpp`, `arity_diagnostic.hpp`,
+  `class_definition.hpp` (`typed_slot_rejection`, `overload_miss`). Error paths never intern a new
+  string while the symbolizer is frozen (parallel workers get the slot-less shape of the same text).
 
 ```jaiscript
 class Cat { int a = 0; Cat(int v) { a = v; } }

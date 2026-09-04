@@ -733,7 +733,7 @@ public:
             run("class R { static int s = 0; }");
             check_eq(std::string("9:string"), run("to_string(R::s) + \":\" + type_of(R::s)"), "reload back preserves the string verbatim");
             const std::string err = run("R::s = L(\"zz\");");
-            check_true(err.find("Type mismatch in assignment") != std::string::npos, "unconvertible store raises under the new type (got: " + err + ")");
+            check_true(err.find("Cannot assign string to static 's' of R (declared int)") != std::string::npos, "unconvertible store raises under the new type (got: " + err + ")");
             check_eq(std::string("9:string"), run("to_string(R::s) + \":\" + type_of(R::s)"), "static untouched by the failed store");
             check_eq(std::string("4:int"), run("R::s = 4; to_string(R::s) + \":\" + type_of(R::s)"), "int governs again");
             run("class R { static int s = 0; }");

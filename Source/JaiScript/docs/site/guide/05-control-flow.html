@@ -4,23 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Control Flow — JaiScript Guide</title>
+<meta name="description" content="if, while, both for forms, a switch that breaks by default, and try/catch/throw that unwinds loops correctly.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Control Flow — JaiScript Guide">
+<meta property="og:description" content="if, while, both for forms, a switch that breaks by default, and try/catch/throw that unwinds loops correctly.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li class="current"><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li class="current"><a href="../guide/05-control-flow.html" aria-current="page">Control Flow</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="control-flow">Control Flow<a class="hlink" href="#control-flow" aria-label="link">&#8203;</a></h1>
 <p>Everything you expect from C++ control flow, minus its sharpest edge: <code>switch</code> never falls through by accident, and a runaway loop cannot outlive its execution budget. <code>if/else</code>, <code>while</code>, C-style <code>for</code>, range-based <code>for</code>, <code>break</code>/<code>continue</code>, and <code>try/catch/throw</code> — all of it unwinds correctly out of loops and nested frames on both backends.</p>
 <h2 id="if-while-for">if / while / for<a class="hlink" href="#if-while-for" aria-label="link">&#8203;</a></h2>
@@ -43,7 +53,7 @@ print(&quot;for with continue/break: {}&quot;, total);</code></pre></div>
 while sum 1..4 = 10
 for with continue/break: 12</code></pre></div>
 <h2 id="range-based-for">Range-based for<a class="hlink" href="#range-based-for" aria-label="link">&#8203;</a></h2>
-<p>Iterates arrays (elements), maps (<code>kv.first</code> / <code>kv.second</code> pairs), and coroutines (see the Coroutines chapter). <code>auto&amp;</code> mutates in place (see Value Semantics — this is one of the escape hatches from copy-by-default):</p>
+<p>Iterates arrays (elements), maps (<code>kv.first</code> / <code>kv.second</code> pairs), and coroutines (see <a href="../guide/08-coroutines.html#range-for-drives-a-coroutine">Coroutines</a>). A plain <code>auto item</code> is a copy of each element; <code>auto&amp;</code> mutates in place &mdash; one of the escape hatches from copy-by-default in <a href="../guide/03-value-semantics.html#escape-hatch-4-range-for-with-auto">Value Semantics</a>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto items = [&quot;sword&quot;, &quot;shield&quot;, &quot;potion&quot;];
 for (auto item : items) { print(&quot;- {}&quot;, item); }
 
@@ -112,21 +122,47 @@ rethrowing inner
 outer caught: inner
 catch without a variable
 == result: done</code></pre></div>
-<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function that throws surfaces as a catchable script error, and an uncaught script throw reaches the host with its script stack trace attached.</p>
+<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function that throws surfaces as a catchable script error, and an uncaught script throw reaches the host with its script stack trace attached. Inside a <code>catch</code>, <code>e</code> is the error text alone; when the same error escapes to the host, its <code>what()</code> appends the error's category (<code>&lt;text&gt;: &lt;category&gt;</code>).</p>
+<h2 id="what-a-catch-can-see">What a catch can see &mdash; and what never reaches one<a class="hlink" href="#what-a-catch-can-see" aria-label="link">&#8203;</a></h2>
+<p>The runtime's own errors are ordinary catchable values: a bad index, a division by zero, a failed <code>cast</code>, and a type mismatch the checker could not see coming because the value came out of a <code>var</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto xs = [1, 2, 3];
+try { xs[5]; } catch (e) { print(&quot;caught: {}&quot;, e); }
+try { print(10 / 0); } catch (e) { print(&quot;caught: {}&quot;, e); }
+var v = &quot;seven&quot;;
+try { int n = v; } catch (e) { print(&quot;caught: {}&quot;, e); }
+try { cast&lt;char&gt;(300); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Array index 5 out of bounds for array of size 3
+caught: Division by zero in integer operation
+caught: Cannot initialize &#x27;n&#x27; (declared int) with string
+caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
+<p>Write the same mistake with a literal and no <code>catch</code> will ever see it. The checker (on by default, strict) reads the whole program before anything runs, so a string literal heading for an <code>int</code> is a <strong>load error</strong>: the program does not start, and the <code>try</code> around it is just text.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
+    int n = &quot;seven&quot;;
+} catch (e) {
+    print(&quot;never printed&quot;);
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:9: error: cannot initialize &#x27;n&#x27; declared &#x27;int&#x27; with &#x27;string&#x27;
+        int n = &quot;seven&quot;;
+            ^</code></pre></div>
+<p>The rule in one line: a mismatch the checker can see (a literal, a typed local, a typed return) fails the load; a mismatch it cannot see (a <code>var</code>-sourced value) raises where it lands and is catchable there. <a href="../guide/02-type-ladder.html#when-a-mismatch-is-caught">The Type Ladder</a> walks through both halves, and <a href="../guide/13-strict-checking.html">Types That Fail Early</a> collects the whole story. The third kind of error &mdash; the terminal kind &mdash; is next.</p>
 <h2 id="terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">Terminal errors: execution budget &amp; memory cap are UNCATCHABLE by design<a class="hlink" href="#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design" aria-label="link">&#8203;</a></h2>
 <p>Every <code>execute()</code>/<code>resume()</code> call has a wall-clock budget — <strong>default 1.0 second</strong> (<code>engine::execution_budget(seconds)</code>; <code>0</code> disables). When it trips, the error is <strong>terminal</strong>: script <code>catch</code> handlers are skipped all the way out, so a runaway script can never swallow its own kill signal and livelock the host.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// engine.execution_budget() defaults to 1.0 second per execute()
+<div class="codeblock cb-jai" data-budget="1"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// engine.execution_budget() defaults to 1.0 second per execute()
 try {
     while (true) { }
 } catch (e) {
     print(&quot;this never prints: budget errors are TERMINAL, catch is skipped&quot;);
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Script execution budget exceeded - raise engine::execution_budget or break up the work: Script execution budget exceeded</code></pre></div>
-<p>(The catch body did not run — the error went straight to the host.)</p>
-<p><code>engine::memory_cap(bytes)</code> works alongside it for allocation bombs: the <strong>first</strong> raise is catchable (the growth is denied), but a <strong>second</strong> raise in the same execute is terminal. Both limits re-arm per <code>execute()</code>, and neither can be swallowed from inside a function, lambda, or coroutine — the terminality is the point.</p><nav class="prevnext"><a class="prev" href="../guide/04-operators.html"><span>&larr; previous</span>Operators &amp; Arithmetic</a><a class="next" href="../guide/06-functions.html"><span>next &rarr;</span>Functions &amp; Lambdas</a></nav></article>
+<p>(The catch body did not run — the error went straight to the host.) Trying this from a terminal? The standalone runner lifts the budget by default, so give it one back: <code>jaiscript --budget=1 runaway.jai</code>.</p>
+<p><code>engine::memory_cap(bytes)</code> works alongside it for allocation bombs: the <strong>first</strong> raise is catchable (the growth is denied), but a <strong>second</strong> raise in the same execute is terminal. Both limits re-arm per <code>execute()</code>, and neither can be swallowed from inside a function, lambda, or coroutine — the terminality is the point.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/04-operators.html"><span>&larr; previous</span>Operators &amp; Arithmetic</a><a class="next" rel="next" href="../guide/06-functions.html"><span>next &rarr;</span>Functions &amp; Lambdas</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

@@ -4,42 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Script-Extensible Objects: extend — JaiScript Embedding</title>
+<meta name="description" content="A script class can derive a bound C++ class, and the script decides which object becomes which class.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Script-Extensible Objects: extend — JaiScript Embedding">
+<meta property="og:description" content="A script class can derive a bound C++ class, and the script decides which object becomes which class.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active" aria-current="page">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li class="current"><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li class="current"><a href="../embedding/13-script-extensible.html" aria-current="page">Script-Extensible Objects: extend</a><ol class="page-toc" data-page-toc></ol></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="script-extensible-objects-extend">Script-Extensible Objects: <code>extend</code><a class="hlink" href="#script-extensible-objects-extend" aria-label="link">&#8203;</a></h1>
 <p><strong>A script class can derive a bound C++ class, and the script decides which object becomes which class.</strong>
 The host constructs and owns its objects exactly as before; a script hands one of them a class with
 <code>extend(object, Class)</code>, and from that moment the object <em>is</em> that class everywhere — typed
 fields, overrides, methods — no matter which road brings it back into script. This chapter covers the script
-surface, the one-line host surface, who owns what, and how it serializes. Every example below is taken from
-<code>source/tests/serialization/polymorphic_serialization_tests.cpp</code> and runs on <strong>both
-backends</strong>; the mechanism is specified in <code>docs/script_extensible.md</code>.</p>
+surface, the one-line host surface, who owns what, and how it serializes. The host-side examples below are
+taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp</code> and run on
+<strong>both backends</strong>; the mechanism is specified in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/script_extensible.md"><code>docs/script_extensible.md</code></a>.</p>
 
 <h2 id="one-object-one-identity">One object, one identity<a class="hlink" href="#one-object-one-identity" aria-label="link">&#8203;</a></h2>
 <p>The shape this exists for is a game whose C++ spawns creatures and whose scripts define what each kind of
 creature does. C++ never names a script class; it hands the creature over and the script extends it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Voidling : ServerCreature {
+<div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
+
+class Voidling : Creature {        // Creature is the host&#x27;s bound C++ class
     int chompCount = 0;
     double blinkCooldown = 0.0;
     bool tick(double dt) override { blinkCooldown = blinkCooldown - dt; return false; }
 }
 
-// the host's three hooks: it passes the C++ creature, the script says what it becomes
+// the three callbacks this host happens to expose (spawn, update, death) - your host will
+// have its own. It passes the C++ creature; the script says what it becomes.
 self.spawn  = [=](var&amp; creature) -&gt; void { extend(creature, Voidling).spawn(); };
 self.update = [=](var&amp; creature, double dt) -&gt; void { creature.update(dt); };
 self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></pre></div>
@@ -56,7 +69,9 @@ layer (fields, overrides) on top.</p>
 the bare class name — its constructor value carries the definition — or a string. It works <strong>in
 place</strong>: the instance the handle already holds is re-classed where it stands, so nothing needs
 rebinding and every other handle to the same object follows.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Voidkin : Creature {              // Creature is a bound C++ class
+<div class="codeblock cb-jai" data-host="Creature registration + raw"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern raw;                             // `raw` arrives from the host, so declare it
+
+class Voidkin : Creature {              // Creature is a bound C++ class
     int chomp = 3;
     string speak() override { return "voidkin"; }
 }
@@ -75,7 +90,7 @@ print(raw.chomp, " ", raw.fangs, " ", raw.speak());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">17
 17
 17 1 voidspawn</code></pre></div>
-<p>The rules, all pinned by tests:</p>
+<p>The rules:</p>
 <ul>
 <li><strong>The class must derive the object's C++ class</strong> (through any chain of script classes).
 Anything else is refused, naming both classes.</li>
@@ -92,8 +107,42 @@ re-classes it in place under the same rule (<code>Pt3</code> must derive <code>p
 and thrown from the C++ entry point.</li>
 </ul>
 <p>Write it as a statement — <code>extend(kin, Voidling); kin.chompCount = 1;</code> — or chain it. A
-<code>var q = extend(p, C)</code> binding follows the language's value-semantics rules for call results; the
-object <code>p</code> holds is already the re-classed one either way.</p>
+<code>var q = extend(p, C)</code> binding follows the language&#x27;s
+<a href="../guide/03-value-semantics.html">value-semantics</a> rules for call results; the object
+<code>p</code> holds is already the re-classed one either way.</p>
+
+<h3 id="try-it-without-a-host">Try it without a host<a class="hlink" href="#try-it-without-a-host" aria-label="link">&#8203;</a></h3>
+<p>Nothing above needs C++. Script classes re-derive under the same rule, so you can watch
+<code>extend</code> work in the standalone runner:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pt  { int x = 1; string what() { return &quot;Pt&quot;; } }
+class Pt2 : Pt  { int y = 2; string what() override { return &quot;Pt2&quot;; } }
+class Pt3 : Pt2 { int z = 3; string what() override { return &quot;Pt3&quot;; } }
+
+var p = Pt2();
+p.x = 17;                                  // a field Pt3 also declares
+
+extend(p, Pt3);                            // re-derive in place
+print(p.what() + &quot; x=&quot; + to_string(p.x) + &quot; y=&quot; + to_string(p.y) + &quot; z=&quot; + to_string(p.z));
+
+try { extend(p, Pt); } catch (e) { print(&quot;refused: &quot; + to_string(e)); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Pt3 x=17 y=2 z=3
+refused: extend: &#x27;Pt&#x27; does not derive &#x27;Pt3&#x27;</code></pre></div>
+<p><code>x</code> survives because both classes declare it; <code>z</code> takes <code>Pt3</code>&#x27;s
+initializer; and <code>Pt</code> is refused because it does not derive <code>p</code>&#x27;s class. Those are
+the same three rules the C++ case obeys.</p>
+
+<h3 id="what-the-checker-sees">What the checker sees<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h3>
+<p>Extension is decided at run time, so <a href="06-static-checking.html">the checker</a> deliberately
+stops gating on it. Any name passed to <code>extend(...)</code> anywhere in a unit is <strong>open</strong>
+for that whole unit &mdash; flow-insensitively, by name &mdash; and a bound C++ class stays open once any
+script layer has been extended over it. A member the checker cannot find on such a receiver is not an
+error; the ones it <em>can</em> find are still typed and still checked.</p>
+<p>What it does still gate is the name itself. Under the strict default a handle the host injects is an
+undeclared identifier, so scripts like the two above declare it: <code>extern self;</code>,
+<code>extern raw;</code>. The declaration is a no-op at run time &mdash; it only tells the checker the name
+arrives from outside the program. The typed form, <code>extern shared_ptr&lt;Creature&gt; raw;</code>, buys
+member checking against <code>Creature</code> for everything the checker can still see; a name passed to
+<code>extend</code> stays open either way.</p>
 
 <h2 id="host-side-script-extensible-and-engine-extend">Host side: <code>script_extensible</code> and <code>engine::extend</code><a class="hlink" href="#host-side-script-extensible-and-engine-extend" aria-label="link">&#8203;</a></h2>
 <p>Every <code>property_owner</code> is script-extensible for free: it derives the <code>jai::script_extensible</code>
@@ -137,13 +186,15 @@ By-value capture (<code>[=]</code>) shares a hybrid, like any engine object.</p>
 field, a container, a save file — the writer emits <code>$type</code> = the script class name,
 <code>$script</code> = the script-level fields, and <code>$val</code> = the C++ base's ordinary payload; the
 reader rebuilds the C++ object through the base's registered load, extends it with the script class, hydrates
-the fields, and calls <code>post_load(self, 1)</code> if the class defines one. JSON and binary, back-references
+the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code> &mdash; define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp, <code>1</code> today). JSON and binary, back-references
 included, and the script-level <code>to_json(v)</code> / <code>from_json(s)</code> do the same for a script
 value. Because extension runs field initializers before hydration, a field that was never written during play
-still loads with its declared default.</p>
+still loads with its declared default. The archive framework itself — dispatch order, the binder chain as the
+polymorphism declaration, the security posture — is the <a href="08-serialization.html">Serialization</a>
+chapter.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Creature&gt; original = eng-&gt;execute("v").as&lt;std::shared_ptr&lt;Creature&gt;&gt;();
 auto loaded = roundtrip_binary(*eng, original);           // a fresh object...
-eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its Voidkin layer   (verified)</code></pre></div>
+eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its Voidkin layer</code></pre></div>
 
 <h2 id="moving-a-layer-between-engines">Moving a layer between engines<a class="hlink" href="#moving-a-layer-between-engines" aria-label="link">&#8203;</a></h2>
 <p>A layer belongs to exactly one engine (its symbols, its class definition). Extending an object in engine
@@ -159,13 +210,15 @@ the object's class, the argument is not a class, arity) and <code>script_layer_r
 moved, or outlived layer reached for its object) — so script catches them like any runtime error; the C++
 <code>engine::extend</code> throws at its boundary.</p>
 <p>The lookup that hands script the layer is a pointer read on the object's slot; it replaces the wrapper the
-boundary used to allocate on every crossing. On the Bindstone arena pilots (three 150-second matches), the
-class-based creature scripts run 4–9% faster than the same logic kept in host-side variable maps, with
-byte-identical outcomes.</p>
-<nav class="prevnext"><a class="prev" href="../embedding/12-debugging.html"><span>&larr; previous</span>Debugging</a></nav></article>
+boundary used to allocate on every crossing. In a creature-simulation workload the class-based scripts measured a few
+percent faster than the same logic kept in host-side maps, with byte-identical outcomes.</p>
+<nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/12-debugging.html"><span>&larr; previous</span>Debugging</a><a class="next" rel="next" href="../examples/index.html"><span>next &middot; examples &rarr;</span>The Example Games</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-09-02</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

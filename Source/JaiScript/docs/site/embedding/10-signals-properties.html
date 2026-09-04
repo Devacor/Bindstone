@@ -4,29 +4,48 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signals &amp; Observable Properties — JaiScript Embedding</title>
+<meta name="description" content="Firing and receiving signals across the boundary, the three routes a signal takes to become script-connectable, and values that announce their own changes.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Signals &amp; Observable Properties — JaiScript Embedding">
+<meta property="og:description" content="Firing and receiving signals across the boundary, the three routes a signal takes to become script-connectable, and values that announce their own changes.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active" aria-current="page">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li class="current"><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li class="current"><a href="../embedding/10-signals-properties.html" aria-current="page">Signals &amp; Observable Properties</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="signals-observable-properties">Signals &amp; Observable Properties<a class="hlink" href="#signals-observable-properties" aria-label="link">&#8203;</a></h1>
-<p>Gameplay is event-shaped: a door opens, a wave spawns, three unrelated systems need to hear about it without the door knowing any of them exist. JaiScript ships two small C++ frameworks for exactly this — <code>jai::signal</code>, a typed multicast event whose receivers can be C++ lambdas <strong>or</strong> script, and <code>jai::observable_property&lt;T&gt;</code>, a value that announces its own changes — and they are how the MutedVision engine wires gameplay events to script. This chapter is the user&#x27;s tour: firing and receiving signals from C++, observable values, and the three routes a signal takes to become script-connectable. How signal members get onto bound classes in the first place — the one-declaration <code>JAI_SIGNAL_PROPERTY</code> route and the machinery beneath it — is the <a href="02-dynamic-binder.html">binder chapter&#x27;s</a> deep dive. Headers: <code>include/jaiscript/signals/</code>, <code>include/jaiscript/properties/</code>.</p>
-<h2 id="jai-signal-the-mv-pattern">jai::signal — private emitter, public view<a class="hlink" href="#jai-signal-the-mv-pattern" aria-label="link">&#8203;</a></h2>
-<p>The founding idiom, used throughout the MutedVision engine: the class owns a <strong>private emitter</strong> and exposes a <strong>public <code>signal</code> view</strong> — outsiders can connect, only the owner can fire.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/signals.cpp — compiled and run, verified
-class Door {
+<p>Gameplay is event-shaped: a door opens, a wave spawns, three unrelated systems need to hear
+about it without the door knowing any of them exist.</p>
+<p>JaiScript ships two small C++ frameworks for exactly that. <code>jai::signal</code> is a typed
+multicast event whose receivers can be C++ lambdas <strong>or</strong> script;
+<code>jai::observable_property&lt;T&gt;</code> is a value that announces its own changes. Together they
+are how a host engine wires gameplay events to script.</p>
+<p>This chapter is your tour: firing and receiving signals from C++, observable values, and the three
+routes a signal takes to become script-connectable. How signal members get onto bound classes in the
+first place — the one-declaration <code>JAI_SIGNAL_PROPERTY</code> route and the machinery beneath it
+— is the <a href="02-dynamic-binder.html">binder chapter&#x27;s</a> deep dive. Headers:
+<code>include/jaiscript/signals/</code>, <code>include/jaiscript/properties/</code>.</p>
+<h2 id="jai-signal-private-emitter-public-view">jai::signal — private emitter, public view<a class="hlink" href="#jai-signal-private-emitter-public-view" aria-label="link">&#8203;</a></h2>
+<p>The founding idiom, and the one worth copying: the class owns a <strong>private emitter</strong> and exposes a <strong>public <code>signal</code> view</strong> — outsiders can connect, only the owner can fire.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Door {
 private:
     jai::signal_emitter&lt;void(int)&gt; onOpenSignal;
 public:
@@ -42,35 +61,39 @@ public:
 Door door;
 door.configure(eng.get());
 
-auto cppConn    = door.onOpen.connect([](int w) { /* C++ receiver */ });
+auto cppConn    = door.onOpen.connect([](int w) { std::cout &lt;&lt; &quot;C++ receiver: opened to &quot; &lt;&lt; w &lt;&lt; &quot;
+&quot;; });
 auto scriptConn = door.onOpen.connect(
     &quot;print(\&quot;script receiver: opened to \&quot; + to_string(width));&quot;);
 
 door.open(42);          // both receivers fire
 scriptConn = nullptr;   // dropping the receiver disconnects
 door.open(7);           // only the C++ receiver remains</code></pre></div>
-<p>Verified output:</p>
+<p>Output:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">C++ receiver: opened to 42
 script receiver: opened to 42
 C++ receiver: opened to 7</code></pre></div>
 <h3 id="api-essentials-signals-signal-decl-hpp">API essentials (<code>signals/signal_decl.hpp</code>)<a class="hlink" href="#api-essentials-signals-signal-decl-hpp" aria-label="link">&#8203;</a></h3>
 <ul><li><strong>Connection lifetime = receiver lifetime.</strong> <code>connect(...)</code> is <code>[[nodiscard]]</code> and returns <code>signal&lt;T&gt;::shared_receiver_type</code> (alias <code>jai::receiver&lt;T&gt;::shared_type</code>); hold it in a member, drop it to disconnect. Alternatively use <strong>owned named connections</strong> — <code>connect(&quot;id&quot;, callback)</code> / <code>disconnect(&quot;id&quot;)</code> — where the emitter owns the receiver, or <code>connect_oneshot(...)</code> for fire-once.</li><li>Script receivers come in two forms: a <strong>source snippet</strong> (fired with <code>parameter_names</code> bound, as above) or a <strong>script function value</strong> (<code>connect(id, script_value fn)</code>). Script-receiver errors route to <code>engine::report_script_error</code> (host-installable sink) instead of throwing into the emit site.</li><li><code>emit_while(...)</code> treats receivers as predicates (stop propagation on false); receivers can <code>block()</code>/<code>unblock()</code> themselves.</li><li><strong>Thread safety is on by default</strong> (recursive mutex around connect/disconnect/emit, so callbacks may modify the signal while it fires); define <code>JAI_SIGNALS_NO_THREADSAFE</code> for single-threaded max performance.</li><li>Header hygiene: hot-path headers should include <code>signals/signal_decl.hpp</code> only; <code>signals/signal.hpp</code> (the umbrella) or <code>signal_impl.hpp</code> is needed in TUs that actually <em>fire script</em> receivers — it pulls the engine glue.</li></ul>
-<p>All of it — C++ and script receivers, oneshot, named connections, serialization of signal-bearing types — is pinned by a dedicated test suite.</p>
+<p>All of it — C++ and script receivers, oneshot, named connections, serialization of signal-bearing types — is covered by a dedicated test suite.</p>
 <h2 id="observable-property">observable_property<a class="hlink" href="#observable-property" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/signals.cpp — verified
-#include &lt;jaiscript/properties/property_manager.hpp&gt;
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/property_manager.hpp&gt;
 #include &lt;jaiscript/properties/property_serialization.hpp&gt;   // property&lt;T&gt; vtable lives here
 #include &lt;jaiscript/properties/observable_property.hpp&gt;
 
 jai::property_manager mgr;
 jai::observable_property&lt;int&gt; hp(mgr, &quot;hp&quot;, 100);
 
-auto watch = hp.on_change.connect([](const int&amp; oldV, const int&amp; newV) { ... });
+auto watch = hp.on_change.connect([](const int&amp; oldV, const int&amp; newV) {
+    std::cout &lt;&lt; &quot;hp: &quot; &lt;&lt; oldV &lt;&lt; &quot; -&gt; &quot; &lt;&lt; newV &lt;&lt; &quot;
+&quot;;
+});
 hp = 75;              // emits (100 -&gt; 75)
 hp += 10;             // arithmetic ops emit too (75 -&gt; 85)
 hp.set_silent(50);    // NO signal — the loading/initialization path
-hp.get();             // 50</code></pre></div>
-<p>Verified output: <code>hp: 100 -&gt; 75</code>, <code>hp: 75 -&gt; 85</code>, <code>final hp: 50</code>.</p>
+std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;
+&quot;;   // 50</code></pre></div>
+<p>Output: <code>hp: 100 -&gt; 75</code>, <code>hp: 75 -&gt; 85</code>, <code>final hp: 50</code>.</p>
 <p>Semantics from the header (<code>properties/observable_property.hpp</code>): assignment emits only on <strong>actual change</strong> (<code>old != new</code>); <code>on_change</code> is a public <code>signal&lt;void(const T&amp;, const T&amp;)&gt;</code> over a private emitter (same idiom); <code>++</code>/<code>--</code>/compound ops all emit; <code>set_silent</code> mutates without notifying. Properties register themselves with their <code>property_manager</code> (that&#x27;s what powers schema-driven <code>auto_bind</code> and automatic serialization of <code>JAI_PROPERTY</code> fields).</p>
 <p>One linking gotcha: a standalone TU that instantiates <code>property&lt;T&gt;</code> needs <code>properties/property_serialization.hpp</code> (or anything that pulls <code>serialization/archive_impl.hpp</code>) — the property&#x27;s virtual <code>serialize</code> methods are defined there. <code>dynamic_binder.hpp</code> includes it already, so binder-using TUs never notice.</p>
 <h2 id="script-facing-integration">Connecting from script<a class="hlink" href="#script-facing-integration" aria-label="link">&#8203;</a></h2>
@@ -85,8 +108,8 @@ routes a signal takes to reach script, from most to least automatic.</p>
 <a href="02-dynamic-binder.html">binder chapter</a>, declaring
 <code>JAI_SIGNAL_PROPERTY(void(int64_t), onWave)</code> <em>was</em> the entire script registration —
 <code>auto_bind</code> surfaces the member, and script connects immediately. The <code>Spawner</code> from
-that chapter again:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto s = Spawner();
+<a href="02-dynamic-binder.html#scripted">that chapter</a> again:</p>
+<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript &middot; needs the Spawner registration from the binder chapter</span><pre><code class="lang-jai">auto s = Spawner();
 s.onWave.connect("hud", [=](int wave) -&gt; void {
     print("wave {} incoming", wave);
 });
@@ -107,7 +130,7 @@ surviving a JSON round-trip and firing after load.</p>
     .method("open", &amp;Door::open)
     .property("onOpen", &amp;Door::onOpen)     // the whole script exposure
     .build();</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var d = Door();
+<div class="codeblock cb-jai" data-host="Door binder chain"><span class="cb-label">jaiscript &middot; needs the host registration above</span><pre><code class="lang-jai">var d = Door();
 d.onOpen.connect("watch", [=](int w) -&gt; void { print("opened to {}", w); });
 d.open(42);
 d.onOpen.disconnect("watch");
@@ -141,10 +164,13 @@ signature hand out the typed object instead of the generic view. Behavior is ide
 same receivers — so this is an opt-in nicety, never a requirement.</li>
 </ul>
 <h3 id="script-facing-notes">Notes that apply to all three routes<a class="hlink" href="#script-facing-notes" aria-label="link">&#8203;</a></h3>
-<ul><li><code>observable_property&lt;T&gt;</code> members registered via the property schema (<code>auto_bind</code> on a <code>property_owner</code>) surface to script as <strong>transparent wrappers</strong>: <code>player.score + 5</code> forwards to the underlying int, while <code>player.score.on_change</code> resolves on the wrapper — pinned by tests on both backends.</li><li>When C++ invokes a script function directly outside a normal call (converted callbacks, signal receivers), wrap the invocation in <code>jai::engine::external_call_guard</code> — without it, reference parameters would bind against whatever script call happens to be in flight (<code>engine.hpp</code>; the signal glue does this for you).</li></ul><nav class="prevnext"><a class="prev" href="../embedding/09-coroutine-hosting.html"><span>&larr; previous</span>Coroutine Hosting</a><a class="next" href="../embedding/11-performance.html"><span>next &rarr;</span>Performance Notes</a></nav></article>
+<ul><li><strong>What the checker sees.</strong> A bound class is a declared name, so <code>auto s = Spawner();</code> passes strict; the signal member itself is a binder property, which the checker leaves untyped — <code>connect</code> / <code>disconnect</code> / <code>connected</code> and their arguments are checked at run time, never at load. A handler lambda&#x27;s body is checked like any other lambda. (Rules in <a href="06-static-checking.html">Static Checking</a>.)</li><li><code>observable_property&lt;T&gt;</code> members registered via the property schema (<code>auto_bind</code> on a <code>property_owner</code>) surface to script as <strong>transparent wrappers</strong>: <code>player.score + 5</code> forwards to the underlying int, while <code>player.score.on_change</code> resolves on the wrapper, identically on both backends.</li><li>When C++ invokes a script function directly outside a normal call (converted callbacks, signal receivers), wrap the invocation in <code>jai::engine::external_call_guard</code> — without it, reference parameters would bind against whatever script call happens to be in flight (<code>engine.hpp</code>; the signal glue does this for you).</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/09-coroutine-hosting.html"><span>&larr; previous</span>Coroutine Hosting</a><a class="next" rel="next" href="../embedding/11-performance.html"><span>next &rarr;</span>Performance Notes</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

@@ -4,27 +4,37 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Functions &amp; Lambdas — JaiScript Guide</title>
+<meta name="description" content="Functions, lambdas with automatic captures, default arguments, variadics, and by-reference parameters.">
+<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Functions &amp; Lambdas — JaiScript Guide">
+<meta property="og:description" content="Functions, lambdas with automatic captures, default arguments, variadics, and by-reference parameters.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
 document.documentElement.setAttribute("data-theme",t);}())</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
-<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li class="current"><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li></ol></aside>
-<main class="content">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li class="current"><a href="../guide/06-functions.html" aria-current="page">Functions &amp; Lambdas</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="functions-lambdas">Functions &amp; Lambdas<a class="hlink" href="#functions-lambdas" aria-label="link">&#8203;</a></h1>
 <p>Functions are ordinary values: store them, pass them, return them. Lambdas capture like C++ lambdas — explicitly, visibly — and closures keep captured locals alive. Whatever way you'd spell a function in C++, that spelling almost certainly parses here.</p>
 <h2 id="declaration-forms">Declaration forms — the full catalog<a class="hlink" href="#declaration-forms" aria-label="link">&#8203;</a></h2>
-<p>Every C++ way of writing a function works, plus the <code>function</code> keyword. Return-type-first accepts <em>any</em> type — builtins, <code>void</code>, containers, <code>shared_ptr&lt;T&gt;</code>, and user classes (<code>Point mk() {&hellip;}</code> works at top level, in namespaces, and in classes). <code>auto</code> infers the return; <code>var</code> makes it dynamic (any type per call). A trailing <code>-&gt; type</code> is accepted on every form. Prefixing <code>coroutine</code> turns any of these spellings into a coroutine (see the Coroutines chapter):</p>
+<p>Every C++ way of writing a function works, plus the <code>function</code> keyword. Return-type-first accepts <em>any</em> type — builtins, <code>void</code>, containers, <code>shared_ptr&lt;T&gt;</code>, and user classes (<code>Point mk() {&hellip;}</code> works at top level, in namespaces, and in classes). <code>auto</code> infers the return; <code>var</code> makes it dynamic (any type per call). A trailing <code>-&gt; type</code> is accepted on every form. Prefixing <code>coroutine</code> turns any of these spellings into a coroutine (see <a href="../guide/08-coroutines.html#spellings">Coroutines</a>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function add(int a, int b) -&gt; int { return a + b; }
 int twice(int v) { return v * 2; }
 auto mul(a, b) { return a * b; }
@@ -49,12 +59,36 @@ print(origin().x);</code></pre></div>
 none
 0.000000</code></pre></div>
 <h2 id="return-type-rules">Return-type rules<a class="hlink" href="#return-type-rules" aria-label="link">&#8203;</a></h2>
-<p>A leading return type and a trailing <code>-&gt; type</code> may both be written only when they <strong>match</strong> (redundant but legal: <code>int f() -&gt; int</code>). A contradictory pair is a parse error. A bare arrow (<code>-&gt; {</code>) adds no information — it keeps the leading type if one was given, otherwise means auto:</p>
+<p>A leading return type and a trailing <code>-&gt; type</code> may both be written only when they <strong>match</strong> (redundant but legal: <code>int f() -&gt; int</code>). A contradictory pair is a parse error. An arrow with no type before the <code>{</code> adds no information — it keeps the leading type if one was given, otherwise means auto:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() -&gt; string { return &quot;s&quot;; }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">!! error: Parse error: &lt;script&gt;:1:12: Conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)</code></pre></div>
-<p>Typed returns are enforced with the usual conversions (<code>int f()</code> returning <code>2.9</code> yields <code>2</code>; returning a string is a runtime type error).</p>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:12: Conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)</code></pre></div>
+<p>A declared return type is a typed slot like any other, and it runs the <a href="../guide/02-type-ladder.html#conversion-table-typed-locked-auto-targets">one conversion table</a>: <code>int f()</code> returning <code>2.9</code> yields <code>2</code>. Return a string literal from it and the checker stops the load before anything runs:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function f() -&gt; int { return &quot;s&quot;; }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:1:23: error: cannot return &#x27;string&#x27; from &#x27;f&#x27; declared to return &#x27;int&#x27; (declared at 1:10)
+    function f() -&gt; int { return &quot;s&quot;; }
+                          ^</code></pre></div>
+<p>A value the checker cannot type &mdash; anything that came through a <code>var</code> &mdash; is converted <strong>at the <code>return</code> statement</strong>, inside the returning function, exactly as in C++. So a <code>try</code> around the <code>return</code> catches the failure in the callee; without one, the error surfaces in the caller with the callee as the top frame of the stack trace:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function parse_level(var raw) -&gt; int {
+    try {
+        return raw;                 // the conversion runs here, inside parse_level
+    } catch (e) {
+        print(&quot;caught in parse_level: {}&quot;, e);
+        return 0;
+    }
+}
+print(parse_level(7.9));
+print(parse_level(&quot;seven&quot;));
+
+function strict_level(var raw) -&gt; int { return raw; }
+try { strict_level(&quot;seven&quot;); } catch (e) { print(&quot;caught by the caller: {}&quot;, e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7
+caught in parse_level: Cannot return string from &#x27;parse_level&#x27; (declared -&gt; int)
+0
+caught by the caller: Cannot return string from &#x27;strict_level&#x27; (declared -&gt; int)</code></pre></div>
+<p>Returning a value from a <code>void</code> function is a load error; a typed function that can fall off the end of its body draws only a warning (such a call yields <code>null</code>). Coroutines are the exception to all of this &mdash; calling one yields a handle, and their yield and return types are not checked (see <a href="../guide/08-coroutines.html#rules-and-edges">Coroutines</a>).</p>
 <h2 id="parameters-defaults">Parameters and defaults<a class="hlink" href="#parameters-defaults" aria-label="link">&#8203;</a></h2>
-<p>Four parameter spellings: classic <code>int x</code> / <code>Creature&amp; c</code> (typed, enforced + converted like any typed target), bare <code>x</code> (dynamic), the typed shorthand <code>int: n</code>, and the auto shorthand <code>:x</code> — an auto-like parameter, the same as writing <code>auto x</code>. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
+<p>Four parameter spellings: classic <code>int x</code> / <code>Creature&amp; c</code> (typed, enforced + converted like any typed target), bare <code>x</code> (dynamic), the typed shorthand <code>int: n</code>, and the auto shorthand <code>:x</code> — an auto-like parameter, the same as writing <code>auto x</code>. The shorthands exist for terse lambdas; <code>int x</code> and bare <code>x</code> are what you will write most. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = &quot;hello&quot;) {
     return greeting + &quot; &quot; + name;
 }
@@ -81,11 +115,42 @@ salve world
 36
 passthrough
 75</code></pre></div>
-<p>Defaults work on every kind of callable — free functions, lambdas, instance methods, static methods, constructors, and namespace functions. By-reference parameters bind the caller&#x27;s variable — covered in depth in the Value Semantics chapter.</p>
+<p>Defaults work on every kind of callable — free functions, lambdas, instance methods, static methods, constructors, and namespace functions. By-reference parameters bind the caller&#x27;s variable — covered in depth in <a href="../guide/03-value-semantics.html#escape-hatch-1-reference-parameters">Value Semantics</a>.</p>
+<p>A typed by-value parameter converts its argument with the same table a declaration uses &mdash; there is only one. So <code>int half(int n)</code> called with <code>7.9</code> sees <code>3</code>, and a <code>string</code> parameter accepts anything (<code>label(5)</code> into <code>string s</code> gives <code>&quot;5&quot;</code>), while a string into an <code>int</code> parameter is rejected. <em>When</em> it is rejected is the checker&#x27;s call, below.</p>
+<h2 id="what-the-checker-sees-about-calls">What the checker sees about calls<a class="hlink" href="#what-the-checker-sees-about-calls" aria-label="link">&#8203;</a></h2>
+<p>When the callee is a function the same program declares, the checker resolves it and checks the call at load time: the argument count (defaults included) and each argument against its parameter. A wrong count or a literal that cannot convert is a load error, and every such error in the file is listed at once:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+print(fib(10, 2));
+print(fib(&quot;ten&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+script:2:17: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:5)
+    print(fib(10, 2));
+                    ^
+script:3:17: error: argument 1 of &#x27;fib&#x27;: cannot pass &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 1:5)
+    print(fib(&quot;ten&quot;));
+                    ^</code></pre></div>
+<p>A callable held in a variable is opaque to the checker &mdash; it could be anything by the time the call runs &mdash; so the same mistakes through a variable are run-time errors, and catchable:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+var f = fib;                       // a callable in a variable: the checker cannot see through it
+try { f(10, 2); } catch (e) { print(&quot;caught: {}&quot;, e); }
+try { f(&quot;ten&quot;); } catch (e) { print(&quot;caught: {}&quot;, e); }
+print(f(10));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: &#x27;fib&#x27; expects 1 argument, got 2
+caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;fib&#x27; (declared int)
+55</code></pre></div>
+<p>The same split applies to a <code>var</code>-typed argument to a direct call: the checker has no type to compare, so the parameter&#x27;s conversion runs at the call and raises there if it fails. Overloaded methods and namespace functions are an error only when <em>no</em> overload fits; reference parameters are not checked statically. Host (C++) functions are checked for arity and for the certain cases only &mdash; see <a href="../embedding/06-static-checking.html">Static Checking</a> in the Embedding docs, and <a href="13-strict-checking.html#what-the-checker-sees">Chapter 13</a> for the whole list of what the checker sees.</p>
+<p>Once a call is admitted, its evaluation order is a contract on both backends: the <strong>callee expression is evaluated first</strong>, then the arguments <strong>left to right</strong>, as in C++17. So a call whose argument swaps the callee out from under it still calls the callee that was bound before the arguments ran:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var f = [](x) { return &quot;old lambda got &quot; + to_string(x); };
+function swap() { f = [](x) { return &quot;new lambda got &quot; + to_string(x); }; return 1; }
+print(f(swap()));
+print(f(2));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">old lambda got 1
+new lambda got 2</code></pre></div>
+<p>The <a href="../guide/04-operators.html">Operators chapter</a> covers evaluation order in general. Every call entry is also a point where the <a href="../guide/05-control-flow.html#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">execution budget</a> is checked.</p>
 <h2 id="initializer-lists-are-constructor-only">Initializer lists are constructor-only<a class="hlink" href="#initializer-lists-are-constructor-only" aria-label="link">&#8203;</a></h2>
-<p><code>: super(&hellip;)</code> / <code>: this(&hellip;)</code> delegation belongs to constructors (see Classes). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>
+<p><code>: super(&hellip;)</code> / <code>: this(&hellip;)</code> delegation belongs to constructors (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">!! error: Parse error: &lt;script&gt;:1:19: Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:19: Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors</code></pre></div>
 <h2 id="function-typed-variables">Function-typed variables and fields<a class="hlink" href="#function-typed-variables" aria-label="link">&#8203;</a></h2>
 <p><code>function name = expr;</code> declares a variable that holds a callable (auto semantics — it locks to callable on first assignment); <code>function name;</code> starts null for later assignment. Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
@@ -128,11 +193,23 @@ print(&quot;a = {}, sum_all() = {} (captured before set_a)&quot;, a, sum_all());
 scale(4) = 40
 counter = 3
 a = 100, sum_all() = 5 (captured before set_a)</code></pre></div>
-<p><strong>Auto-capture:</strong> even with an empty capture list, a lambda can read enclosing variables — they are snapshot <em>by value</em> at creation time (use <code>[&amp;]</code> / <code>[&amp;name]</code> for write-through):</p>
+<p><strong>Auto-capture:</strong> even with an empty capture list, a lambda can read the variables around it. What happens next depends on where the variable lives, and there are exactly two cases:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 5;
 auto f = []() { return n; };
-f();</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 5</code></pre></div>
+n = 6;
+print(&quot;top-level n is a global: f() = {}&quot;, f());
+
+function g() {
+    auto m = 5;
+    auto h = []() { return m; };
+    m = 6;
+    return h();
+}
+print(&quot;function-local m is snapshot: g() = {}&quot;, g());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">top-level n is a global: f() = 6
+function-local m is snapshot: g() = 5</code></pre></div>
+<p>A <strong>function local or parameter</strong> is captured when the lambda is created: bare <code>[]</code> takes a copy, the same as <code>[=]</code>; <code>[&amp;]</code> / <code>[&amp;name]</code> share the variable&#x27;s storage, so writes go both ways and the storage outlives the frame (escaping a <code>[&amp;]</code> capture is safe here, unlike C++). A <strong>global</strong> &mdash; and a variable declared at the top level of a file <em>is</em> a global &mdash; is never captured: the lambda reads it live, at call time, so a later assignment is visible. To pin a global&#x27;s current value, name it in the capture list (<code>[n]</code> snapshots it) or copy it into a local first. The checker nudges you toward spelling the intent: a bare <code>[]</code> that implicitly captures a local draws the warning <code>bare [] implicitly captured local &#x27;m&#x27; by value &mdash; be explicit with [=] (snapshot) or [&amp;] (share updates)</code>; explicit capture lists are silent.</p>
+<div class="callout warn"><p>The global case has a consequence for callbacks that outlive the file that made them &mdash; a stored hook, a <a href="../embedding/10-signals-properties.html">signal receiver</a>. Such a closure reads a global when it <em>fires</em>, and on an engine that re-runs files, a later file (or the host) may have rebound that global by then. Hand context to the hook as a parameter and let the capture pin it; never read injected globals from a deferred closure.</p></div>
 <p><strong>Nested lambdas</strong> see the enclosing function&#x27;s locals through every lambda between them: the lambda created in the declaring frame captures the variable, the ones in between carry it, and the innermost reads it — by value with <code>[=]</code> or an empty capture list, write-through with <code>[&amp;]</code>. Naming it explicitly in an inner capture list is enough; the outer lambda need not mention it in its own body:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_adder(int base) -&gt; var {
     return [=](int step) -&gt; var {
@@ -160,13 +237,16 @@ print(&quot;ops map: {}&quot;, ops[&quot;square&quot;](7));</code></pre></div>
 1 2 3
 ops map: 49</code></pre></div>
 <h2 id="redefinition-and-the-duplicate-warning">Redefinition and the duplicate warning<a class="hlink" href="#redefinition-and-the-duplicate-warning" aria-label="link">&#8203;</a></h2>
-<p>Top-level functions do <em>not</em> overload — a same-name definition replaces the earlier one (last wins). With static checking enabled (<code>engine.static_checking(check_mode::warn)</code> — see the Embedding docs), defining the same name twice <em>inside one textual parse unit</em> reports a warning (never an error; <code>strict</code> mode still executes):</p>
+<p>Top-level functions do <em>not</em> overload — a same-name definition replaces the earlier one (last wins). The checker reports a duplicate definition <em>inside one file</em> as a warning whenever it runs (strict or warn) &mdash; and warnings never gate, so under the default strict mode the file simply loads and prints <code>5</code>. Run it with <code>--check=warn</code> and the runner prints what it collected on the way:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function damage(a) { return a; }
 function damage(a, b) { return a + b; }
 print(damage(2, 3));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
-warning script:2:10: duplicate definition of function 'damage' replaces the earlier one (top-level functions do not overload)</code></pre></div>
-<p>Composition through <code>include</code>/<code>import</code> stays <strong>silent</strong>: included files parse and check as their own units, so a library included from several places never triggers the warning — only a literal duplicate in one file does. Redefinition across separate <code>execute()</code> calls (the hot-reload shape) is silent too. Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code> — see Kitchen Sink; same name + same arity there requires <code>override</code> after the parameter list) and for class constructors/methods (see Classes).</p>
+<div class="codeblock cb-output"><span class="cb-label">output &middot; --check=warn</span><pre><code class="lang-output">jaiscript: static check (warn mode, running anyway):
+dup.jai:2:10: warning: duplicate definition of function &#x27;damage&#x27; replaces the earlier one (top-level functions do not overload) (declared at 1:10)
+    function damage(a, b) { return a + b; }
+             ^
+5</code></pre></div>
+<p>Composition through <code>include</code>/<code>import</code> stays <strong>silent</strong>: included files parse and check as their own units, so a library included from several places never triggers the warning — only a literal duplicate in one file does. Redefinition across separate <code>execute()</code> calls (the hot-reload shape) is silent too. Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code> — see <a href="../guide/11-kitchen-sink.html#namespaces">Namespaces</a>; same name + same arity there requires <code>override</code> after the parameter list) and for class constructors/methods (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>).</p>
 <h2 id="recursion">Recursion<a class="hlink" href="#recursion" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
     if (n &lt; 2) { return n; }
@@ -176,20 +256,21 @@ auto out = [];
 for (int i = 0; i &lt; 10; ++i) { out.push(fib(i)); }
 out.join(&quot;, &quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34</code></pre></div>
-<p>(On the VM backend, script-to-script calls run as in-loop frames — deep script recursion does not consume
-native stack. Bare self tail calls — <code>return f(args)</code> — go further and reuse the live frame:
-accumulator-style tail recursion runs in constant space at any depth.)</p>
+<p>Non-tail recursion is capped at 10,000 frames on both backends; the cap is a catchable error (<code>Maximum recursion depth (10000) exceeded - possible infinite recursion</code>), not a native stack overflow. On the VM, script-to-script calls run as in-loop frames, so deep recursion never touches the native stack, and a bare self tail call &mdash; <code>return f(args)</code> &mdash; reuses the live frame: accumulator-style tail recursion runs in constant space at any depth there.</p>
 <h2 id="variadics-live-on-the-host-side">Variadics live on the host side<a class="hlink" href="#variadics-live-on-the-host-side" aria-label="link">&#8203;</a></h2>
 <p>Script functions have fixed arity (plus defaults). Variadic functions are provided by the <strong>host</strong> via <code>engine::add_variadic_function</code>, which receives all arguments as a vector — <code>print</code> and <code>format</code> are exactly this:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">engine.add_variadic_function(&quot;sum_all&quot;, [&amp;engine](const std::vector&lt;jai::script_value&gt;&amp; args) {
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_variadic_function(&quot;sum_all&quot;, [&amp;eng](const std::vector&lt;jai::script_value&gt;&amp; args) {
     jai::script_int total = 0;
     for (auto&amp; a : args) total += a.as_int();
-    return jai::script_value(total, &amp;engine);
+    return jai::script_value(total, eng.get());
 });
-// script: sum_all(1, 2, 3, 4)  -&gt;  10</code></pre></div><nav class="prevnext"><a class="prev" href="../guide/05-control-flow.html"><span>&larr; previous</span>Control Flow</a><a class="next" href="../guide/07-classes.html"><span>next &rarr;</span>Classes</a></nav></article>
+// script: sum_all(1, 2, 3, 4)  -&gt;  10</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/05-control-flow.html"><span>&larr; previous</span>Control Flow</a><a class="next" rel="next" href="../guide/07-classes.html"><span>next &rarr;</span>Classes</a></nav></article>
 </main>
 </div>
-<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-12</footer>
+<footer class="site-footer">
+<p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+</footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>
 </body>

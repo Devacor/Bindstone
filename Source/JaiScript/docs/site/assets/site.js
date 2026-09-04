@@ -5,20 +5,38 @@
   /* ---------------- theme toggle ---------------- */
   var root = document.documentElement;
   var toggle = document.getElementById("theme-toggle");
+  function paintToggle() {
+    if (!toggle) return;
+    var dark = root.getAttribute("data-theme") === "dark";
+    var label = dark ? "Switch to light theme" : "Switch to dark theme";
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+  }
   if (toggle) {
+    paintToggle();
     toggle.addEventListener("click", function () {
       var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("jai-theme", next); } catch (e) {}
+      paintToggle();
     });
   }
+
+  /* ---------------- heading anchors ---------------- */
+  // The markup carries a bare "link" label; say what the link is for, once, here.
+  (function () {
+    var anchors = document.querySelectorAll(".hlink");
+    for (var i = 0; i < anchors.length; i++) {
+      anchors[i].setAttribute("aria-label", "Link to this section");
+    }
+  }());
 
   /* ---------------- tiny tokenizing highlighter ---------------- */
   var JAI_KW = {};
   ("var auto int double float string bool char class function coroutine yield if else while for " +
    "switch case default fallthrough break continue try catch throw return include import namespace " +
    "enum new null true false void this super override operator static private public array map " +
-   "shared_ptr weak_ptr skip_newline skip_flush").split(" ").forEach(function (k) { JAI_KW[k] = 1; });
+   "shared_ptr weak_ptr cast extern skip_newline skip_flush").split(" ").forEach(function (k) { JAI_KW[k] = 1; });
   var CPP_KW = {};
   ("auto int double float bool char class struct const constexpr void return if else while for switch " +
    "case break continue try catch throw new delete nullptr true false namespace using template typename " +
@@ -130,6 +148,92 @@
     pre.insertBefore(gutter, codeEl);
   }
 
+  /* ---------------- code block labels ---------------- */
+  // Language labels read well in small caps; a file path does not.
+  (function () {
+    var labels = document.querySelectorAll(".cb-label");
+    for (var i = 0; i < labels.length; i++) {
+      if (/[\/\\]/.test(labels[i].textContent)) { labels[i].classList.add("cb-file"); }
+    }
+  }());
+
+  /* ---------------- copy buttons ---------------- */
+  // The gutter is a sibling of <code>, so code.textContent is already clean.
+  (function () {
+    var cbs = document.querySelectorAll(".codeblock:not(.cb-output):not(.cb-capture)");
+    for (var i = 0; i < cbs.length; i++) {
+      (function (block) {
+        var code = block.querySelector("pre > code");
+        if (!code) return;
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cb-copy";
+        btn.textContent = "copy";
+        btn.setAttribute("aria-label", "Copy code");
+        btn.addEventListener("click", function () {
+          var body = code.textContent.replace(/\n$/, "");
+          var done = function () {
+            btn.textContent = "copied"; btn.classList.add("done");
+            setTimeout(function () { btn.textContent = "copy"; btn.classList.remove("done"); }, 1500);
+          };
+          var fallback = function () {
+            var range = document.createRange();
+            range.selectNodeContents(code);
+            var selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            btn.textContent = "ctrl+c";
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(body).then(done, fallback);
+          } else { fallback(); }
+        });
+        block.appendChild(btn);
+      }(cbs[i]));
+    }
+  }());
+
+  /* ---------------- in-page table of contents ---------------- */
+  (function () {
+    var narrow = window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
+    if (narrow) {
+      var boxes = document.querySelectorAll(".sidebar details");
+      for (var d = 0; d < boxes.length; d++) { boxes[d].open = false; }
+    }
+    var host = document.querySelector("[data-page-toc]");
+    var article = document.querySelector("article.chapter");
+    if (!host || !article) return;
+    var sel = host.hasAttribute("data-toc-h3") ? "h2[id], h3[id]" : "h2[id]";
+    var heads = article.querySelectorAll(sel);
+    if (heads.length < 3) return;
+    var links = [];
+    for (var i = 0; i < heads.length; i++) {
+      var h = heads[i];
+      var clone = h.cloneNode(true);
+      var anchor = clone.querySelector(".hlink");
+      if (anchor) anchor.parentNode.removeChild(anchor);
+      var li = document.createElement("li");
+      if (h.tagName === "H3") li.className = "lvl3";
+      var a = document.createElement("a");
+      a.href = "#" + h.id;
+      a.textContent = clone.textContent.trim();
+      li.appendChild(a);
+      host.appendChild(li);
+      links.push(a);
+    }
+    if (!("IntersectionObserver" in window)) return;
+    var io = new IntersectionObserver(function (entries) {
+      for (var e = 0; e < entries.length; e++) {
+        if (!entries[e].isIntersecting) continue;
+        var want = "#" + entries[e].target.id;
+        for (var j = 0; j < links.length; j++) {
+          links[j].classList.toggle("active", links[j].getAttribute("href") === want);
+        }
+      }
+    }, { rootMargin: "-15% 0px -75% 0px" });
+    for (var k = 0; k < heads.length; k++) io.observe(heads[k]);
+  }());
+
   /* ---------------- search ---------------- */
   var box = document.getElementById("search-box");
   var results = document.getElementById("search-results");
@@ -140,24 +244,30 @@
   var rootPrefix = cssHref.replace(/assets\/style\.css$/, "");
   var sel = -1;
 
+  function expand(on) {
+    results.hidden = !on;
+    if (box) box.setAttribute("aria-expanded", on ? "true" : "false");
+    if (!on && box) box.removeAttribute("aria-activedescendant");
+  }
+
   function render(items) {
     if (!items.length) {
       results.innerHTML = '<div class="sr-none">no matches</div>';
-      results.hidden = false; sel = -1; return;
+      expand(true); sel = -1; return;
     }
     var htmlOut = "";
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
-      htmlOut += '<a href="' + rootPrefix + it.u + (it.a ? "#" + it.a : "") + '">' +
+      htmlOut += '<a role="option" id="sr-' + i + '" href="' + rootPrefix + it.u + (it.a ? "#" + it.a : "") + '">' +
         '<div class="sr-title">' + esc(it.label) + "</div>" +
         '<div class="sr-ctx">' + esc(it.ctx) + "</div></a>";
     }
-    results.innerHTML = htmlOut; results.hidden = false; sel = -1;
+    results.innerHTML = htmlOut; expand(true); sel = -1;
   }
 
   function search(q) {
     q = q.toLowerCase().trim();
-    if (!q) { results.hidden = true; return; }
+    if (!q) { expand(false); return; }
     var hits = [];
     for (var i = 0; i < index.length && hits.length < 12; i++) {
       var e = index[i];
@@ -168,7 +278,8 @@
       for (var h = 0; h < e.h.length; h++) {
         if (e.h[h].toLowerCase().indexOf(q) >= 0) {
           hits.push({ u: e.u, label: e.h[h], ctx: e.s + " › " + e.t,
-                      a: e.h[h].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") });
+                      a: (e.i && e.i[h]) ||
+                         e.h[h].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") });
           break;
         }
       }
@@ -186,14 +297,23 @@
         sel = ev.key === "ArrowDown" ? Math.min(sel + 1, links.length - 1) : Math.max(sel - 1, 0);
         for (var i = 0; i < links.length; i++) links[i].className = i === sel ? "sel" : "";
         links[sel].scrollIntoView({ block: "nearest" });
+        box.setAttribute("aria-activedescendant", "sr-" + sel);
       } else if (ev.key === "Enter") {
-        if (links.length) { window.location.href = links[Math.max(sel, 0)].getAttribute("href"); }
+        if (sel >= 0 && links[sel]) { window.location.href = links[sel].getAttribute("href"); }
+        else if (links.length === 1) { window.location.href = links[0].getAttribute("href"); }
       } else if (ev.key === "Escape") {
-        results.hidden = true; box.blur();
+        expand(false); box.blur();
       }
     });
     document.addEventListener("click", function (ev) {
-      if (!results.contains(ev.target) && ev.target !== box) results.hidden = true;
+      if (!results.contains(ev.target) && ev.target !== box) expand(false);
+    });
+    // "/" focuses search from anywhere that is not itself a text field
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      var t = ev.target, tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      ev.preventDefault(); box.focus(); box.select();
     });
   }
 }());

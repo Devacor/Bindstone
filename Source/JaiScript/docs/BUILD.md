@@ -1,102 +1,208 @@
 # Building JaiScript
 
-JaiScript uses CMake for cross-platform builds with excellent Visual Studio integration.
-(Day-to-day dev workflow with the exact CLI commands, Debug-vs-Release advice, and the
-Bindstone/MutedVision integration build lives in `Source/JaiScript/CLAUDE.md`.)
+JaiScript builds with CMake and has no dependencies. The whole thing is a static library plus
+headers, and everything else in this repository — the test suite, the runner, the example games
+— is a target you can turn off.
 
-## Prerequisites
+## Requirements
 
-- **C++20 Compiler**
-  - Visual Studio 18 (MSVC)
-  - GCC 10+ or Clang 12+ (Linux/Mac)
-- **CMake 3.20+** (+ Ninja for the Open-Folder configs)
+- **A C++20 compiler.** Verified — the full suite on both backends — with MSVC 19.51 (Visual
+  Studio 18, toolset 14.51), Clang 20 and GCC 16 (MinGW-w64); the CI workflow in
+  `.github/workflows/ci.yml` targets MSVC, GCC 14 and Clang on Ubuntu 24.04. Older compilers
+  may work; they are untested. The library uses `std::to_chars` for doubles and
+  `std::strong_order`, so a standard library without those will not get far.
+- **CMake 3.20+.**
+- **Ninja**, optional but recommended. It gives single-configuration build directories, which
+  makes the output paths predictable.
 
-## Visual Studio (Recommended for Windows)
-
-### Open Folder
-
-1. Open Visual Studio
-2. **File → Open → Folder**
-3. Select the `JaiScript` directory
-4. VS will automatically detect `CMakeLists.txt` and configure the project (Ninja generator;
-   build dirs land under `out/build/<config>/`, e.g. `out/build/x64-Debug/`,
-   `out/build/x64-Release BENCHMARKS/`)
-5. Build using **Build → Build All** (Ctrl+Shift+B), or build just the test target
-   (`jaiscript_tests`)
-6. Run tests: `out/build/<config>/bin/jaiscript_tests.exe`
-
-## Command Line Build
+## The short version
 
 ```bash
-# Configure
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+build/bin/jaiscript_tests
+```
 
-# Build
+That builds everything: the library, the test suite, the differential fuzzer, the runner, and
+the three example games. Binaries land in `build/bin/`, the library in `build/lib/`.
+
+## Picking targets
+
+Building everything takes a while; usually you want one or two things.
+
+```bash
+cmake --build build --target jaiscript          # the library alone
+cmake --build build --target jaiscript_tests    # the Foundry test suite
+cmake --build build --target jaiscript_runner   # the runner/REPL — the binary is `jaiscript`
+cmake --build build --target jaiscript_fuzz     # the differential fuzzer
+cmake --build build --target jai_gloom          # GLOOM, the raycast shooter
+cmake --build build --target jai_crawler        # GRUBWELL, the dungeon crawler
+cmake --build build --target jai_demoreel       # the demoscene reel
+```
+
+Note that the runner's CMake target is `jaiscript_runner` (the library already owns the name
+`jaiscript`), while the executable it produces is `jaiscript`.
+
+## Where the binaries end up
+
+With a single-configuration generator (Ninja, Make) they are in `build/bin/`:
+
+```bash
+build/bin/jaiscript_tests
+build/bin/jaiscript hello.jai
+build/bin/jai_gloom
+```
+
+With a multi-configuration generator (Visual Studio, Xcode) the configuration is chosen at
+build time, not configure time, and the binaries sit one level deeper:
+
+```bash
+cmake -S . -B build
 cmake --build build --config Release --target jaiscript_tests
-
-# Run tests
-cd build
-ctest -C Release --output-on-failure
-# Or run directly:
-./bin/jaiscript_tests.exe                 # tree-walking interpreter (default)
-./bin/jaiscript_tests.exe --backend=vm    # whole suite on the bytecode VM
+build/bin/Release/jaiscript_tests
 ```
 
-## CMake Options
+The example games copy their scripts next to the binary (`gloom_scripts/`, `crawler_scripts/`,
+`demoreel_scenes/`) but prefer the source directory in the tree (`examples/gloom/scripts/`,
+`examples/crawler/scripts/`, `examples/demoreel/scenes/`) when they can find it, so editing a
+script in the tree is what hot reload picks up. Build the games in Release: they render every
+frame in script, and a Debug frame takes tens of times longer. Each game's `README.md` has the
+flags.
 
-- `JAISCRIPT_BUILD_TESTS` - Build test suite (default: ON)
-- `JAISCRIPT_ENABLE_PROFILING` - Profiling instrumentation (default: OFF)
-- `JAISCRIPT_ENABLE_BENCHMARKS` - Performance benchmark suites, incl. sol2/Lua and Squirrel
-  comparisons (default: OFF; the "x64-Release BENCHMARKS" config turns it on)
-- `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` - Env/closure cycle debugging (default: OFF; the Debug
-  config defines it)
-- `JAISCRIPT_NATIVE_ARCH` - Tune Release for this machine's CPU (`-march=native`; non-portable
-  binaries) (default: OFF)
-- `JAISCRIPT_ENABLE_LTO` - Link-time optimization for GCC/Clang Release (default: OFF)
+## Visual Studio: Open Folder
 
-Example:
+Visual Studio can open this directory directly (**File → Open → Folder**). It detects
+`CMakeLists.txt`, configures with Ninja, and puts build directories under
+`out/build/<config>/`, so the test executable is `out/build/x64-Debug/bin/jaiscript_tests.exe`.
+The configurations it offers come from `CMakeSettings.json`.
+
+Debug is where you want to live day to day: it has no link-time code generation, so an
+incremental link is seconds rather than minutes.
+
+## Options
+
+| Option | Default | What it does |
+|---|---|---|
+| `JAISCRIPT_BUILD_TESTS` | ON | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
+| `JAISCRIPT_BUILD_RUNNER` | ON | The standalone runner / REPL |
+| `JAISCRIPT_BUILD_EXAMPLES` | ON | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
+| `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
+| `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
+| `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
+| `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
+
 ```bash
-cmake -B build -DJAISCRIPT_BUILD_TESTS=OFF
+cmake -S . -B build -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_ENABLE_DEBUGGER=OFF
 ```
 
-## Running Tests
+### Integer overflow policy
 
-The Foundry test suite auto-discovers all test suites. You can filter tests by name:
+By default, an overflowing `+`, `-`, `*`, unary `-`, or `INT64_MIN / -1` raises a catchable
+script error. Define `JAISCRIPT_WRAP_ON_OVERFLOW` for the whole build to opt into silent
+two's-complement wraparound instead:
 
 ```bash
-# Run all tests
-jaiscript_tests.exe
-
-# Bare pattern (ADDITIVE): matching suites (all their tests) OR matching test names
-jaiscript_tests.exe "static"
-
-# Dot form: suite filter AND test filter
-jaiscript_tests.exe "Language.operators"
+cmake -S . -B build -DCMAKE_CXX_FLAGS=-DJAISCRIPT_WRAP_ON_OVERFLOW
 ```
 
-Adding a NEW test `.cpp` requires a CMake reconfigure (the test list is a `file(GLOB_RECURSE)`
-evaluated at configure time).
+The unused policy's code is eliminated at compile time, so neither choice costs anything at run
+time. Arithmetic is never undefined behavior either way.
 
-## Project Structure
+## Running the tests
+
+```bash
+build/bin/jaiscript_tests                 # tree-walking interpreter
+build/bin/jaiscript_tests --backend=vm    # bytecode VM
+```
+
+**Both must pass.** The two backends are held to identical results, output, and error text; a
+change that only satisfies one of them is not done. See
+[../CONTRIBUTING.md](../CONTRIBUTING.md).
+
+Filtering:
+
+```bash
+jaiscript_tests "Coroutine"          # ADDITIVE: matching suites (all their tests) OR matching test names
+jaiscript_tests "Language.operators" # the dot form is the strict AND: suite filter AND test filter
+jaiscript_tests --verbose            # per-test names and timings
+```
+
+A grouped CTest view is registered too, in the tests subdirectory:
+
+```bash
+ctest --test-dir build/source/tests --output-on-failure
+```
+
+Adding a **new** test `.cpp` requires re-running CMake — the test list is a
+`file(GLOB_RECURSE)` evaluated at configure time.
+
+## Comparison benchmarks
+
+`JAISCRIPT_ENABLE_BENCHMARKS=ON` adds the performance suites. Some of them compare JaiScript
+against other embedded languages, and **those sources are not distributed here** — nothing
+third-party ships in this repository. The configure step looks for each one and prints what it
+found:
+
+| comparison | expected location |
+|---|---|
+| Lua 5.4 + sol2 | `lua/src/lua.h` and `sol2/include/sol/sol.hpp` at the repository root |
+| Squirrel 3 | `squirrel/include/squirrel.h` at the repository root |
+| ChaiScript 6.1.0 | `include/chaiscript/chaiscript.hpp` under `CHAISCRIPT_ROOT` (see below) |
+
+Missing ones are skipped with a configure message, and the rest of the benchmark suites build
+and run normally. All four are MIT-licensed and easy to drop in if you want the comparison
+numbers; you are just supplying them yourself. The paths are fixed in
+`source/tests/CMakeLists.txt` (`CHAISCRIPT_ROOT`, `SQUIRREL_ROOT`, `LUA_ROOT`, `SOL2_ROOT`);
+there is no cache variable to point elsewhere. ChaiScript's default points outside the
+repository, so edit that one line to where your copy lives.
+
+The GLOOM example has ports in the same languages behind their own options —
+`GLOOM_PORT_LUA`, `GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI` (all OFF) — reading the same
+locations. Unlike the benchmarks, a port option that is ON with its sources missing is a
+configure error rather than a skip.
+
+## Layout
 
 ```
 JaiScript/
-├── CMakeLists.txt          # Root CMake configuration
-├── include/jaiscript/      # Public headers (core/ detail/ vm/ stdlib/ signals/ properties/ serialization/ testing/)
+├── CMakeLists.txt
+├── include/jaiscript/      Public headers
+│   ├── core/                 value, engine, dynamic_binder, class_definition, ...
+│   ├── detail/               lexer, parser, AST, and the kernels both backends share
+│   ├── vm/                   opcodes, compiler, bytecode backend, disassembler
+│   ├── stdlib/  signals/  properties/  serialization/  testing/
 ├── source/
-│   ├── implementation/     # Library .cpp files (lexer, parser, interpreter, engine, value, vm/)
-│   └── tests/              # Foundry test suites
-│       ├── main_test_runner.cpp
-│       ├── containers/  core/       foundry/     fuzz/       integration/
-│       ├── language/    performance/ properties/ scripts/    semantics/
-│       └── serialization/ signals/  stdlib/      vm/
-├── examples/               # Standalone example programs
-├── bench/                  # Micro-benchmarks
-└── sol2/ lua/ squirrel/    # NOT built into the engine — benchmark-comparison sources only
+│   ├── implementation/     Library .cpp files
+│   └── tests/              Foundry suites, and the differential fuzzer under fuzz/
+├── tools/
+│   ├── jaiscript/          The runner / REPL
+│   └── vscode-jaiscript/   The VS Code extension (syntax, debugging)
+├── examples/               GLOOM, GRUBWELL, the demoreel
+├── bench/                  Micro-benchmarks
+└── docs/                   This directory, and the documentation site under docs/site/
 ```
 
-## Incremental Builds
+## Consuming it from another project
 
-CMake automatically tracks dependencies. Just build and it will only recompile changed files.
-(The legacy `build_*.bat` scripts still exist for a couple of standalone tools, but the CMake
-targets are the supported path.)
+The library target is `jaiscript`. From a superproject:
+
+```cmake
+set(JAISCRIPT_BUILD_TESTS    OFF CACHE BOOL "")
+set(JAISCRIPT_BUILD_EXAMPLES OFF CACHE BOOL "")
+set(JAISCRIPT_BUILD_RUNNER   OFF CACHE BOOL "")
+add_subdirectory(JaiScript)
+
+target_link_libraries(my_game PRIVATE jaiscript)
+target_include_directories(my_game PRIVATE JaiScript/include)
+```
+
+The explicit `target_include_directories` is not redundant: the library's exported include path
+is written relative to the top-level source directory, so it only resolves on its own when
+JaiScript *is* the top-level project. Point at `JaiScript/include` yourself when it is not.
+
+On Windows the library links `ws2_32` for the debugger transport and carries that dependency
+on its own interface, so a consumer needs nothing extra. On MSVC it selects the static runtime
+(`/MT`, `/MTd`); a consumer built against the DLL runtime should set `MSVC_RUNTIME_LIBRARY`
+on the `jaiscript` target after `add_subdirectory`, or the linker will complain about
+mismatched runtimes.

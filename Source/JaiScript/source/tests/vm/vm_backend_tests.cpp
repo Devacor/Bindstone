@@ -2291,7 +2291,7 @@ public:
 		test("unsupported_constructs_error_cleanly", [this]() {
 			auto e = vm_engine();
 			check_eq((int64_t)7, e->execute("class Cat { int a = 7; } auto c = Cat(); c.a").as_int());
-			check_throws([&]() { e->execute("coroutine gen() { yield 1; } auto g = gen(); g.resume();"); }, "coroutines report B4");
+			check_eq((int64_t)1, e->execute("coroutine gen() { yield 1; } auto g = gen(); g.resume();").as_int(), "bare coroutine spelling runs");
 			check_throws([&]() { e->execute("include \"no_such_file.jai\";"); }, "include reports B4");
 			// Engine stays usable
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
@@ -2473,6 +2473,30 @@ public:
 			check_true(listing.find("STORE") != std::string::npos, "store present");
 			check_true(listing.find("IMPLICIT_RETURN") != std::string::npos, "implicit return present");
 			check_true(listing.find("HALT") != std::string::npos, "halt present");
+		});
+
+		test("disassembler_return_convert_only_inside_try", [this]() {
+			auto e = vm_engine();
+			auto* symbolizer = e->get_symbolizer();
+			auto listing_of = [&](const char* script) {
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				jai::vm::vm_compiler compiler(symbolizer);
+				auto compiled = compiler.compile_program(parse_result.value());
+				return jai::vm::disassemble(*compiled, symbolizer);
+			};
+			std::string clean = listing_of("var n = 1; return n;");
+			check_true(clean.find("RETURN_IDENT") != std::string::npos, "clean-exit return keeps the fused form");
+			check_true(clean.find("RETURN_CONVERT") == std::string::npos, "no site conversion outside a try/catch region");
+			std::string in_try = listing_of("var n = 1; try { return n; } catch (e) { return 0; }");
+			const size_t conv = in_try.find("RETURN_CONVERT");
+			const size_t pop = in_try.find("TRY_POP");
+			check_true(conv != std::string::npos && pop != std::string::npos && conv < pop,
+				"an in-try return converts before the region exit");
 		});
 
 		test("differential_interpreter_vs_vm", [this]() {
@@ -2989,12 +3013,12 @@ public:
 		// exact non-lvalue error instead of lazily inserting a dead shadow field that
 		// swallows writes
 		test("tier1_map_pair_accessor_ref_args", [this]() {
-			// Range-for map pairs expose .second through a C++-backed accessor whose
-			// EVALUATION yields a live map-entry reference: tier 2 binds it and writes
-			// land in the real entry (Dev ruling 2026-07-12 - REVERSES the old
-			// non-lvalue pin here, which guarded fields_-node binding; tier 2 binds the
-			// evaluated reference, never the placeholder node). Map KEYS stay
-			// unbindable: kv.first evaluates to a COPY, so the ordering invariant holds.
+			// Range-for map pairs expose .second through a C++ property whose value is a
+			// live map-entry reference: the PROPERTY-mode ref (reference_model.md) writes
+			// through the pair's setter into the real entry (Dev ruling 2026-07-12 kept
+			// the write landing in the map). kv.first is the pair's own COPY of the key:
+			// binding it writes that copy (the by-reference-binds-properties ruling), so
+			// the map key - and the ordering invariant - stay untouched.
 			const char* src = R"(
 				var m = {"a": 1, "b": 2};
 				function f(int& x) { x = 77; }
@@ -3002,10 +3026,10 @@ public:
 				var msg = "";
 				for (var& kv : m) {
 					f(kv.second);
-					try { g(kv.first); } catch (e) { msg = "" + e; }
+					try { g(kv.first); msg = kv.first; } catch (e) { msg = "" + e; }
 					break;
 				}
-				to_string(m["a"]) + "|" + msg + "|" + to_string(m.has("zz"));
+				to_string(m["a"]) + "|" + msg + "|" + to_string(m.has("zz")) + "|" + to_string(m.has("a"));
 			)";
 			std::string first;
 			for (bool use_vm : {false, true}) {
@@ -3013,10 +3037,7 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
-				check_true(got.find("77|") == 0, "write through kv.second lands in the map: " + got);
-				check_true(got.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
-					"map keys stay unbindable: " + got);
-				check_true(got.find("|false") != std::string::npos, "no key mutation: " + got);
+				check_eq(std::string("77|zz|false|true"), got, "kv.second writes the entry, kv.first writes the pair's copy only");
 				if (!use_vm) { first = got; } else { check_eq(first, got, "identical behavior on both backends"); }
 			}
 		});
@@ -3683,17 +3704,18 @@ public:
 			// f(yield ...) suspends BETWEEN callee resolution and the call; the parked
 			// callee is per-fiber state and must survive resumer-side calls
 			auto [i1, v1] = run_both_backends(R"(
-				function add(auto a, auto b) -> auto { return a + b; }
-				coroutine gen() -> auto {
+				var add(var a, var b) { return a + b; }
+				coroutine var gen() {
 					return add(10, (yield 1) ? 0 : 5);
 				}
 				var h = gen();
 				var first = h.resume();
 				var between = add(2, 3);
-				var final = h.resume();
-				"" + first + ":" + between + ":" + final;
+				var last = h.resume();
+				"" + first + ":" + between + ":" + last + ":" + h.done();
 			)");
-			check_eq(i1, v1, "yield-in-args pending isolation parity");
+			check_eq(std::string("1:5:15:true"), i1, "interp: yield-in-args pending isolation");
+			check_eq(std::string("1:5:15:true"), v1, "vm: yield-in-args pending isolation");
 		});
 
 		// INDEX operand fusion phase 2: member-base containers (`base.field[i]` resolves

@@ -56,7 +56,7 @@ class Monster : Entity {
 		behavior = def_row["behavior"];
 		tier = def_row["tier"];
 		// unconditional: `if (row.has(k)) { int_field = row[k]; }` inside a ctor
-		// trips an interpreter-only "Type mismatch in assignment" (VM converts)
+		// trips an interpreter-only "Cannot assign ... to field ... (declared int)" (VM converts)
 		range = def_row["range"];
 		withers = def_row["withers"];
 		burns = def_row["burns"];

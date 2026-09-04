@@ -130,7 +130,7 @@ public:
             try { e->execute("function bad() -> int { return \"nope\"; } bad();"); }
             catch (const static_check_error&) { text = "static_check_error"; }
             catch (const std::exception& ex) { text = ex.what(); }
-            check_true(text.find("Type mismatch: expected int but got string") != std::string::npos,
+            check_true(text.find("Cannot return string from 'bad' (declared -> int)") != std::string::npos,
                 "off: the runtime's text, never the checker's (got: " + text + ")");
             // and no diagnostics were collected anywhere
             check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size());
@@ -600,14 +600,14 @@ public:
             try { flagged.execute(); }
             catch (const static_check_error&) { text = "static_check_error"; }
             catch (const std::exception& ex) { text = ex.what(); }
-            check_true(text.find("Type mismatch in assignment") != std::string::npos,
+            check_true(text.find("Cannot initialize 'bad' (declared int) with string") != std::string::npos,
                 "warn executes into the runtime error (got: " + text + ")");
             // strict admits the var-sourced twin; the same runtime error fires at execute
             auto var_bite = strict->jaibite("var s = \"s\"; int bad = s;");
             check_true(var_bite.checked_clean());
             text.clear();
             try { var_bite.execute(); } catch (const std::exception& ex) { text = ex.what(); }
-            check_true(text.find("Type mismatch in assignment") != std::string::npos,
+            check_true(text.find("Cannot initialize 'bad' (declared int) with string") != std::string::npos,
                 "var-sourced store keeps the runtime text under strict (got: " + text + ")");
         });
 
@@ -1021,8 +1021,9 @@ public:
 
         test("accessor_members_known_with_unknown_type", [this]() {
             // _get_x/_set_x declare a member x the checker knows (no `no member` error) whose
-            // static type is the accessor's business: reads and writes are lenient, bare x
-            // inside the class keeps the field's declared type.
+            // static type is the single declared accessor's ("Members"): a typed getter types
+            // the read, a typed setter checks the store, bare x inside the class keeps the
+            // field's declared type, and nothing is ever proven from the member.
             auto e = make_engine();
             check_eq((int64_t)5, e->execute(
                 "class V { int seen = 0; int _get_virt() { return seen; } void _set_virt(int v) { seen = v; } }\n"
@@ -1034,7 +1035,13 @@ public:
             try { e->execute("C c2 = C(); int n = c2.b; n"); text = "ran"; }
             catch (const static_check_error&) { text = "static"; }
             catch (const std::exception& ex) { text = ex.what(); }
-            check_true(text.find("Type mismatch") != std::string::npos, "unknown-typed member into int: a run-time mismatch, not a load error: " + text);
+            check_true(text.find("Type mismatch") != std::string::npos, "registered-only class: the getter's declaration is out of view, a run-time mismatch: " + text);
+            std::string same_unit;
+            try { e->execute("class P2 { int b = 1; } class C2 : P2 { override string _get_b() { return \"s\"; } }\nC2 c3 = C2(); int n = c3.b; n"); same_unit = "ran"; }
+            catch (const static_check_error& err) { same_unit = err.what(); }
+            catch (const std::exception& ex) { same_unit = std::string("runtime: ") + ex.what(); }
+            check_true(same_unit.find("cannot initialize 'n' declared 'int' with 'string'") != std::string::npos,
+                       "same unit: the one declared getter in the chain types the member, a load error: " + same_unit);
             bool threw = false;
             std::string message;
             try { e->execute("class Q { int b = 1; int _get_b() { return 7; } } Q q = Q(); q.zzz;"); }
@@ -1818,7 +1825,7 @@ public:
             check_true(r.format().find("warning: cannot initialize 'x' declared 'int' with 'string'") != std::string::npos);
             // strict loads it; the runtime keeps its conversion error (both backends)
             std::string what = outcome(*e, "[[warn_mode]];\nint x = \"s\";\nx");
-            check_true(what.find("ERROR Type mismatch") == 0, "runtime rejection survives (got: " + what + ")");
+            check_true(what.find("ERROR Cannot initialize") == 0, "runtime rejection survives (got: " + what + ")");
             check_false(what.find("static check failed") != std::string::npos);
             // without the attribute the same unit fails the static gate
             std::string strict = outcome(*make_engine(), "int x = \"s\";\nx");
@@ -1906,7 +1913,7 @@ public:
             auto warn = make_engine();
             warn->static_checking(check_mode::warn);
             std::string plain = outcome(*warn, "int q = \"s\";\nq");
-            check_true(plain.find("ERROR Type mismatch") == 0, "warn engine runs into the runtime error (got: " + plain + ")");
+            check_true(plain.find("ERROR Cannot initialize") == 0, "warn engine runs into the runtime error (got: " + plain + ")");
             check_true(warn->last_check_diagnostics().has_errors());
             check_false(warn->last_check_diagnostics().has_strict_errors());
             std::string gated = outcome(*warn, "[[strict_mode]];\nint q = \"s\";\nq");
@@ -1916,7 +1923,7 @@ public:
             std::string partial = outcome(*warn, "int a = \"s\";\n[[strict_mode]] int b = \"s\";\nb");
             check_true(partial.find("ERROR static check failed") == 0, "got: " + partial);
             std::string free = outcome(*warn, "int a = \"s\";\n[[warn_mode]] int b = \"s\";\nb");
-            check_true(free.find("ERROR Type mismatch") == 0, "got: " + free);
+            check_true(free.find("ERROR Cannot initialize") == 0, "got: " + free);
             // jaibite creation gates the same way
             check_throws<static_check_error>([&]() { warn->jaibite("[[strict_mode]];\nint q = \"s\";"); });
             check_false(warn->jaibite("int q = \"s\";").checked_clean());
@@ -1926,7 +1933,7 @@ public:
             auto e = make_engine();
             e->static_checking(check_mode::off);
             std::string what = outcome(*e, "[[strict_mode]];\nint q = \"s\";\nq");
-            check_true(what.find("ERROR Type mismatch") == 0, "got: " + what);
+            check_true(what.find("ERROR Cannot initialize") == 0, "got: " + what);
             check_true(e->last_check_diagnostics().diagnostics.empty());
             check_eq((int64_t)5, e->execute("[[warn_mode]];\nint x = 5;\n[[strict_mode]] int y = x;\n{ [[warn_mode]] y = 5; }\ny").as_int());
             check_true(e->last_check_diagnostics().diagnostics.empty());
@@ -1994,6 +2001,193 @@ public:
             check_eq((size_t)1, error_count(ri));
             check_true(has_diag(ri, dlevel::error, "cannot initialize field 's' declared 'int' with 'string'"));
             check_eq((size_t)0, error_count(e->check("class C { static float f = 3; static string t = 5; static int n = true; static int u; }")), "converting static initializers are clean");
+        });
+
+        // ------------------------------------------------------------ precision map (docs "Precision map")
+
+        // The creature shape: a script kind over a dynamic_binder base in an imported unit, a
+        // subclass in the root. Typos and typed-field mismatches are errors (false-negative
+        // guards); binder methods/properties reached through the chain carry no static
+        // signature and stay lenient BY DESIGN - the runtime raises.
+        test("creature_shape_cross_unit_cpp_base_precision", [this]() {
+            auto dir = closure_dir("xunit_creature");
+            write_unit(dir, "cr_kind.jai", "class Kind : ProbeObject { int hp = 1; Kind() : super() {} int twice() { return doubled(); } }\n");
+            auto e = program_engine(dir);
+            dynamic_binder<probe_object>(*e, "ProbeObject")
+                .constructor<>()
+                .method("doubled", &probe_object::doubled)
+                .property("value", &probe_object::value)
+                .build();
+            const std::string imp = "import \"cr_kind.jai\";\n";
+            const std::string sub = "class W : Kind { W() : super() {} ";
+            auto typo = e->check(imp + sub + "int tick() { return hpp + this.hpp; } }");
+            check_eq((size_t)2, error_count(typo), typo.format());
+            check_true(has_diag(typo, dlevel::error, "use of undeclared identifier 'hpp'"), typo.format());
+            check_true(has_diag(typo, dlevel::error, "no member 'hpp' in class 'W'"), typo.format());
+            auto bare = e->check(imp + sub + "void f() { hp = \"s\"; } }");
+            check_eq((size_t)1, error_count(bare), bare.format());
+            check_true(has_diag(bare, dlevel::error, "cannot assign 'string' to field 'hp' declared 'int'"), bare.format());
+            auto viathis = e->check(imp + sub + "void f() { this.hp = [1]; } }");
+            check_eq((size_t)1, error_count(viathis), viathis.format());
+            check_true(has_diag(viathis, dlevel::error, "cannot assign 'array' to field 'hp' declared 'int'"), viathis.format());
+            auto recv = e->check(imp + sub + "}\nW w = W();\nw.hp = \"s\";\nchar c = w.hp;");
+            check_eq((size_t)2, error_count(recv), recv.format());
+            const std::string ok = imp + sub + "int tick() { return hp + twice() + doubled(); } }\nW w = W();\nw.value = 4;\nw.hp = 2.9;\nw.tick() + w.value";
+            auto okr = e->check(ok);
+            check_eq((size_t)0, error_count(okr), okr.format(ok));
+            // lenient by design: binder arity and binder property types
+            const std::string arity = imp + sub + "int tick() { return doubled(1) + this.doubled(1, 2); } }\nW w = W();\nw.doubled(1)";
+            auto ar = e->check(arity);
+            check_eq((size_t)0, error_count(ar), "binder arity through the chain is lenient: " + ar.format(arity));
+            const std::string prop = imp + sub + "}\nW w = W();\nw.value = \"s\";\nw.value";
+            check_eq((size_t)0, error_count(e->check(prop)), "binder property stores are lenient");
+            check_eq((int64_t)22, e->execute(ok).as_int());
+            std::string what = outcome(*e, arity);
+            check_true(what.find("ERROR") == 0, "the runtime rejects the binder arity (got: " + what + ")");
+            std::string pw = outcome(*e, prop);
+            check_true(pw.find("ERROR") == 0, "the runtime rejects the binder property store (got: " + pw + ")");
+            std::filesystem::remove_all(dir);
+        });
+
+        // Accessor-bearing members ("Members"): exactly one declared user getter types the read.
+        test("accessor_member_reads_typed_by_single_getter", [this]() {
+            auto e = make_engine();
+            const std::string cls =
+                "class V { int hp_ = 5; string name_ = \"n\"; int _get_hp() { return hp_; } string _get_name() { return name_; } }\n"
+                "V v = V();\n";
+            auto r = e->check(cls + "char c = v.hp;");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "cannot initialize 'c' declared 'char' with 'int'"), r.format());
+            auto r2 = e->check(cls + "int n = v.name;");
+            check_eq((size_t)1, error_count(r2), r2.format());
+            check_true(has_diag(r2, dlevel::error, "cannot initialize 'n' declared 'int' with 'string'"), r2.format());
+            check_eq((size_t)1, error_count(e->check(cls + "array<int> a = v.hp;")), "array from an int getter");
+            check_eq((size_t)1, error_count(e->check(cls + "int n = 0; n = v.name;")), "assignment from a string getter");
+            check_eq((size_t)1, error_count(e->check(cls + "int take(int x) { return x; } take(v.name);")), "argument from a string getter");
+            check_eq((size_t)1, error_count(e->check(cls + "int f(V q) { return q.name; }")), "return from a string getter");
+            check_eq((size_t)0, error_count(e->check(cls + "int a = v.hp; float f = v.hp; string s = v.name; string t = v.hp; bool b = v.hp; var d = v.name; int l = v.name.size();")), "well-typed reads are clean");
+            check_eq((size_t)0, error_count(e->check(cls + "v.name.zzz();")), "a builtin method on the typed result stays lenient");
+            e->static_checking(check_mode::warn);
+            std::string what = outcome(*e, cls + "int n = v.name; n");
+            check_true(what.find("ERROR Cannot initialize") == 0, "the runtime keeps its rejection (got: " + what + ")");
+            e->static_checking(check_mode::strict);
+            // never a proof source: the plain-field twin proves one more decl than the getter-typed read
+            auto plain = make_engine();
+            check_eq((size_t)0, error_count(plain->check("class F { int hp = 5; } F f = F(); int x = f.hp; int y = 5; x + y")));
+            auto acc = make_engine();
+            check_eq((size_t)0, error_count(acc->check("class V { int hp_ = 5; int _get_hp() { return hp_; } } V v = V(); int x = v.hp; int y = 5; x + y")));
+            check_eq(plain->last_proof_stats().decls, acc->last_proof_stats().decls + 1, "the getter-typed decl is not proven");
+        });
+
+        // ...and exactly one declared user setter checks the store.
+        test("accessor_member_stores_checked_by_single_setter", [this]() {
+            auto e = make_engine();
+            const std::string cls =
+                "class S { int hp = 0; int _get_hp() { return hp; } void _set_hp(int v) { hp = v; } }\n"
+                "S s = S();\n";
+            auto r = e->check(cls + "s.hp = \"s\";");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "cannot assign 'string' to property 'hp' declared 'int'"), r.format());
+            check_eq((size_t)1, error_count(e->check(cls + "s.hp = [1];")), "array into an int setter");
+            check_eq((size_t)1, error_count(e->check(cls + "s.hp += \"x\";")), "compound: getter int + string is a string into the int setter");
+            check_eq((size_t)1, error_count(e->check("class T { int m() { this.hp = \"s\"; return 1; } int hp_ = 0; void _set_hp(int v) { hp_ = v; } }")), "through this");
+            check_eq((size_t)1, error_count(e->check(cls + "void f(S q) { q.hp = \"s\"; }")), "through a typed parameter");
+            check_eq((size_t)0, error_count(e->check(cls + "s.hp = 7; s.hp = 2.5; s.hp = true; s.hp += 1; s.hp++; --s.hp; s.hp -= 2.5; var y = (s.hp = 3);")), "converting stores are clean");
+            const std::string setter_only = "class T2 { int v_ = 0; void _set_hp(int v) { v_ = v; } }\nT2 t = T2();\n";
+            check_eq((size_t)1, error_count(e->check(setter_only + "t.hp = \"s\";")), "setter-only plain store");
+            check_eq((size_t)0, error_count(e->check(setter_only + "t.hp += \"s\";")), "setter-only compound store: no getter type, lenient");
+            e->static_checking(check_mode::warn);
+            std::string what = outcome(*e, cls + "s.hp = \"s\"; s.hp");
+            check_true(what.find("ERROR No overload of '_set_hp'") == 0, "the runtime keeps its rejection (got: " + what + ")");
+            e->static_checking(check_mode::strict);
+            // never a proof source: the member stays off the field lanes after registration too
+            const std::string prog = cls + "s.hp = 4; int x = s.hp; x";
+            check_eq((int64_t)4, e->execute(prog).as_int());
+            check_eq((int64_t)4, e->execute(prog).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().members, "accessor member: no field proof after registration");
+            check_eq((uint32_t)0, e->last_proof_stats().stores, "accessor store: no same_type proof");
+        });
+
+        // The rule's boundaries ("Members"): anything but ONE unambiguous declaration is lenient.
+        test("accessor_member_ambiguity_stays_lenient", [this]() {
+            auto e = make_engine();
+            struct row { const char* cls; const char* why; };
+            const row lenient_reads[] = {
+                {"class A { int _get_hp() { return 1; } int _get_hp(int k) { return k; } }", "two getter overloads"},
+                {"class A0 { int _get_hp() { return 1; } } class A : A0 { override string _get_hp() { return \"s\"; } }", "getters at two chain levels"},
+                {"class A { var _get_hp() { return 1; } }", "var-returning getter"},
+                {"class A { auto _get_hp() { return 1; } }", "auto-returning getter"},
+                {"class A { int _get_hp(int k = 0) { return k; } }", "getter with a parameter"},
+                {"class A { coroutine int _get_hp() { yield 1; } }", "coroutine getter"},
+            };
+            for (const auto& rw : lenient_reads) {
+                auto r = e->check(std::string(rw.cls) + "\nA a = A();\nchar c = a.hp;\narray<int> xs = a.hp;");
+                check_eq((size_t)0, error_count(r), std::string(rw.why) + ": " + r.format());
+            }
+            const row lenient_stores[] = {
+                {"class A { void _set_hp(int v) { } void _set_hp(string v) { } }", "two setter overloads"},
+                {"class A0 { void _set_hp(int v) { } } class A : A0 { override void _set_hp(string v) { } }", "setters at two chain levels"},
+                {"class A { void _set_hp(var v) { } }", "var setter parameter"},
+                {"class A { void _set_hp(v) { } }", "untyped setter parameter"},
+                {"class A { void _set_hp(int& v) { } }", "reference setter parameter"},
+                {"class A { void _set_hp(int a, int b = 0) { } }", "two-parameter setter"},
+            };
+            for (const auto& rw : lenient_stores) {
+                auto r = e->check(std::string(rw.cls) + "\nA a = A();\na.hp = \"s\";\na.hp = [1];\na.hp += \"x\";");
+                check_eq((size_t)0, error_count(r), std::string(rw.why) + ": " + r.format());
+            }
+            // a registered-only ancestor's accessor has no declaration in view: lenient, still known
+            e->execute("class R0 { int hp_ = 1; int _get_hp() { return hp_; } void _set_hp(int v) { hp_ = v; } }");
+            auto reg = e->check("class R1 : R0 { }\nR1 r = R1();\nchar c = r.hp;\nr.hp = \"s\";\nint n = r.hp;");
+            check_eq((size_t)0, error_count(reg), "registered-only ancestor: " + reg.format());
+        });
+
+        // Cross-unit accessors type through the program table exactly like the same-unit case,
+        // and stay off every proof lane before and after their unit has run.
+        test("accessor_cross_unit_typed_for_checking_never_for_proofs", [this]() {
+            auto dir = closure_dir("xunit_accessor");
+            write_unit(dir, "ac_a.jai", "class A { int hp = 3; int _get_hp() { return hp; } void _set_hp(int v) { hp = v; } string _get_name() { return \"n\"; } }\n");
+            write_unit(dir, "ac_b.jai", "import \"ac_a.jai\";\nint read_hp(A a) { int x = a.hp; a.hp = x + 1; return a.hp; }\n");
+            auto bad = program_engine(dir)->check("import \"ac_a.jai\";\nA a = A();\na.hp = \"s\";\nchar c = a.hp;\nint n = a.name;");
+            check_eq((size_t)3, error_count(bad), bad.format());
+            check_true(has_diag(bad, dlevel::error, "cannot assign 'string' to property 'hp' declared 'int'"), bad.format());
+            check_true(has_diag(bad, dlevel::error, "cannot initialize 'c' declared 'char' with 'int'"), bad.format());
+            check_true(has_diag(bad, dlevel::error, "cannot initialize 'n' declared 'int' with 'string'"), bad.format());
+            check_eq((size_t)0, bad.diagnostics[0].related_line, "cross-unit: no related location in this source");
+            const std::string root = "import \"ac_a.jai\";\nimport \"ac_b.jai\";\nread_hp(A())";
+            auto e = program_engine(dir);
+            check_eq((size_t)0, error_count(e->check(root)));
+            check_eq((uint32_t)0, e->last_proof_stats().members, "cross-unit first check: no field proof");
+            check_eq((uint32_t)0, e->last_proof_stats().decls, "cross-unit first check: no decl proof from an accessor read");
+            check_eq((int64_t)4, e->execute(root).as_int());
+            check_eq((int64_t)4, e->execute(root).as_int());
+            check_eq((uint32_t)0, e->last_proof_stats().members, "registered: an accessor member is still never a field proof");
+            std::filesystem::remove_all(dir);
+        });
+
+        // A [[warn_mode]] unit reports the same accessor mistakes as warnings and still loads.
+        test("accessor_mistakes_in_warn_mode_unit_are_warnings", [this]() {
+            const std::string body =
+                "class S { int hp = 0; int _get_hp() { return hp; } void _set_hp(int v) { hp = v; } string _get_name() { return \"n\"; } }\n"
+                "S s = S();\n"
+                "int n = s.name;\n"
+                "char c = s.hp;\n"
+                "s.hp = \"s\";\n"
+                "s.hp += \"x\";\n"
+                "s.zzz;\n";
+            const std::string unit = "[[warn_mode]];\n" + body;
+            auto e = make_engine();
+            auto r = e->check(unit);
+            check_eq((size_t)0, error_count(r), r.format(unit));
+            check_eq((size_t)5, warning_count(r), r.format(unit));
+            check_true(has_diag(r, dlevel::warning, "cannot initialize 'n' declared 'int' with 'string'"), r.format(unit));
+            check_true(has_diag(r, dlevel::warning, "cannot initialize 'c' declared 'char' with 'int'"), r.format(unit));
+            check_true(has_diag(r, dlevel::warning, "cannot assign 'string' to property 'hp' declared 'int'"), r.format(unit));
+            check_true(has_diag(r, dlevel::warning, "no member 'zzz' in class 'S'"), r.format(unit));
+            std::string what = outcome(*e, unit);
+            check_true(what.find("ERROR Cannot initialize") == 0, "the strict engine loads the unit; the runtime raises (got: " + what + ")");
+            auto strict = e->check(body);
+            check_eq((size_t)5, error_count(strict), strict.format(body));
         });
 
     }

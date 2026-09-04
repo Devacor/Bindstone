@@ -47,7 +47,7 @@ Warning severity never gates.
 | `bool` | anything | truthy conversion |
 | `string` | anything | to_string conversion; objects use their `to_string()` when defined |
 | `char` | char, object with `to_char()` | `char c = 65` is a runtime error too (`cast<char>` is the spelling) |
-| `array` / `map` | array / map | element/key types NOT checked statically (lenient v1); the runtime element boundary runs on every path (`Cannot store 'string' in 'array<int>'`) |
+| `array` / `map` | array / map | element/key types NOT checked statically (lenient v1); the runtime element boundary runs on every path (`Cannot store string in array<int>`) |
 | object `C` | null (a typed null); same class; derived→base; a `shared_ptr<C or derived>` handle; ctor conversion `C(src)` through exactly ONE true 1-param ctor whose parameter takes `src` directly (no chaining, no `to_X()` on the way in); on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
 | `shared_ptr` / `weak_ptr` / references / function slots | anything | lenient v1; `null` stores a typed null on every path |
 | `var` | anything, forever | THE opt-out: a var-typed expression makes downstream types unknown (like TS `any`); unknown never errors |
@@ -58,14 +58,21 @@ Warning severity never gates.
 time (`detail::convert_for_typed_slot`), the array/map element boundary included, so a value
 the checker admits converts. A chained conversion (`TA -> TB -> TC`, `X.to_int() -> C(int)`)
 is never implicit; a converting constructor or `to_X()` that throws surfaces its own error.
-Each site keeps its rejection text: `Type mismatch in assignment` / `Incompatible class types`
-for declarations, `=` and fields, `Type mismatch: expected T but got S` / `Cannot convert S to
-C (no suitable single-argument constructor)` for parameters and returns, the container text
-for declarations, `=`, parameters and returns (a field store keeps `Type mismatch in assignment`).
-`S` is the value's own type (`string`, `null`, `array`, a class name), never a `var` tag. A
-return that fails converts at the `return` statement: the returning function is the top frame
-of the stack trace with the call site below it (lambdas, methods and resumed coroutines alike;
-a coroutine's frame sits above the resumer's), and the error still surfaces in the caller.
+Each site names its slot in the rejection text (`docs/diagnostics.md` family D):
+`Cannot initialize 'x' (declared int) with S` for declarations, `Cannot assign S to 'x'
+(declared int)` for `=`, `Cannot assign S to field 'f' of C (declared int)` / `... to static 's'
+of C ...` for fields, `Cannot pass S to parameter 'n' of 'fib' (declared int)` and
+`Cannot return S from 'f' (declared -> int)` for parameters and returns, `Cannot convert S to
+C (no suitable single-argument constructor)` for a class-target parameter or return, the
+container text (`Cannot store S in array<int>`) on every path. `S` is the value's own type
+(`string`, `null`, `array`, a class name), never a `var` tag. The
+return conversion is part of the `return` statement (C++ semantics): a `try` around the
+`return` inside the callee catches its failure - the catch's own `return` converts in turn,
+a converting constructor or `to_X()` that throws during the conversion is caught the same
+way, and so is a reference return's "must return an lvalue reference". Uncaught, the
+returning function is the top frame of the stack trace with the call site below it (lambdas,
+methods and resumed coroutines alike; a coroutine's frame sits above the resumer's) and the
+error surfaces in the caller.
 
 **Compound assign** (Dev ruling 2026-07, settled): typed targets follow C++ rules —
 `x op= rhs` is `x = T(x op rhs)`, so `int x; x += 2.5` is fine (truncates) and
@@ -121,9 +128,20 @@ an unknown field/method is an error, reads and writes both (declared intent — 
 tolerates dynamic field creation on writes). A member that only a SUBTYPE declares is an
 error on a receiver whose static class is certain, exactly like C++ — the fixes are a `var`
 receiver or `cast<T&>(expr).member`. A member that a user `_get_x`/`_set_x` declares (same
-unit or registered, anywhere in the chain) is known with an unknown type: `expr.x` reads and
-writes are lenient and never proven; a bare `x` inside the class keeps the field's declared
-type. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
+unit or registered, anywhere in the chain) is known, and is never a proof source (reads or
+writes). Its static type is the accessor's declaration when that declaration is unambiguous:
+`expr.x` reads as the getter's declared return type when the receiver's chain (this unit and
+the program table) holds exactly ONE user `_get_x`, parameterless, not a coroutine, declaring
+a non-`var` type (`int _get_hp()` makes `char c = obj.hp` an error, `string _get_name()` makes
+`int n = obj.name` one); `expr.x = v` and the compound forms check `v` against the single
+one-parameter by-value user `_set_x`'s declared type (`void _set_hp(int)` makes `obj.hp = "s"`
+the error `cannot assign 'string' to property 'hp' declared 'int'`; `obj.hp += "s"` needs the
+getter's type too and is lenient without one). Two getter (or setter) overloads anywhere in
+the chain, a `var`/`auto`-returning getter, a getter with parameters, a coroutine getter, a
+reference or untyped setter parameter, or a chain that reaches a REGISTERED ancestor carrying
+the accessor (a binder property, a class from an earlier execute: no declaration in view) all
+leave the member unknown - lenient, as before. A bare `x` inside the class keeps the field's
+declared type. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
 compound forms check the store against the static's declared type (the runtime enforces the same
 table on every spelling). Any unresolvable ancestor opens the class: silence.
 Builtin container/string/map methods, subscripts, enum values (existence IS checked:
@@ -288,6 +306,34 @@ conversions). Enforced by `static_check_tests.cpp::fuzz_corpus_false_positive_ga
 differential-fuzzer generator seeds; any program that executes cleanly must check clean.
 Grow that seed count before loosening any lenient rule.
 
+### Precision map
+
+Where strict typing is lenient BY DESIGN - the whole false-negative surface, in one place. A
+mistake in any of these spots is a run-time error, never a load error:
+
+- `var` anywhere, and everything computed from it; `auto` without an initializer (locks at
+  the first store, flow the checker cannot see); a `null` initializer.
+- References (`T&` declarations, `auto&` loop variables, by-reference parameters) and
+  `shared_ptr<T>` / `weak_ptr<T>` handles as STORE targets (member lookup through a typed handle
+  or reference is still checked).
+- Container elements: `array<T>` / `map<K,V>` element and key types (the runtime element
+  boundary is the check), subscripts, builtin container/string methods.
+- Engine globals (typed off the value tag: a later retag is invisible), host-object
+  conversions, callables held in variables, host functions beyond arity and primitive
+  certainties, binder (C++) methods reached through a script chain (no static signature:
+  wrong arity or a wrong argument type raises at the call), binder properties (untyped).
+- Dynamic-path `import(expr)`/`include(expr)` units and below-top-level imports (undeclared
+  identifiers drop to warnings), `extern` names (untyped: `var`; typed: checked), a parent found
+  nowhere (its subclass's bare names type as unknown), namespaces at every depth.
+- Accessor-bearing members whose declaration is ambiguous ("Members": two getter/setter
+  overloads in the chain, `var`/`auto`/coroutine/parameterized getters, reference or untyped
+  setter parameters, an accessor on a registered-only ancestor).
+- Coroutines: yield and return types, and a call yields a handle (typed as unknown).
+- Mixed-branch ternaries, `this`/`super` as values, hot-reload redefinitions (receivers that
+  carry the old shape are open), `extend`ed classes and everything passed to `extend(...)`.
+- For PROOFS (not diagnostics): cross-unit classes until their unit has run, every row above,
+  and every accessor-bearing member, typed or not.
+
 ## Proofs
 
 The same walk that produces diagnostics also produces **proofs**: annotations on AST nodes
@@ -358,9 +404,10 @@ derived→base, ctor conversions), containers and typed maps, compound assignmen
 `++`/`--` desugars, `store_through` references, static fields, `super.f`, `?.` receivers,
 engine globals, `_cpp_object`, hybrid (C++-base) and `extend`ed classes, transparent
 wrappers, callable locals, engine functions, `new_expr`, coroutine callees, defaulted or
-by-reference parameters, native-entry/coroutine/fiber return epilogues, worker (parallel)
-frames, and `binary_expr::static_operand_class` (annotation only). All of these run the
-existing code with proofs on or off.
+by-reference parameters, worker (parallel) frames, and `binary_expr::static_operand_class`
+(annotation only). All of these run the existing code with proofs on or off. A return proof
+is consumed at the `return` statement itself on both backends (the in-region conversion op
+and every completion door alike), always behind the payload guard.
 
 **Differential gate** — the contract is pinned four ways: `static_check_tests.cpp::
 proof_differential_gate` runs 200 generator seeds on {interpreter, vm} × {proofs on, off}

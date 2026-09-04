@@ -87,6 +87,9 @@ namespace jai {
         internal_error = 124,
         execution_budget_exceeded = 125,
         memory_cap_exceeded = 126,
+        // Interpreter-internal: a yield unwinding the expression it sits in; consumed by the
+        // statement that owns the expression, never surfaced by a correct replay
+        coroutine_suspended = 127,
     };
 
     class runtime_error_category_impl : public std::error_category {

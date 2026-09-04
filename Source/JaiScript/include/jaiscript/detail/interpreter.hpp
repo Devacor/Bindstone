@@ -45,6 +45,8 @@
 
 #include "ast.hpp"
 #include "null_member_diagnostic.hpp"
+#include "arity_diagnostic.hpp"
+#include "slot_site.hpp"
 #include "string_symbolizer.hpp"
 #include "environment.hpp"
 #include "member_scope.hpp"
@@ -119,23 +121,38 @@ namespace jai {
             // so resume continues the SAME iteration instead of re-evaluating the
             // container expression (which would re-mint a fresh inner coroutine)
             std::optional<script_value> saved_container;
+            // Expression replay: which evaluation path of the node suspended (replay_phase) and
+            // the operands it had produced before the suspended child, in evaluation order;
+            // for those frames `index` is the suspended child's ordinal
+            uint32_t phase = 0;
+            std::vector<script_value> partial;
         };
 
         std::shared_ptr<environment> saved_environment;
         std::vector<call_frame> saved_call_stack;
         std::optional<script_value> saved_return_value;
         bool saved_has_return = false;
-        bool saved_return_proven = false;
         // The yield-point member scope rides the suspension exactly like the env
         // chain (call_function's yield path skips cleanup, so the ordinary
         // save/restore never runs for a suspending body).
         detail::member_scope_ctx saved_member_scope{};
+        // The body's function object outlives its first resume: the saved frames point at
+        // it across every later resume (return-site conversion, debugger locals)
+        std::optional<script_defined_function> function;
 
         void push_continuation(ast_node* node, size_t index,
                                std::shared_ptr<environment> env = nullptr,
                                std::optional<script_value> container = std::nullopt) {
             continuations_.push_back({node, index, std::move(env), std::move(container)});
         }
+        void push_replay(ast_node* node, uint32_t phase, size_t index,
+                         std::vector<script_value> partial = {},
+                         std::shared_ptr<environment> env = nullptr,
+                         std::optional<script_value> container = std::nullopt) {
+            continuations_.push_back({node, index, std::move(env), std::move(container), phase, std::move(partial)});
+        }
+        // The innermost frame pushed so far (the node that owns the suspended child)
+        ast_node* back_node() const { return continuations_.empty() ? nullptr : continuations_.back().node; }
         continuation_point* peek_continuation(ast_node* node) {
             if (!continuations_.empty() && continuations_.back().node == node) {
                 return &continuations_.back();
@@ -148,6 +165,8 @@ namespace jai {
             }
         }
         bool has_continuations() const { return !continuations_.empty(); }
+        // A catch inside the coroutine: any frame still parked belongs to the aborted replay
+        void clear_continuations() { continuations_.clear(); }
 
     private:
         std::vector<continuation_point> continuations_;
@@ -391,6 +410,70 @@ namespace jai {
         checked_result<void> visit_throw_expr(throw_expr* expr) override;
         checked_result<void> visit_cast_expr(cast_expr* expr) override;
         checked_result<void> visit_yield_expr(yield_expr* expr);
+
+        // Coroutine expression replay: a yield unwinds as the coroutine_suspended signal,
+        // each visitor on the way out parks the operands it had produced (replay_phase +
+        // child ordinal), and the <true> instantiations resume from the parked child. The
+        // <false> instantiations are the ordinary visitors, byte for byte.
+        using replay_point = interpreter_coroutine_state::continuation_point;
+        enum replay_phase : uint32_t {
+            rp_none = 0,
+            rp_root,           // statement: its one expression suspended
+            rp_cond,           // if / while / for / switch: the condition
+            rp_update,         // for: the update expression
+            rp_init,           // for: the initializer declaration
+            rp_container,      // range-for: the container expression
+            rp_body_done,      // if / while / for / range-for: a brace-less body completed at the yield
+            rp_case_value,     // switch: case[index]'s value (partial[0] = the switch value)
+            rp_case_body,      // switch: case[index]'s body (saved_env = its scope)
+            rp_default_body,   // switch: the default body (saved_env = its scope)
+            rp_catch,          // try: inside the catch block (saved_container = the caught value)
+            rp_operand,        // ordinal-only expression nodes
+            rp_call_math, rp_call_string, rp_call_direct, rp_call_generic,
+            rp_new_weak, rp_new_shared, rp_new_class,
+            rp_asg_rhs, rp_asg_member_compound, rp_asg_sub_fast, rp_asg_general, rp_asg_regular,
+        };
+        template<bool Replaying> checked_result<void> visit_binary_expr_t(binary_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_unary_expr_t(unary_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_call_expr_t(call_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_member_expr_t(member_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_new_expr_t(new_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_ternary_expr_t(ternary_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_array_literal_expr_t(array_literal_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_map_literal_expr_t(map_literal_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_cast_expr_t(cast_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_throw_expr_t(throw_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_yield_expr_t(yield_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> visit_expression_stmt_t(expression_stmt* stmt);
+        template<bool Replaying> checked_result<void> visit_return_stmt_t(return_stmt* stmt);
+        template<bool Replaying> checked_result<void> visit_variable_decl_t(variable_decl* decl);
+        template<bool Replaying> checked_result<void> visit_destructuring_decl_t(destructuring_decl* decl);
+        template<bool Replaying> checked_result<void> visit_expression_decl_t(expression_decl* decl);
+        // Resume side: run the suspended child of a parked node (a child with no frame is the
+        // consumed yield leaf: null, its operand never re-evaluated)
+        checked_result<void> replay_expression(expression* expr);
+        checked_result<void> dispatch_stmt_resuming(statement* stmt);
+        checked_result<void> dispatch_decl_resuming(declaration* decl);
+        checked_result<void> run_case_body(ast_node* self, const std::vector<statement_ptr>& body);
+        checked_result<void> store_through_subscript_reference(script_value& target_ref, script_value value);
+        // Unwind side (cold): park a node's produced operands / mark a statement's root
+        void park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial);
+        void note_statement_yield(ast_node* stmt, expression* root);
+        template<typename T> static bool is_yield_signal(const checked_result<T>& r) {
+            return !r && r.error() == make_error_code(runtime_error_code::coroutine_suspended);
+        }
+        // Operand helpers: the <false> instantiations fold to the plain dispatch
+        template<bool Replaying> checked_result<void> eval_child(expression* child, const replay_point* rs, size_t ordinal) {
+            if constexpr (Replaying) { if (rs && rs->index == ordinal) return replay_expression(child); }
+            return dispatch_expr(child);
+        }
+        template<bool Replaying> checked_result<void> eval_root(expression* root) {
+            if constexpr (Replaying) return replay_expression(root); else return dispatch_expr(root);
+        }
+        template<bool Replaying> static constexpr bool parked(const replay_point* rs, size_t ordinal) {
+            if constexpr (Replaying) return rs && ordinal < rs->index; else return false;
+        }
 
         // statement visitors
         checked_result<void> visit_expression_stmt(expression_stmt* stmt) override;
@@ -686,9 +769,6 @@ namespace jai {
         // Return value storage for global scope returns
         std::optional<script_value> returnValue_;  // Use optional to avoid needing default constructor
         bool hasReturnValue_ = false;
-        // The pending return came from a `return` stamped proof_same_type (call_function's
-        // epilogue may skip the identity conversion behind detail::same_type_payload)
-        bool return_proven_ = false;
 
         // Control flow flags (for break/continue without exception overhead)
         bool hasBreakRequest_ = false;
@@ -786,6 +866,8 @@ namespace jai {
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at construction
+        detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at construction
+        bool member_callee_lookup_ = false;   // visit_call_expr -> visit_member_expr: the member is being called (null-receiver text)
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;
@@ -908,8 +990,8 @@ namespace jai {
         // member scope (detail/member_scope.hpp) the order is C++ unqualified lookup:
         // the function's own scopes, the class's members, then the definition/global
         // chain. A member METHOD or C++ PROPERTY hit answers nullptr - it shadows (never
-        // fall past the class scope to a same-named global) but only value/callee sites
-        // mint, so pointer callers land on their existing miss paths.
+        // fall past the class scope to a same-named global) but only value/callee/ref-bind
+        // sites mint, so pointer callers land on their existing miss paths.
         [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id, bool global_only = false) noexcept {
             if (global_only) [[unlikely]] {
                 // ::name - GLOBAL env only (locals, captures, member scope all skipped)
@@ -943,6 +1025,13 @@ namespace jai {
             return member_scope_.floor ? member_scope_.floor->get_value_ptr(symbol_id)
                                        : environment_->get_value_ptr(symbol_id);
         }
+
+        // The bare-name ref-bind rung after resolve_local_or_env misses: a hybrid's C++
+        // property under the current member scope mints a CPP-MEMBER / PROPERTY reference
+        // (nullopt = not a property here; the caller keeps its undefined-variable text).
+        // Defined in interpreter.cpp (needs detail/ref_lvalue.hpp).
+        std::optional<checked_result<script_value>> bind_bare_cpp_property_ref(uint64_t symbol_id, bool global_qualified,
+                                                                                environment* env = nullptr);
 
         // Execution-budget check (see the public execution_budget API above)
         [[nodiscard]] JAI_FORCEINLINE bool execution_budget_exhausted() noexcept {
@@ -1001,7 +1090,8 @@ namespace jai {
         checked_result<script_value> enforce_type_compatibility(
             script_value value,
             type_info_ptr target_type,
-            std::string_view var_name = ""
+            std::string_view var_name = "",
+            detail::slot_kind kind = detail::slot_kind::assignment
         );
 
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)): a locked target
@@ -1136,13 +1226,13 @@ namespace jai {
                                                       const script_value* evaluated_arg = nullptr);
         // Share-or-box against the caller's variable storage (cell model)
         checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
-        void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
 
         // Type conversion helpers (constructor-based conversions)
         // Attempts to convert a value to a target type using constructor-based conversion.
         // Returns the converted value on success, or the original value if no conversion is needed/possible.
         // Returns checked_result with error if conversion fails.
-        [[nodiscard]] checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
+        [[nodiscard]] checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
+                                                                            const detail::slot_site& site = detail::slot_site{});
 
         // Check if a conversion is possible from source value to target type
         bool can_convert_to_type(const script_value& source, type_info_ptr target_type) const;
@@ -1209,7 +1299,6 @@ namespace jai {
             hasYieldRequest_ = false;
             returnValue_.reset();
             hasReturnValue_ = false;
-            return_proven_ = false;
             pending_call_ctx_ = nullptr;
             external_ctx_stack_.clear();
             execution_budget(budget);

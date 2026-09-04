@@ -141,6 +141,7 @@ namespace {
 			case opcode::op_return:
 			case opcode::op_return_ident:
 			case opcode::op_return_binary:
+			case opcode::op_return_convert:
 			case opcode::op_call_method:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -257,6 +258,7 @@ namespace {
 			case opcode::op_return:
 			case opcode::op_return_ident:
 			case opcode::op_return_binary:
+			case opcode::op_return_convert:
 			case opcode::op_call_method:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -820,7 +822,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 				return;
 			} else {
 				// Calls that already yield a reference pass through; anything else
-				// rejects at convert_return_value's ref-return epilogue
+				// rejects in the ref-return conversion (return site / completion door)
 				if (clean_exit && rs->value->get_type() == node_type::call_expr &&
 				    static_cast<call_expr*>(rs->value.get())->callee->get_type() == node_type::identifier_expr) {
 					pending_tail_call_ = true;
@@ -844,8 +846,14 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		} else {
 			emit(opcode::op_null);
 		}
+		if (!clean_exit) {
+			// The typed-return conversion runs at the site, inside this frame's try
+			// records (a catch around the return sees it); the op_return after the
+			// exits lands the converted value without converting again
+			emit(opcode::op_return_convert, rs->static_return_proof);
+		}
 		emit_region_exits(SIZE_MAX);
-		emit(opcode::op_return, 1, rs->static_return_proof);
+		emit(opcode::op_return, 1, clean_exit ? rs->static_return_proof : return_mode_converted);
 		return;
 	}
 	case node_type::break_stmt:

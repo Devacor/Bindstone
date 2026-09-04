@@ -79,8 +79,9 @@ namespace jai::detail {
 	// A fields_ node is the member's TRUTH only for script-declared fields. C++
 	// .property() members (dynamic_binder) keep a dead null placeholder in fields_ -
 	// reads/writes route through the bound accessors - so a ref bound to the node
-	// would silently swallow writes. Instance-local fields with no class declarer
-	// have no accessor to bypass and stay bindable.
+	// would silently swallow writes (they take the CPP-MEMBER / PROPERTY mint instead).
+	// Instance-local fields with no class declarer have no accessor to bypass and stay
+	// bindable.
 	inline bool ref_field_is_script_backed(const std::shared_ptr<class_instance>& instance, uint64_t member_id) {
 		const class_definition* class_def = instance->get_class_definition();
 		if (!class_def) {
@@ -146,10 +147,56 @@ namespace jai::detail {
 				cur = field_value;
 				continue;
 			}
+			if (holder->property) {
+				// CPP-MEMBER: the live box; PROPERTY: the getter (native only at a bind point)
+				if (holder->property->live_member) {
+					return script_value(*holder->cell());
+				}
+				return holder->read_property(v.get_engine(), /*bind_point*/ true);
+			}
 			// unreachable: every factory sets a mode
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
 		}
 		return script_value(*cur);
+	}
+
+	// C++ property reference mint - the bare name, this.name and obj.name spellings on
+	// every receiver kind (hybrid layer, plain wrapper, raw handle). A member-pointer
+	// property the cpp_bound box decodes binds the MEMBER ITSELF (CPP-MEMBER) unless a
+	// script _get_/_set_ override sits in the chain; everything else binds through the
+	// accessors (PROPERTY). Parallel workers reach neither accessors nor raw member
+	// memory: a frozen symbolizer keeps the non-lvalue verdict. Never throws.
+	inline checked_result<script_value> bind_cpp_property_ref(const script_value& receiver, const cpp_property_site& site,
+	                                                          uint64_t member_id, engine* eng, string_symbolizer* symbolizer) {
+		if (!site || symbolizer->frozen()) {
+			return ref_non_lvalue_error();
+		}
+		class_instance* instance = site.view.instance.get();
+		if (instance && instance->script_layer_retired()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::script_layer_retired),
+				"Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
+				site.view.def->get_type_id());
+		}
+		const auto* member = site.accessor_class ? site.accessor_class->get_property_member_accessor(member_id) : nullptr;
+		if (member && !cpp_property_has_script_override(site)) {
+			void* address = nullptr;
+			try {
+				address = member->address(receiver);
+			} catch (const std::exception&) {
+				address = nullptr;
+			}
+			if (!address) {
+				return ref_non_lvalue_error();
+			}
+			return script_value::make_cpp_member_reference(receiver, pin_cpp_object(receiver, instance), address,
+			                                               member->size_and_sign, member->semantic_index, member_id, eng);
+		}
+		return script_value::make_property_reference(receiver, member_id, eng);
+	}
+
+	inline checked_result<script_value> bind_cpp_property_ref(const script_value& receiver, uint64_t member_id,
+	                                                          engine* eng, string_symbolizer* symbolizer) {
+		return bind_cpp_property_ref(receiver, resolve_cpp_property(receiver, member_id, eng), member_id, eng, symbolizer);
 	}
 
 	// Caller-frame view for the kernel's base-identifier / this resolution. The
@@ -174,16 +221,15 @@ namespace jai::detail {
 
 	// Binds a field/subscript/chain lvalue argument to a reference parameter. Resolution
 	// is pure pointer/value chasing over already-evaluated state - it never runs script,
-	// never throws, and never mutates the instance. Bindability = an INSTANCE fields_
-	// node (find_field_value, never has_field/get_field: those consult class defaults
-	// and lazy-insert) whose declaring class is script-side (ref_field_is_script_backed:
-	// dynamic_binder .property() members pre-initialize a dead placeholder node whose
-	// truth lives in the C++ object). Script-class fields qualify - their synthesized
-	// accessors transparently wrap the node - while computed properties (a user
-	// _get_/_set_ in the chain included) and C++ .property() members keep the
-	// non-lvalue error. Field refs pin the instance,
-	// element refs pin the vector; typed fields/elements carry their current tag as the
-	// assign-through constraint.
+	// never throws, and never mutates the instance (a NATIVE property getter may run for
+	// a non-final property step). Bindability = a binder .property() member (CPP-MEMBER /
+	// PROPERTY mint, every receiver kind) or an INSTANCE fields_ node (find_field_value,
+	// never has_field/get_field: those consult class defaults and lazy-insert) whose
+	// declaring class is script-side (ref_field_is_script_backed). Script-class fields
+	// qualify - their synthesized accessors transparently wrap the node - while computed
+	// script properties (a user _get_/_set_ in the chain) keep the non-lvalue error.
+	// Field refs pin the instance, element refs pin the vector; typed fields/elements
+	// carry their current tag as the assign-through constraint.
 	inline checked_result<script_value> resolve_ref_lvalue(const expression* arg, const caller_frame_view& caller,
 	                                                       environment* caller_env,
 	                                                       engine* eng, string_symbolizer* symbolizer) {
@@ -275,15 +321,38 @@ namespace jai::detail {
 			return nullptr;
 		};
 
-		script_value cur(std::monostate{}, eng);
-		if (base->get_type() == node_type::identifier_expr) {
-			const script_value* base_ptr = resolve_identifier_ptr(static_cast<const identifier_expr*>(base));
-			if (!base_ptr) {
+		// A bare C++ property as the chain's BASE (f(child.x) inside a hybrid method): no
+		// cell to point at, so the caller's member scope reads it through a native getter
+		auto bare_property_base = [&](const identifier_expr* ident) -> checked_result<script_value> {
+			const auto scope_state = caller.metadata
+				? static_cast<member_scope_state>(caller.metadata->scope_state)
+				: member_scope_state::none;
+			if (scope_state != member_scope_state::instance || !caller.metadata->scope_this ||
+			    ident->global_qualified || symbolizer->frozen()) {
 				return ref_non_lvalue_error();
 			}
-			auto derefed = ref_checked_deref(*base_ptr);
-			if (!derefed) { return derefed; }
-			cur = std::move(derefed.value());
+			auto member = probe_member_scope(scope_state, caller.metadata->scope_this, nullptr,
+			                                 ident->symbol_id, /*want_methods*/ false);
+			if (member.what != member_probe_hit::kind::cpp_property) {
+				return ref_non_lvalue_error();
+			}
+			const script_value& receiver = *caller.metadata->scope_this;
+			return read_cpp_property_site(receiver, resolve_cpp_property(receiver, ident->symbol_id, eng), /*bind_point*/ true);
+		};
+
+		script_value cur(std::monostate{}, eng);
+		if (base->get_type() == node_type::identifier_expr) {
+			const auto* ident = static_cast<const identifier_expr*>(base);
+			const script_value* base_ptr = resolve_identifier_ptr(ident);
+			if (!base_ptr) {
+				auto read = bare_property_base(ident);
+				if (!read) { return read; }
+				cur = std::move(read.value());
+			} else {
+				auto derefed = ref_checked_deref(*base_ptr);
+				if (!derefed) { return derefed; }
+				cur = std::move(derefed.value());
+			}
 		} else {   // this_expr
 			const script_value* this_ptr = caller.this_ptr();
 			if (!this_ptr && caller_env) {
@@ -302,20 +371,33 @@ namespace jai::detail {
 			const expression* step = step_at(i);
 			if (step->get_type() == node_type::member_expr) {
 				const auto* m = static_cast<const member_expr*>(step);
-				auto holder = cur.get_object_holder();
-				if (!holder || !holder->is_class_instance_wrapper || !holder->data) {
-					return ref_non_lvalue_error();   // C++ objects, wrappers, non-objects: not supported
-				}
-				auto instance = std::static_pointer_cast<class_instance>(holder->data);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
-				// Access enforcement at the bind site: the ref is minted in the CALLER's
-				// context, so a private field can't escape by-reference either
-				if (const class_definition* field_cls = instance->get_class_definition()) {
-					if (field_cls->chain_has_nonpublic()) [[unlikely]] {
-						auto access_ok = enforce_member_access(field_cls, member_id,
-							caller_env ? caller_env->find_access_context() : nullptr);
-						if (!access_ok) { return access_ok.error_value(); }
+				// Binder .property() members bind on every receiver kind (a same-named
+				// script field shadows: getter_id 0 keeps the FIELD path below); a
+				// non-final property step reads through a native getter only
+				auto property = resolve_cpp_property(cur, member_id, eng);
+				if (property.view.def && property.view.def->chain_has_nonpublic()) [[unlikely]] {
+					// Access enforcement at the bind site: the ref is minted in the CALLER's
+					// context, so a private field can't escape by-reference either
+					auto access_ok = enforce_member_access(property.view.def, member_id,
+						caller_env ? caller_env->find_access_context() : nullptr);
+					if (!access_ok) { return access_ok.error_value(); }
+				}
+				if (property) {
+					if (is_final) {
+						return bind_cpp_property_ref(cur, property, member_id, eng, symbolizer);
 					}
+					if (symbolizer->frozen()) {
+						return ref_non_lvalue_error();
+					}
+					auto read = read_cpp_property_site(cur, property, /*bind_point*/ true);
+					if (!read) { return read; }
+					cur = std::move(read.value());
+					continue;
+				}
+				auto instance = property.view.instance;
+				if (!instance) {
+					return ref_non_lvalue_error();   // raw C++ handles without such a property, non-objects: not supported
 				}
 				script_value* field_value = instance->find_field_value(member_id);
 				if (!field_value || !ref_field_is_script_backed(instance, member_id) ||
@@ -700,6 +782,12 @@ namespace jai::detail {
 	// matches deref's own re-resolve error.
 	inline void ref_write_through(script_value& refLocal, script_value&& v) {
 		const auto* holder = refLocal.get_reference_holder();
+		if (holder && holder->property) [[unlikely]] {
+			// CPP-MEMBER writes the box's memory (a deref()= would replace the box and
+			// detach); PROPERTY runs the setter (its deref is a scratch)
+			refLocal.assign_through(std::move(v));
+			return;
+		}
 		if (holder && holder->typed_element()) {
 			if (holder->container_index >= holder->container->size()) {
 				throw runtime_error("Reference to a removed array element");

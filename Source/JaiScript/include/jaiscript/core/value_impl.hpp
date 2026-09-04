@@ -33,26 +33,13 @@ namespace jai {
         // Use const_cast since the binding box is type-erased storage
         // Constness is handled at the call site via make_value overloads
         void* boundPtr = const_cast<void*>(static_cast<const void*>(target));
-        uint8_t sizeAndSign = static_cast<uint8_t>(sizeof(T));
-        if constexpr (std::is_unsigned_v<T> && !std::is_same_v<T, bool>)
-            sizeAndSign |= 0x80;
+        using encoding = cpp_bound_encoding<std::remove_const_t<T>>;   // ONE encoding with the binder's member accessors
+        constexpr uint8_t sizeAndSign = encoding::size_and_sign;
 
         if (eng) {
-            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
-                val.type_info_ = eng->get_type_info_int();
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_INT));
-            } else if constexpr (std::is_floating_point_v<T>) {
-                val.type_info_ = eng->get_type_info_float();
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_FLOAT));
-            } else if constexpr (std::is_same_v<T, bool>) {
-                val.type_info_ = eng->get_type_info_bool();
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_BOOL));
-            } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, script_string>) {
-                val.type_info_ = eng->get_type_info_string();
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_STRING));
-            } else if constexpr (std::is_same_v<T, char>) {
-                val.type_info_ = eng->get_type_info_char();
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_CHAR));
+            if constexpr (encoding::semantic_index != TYPEID_NULL) {
+                val.type_info_ = cpp_bound_type_info(eng, encoding::semantic_index);
+                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, encoding::semantic_index);
             } else if constexpr (std::is_class_v<T>) {
                 if (eng->template has_registered_class<T>()) {
                     // This enables non-owning reference semantics for T& returns

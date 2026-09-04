@@ -577,6 +577,12 @@ Epilogue:
 ```
 `resume_coroutine` 13520-13540 stays unproven (identity anyway).
 
+**Superseded by returncatch** (the conversion moved to the return site): `return_proven_` is
+gone. `visit_return_stmt` converts against the enclosing `call_frame::function`'s declared type
+(`detail::return_conv_of`, detail/return_conv.hpp) and consumes the proof there -
+`stmt->static_return_proof == proof_same_type && same_type_payload(out, return_type)` skips the
+table; the `call_function` / `resume_coroutine` epilogues only deref.
+
 ### I-M1 Member read — `visit_member_expr`, after the null_safe check (7654-7657), before `if (is_super_access)` (7660)
 ```cpp
     if (expr->proven_class && !parallel_worker_) {
@@ -765,6 +771,12 @@ switch, `case return_conv::check:` (and `unclassified` when `rec.return_type` is
 `deref_only` tail (deref, anchor, ctor stamp, pop, land) unchanged. The native/fiber epilogue
 (13929-13935) stays unproven (identity anyway).
 
+**Superseded by returncatch:** `proven` became `mode` (`op_return.b`: 0, 1 = the proof,
+`return_mode_converted`). A `return` inside a try/catch region compiles to `op_return_convert`
+(a = the proof) BEFORE the region exits and lands with mode 2 (identity in `return_with_result`,
+the ref handle passed through); the native-entry / fiber doors convert in `entry_return_finish`
+and honour the proof behind the same guard (`convert_return_at_site`).
+
 ### V-M1 Member read — `exec_get_member` 8784, before the `member_ic` block
 ```cpp
 	if (expr->proven_class && cached_global_env_) {
@@ -912,6 +924,6 @@ Done when, per step: `--backend=vm` suite green; interp-vs-vm fuzz (300 seeds, b
 - `binary_expr::static_operand_class` consumption (annotation only; `has_custom_numeric_ops_`/operator tables can change after the check).
 - Proven callee dispatch (skipping overload resolution / method IC by proof); proofs for callable locals, engine functions, `new_expr`, coroutine callees, defaulted or reference parameters.
 - Proofs on compound assignment / `++`/`--` desugars, `store_through` references, `environment::assign`'s method-env fallback, compound this-field stores, static fields, `super.f`, `?.` receivers, engine globals, `_cpp_object`, hybrid (cpp-base) classes, extended layers, transparent wrappers.
-- Native-entry / coroutine / fiber return epilogues; `fused_member_container`; worker (parallel) frames.
+- `fused_member_container`; worker (parallel) frames. (The native-entry / coroutine / fiber return doors honour the return proof since returncatch.)
 - Invalidating compiled vm chunks on re-stamp; serializing proofs in `.jaibite`; a per-call re-stamp on the instanceVars path.
 - Any change to error texts, `type_of` results, tag stamping, clone/value semantics, or reference normalization.

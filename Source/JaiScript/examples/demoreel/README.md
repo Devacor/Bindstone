@@ -467,13 +467,13 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 
 10. **NEW (2026-07-06, post-rulings HEAD; interpreter only).** Plain
     *assignment* of a bare array-element read into an int-typed local throws
-    `Type mismatch in assignment`; the *declaration* shape is fine, and the VM
+    `Cannot assign ... to 'x' (declared int)`; the *declaration* shape is fine, and the VM
     accepts both. Hit in KINSTEIN's DDA loop; likely the new element-ref
     (ref_lvalue) surface.
     ```jaiscript
     var a = [7];
     int x = 0;
-    x = a[0];        // interpreter: Type mismatch in assignment
+    x = a[0];        // interpreter: Cannot assign ... to 'x' (declared int)
     int y = a[0];    // fine on both backends
     ```
     Workaround (ships in kinstein.jai): read into a declared local, then assign.

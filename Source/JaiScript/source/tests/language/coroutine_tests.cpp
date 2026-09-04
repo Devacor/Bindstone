@@ -628,24 +628,37 @@ public:
             )", "6|12", "base coroutine method binds the derived receiver");
         });
 
-        test("static_coroutine_method_rejected", [this]() {
-            // Both orders parse-error cleanly; the engine stays usable (parser synchronizes)
+        // Static coroutine methods: every spelling (either modifier order) mints a handle
+        // through the static_method callable; the body reads and stores the class's statics
+        test("static_coroutine_method_spellings", [this, check_both]() {
+            check_both(R"(
+                class S {
+                    static int n = 10;
+                    coroutine static int f1() { yield n; n += 1; yield n; return 0; }
+                    coroutine static f2() -> int { yield n; n += 1; yield n; return 0; }
+                    coroutine function static f3() { yield n; n += 1; yield n; return 0; }
+                    static coroutine int f4() { yield n; n += 1; yield n; return 0; }
+                    coroutine static function f5() { yield n; n += 1; yield n; return 0; }
+                }
+                string drain(var h) { string s = ""; for (auto v : h) { s += to_string(v) + ","; } return s; }
+                drain(S::f1()) + drain(S::f2()) + drain(S::f3()) + drain(S::f4()) + drain(S::f5()) + to_string(S::n)
+            )", "10,11,11,12,12,13,13,14,14,15,15", "static coroutine spellings share the class's static field");
+            check_both(R"(
+                class S { static int n = 0; coroutine static int f() { n += 1; yield n; n += 1; yield n; return 0; } }
+                auto a = S::f(); auto b = S::f();
+                to_string(a.resume()) + to_string(b.resume()) + to_string(a.resume()) + to_string(b.resume()) + "|" + to_string(S::n) + "|" + to_string(a.done())
+            )", "1234|4|false", "two static coroutine handles interleave over one static");
+        });
+
+        test("static_coroutine_survives_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
-                bool threw = false;
-                try { e->execute("class S { static coroutine int f() { yield 1; } }"); }
-                catch (const std::exception& ex) {
-                    threw = std::string(ex.what()).find("static coroutine methods are not supported") != std::string::npos;
-                }
-                check(threw, "static coroutine reports the dedicated error");
-                bool threw2 = false;
-                try { e->execute("class S2 { coroutine static int f() { yield 1; } }"); }
-                catch (const std::exception& ex) {
-                    threw2 = std::string(ex.what()).find("static coroutine methods are not supported") != std::string::npos;
-                }
-                check(threw2, "coroutine static reports the dedicated error");
-                check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>());
+                jai::stdlib::register_all(e);
+                e->execute("class S { static int n = 5; coroutine static int f() { yield n; yield n + 1; return 0; } }\nvar h = S::f();\nvar a = h.resume();");
+                e->execute("class S { static int n = 5; string extra = \"e\"; coroutine static int f() { yield 99; return 0; } }");
+                auto r = e->execute("to_string(a) + \"|\" + to_string(h.resume()) + \"|\" + to_string(S::f().resume())");
+                check_eq(std::string("5|6|99"), r.to_string(), std::string(use_vm ? "vm" : "interp") + ": the suspended static handle keeps the old body; fresh calls mint the new one");
             }
         });
 
@@ -659,6 +672,129 @@ public:
                     threw = std::string(ex.what()).find("'coroutine' in a class body must be followed by a method") != std::string::npos;
                 }
                 check(threw, "coroutine before a field reports the dedicated error");
+            }
+        });
+
+        // Every function spelling takes the `coroutine` prefix and produces the same
+        // declaration node: one 3-yield generator per spelling, driven by range-for
+        test("coroutine_free_spellings_same_sequence", [this, check_both]() {
+            const char* heads[] = {
+                "coroutine gen()", "coroutine gen() -> auto", "coroutine gen() -> int", "coroutine gen() ->",
+                "coroutine function gen()", "coroutine function gen() -> auto", "coroutine function gen() -> int",
+                "coroutine int gen()", "coroutine auto gen()", "coroutine var gen()", "coroutine int gen() -> int",
+            };
+            for (const char* head : heads) {
+                std::string src = std::string(head) + " { yield 1; yield 2; yield 3; return 0; }\n"
+                    "string s = \"\"; auto h = gen(); for (auto v : h) { s += to_string(v) + \"|\"; } s + to_string(h.done())";
+                check_both(src.c_str(), "1|2|3|true", head);
+            }
+            check_both("int outer() { coroutine gen() -> auto { yield 1; yield 2; yield 3; } int n = 0; for (auto v : gen()) { n = n * 10 + v; } return n; }\nouter()",
+                "123", "bare spelling nested in a function body");
+        });
+
+        test("coroutine_method_spellings_same_sequence", [this, check_both]() {
+            check_both(R"(
+                class C {
+                    int base = 1;
+                    coroutine gen1() -> auto { yield base; yield base + 1; yield base + 2; return 0; }
+                    coroutine function gen2() -> int { yield base; yield base + 1; yield base + 2; return 0; }
+                    coroutine int gen3() { yield base; yield base + 1; yield base + 2; return 0; }
+                    coroutine gen4() { yield base; yield base + 1; yield base + 2; return 0; }
+                    coroutine function gen5() { yield base; yield base + 1; yield base + 2; return 0; }
+                    coroutine gen6() -> { yield base; yield base + 1; yield base + 2; return 0; }
+                }
+                class D : C {
+                    coroutine override int gen3() { yield 7; yield 8; yield 9; return 0; }
+                    coroutine override gen4() { yield 7; yield 8; yield 9; return 0; }
+                }
+                string drain(var h) { string s = ""; for (auto v : h) { s += to_string(v); } return s; }
+                auto c = C(); auto d = D();
+                drain(c.gen1()) + "|" + drain(c.gen2()) + "|" + drain(c.gen3()) + "|" + drain(c.gen4()) + "|" + drain(c.gen5()) + "|" + drain(c.gen6())
+                    + "|" + drain(d.gen3()) + "|" + drain(d.gen4()) + "|" + drain(d.gen1())
+            )", "123|123|123|123|123|123|789|789|123", "method spellings and overrides");
+            check_both(R"(
+                class V {
+                    int n = 2;
+                    coroutine operator+(int k) { yield n + k; yield n * k; return 0; }
+                    coroutine function operator-(int k) { yield n - k; return 0; }
+                }
+                string s = ""; auto v = V();
+                for (auto x : v + 3) { s += to_string(x) + ","; }
+                for (auto x : v - 3) { s += to_string(x) + ","; }
+                s
+            )", "5,6,-1,", "bare coroutine operator method beside the function-keyword spelling");
+        });
+
+        // The checker stays lenient for coroutine returns (coroutines_stay_lenient): a wrong
+        // completion type raises on the delivering resume, with one text and one trace on
+        // every spelling and both backends
+        test("coroutine_return_type_enforced_identically_across_spellings", [this]() {
+            auto run = [](bool use_vm, const std::string& src) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(jai::check_mode::strict);
+                jai::stdlib::register_all(e);
+                std::string out;
+                try { out = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
+                return out;
+            };
+            const char* heads[] = { "coroutine gen() -> int", "coroutine function gen() -> int", "coroutine int gen()", "coroutine int gen() -> int" };
+            const char* bodies[] = {
+                " { yield 1; return \"x\"; }\nauto h = gen();\nvar first = h.resume();\nh.resume();",
+                " { yield 1; var s = \"x\"; return s; }\nauto h = gen();\nvar first = h.resume();\nh.resume();",
+            };
+            for (const char* body : bodies) {
+                std::string reference;
+                for (const char* head : heads) {
+                    for (bool use_vm : {false, true}) {
+                        const std::string label = std::string(head) + (use_vm ? " vm" : " interp");
+                        std::string out = run(use_vm, std::string(head) + body);
+                        check_true(out.find("Cannot return string from 'gen' (declared -> int)") == 0, label + ": " + out);
+                        check_true(out.find("at gen (<script>:1)") != std::string::npos, label + " attributes to the coroutine frame: " + out);
+                        if (reference.empty()) { reference = out; }
+                        else { check_eq(reference, out, label + ": same text and trace as the first spelling"); }
+                    }
+                }
+            }
+            for (const char* head : heads) {
+                for (bool use_vm : {false, true}) {
+                    check_eq(std::string("int:2"), run(use_vm, std::string(head) + " { yield 1; return 2.5; }\nauto h = gen(); h.resume(); var r = h.resume(); type_of(r) + \":\" + to_string(r)"),
+                        std::string(head) + (use_vm ? " vm" : " interp") + ": the completion value converts to int");
+                }
+            }
+        });
+
+        test("coroutine_spellings_reject_ref_return", [this, both_backends]() {
+            const char* srcs[] = {
+                "coroutine gen() -> int& { yield 1; }",
+                "coroutine function gen() -> int& { yield 1; }",
+                "coroutine int& gen() { yield 1; }",
+                "class C { coroutine gen() -> int& { yield 1; } }",
+                "class C { coroutine function gen() -> int& { yield 1; } }",
+                "class C { coroutine static gen() -> int& { yield 1; } }",
+            };
+            for (const char* src : srcs) {
+                auto [i_out, v_out] = both_backends(src);
+                check_true(i_out.find("Coroutines cannot return references") != std::string::npos, std::string("interp: ") + src + " -> " + i_out);
+                check_eq(i_out, v_out, std::string("parity: ") + src);
+            }
+            auto e = jai::engine::make();
+            try { e->execute("class C { coroutine gen() -> int& { yield 1; } }"); } catch (const std::exception&) {}
+            check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>(), "engine stays usable after the rejection");
+        });
+
+        // No coroutine lambda / anonymous form exists: the keyword is only a declaration prefix
+        test("coroutine_bare_spelling_is_not_an_expression", [this, both_backends]() {
+            const char* srcs[] = {
+                "var f = coroutine () { yield 1; }; 1",
+                "var f = coroutine function() { yield 1; }; 1",
+                "var f = coroutine gen() { yield 1; }; 1",
+            };
+            for (const char* src : srcs) {
+                auto [i_out, v_out] = both_backends(src);
+                check_true(i_out.find("ERROR: ") == 0, std::string("interp rejects: ") + src + " -> " + i_out);
+                check_eq(i_out, v_out, std::string("parity: ") + src);
             }
         });
 
@@ -837,6 +973,538 @@ public:
             check_eq(static_cast<script_int>(2), engine->execute("h.resume();").as<script_int>());
             engine->execute("var h2 = w.gen();");
             check_eq(static_cast<script_int>(100), engine->execute("h2.resume();").as<script_int>());
+        });
+
+        // ===== COVERAGE BATTERIES (both backends; the vm runs fibers, the interpreter
+        // replays continuations - the differential is where the bugs hide) =====
+        // drain(h): every resumed value including the completion value, '|'-joined.
+        const std::string prelude =
+            "string drain(var h) {\n"
+            "    string s = \"\";\n"
+            "    while (!h.done()) {\n"
+            "        var v = h.resume();\n"
+            "        if (s != \"\") { s += \"|\"; }\n"
+            "        s += to_string(v);\n"
+            "    }\n"
+            "    return s;\n"
+            "}\n";
+        auto both_drained = [check_both, prelude](const std::string& body, const std::string& expected, const char* what) {
+            check_both((prelude + body).c_str(), expected, what);
+        };
+        auto check_parity = [this, both_backends](const char* src, const char* what) {
+            auto [i_out, v_out] = both_backends(src);
+            check_eq(i_out, v_out, std::string("parity: ") + what);
+            return i_out;
+        };
+
+        test("decl_spellings_free", [this, both_drained]() {
+            const std::string drive = "auto h = g(); drain(h) + \"#\" + to_string(h.done())";
+            both_drained("coroutine int g() { yield 1; return 2.9; }\n" + drive, "1|2#true", "coroutine int g()");
+            both_drained("coroutine function g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine function g() -> auto");
+            both_drained("coroutine function g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine function g()");
+            both_drained("coroutine var g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine var g()");
+            both_drained("coroutine auto g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine auto g()");
+            both_drained("coroutine string g() { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine string g(): the completion value converts, yields do not");
+            both_drained("coroutine void g() { yield; yield; }\n" + drive, "null|null|null#true", "coroutine void g()");
+        });
+
+        test("decl_spellings_free_arrow_only", [this, both_drained]() {
+            // `coroutine name() -> T` (no leading type, no `function`): landing with the coroutine syntax pass
+            const std::string drive = "auto h = g(); drain(h) + \"#\" + to_string(h.done())";
+            both_drained("coroutine g() -> int { yield 1; return 2.9; }\n" + drive, "1|2#true", "coroutine g() -> int");
+            both_drained("coroutine g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine g() -> auto");
+            both_drained("coroutine g() -> string { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine g() -> string");
+        });
+
+        test("decl_spellings_methods", [this, both_drained]() {
+            const std::string drive = "auto c = C(); auto h = c.g(); drain(h) + \"#\" + to_string(h.done()) + \"#\" + to_string(c.v)";
+            both_drained("class C { int v = 3; coroutine int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine int g() method");
+            both_drained("class C { int v = 3; coroutine function g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine function g() -> auto method");
+            both_drained("class C { int v = 3; coroutine function g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine function g() method");
+            both_drained("class C { int v = 3; coroutine var g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine var g() method");
+            both_drained("class C { int v = 3; coroutine auto g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine auto g() method");
+            both_drained("class C { int v = 3; coroutine void g() { yield; v = 4; } }\n" + drive, "null|null#true#4", "coroutine void g() method");
+            both_drained("class B { int v = 3; } class C : B { coroutine int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine method over an inherited field");
+            both_drained("class B { int v = 3; coroutine int g() { yield v; return 1; } } class C : B { coroutine override int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine override int g() method");
+        });
+
+        test("decl_spellings_methods_arrow_only", [this, both_drained]() {
+            const std::string drive = "auto c = C(); auto h = c.g(); drain(h) + \"#\" + to_string(h.done()) + \"#\" + to_string(c.v)";
+            both_drained("class C { int v = 3; coroutine g() -> int { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine g() -> int method");
+            both_drained("class C { int v = 3; coroutine g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine g() -> auto method");
+        });
+
+        // A yield with no resume value evaluates to null; every expression position must
+        // resume at the yield point without re-running what came before it.
+        test("yield_positions_expressions", [this, both_drained]() {
+            both_drained("coroutine int g() { var t = ((yield 1) == null ? 10 : 0) + 1; yield t; var u = 1 + ((yield 2) == null ? 20 : 0); return u; }\nauto h = g(); drain(h)",
+                "1|11|2|21", "yield as the left and the right binary operand");
+            both_drained("coroutine int g() { var t = (yield 1) ? 0 : 5; yield t; var w = (yield 2) == null ? (yield 3) : 0; return w == null ? 4 : 0; }\nauto h = g(); drain(h)",
+                "1|5|2|3|4", "yield in a ternary condition and in a ternary branch");
+            both_drained("coroutine int g() { var arr = [7, 8]; yield arr[(yield 1) == null ? 1 : 0]; var brr = [9]; yield ((yield 2) == null ? brr : arr)[0]; return 0; }\nauto h = g(); drain(h)",
+                "1|8|2|9|0", "yield inside an index and inside an index base");
+            both_drained("class P { int v = 0; P(int x) { v = x; } }\ncoroutine int g() { var p = P(3); var q = P(4); yield ((yield 1) == null ? p : q).v; yield ((yield 2) == null ? q : p).v; return 0; }\nauto h = g(); drain(h)",
+                "1|3|2|4|0", "yield inside a member-chain receiver");
+            both_drained("coroutine int g() { var a = [(yield 1), 7]; var m = {\"k\": (yield 2), \"j\": 5}; yield a.size() * 100 + (a[0] == null ? 10 : 0) + (m[\"k\"] == null ? 1 : 0) + a[1] + m[\"j\"]; return 0; }\nauto h = g(); drain(h)",
+                "1|2|223|0", "yield inside array and map literals");
+            both_drained("coroutine int g() { var x = 5; x = yield 1; var n = 10; n += (yield 2) == null ? 5 : 0; yield (x == null ? 100 : 0) + n; return 0; }\nauto h = g(); drain(h)",
+                "1|2|115|0", "yield as an assignment rhs and inside a compound rhs");
+            both_drained("coroutine int g() { yield 1; return (yield 2) == null ? 42 : 0; }\nauto h = g(); drain(h)",
+                "1|2|42", "yield inside a return expression");
+            both_drained("coroutine int g() { if ((yield 1) == null) { yield 10; } else { yield 20; } return 0; }\nauto h = g(); drain(h)",
+                "1|10|0", "yield in an if condition");
+            both_drained("coroutine int g() { int i = 0; while ((yield i) == null && i < 2) { i++; } return i; }\nauto h = g(); drain(h)",
+                "0|1|2|2", "yield in a while condition");
+            both_drained("coroutine int g() { int c = 0; for (int i = 0; (yield i) == null && i < 2; i++) { c++; } return c; }\nauto h = g(); drain(h)",
+                "0|1|2|2", "yield in a for condition");
+            both_drained("coroutine int g() { int s = 0; for (auto x : ((yield 1) == null ? [1, 2, 3] : [9])) { s += x; } return s; }\nauto h = g(); drain(h)",
+                "1|6", "yield in a range-for source");
+            both_drained("coroutine int g() { var t = ((yield 1) == null ? 10 : 0) + ((yield 2) == null ? 1 : 0); return t; }\nauto h = g(); drain(h)",
+                "1|2|11", "two yields in one expression");
+        });
+
+        test("yield_in_call_arguments", [this, both_drained, check_parity]() {
+            both_drained("int add(int a, int b) { return a + b; }\ncoroutine int g() { yield add(10, (yield 1) == null ? 5 : 0); yield add(add(1, (yield 2) == null ? 2 : 0), 3); return 0; }\nauto h = g(); drain(h)",
+                "1|15|2|6|0", "yield inside a free call's argument, flat and nested");
+            both_drained("class Acc { int t = 0; int add(int v) { t += v; return t; } }\ncoroutine int g() { var acc = Acc(); yield acc.add((yield 1) == null ? 5 : 0); yield acc.t; return 0; }\nauto h = g(); drain(h)",
+                "1|5|5|0", "yield inside a method call's argument");
+            both_drained("class P { int v = 0; P(int x) { v = x; } }\ncoroutine int g() { var p = P((yield 1) == null ? 7 : 0); yield p.v; return 0; }\nauto h = g(); drain(h)",
+                "1|7|0", "yield inside a constructor argument");
+            both_drained("class B { int tick(int x) { return x * 2; } }\nclass D : B { coroutine int g() { yield super::tick((yield 1) == null ? 3 : 0); return 0; } }\nauto d = D(); auto h = d.g(); drain(h)",
+                "1|6|0", "yield inside a super method call's argument");
+            both_drained("coroutine int g() { yield to_string((yield 1) == null ? 4 : 0) + \"x\"; return 0; }\nauto h = g(); drain(h)",
+                "1|4x|0", "yield inside a host call's argument");
+            both_drained("coroutine int inner() { yield 1; return 2; }\ncoroutine int g() { auto i = inner(); yield i.resume() + ((yield 10) == null ? 100 : 0); return 0; }\nauto h = g(); drain(h)",
+                "10|101|0", "another handle's resume as the sibling operand of a yield runs once");
+            // constructors cannot be coroutines: `super(yield ...)` is rejected at parse time on both
+            // parity pin: literal to be sharpened once the behavior is ruled
+            std::string text = check_parity("class B { B(int x) { } }\nclass D : B { D() : super(yield 1) { } }\n1", "yield inside super(...) delegation");
+            check_true(text.find("ERROR") == 0, "yield in a ctor initializer is rejected: " + text);
+        });
+
+        test("yield_control_flow", [this, both_drained]() {
+            both_drained("coroutine int g() { try { yield 1; throw \"boom\"; } catch (e) { yield 2; } yield 3; return 0; }\nauto h = g(); drain(h)",
+                "1|2|3|0", "yields inside try and inside catch");
+            both_drained("coroutine int g() { yield 1; throw \"boom\"; }\nauto h = g(); var a = h.resume(); string c = \"\"; try { h.resume(); } catch (e) { c = to_string(e); } to_string(a) + \"|\" + c + \"|\" + to_string(h.done())",
+                "1|boom|true", "a throw after a yield reaches the resumer; the handle is done");
+            both_drained("coroutine int g(int k) { switch (k) { case 1: yield 10; yield 11; case 2: yield 20; fallthrough; default: yield 30; } return 0; }\ndrain(g(1)) + \"#\" + drain(g(2)) + \"#\" + drain(g(3))",
+                "10|11|0#20|30|0#30|0", "yields inside switch cases, break-by-default and fallthrough");
+            both_drained("coroutine int g(bool early) { yield 1; if (early) { return 99; } yield 2; return 3; }\ndrain(g(true)) + \"#\" + drain(g(false))",
+                "1|99#1|2|3", "early return");
+            both_drained("coroutine int g() { yield 1; }\nauto h = g(); drain(h) + \"#\" + to_string(h.done())",
+                "1|null#true", "falling off the end completes with null");
+            both_drained("coroutine int g() { return 5; }\nauto h = g(); var a = h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } to_string(a) + \"|\" + t + \"|\" + to_string(h.done())",
+                "5|Cannot resume a completed coroutine|true", "resume after completion");
+            both_drained("coroutine int g() { throw \"x\"; }\nauto h = g(); string t = \"\"; try { h.resume(); } catch (e) { } try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+                "Cannot resume a completed coroutine|true", "resume after failure");
+            both_drained("var self = null;\ncoroutine int g() { string t = \"\"; try { self.resume(); } catch (e) { t = to_string(e); } yield t; return 0; }\nself = g(); to_string(self.resume())",
+                "Coroutine is already running", "a coroutine resuming itself");
+            both_drained("coroutine int g() { for (int i = 0; i < 2; i++) { yield i; } int j = 0; while (j < 2) { yield 10 + j; j++; } for (auto x : [20, 21]) { yield x; } return 0; }\nauto h = g(); drain(h)",
+                "0|1|10|11|20|21|0", "yields per iteration in for, while and range-for");
+        });
+
+        test("nested_generators_and_resume_depth", [this, both_drained]() {
+            both_drained("coroutine int chain(int d) { if (d == 0) { yield 0; return 0; } auto h = chain(d - 1); yield h.resume() + 1; return h.resume() + 1; }\nauto h = chain(40); to_string(h.resume()) + \"|\" + to_string(h.resume()) + \"|\" + to_string(h.done())",
+                "40|40|true", "a 40-deep chain of coroutines each resuming the next");
+            both_drained("coroutine int inner(int n) { for (int i = 0; i < n; i++) { yield i; } return -1; }\ncoroutine int outer() { int s = 0; for (auto x : inner(3)) { s += x; yield s; } auto h = inner(2); while (!h.done()) { var v = h.resume(); if (!h.done()) { yield v * 100; } } return s; }\nauto h = outer(); drain(h)",
+                "0|1|3|0|100|3", "a generator driving another by range-for and by manual resume");
+            both_drained("class G { int base = 10; coroutine int gen() { yield base; yield base + 1; return 0; } }\ncoroutine int drive() { auto g = G(); auto h = g.gen(); yield h.resume(); g.base = 20; yield h.resume(); return 0; }\nauto h = drive(); drain(h)",
+                "10|21|0", "a method coroutine resumed from inside a coroutine sees live fields");
+        });
+
+        test("captured_locals_across_yields", [this, both_drained]() {
+            both_drained("coroutine int g() { int v = 1; auto by_val = [=]() { return v; }; auto by_ref = [&]() { return v; }; yield by_val() * 10 + by_ref(); v = 5; yield by_val() * 10 + by_ref(); return 0; }\nauto h = g(); drain(h)",
+                "11|15|0", "[=] snapshots and [&] shares a local across yields");
+            both_drained("coroutine int g() { int v = 1; auto bump = [&]() { v += 1; return v; }; yield bump(); yield bump(); return v; }\nauto h = g(); drain(h)",
+                "2|3|3", "a [&] lambda mutating a local between yields");
+            both_drained("int shared = 0;\ncoroutine int g(int& r) { r += 1; shared += 1; yield r; r += 1; shared += 1; return r; }\nint x = 5; auto h = g(x); string s = drain(h); s + \"|\" + to_string(x) + \"|\" + to_string(shared)",
+                "6|7|5|2", "a by-reference parameter binds by value at creation; globals stay live");
+        });
+
+        test("typed_completion_values", [this, both_drained]() {
+            both_drained("coroutine int g() { yield 1.5; return 2.7; }\nauto h = g(); var a = h.resume(); var b = h.resume(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
+                "float:1.500000|int:2", "yields are unconverted, the completion value converts to the declared type");
+            both_drained("coroutine string g() { yield 1; return 2; }\nauto h = g(); h.resume(); var b = h.resume(); type_of(b) + \":\" + b",
+                "string:2", "string completion converts");
+            both_drained("coroutine int g() { yield 1; var x = \"s\"; return x; }\nauto h = g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+                "Cannot return string from 'g' (declared -> int)|true", "a var-sourced wrong completion type raises the same text; the handle is done");
+            both_drained("class C { coroutine int g() { yield 1; var x = [1]; return x; } }\nauto h = C().g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t",
+                "Cannot return array from 'g' (declared -> int)", "method coroutine completion mismatch text");
+        });
+
+        test("range_for_break_leaves_handle_suspended", [this, both_drained]() {
+            both_drained("coroutine int g() { yield 1; yield 2; yield 3; return 0; }\nauto h = g(); int seen = 0; for (auto v : h) { seen = v; if (v == 2) { break; } } to_string(seen) + \"|\" + to_string(h.done()) + \"|\" + to_string(h.resume()) + \"|\" + to_string(h.resume()) + \"|\" + to_string(h.done())",
+                "2|false|3|0|true", "break mid-drive leaves the handle suspended at the last yield");
+            both_drained("coroutine int g() { yield 1; yield 2; return 0; }\nauto h = g(); int n = 0; for (auto v : h) { n += v; } string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } to_string(n) + \"|\" + to_string(h.done()) + \"|\" + t",
+                "3|true|Cannot resume a completed coroutine", "a full drive completes the handle; the completion value is not an element");
+        });
+
+        // Hot reload while a method coroutine is suspended MID range-for drive: the old body
+        // finishes over the migrated instance (guide 07/08), fresh calls mint the new body.
+        test("hot_reload_mid_iteration_keeps_suspended_body", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                e->execute("class W { int v = 1; coroutine int gen() { for (int i = 0; i < 4; i++) { yield v + i; } return 0; } }\nvar w = W();\nw.v = 10;\nvar h = w.gen();\nvar first = h.resume();");
+                e->execute("class W { int v = 1; string extra = \"e\"; coroutine int gen() { yield 99; return 0; } }");
+                auto r = e->execute("string s = to_string(first);\nfor (auto x : h) { s += \",\" + to_string(x); }\ns + \"|\" + w.extra + \"|\" + to_string(w.gen().resume())");
+                check_eq(std::string("10,11,12,13|e|99"), r.to_string(), std::string(use_vm ? "vm" : "interp") + ": mid-iteration reload keeps the old body on the migrated instance");
+            }
+        });
+
+        test("coroutines_and_parallel_bodies", [this, both_drained, check_parity]() {
+            // parity pin: literal to be sharpened once the behavior is ruled
+            std::string r = check_parity("coroutine int gen(int x) { yield x; return x; }\nint f(int x) { auto h = gen(x); return h.resume(); }\nstring r = \"no-error\";\ntry { parallel_transform([1, 2, 3], f); } catch (e) { r = to_string(e); }\nr",
+                "a parallel body that mints and resumes a coroutine");
+            check_true(r != "no-error", "no yield reaches a parallel body (docs/parallel_design.md 8): " + r);
+            both_drained("int dbl(int x) { return x * 2; }\ncoroutine int g() { yield 1; var r = parallel_transform([1, 2, 3], dbl); yield r[0] + r[1] + r[2]; return 0; }\nauto h = g(); drain(h)",
+                "1|12|0", "a parallel_transform between two yields of a coroutine");
+        });
+
+        test("budget_exhaustion_inside_coroutine_text_parity", [this]() {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0.05);
+                try {
+                    e->execute("coroutine int spin() { yield 1; while (true) { } return 0; }\nauto h = spin();\nh.resume();\nstring t = \"\";\ntry { h.resume(); } catch (e) { t = \"caught\"; }\nt");
+                    out[idx] = "OK";
+                } catch (const std::exception& ex) { out[idx] = ex.what(); }
+                check_true(out[idx].find("Script execution budget exceeded") != std::string::npos,
+                           std::string(use_vm ? "vm" : "interp") + ": the budget error is terminal inside a resumed coroutine (got: " + out[idx] + ")");
+                check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>());
+                ++idx;
+            }
+            check_eq(out[0], out[1], "budget text parity across backends");
+        });
+
+        test("resumed_coroutine_error_trace_parity", [this]() {
+            auto run_both = [](const char* src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { e->execute(src); out[idx] = "OK"; }
+                    catch (const std::exception& ex) { out[idx] = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            {
+                auto [i_out, v_out] = run_both(
+                    "class C {\n"                       // 1
+                    "  int v = 3;\n"                    // 2
+                    "  coroutine int gen() {\n"         // 3
+                    "    yield v;\n"                    // 4
+                    "    throw \"boom\";\n"             // 5
+                    "  }\n"                             // 6
+                    "}\n"                               // 7
+                    "auto c = C();\n"                   // 8
+                    "auto h = c.gen();\n"               // 9
+                    "var a = h.resume();\n"             // 10
+                    "var b = h.resume();\n");           // 11
+                const std::string expected = "boom\n  at gen (<script>:5)\n  at <script> (<script>:11)\n";
+                check_eq(expected, i_out, "interp: method coroutine throw attributed to the coroutine frame");
+                check_eq(expected, v_out, "vm: method coroutine throw attributed to the coroutine frame");
+            }
+            {
+                // parity pin: literal to be sharpened once the behavior is ruled
+                auto [i_out, v_out] = run_both(
+                    "coroutine int inner() {\n"         // 1
+                    "  yield 1;\n"                      // 2
+                    "  throw \"deep\";\n"               // 3
+                    "}\n"                               // 4
+                    "coroutine int outer() {\n"         // 5
+                    "  auto h = inner();\n"             // 6
+                    "  yield h.resume();\n"             // 7
+                    "  yield h.resume();\n"             // 8
+                    "  return 0;\n"                     // 9
+                    "}\n"                               // 10
+                    "auto o = outer();\n"               // 11
+                    "var a = o.resume();\n"             // 12
+                    "var b = o.resume();\n");           // 13
+                check_eq(i_out, v_out, "nested coroutine throw: trace parity");
+                check_true(i_out.find("deep\n") == 0, "text: " + i_out);
+                check_true(i_out.find("at inner (<script>:3)") != std::string::npos, "inner frame: " + i_out);
+                check_true(i_out.find("at outer (<script>:8)") != std::string::npos, "outer frame: " + i_out);
+                check_true(i_out.find("at inner") < i_out.find("at outer") && i_out.find("at outer") < i_out.find("at <script>"), "frame order: " + i_out);
+            }
+        });
+
+        // ===== YIELD INSIDE AN EXPRESSION (both backends; the vm's fibers are the oracle) =====
+        // A yield suspends AT the yield point: nothing later in evaluation order runs before
+        // the next resume(), the resume value is null, and everything evaluated before the
+        // yield is reused - never re-evaluated.
+        test("yield_in_free_call_argument", [this, both_drained]() {
+            both_drained("int add2(int a) { return a + 2; }\ncoroutine int gen() { int r = add2((yield 1) ? 0 : 5); return r; }\nauto h = gen(); drain(h)",
+                "1|7", "the call runs only after the resume; the yield is null");
+            both_drained("int add2(int a, int b) { return a + b; }\ncoroutine int gen() { return add2((yield 1) == null ? 10 : 0, 5); }\nauto h = gen(); drain(h)",
+                "1|15", "a yield in the first of two arguments");
+            both_drained("int add2(int a, int b) { return a + b; }\ncoroutine int gen() { return add2(5, (yield 1) == null ? 10 : 0); }\nauto h = gen(); drain(h)",
+                "1|15", "a yield in the last argument");
+        });
+
+        test("yield_as_plain_argument_raises_on_resume", [this, both_drained]() {
+            // add2(yield 1, 2): the resume substitutes null, and the typed parameter rejects it
+            both_drained("int add2(int a, int b) { return a + b; }\ncoroutine int gen() { return add2(yield 1, 2); }\n"
+                         "auto h = gen(); var a = h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } to_string(a) + \"|\" + t + \"|\" + to_string(h.done())",
+                "1|Cannot pass null to parameter 'a' of 'add2' (declared int)|true",
+                "a bare yield argument fails the typed parameter on resume; the handle is done");
+        });
+
+        test("yield_in_method_and_ctor_arguments", [this, both_drained]() {
+            both_drained("class Acc { int t = 0; int add(int v) { t += v; return t; } }\ncoroutine int gen() { auto acc = Acc(); int r = acc.add((yield 1) ? 0 : 5); return r; }\nauto h = gen(); drain(h)",
+                "1|5", "yield inside a method call argument");
+            both_drained("class Box { int v = 0; Box(int x) { v = x; } }\ncoroutine int gen() { auto b = Box((yield 1) == null ? 4 : 0); return b.v; }\nauto h = gen(); drain(h)",
+                "1|4", "yield inside a constructor argument");
+            both_drained("coroutine int gen() { string s = \"abc\"; return s.starts_with((yield 1) == null ? \"ab\" : \"zz\") ? 7 : 0; }\nauto h = gen(); drain(h)",
+                "1|7", "yield inside a string builtin's argument");
+            both_drained("coroutine int gen() { return math::max((yield 1) == null ? 3 : 0, 2); }\nauto h = gen(); drain(h)",
+                "1|3", "yield inside a math:: intrinsic argument");
+            both_drained("class B { int tick(int x) { return x * 2; } }\nclass D : B { coroutine int g() { return super::tick((yield 1) == null ? 3 : 0); } }\nauto h = D().g(); drain(h)",
+                "1|6", "yield inside a super method call argument");
+        });
+
+        test("yield_in_arguments_side_effects_run_once", [this, both_drained]() {
+            // The argument before the yield runs in the FIRST resume, the call itself in the second
+            both_drained("string log = \"\";\nint side() { log += \"S\"; return 1; }\nint f2(int a, int b) { log += \"F\"; return a + b; }\n"
+                         "coroutine int gen() { int r = f2(side(), (yield 1) == null ? 5 : 0); return r; }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "|S|F#1|6", "side() runs once, before the suspension; the call runs after it");
+            both_drained("string log = \"\";\nint inner(var x) { log += \"I\"; return x == null ? 1 : 0; }\nint outer(int a, int b) { log += \"O\"; return a * 10 + b; }\n"
+                         "coroutine int gen() { return outer(inner(yield 1), (yield 2) == null ? 1 : 0); }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "||I|O#1|2|11", "nested inner/outer argument yields: each callee runs exactly once");
+            both_drained("string log = \"\";\ncoroutine int gen() { if ((yield 1) == null) { log += \"A\"; } return 0; }\n"
+                         "auto h = gen(); while (!h.done()) { log += \"|\"; h.resume(); } log",
+                "||A", "the branch runs in the resume that follows the yield, not before it");
+        });
+
+        test("yield_with_a_callee_resolved_before_arguments", [this, both_drained]() {
+            both_drained("string log = \"\";\nint side() { log += \"S\"; return 1; }\nint f2(int a, int b) { log += \"F\"; return a + b; }\n"
+                         "coroutine int gen() { return f2(side(), (yield 1) == null ? 5 : 0); }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "|S|F#1|6", "the callee-first probe shape (row 29) with a yield in the args");
+            both_drained("int orig(int x) { return 100 + x; }\nint repl(int x) { return 200 + x; }\nvar fp = orig;\n"
+                         "coroutine int gen() { return fp((yield 1) == null ? 5 : 0); }\n"
+                         "auto h = gen(); var a = h.resume(); fp = repl; var b = h.resume(); to_string(a) + \"|\" + to_string(b)",
+                "1|105", "the callee parked before the yield is the one invoked");
+            both_drained("coroutine int inner() { yield 1; return 2; }\ncoroutine int gen() { auto hi = inner(); return hi.done((yield 1) == null ? 0 : 0) == false ? 3 : 4; }\n"
+                         "auto h = gen(); var a = h.resume(); var b = h.resume(); to_string(a) + \"|\" + to_string(b) + \"|\" + to_string(h.done())",
+                "1|3|true", "a builtin handle method with a yield in its argument list runs after the resume");
+        });
+
+        test("yield_in_method_receiver_expression", [this, both_drained]() {
+            both_drained("class P { int v = 0; P(int x) { v = x; } int get() { return v; } }\ncoroutine int gen() { auto b = P(3); return ((yield 1) == null ? b : b).get(); }\nauto h = gen(); drain(h)",
+                "1|3", "yield inside a method-call receiver expression");
+            both_drained("string log = \"\";\nclass P { int v = 0; P(int x) { v = x; } int get() { return v; } }\nP pick(var t) { log += \"P\"; return P(9); }\n"
+                         "coroutine int gen() { return pick(yield 1).get(); }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "||P#1|9", "the receiver call runs once, after the resume");
+        });
+
+        test("yield_in_operand_positions", [this, both_drained]() {
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { return 100 + nz(yield 1); }\nauto h = gen(); drain(h)",
+                "1|101", "yield in a right binary operand under a call");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { return nz(yield 1) + 200; }\nauto h = gen(); drain(h)",
+                "1|201", "yield in a left binary operand under a call");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { return nz(yield 1) * 10 + nz(yield 2) * 20; }\nauto h = gen(); drain(h)",
+                "1|2|30", "two yields in one expression, each consumed once");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { return -nz(yield 1); }\nauto h = gen(); drain(h)",
+                "1|-1", "yield under a unary operand");
+            both_drained("string log = \"\";\nbool logged() { log += \"L\"; return true; }\ncoroutine int gen() { bool b = logged() && (yield 1) == null; return b ? 5 : 0; }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "|L|#1|5", "&& short-circuit: the left operand runs once, before the suspension");
+            both_drained("string log = \"\";\nbool logged() { log += \"L\"; return false; }\ncoroutine int gen() { bool b = logged() || (yield 1) == null; return b ? 5 : 0; }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "|L|#1|5", "|| short-circuit twin");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { var arr = [7, 8]; return arr[nz(yield 1)]; }\nauto h = gen(); drain(h)",
+                "1|8", "yield inside a subscript index");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\narray<int> pick_arr(var t) { return [40, 41]; }\ncoroutine int gen() { return pick_arr(yield 1)[nz(yield 2)]; }\nauto h = gen(); drain(h)",
+                "1|2|41", "yields in an index base and its index");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { return cast<int>(nz(yield 1)) * 42; }\nauto h = gen(); drain(h)",
+                "1|42", "yield inside a cast operand");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { string t = \"\"; try { throw nz(yield 1) * 9; } catch (e) { t = to_string(e); } return t == \"9\" ? 5 : 0; }\nauto h = gen(); drain(h)",
+                "1|5", "yield inside a throw operand");
+            both_drained("coroutine int gen() { var v = yield (yield 1); return v == null ? 7 : 0; }\nauto h = gen(); drain(h)",
+                "1|null|7", "a yield nested inside another yield operand");
+        });
+
+        test("yield_in_literals_and_stores", [this, both_drained]() {
+            both_drained("string log = \"\";\nint one() { log += \"1\"; return 1; }\nint nz(var v) { return v == null ? 5 : 0; }\n"
+                         "coroutine int gen() { var a = [one(), nz(yield 1)]; return a[0] * 10 + a[1]; }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "|1|#1|15", "an array literal element after a logged element: each runs once");
+            both_drained("int nz(var v) { return v == null ? 5 : 0; }\ncoroutine int gen() { var m = {\"k\": nz(yield 1), \"j\": 2}; return m[\"k\"] * 10 + m[\"j\"]; }\nauto h = gen(); drain(h)",
+                "1|52", "yield inside a map literal value");
+            both_drained("int nz(var v) { return v == null ? 42 : 0; }\ncoroutine int gen() { int a = 0; a = nz(yield 1); return a; }\nauto h = gen(); drain(h)",
+                "1|42", "yield in an assignment rhs");
+            both_drained("int nz(var v) { return v == null ? 42 : 0; }\ncoroutine int gen() { int a = 8; a += nz(yield 1); return a; }\nauto h = gen(); drain(h)",
+                "1|50", "yield in a compound assignment rhs");
+            both_drained("string log = \"\";\nint side() { log += \"S\"; return 0; }\nint nz(var v) { return v == null ? 6 : 0; }\n"
+                         "coroutine int gen() { var arr = [1, 2]; arr[side()] = nz(yield 1); return arr[0]; }\n"
+                         "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
+                "||S#1|6", "the store target subexpression is evaluated once, after the resume");
+            both_drained("class C { int v = 1; }\nint nz(var v) { return v == null ? 4 : 0; }\ncoroutine int gen() { auto c = C(); c.v += nz(yield 1); return c.v; }\nauto h = gen(); drain(h)",
+                "1|5", "yield in a member compound assignment rhs");
+            both_drained("int nz(var v) { return v == null ? 42 : 0; }\ncoroutine int gen() { return nz(yield 1); }\nauto h = gen(); drain(h)",
+                "1|42", "yield inside a return expression");
+            both_drained("int nz(var v) { return v == null ? 3 : 0; }\ncoroutine int gen() { int x = nz(yield 1); return x; }\nauto h = gen(); drain(h)",
+                "1|3", "yield inside a declaration initializer");
+        });
+
+        test("yield_in_conditions_and_range_for", [this, both_drained]() {
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { if (nz(yield 1) == 1) { return 7; } return 0; }\nauto h = gen(); drain(h)",
+                "1|7", "yield inside a call in an if condition");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { int c = 0; while (nz(yield c) == 1 && c < 2) { c++; } return c; }\nauto h = gen(); drain(h)",
+                "0|1|2|2", "yield inside a call in a while condition");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { int c = 0; for (int i = 0; nz(yield i) == 1 && i < 2; i++) { c++; } return c; }\nauto h = gen(); drain(h)",
+                "0|1|2|2", "yield inside a call in a for condition");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { int t = 0; for (int i = 0; i < 2; i += nz(yield i)) { t += 10; } return t; }\nauto h = gen(); drain(h)",
+                "0|1|20", "yield inside a for update expression");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { int t = 0; for (auto x : [nz(yield 1), 2]) { t += x; } return t; }\nauto h = gen(); drain(h)",
+                "1|3", "yield inside a range-for source");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { int t = 0; for (auto x : [1, 2, 3]) { t += x * nz(yield x); } return t; }\nauto h = gen(); drain(h)",
+                "1|2|3|6", "a yield inside a call in a range-for body, once per element");
+            both_drained("int nz(var v) { return v == null ? 2 : 0; }\ncoroutine int inner() { yield nz(yield 1); return 9; }\n"
+                         "coroutine int outer() { int t = 0; for (auto v : inner()) { t = t * 10 + v; } return t; }\nauto h = outer(); drain(h)",
+                "12", "range-for over a generator whose yields sit in argument positions");
+        });
+
+        test("yield_in_switch_and_catch_replays_once", [this, both_drained]() {
+            both_drained("string log = \"\";\ncoroutine int gen() { try { log += \"T\"; throw \"x\"; } catch (e) { log += \"C\"; yield 1; log += \"c\"; } return 0; }\n"
+                         "auto h = gen(); while (!h.done()) { h.resume(); log += \"|\"; } log",
+                "TC|c|", "a yield in a catch block does not re-run the try body on resume");
+            both_drained("string log = \"\";\nint cond() { log += \"S\"; return 1; }\nint cv() { log += \"V\"; return 1; }\n"
+                         "coroutine int gen() { switch (cond()) { case 1: log += \"B\"; yield 1; log += \"b\"; } return 0; }\n"
+                         "auto h = gen(); while (!h.done()) { h.resume(); log += \"|\"; } log",
+                "SB|b|", "a yield in a switch case does not re-evaluate the condition or case values");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { switch (nz(yield 1)) { case 1: return 5; default: return 9; } }\nauto h = gen(); drain(h)",
+                "1|5", "yield inside a switch condition");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { switch (1) { case nz(yield 1): return 5; default: return 9; } }\nauto h = gen(); drain(h)",
+                "1|5", "yield inside a case value");
+        });
+
+        test("yield_typed_slot_and_lambda_rules_unchanged", [this, both_drained, check_parity]() {
+            both_drained("coroutine int gen() { int x = yield 1; return x; }\n"
+                         "auto h = gen(); var a = h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } to_string(a) + \"|\" + t",
+                "1|Cannot initialize 'x' (declared int) with null", "a null resume value into a typed slot still raises the same text");
+            std::string r = check_parity("coroutine int gen() { auto f = [=]() { yield 1; return 2; }; return f(); }\n1", "yield inside a lambda in a coroutine");
+            check_true(r.find("yield can only be used inside a coroutine function") != std::string::npos,
+                       "yield in a lambda body is a parse error on both backends: " + r);
+            std::string r2 = check_parity("coroutine int gen() { int nested() { yield 1; return 2; } return nested(); }\n1", "yield inside a nested function in a coroutine");
+            check_true(r2.find("yield can only be used inside a coroutine function") != std::string::npos,
+                       "yield in a nested function body is a parse error on both backends: " + r2);
+        });
+
+        test("static_member_store_rhs_runs_once", [this, both_drained]() {
+            // the interpreter re-dispatched the rhs for a static target (side effects twice)
+            both_drained("class C { static int s = 0; }\nstring log = \"\";\nint side() { log += \"S\"; return 4; }\n"
+                         "coroutine int gen() { C::s = side(); yield C::s; return 0; }\n"
+                         "auto h = gen(); string s = drain(h); s + \"#\" + log",
+                "4|0#S", "a static member store evaluates its rhs exactly once");
+        });
+
+        test("handle_type_of_and_to_string_parity", [this, check_parity]() {
+            // parity pin: literal to be sharpened once the behavior is ruled
+            std::string r = check_parity("coroutine int g() { yield 1; }\nauto h = g(); auto h2 = h;\ntype_of(h) + \"|\" + to_string(to_string(h) != \"\") + \"|\" + to_string(h == null) + \"|\" + to_string(h == h2)",
+                "type_of / to_string / equality of a coroutine handle");
+            check_true(r.find("ERROR") != 0, "handles print and compare without raising: " + r);
+        });
+
+        // A brace-less body that completes AT the yield leaves no inner frame: the enclosing
+        // if/while/for/range-for must step past it on resume, never re-run it
+        test("yield_in_brace_less_bodies", [this, both_drained]() {
+            both_drained("coroutine int g() { if (true) yield 1; yield 2; return 3; }\nauto h = g(); drain(h)",
+                "1|2|3", "brace-less if body");
+            both_drained("coroutine int g() { if (false) yield 1; else yield 2; yield 3; return 4; }\nauto h = g(); drain(h)",
+                "2|3|4", "brace-less else body");
+            both_drained("coroutine int g() { int i = 0; while (i < 3) yield i++; return 9; }\nauto h = g(); drain(h)",
+                "0|1|2|9", "brace-less while body");
+            both_drained("coroutine int g() { for (int i = 0; i < 3; i++) yield i * 10; return 9; }\nauto h = g(); drain(h)",
+                "0|10|20|9", "brace-less for body");
+            both_drained("coroutine int g() { for (auto x : [5, 6]) yield x; return 9; }\nauto h = g(); drain(h)",
+                "5|6|9", "brace-less range-for body over an array");
+            both_drained("coroutine int g() { for (auto kv : {\"a\": 1, \"b\": 2}) yield kv.second; return 9; }\nauto h = g(); drain(h)",
+                "1|2|9", "brace-less range-for body over a map");
+            both_drained("coroutine int inner() { yield 7; yield 8; return 0; }\ncoroutine int g() { for (auto v : inner()) yield v * 2; return 9; }\nauto h = g(); drain(h)",
+                "14|16|9", "brace-less range-for body over a generator");
+            both_drained("coroutine int g() { int k = 0; while (k < 2) if (k++ == 0) yield 10; else yield 20; return 4; }\nauto h = g(); drain(h)",
+                "10|20|4", "brace-less while body that is a brace-less if/else");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int i = 0; while (nz(yield i) == 1 && i < 2) i++; return i; }\nauto h = g(); drain(h)",
+                "0|1|2|2", "brace-less while body under a condition that yields");
+        });
+
+        // Store targets: the receiver / subscript of a store is evaluated exactly once, and a
+        // yield inside it suspends there (the rhs, evaluated first, is parked)
+        test("yield_in_store_targets_runs_once", [this, both_drained]() {
+            both_drained("class P { int v = 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v = 5; return p.v; }\nauto h = g(); drain(h)",
+                "1|5", "yield inside a member-store receiver");
+            both_drained("coroutine int g() { var arr = [1, 2]; arr[(yield 1) == null ? 1 : 0] += 5; return arr[1]; }\nauto h = g(); drain(h)",
+                "1|7", "yield inside a compound-store subscript");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var arr = [[1, 2], [3, 4]]; arr[nz(yield 1)][nz(yield 2)] = 9; return arr[1][1]; }\nauto h = g(); drain(h)",
+                "1|2|9", "yields inside a nested-subscript store target");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { array<int> a = [1, 2]; a[0] = nz(yield 1) * 7; a[1] += nz(yield 2) * 5; return a[0] + a[1]; }\nauto h = g(); drain(h)",
+                "1|2|14", "typed-array element stores with yields in the rhs");
+            both_drained("coroutine int g() { var m = {\"k\": 0}; m[\"k\"]++; m[\"k\"] += (yield 1) == null ? 1 : 0; ++m[\"k\"]; return m[\"k\"]; }\nauto h = g(); drain(h)",
+                "1|3", "map-entry ++ / compound with a yield in the rhs");
+            // the compound-store target of the general path used to be re-dispatched for the
+            // store-back (side effects twice on the interpreter): pinned on both backends
+            both_drained("string log = \"\";\nint side() { log += \"S\"; return 1; }\nvar arr = [1, 2];\narr[side()] += 5;\nvar m = {\"a\": [1, 2]};\nstring key() { log += \"Y\"; return \"a\"; }\nm[key()][side()] += 5;\nlog + \" \" + to_string(arr[1]) + \" \" + to_string(m[\"a\"][1])",
+                "SYS 7 7", "a compound store evaluates its subscript target exactly once");
+        });
+
+        test("yield_in_method_field_stores", [this, both_drained]() {
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\nclass C { int v = 0; coroutine int g() { v = nz(yield 1) * 10; v += nz(yield 2); this.v += nz(yield 3) * 100; return v; } }\nauto h = C().g(); drain(h)",
+                "1|2|3|111", "bare-field, bare-compound and this.field compound stores with yields in the rhs");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int a = 1; var lam = [&]() { return a * 10; }; a = nz(yield 1) + lam(); return a + lam(); }\nauto h = g(); drain(h)",
+                "1|121", "a [&] lambda reads the local after a resumed store");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var arr = [1, 2, 3]; int t = 0; for (auto& x : arr) { x += nz(yield x); t += x; } return t + arr[0]; }\nauto h = g(); drain(h)",
+                "1|2|3|11", "by-reference range-for element stores with yields");
+        });
+
+        test("yield_in_nested_control_flow", [this, both_drained]() {
+            both_drained("coroutine int g(int k) { switch (k) { case 1: { yield 10; yield 11; } case 2: yield 20; fallthrough; default: { yield 30; yield 31; } } return 0; }\ndrain(g(1)) + \"#\" + drain(g(2)) + \"#\" + drain(g(3))",
+                "10|11|0#20|30|31|0#30|31|0", "yields inside nested blocks of switch cases, fallthrough and default");
+            both_drained("coroutine int g() { int t = 0; for (int i = 0; i < 3; i++) { try { if (i == 1) { throw \"x\"; } yield i; } catch (e) { t += 100; yield 99; } } return t; }\nauto h = g(); drain(h)",
+                "0|99|2|100", "a try/catch with yields in both blocks inside a for loop");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int c = 0; for (int i = nz(yield 1); i < 3; i++) { c += i; } return c; }\nauto h = g(); drain(h)",
+                "1|3", "yield inside a for initializer");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int t = 0; for (int i = 0; i < 4; i++) { if (nz(yield i) == 1 && i == 1) { continue; } if (i == 2) { break; } t += 10; } return t; }\nauto h = g(); drain(h)",
+                "0|1|2|10", "continue and break after a resumed yield in a loop body");
+            both_drained("int add(int a, int b) { return a + b; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { if (add(nz(yield 1), (yield 2) == null ? 1 : 0) == 2) { return 8; } return 0; }\nauto h = g(); drain(h)",
+                "1|2|8", "two yields inside a call inside an if condition");
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { int s = 0; while (true) { s += nz(yield s); if (s >= 3) { break; } } return s; }\nauto h = g(); drain(h)",
+                "0|1|2|3", "compound store with a yield in an infinite loop broken after the resume");
+            both_drained("coroutine int f3() { try { yield 1; throw \"a\"; } catch (e) { yield 2; throw \"b\"; } return 0; }\n"
+                         "auto h = f3(); string s = to_string(h.resume()); s += to_string(h.resume()); try { h.resume(); } catch (e) { s += \"caught\"; } s + to_string(h.done())",
+                "12caughttrue", "a rethrow from a resumed catch block fails the handle");
+        });
+
+        test("error_after_resumed_yield_fails_handle", [this, both_drained]() {
+            both_drained("int nz(var v) { return v == null ? 1 : 0; }\nint boom(int x) { throw \"boom\" + to_string(x); }\ncoroutine int g() { int r = boom(nz(yield 1)); return r; }\n"
+                         "auto h = g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+                "boom1|true", "a script throw in the continued part of the expression reaches the resumer");
+            both_drained("class P { int v = 0; P(int x) { v = x; } }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { auto p = new P(nz(yield 1) * 3); shared_ptr<P> sp = new P(nz(yield 2) * 4); return p.v + sp.v; }\nauto h = g(); drain(h)",
+                "1|2|7", "yields inside new-expression arguments");
+        });
+
+        test("hot_reload_mid_expression_keeps_suspended_body", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                e->execute("int nz(var v) { return v == null ? 1 : 0; }\nclass W { int v = 1; coroutine int g() { return nz(yield 1) + v; } }\nvar w = W(); var h = w.g(); var a = h.resume();");
+                e->execute("class W { int v = 1; string e = \"x\"; coroutine int g() { return 99; } }");
+                auto r = e->execute("to_string(a) + \"|\" + to_string(h.resume()) + \"|\" + w.e + \"|\" + to_string(w.g().resume())");
+                check_eq(std::string("1|2|x|99"), r.to_string(), std::string(use_vm ? "vm" : "interp") + ": a reload between resumes finishes the old expression on the migrated instance");
+            }
         });
 
     }

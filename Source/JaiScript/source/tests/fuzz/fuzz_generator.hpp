@@ -884,7 +884,24 @@ namespace jai::fuzz {
 			std::string acc = takes_arg ? pname : int_literal();
 			int yields = static_cast<int>(rng_.range(1, 3));
 			for (int i = 0; i < yields; ++i) {
-				lines_.push_back("yield " + acc + " + " + std::to_string(i) + ";");
+				// statement-level yields plus yields in sub-expression positions (argument,
+				// operand, condition): the backends must agree on where each one suspends
+				switch (rng_.range(0, 4)) {
+					case 1:
+						lines_.push_back("int y" + std::to_string(i) + " = ((yield " + acc + " + " + std::to_string(i) +
+						                 ") == null ? 1 : 0) + " + acc + ";");
+						break;
+					case 2:
+						lines_.push_back("int y" + std::to_string(i) + " = to_string(yield " + acc + " + " + std::to_string(i) +
+						                 ").size();");
+						break;
+					case 3:
+						lines_.push_back("if ((yield " + acc + " + " + std::to_string(i) + ") == null) { " + acc + " = " + acc + " + 1; }");
+						break;
+					default:
+						lines_.push_back("yield " + acc + " + " + std::to_string(i) + ";");
+						break;
+				}
 			}
 			if (rng_.chance(70)) {
 				// typed final return, sometimes a float needing conversion (spicy)

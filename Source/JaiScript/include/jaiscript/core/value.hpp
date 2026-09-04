@@ -268,6 +268,16 @@ namespace jai {
         // reference into a temporary map keeps the map alive.
         static script_value make_map_entry_reference(const strong_ptr<script_map>& map_storage,
                                                      const script_value& key, engine* eng, type_info_ptr value_type);
+        // CPP-MEMBER reference (a binder member-pointer property the cpp_bound box can decode):
+        // the referent IS the C++ member at `address`; object_pin keeps the object alive,
+        // `receiver` is the handle the property was bound on (docs/reference_model.md).
+        static script_value make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
+                                                      void* address, uint8_t size_and_sign, uint8_t semantic_index,
+                                                      uint64_t field_id, engine* eng);
+        // PROPERTY reference (every other binder property): deref reads through the getter
+        // on every touch, assign-through writes through the setter (a setter-less property
+        // stays the silent no-op `receiver.name = v` is today).
+        static script_value make_property_reference(const script_value& receiver, uint64_t field_id, engine* eng);
         static script_value make_function(const script_function& func, engine* eng);
         // Rvalue mint: moves the std::function into its strong_ptr box (every backend
         // mint passes a temporary - the copy was pure churn)
@@ -281,6 +291,8 @@ namespace jai {
         // NOTE: Implementation is in value_impl.hpp (include after engine.hpp)
         template<typename T>
         static script_value make_cpp_bound(T* target, engine* eng);
+        // The engine tag a bound box of that semantic index carries (int/float/bool/string)
+        static type_info_ptr cpp_bound_type_info(engine* eng, uint8_t semantic_index);
         
         // Template factory methods removed - use engine->make_object instead
         // This ensures proper type name registration
@@ -1852,6 +1864,20 @@ namespace jai {
         // holds the KEY; deref/assign-through re-resolve via find(key) each time, so an
         // erased entry errors cleanly and a reference into a temporary map keeps the
         // map alive.
+        //
+        // CPP-MEMBER / PROPERTY (binder .property() members; docs/reference_model.md): the
+        // holder keeps the receiver handle and the property's field id. CPP-MEMBER aims a
+        // cpp_bound box in the inline storage at the C++ member itself (object_pin is the
+        // object's lifetime); PROPERTY re-runs the getter into the inline scratch on every
+        // deref and the setter on every assign-through.
+        struct property_binding {
+            strong_ptr<object_holder> receiver;
+            type_info_ptr receiver_tag = nullptr;
+            std::shared_ptr<void> object_pin;
+            uint64_t field_id = 0;
+            bool live_member = false;   // CPP-MEMBER: inline storage holds the bound box
+            bool has_scratch = false;   // PROPERTY: inline storage holds the last getter result
+        };
         struct reference_holder {
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
@@ -1889,14 +1915,6 @@ namespace jai {
             bool has_elem_scratch = false;
             bool typed_element() const noexcept { return container && container->is_typed(); }
             const script_value& materialize_typed_element(engine* eng);   // value.cpp
-            // In-place mutation sites (++/--) mutate the materialized scratch through
-            // deref() and commit it back to the raw buffer with this (bounds re-checked:
-            // no user code runs between materialize and commit, but stay defensive).
-            void commit_typed_element_scratch() {
-                if (has_elem_scratch && container_index < container->size()) {
-                    container->set(container_index, *cell());
-                }
-            }
 
             // FIELD mode (ref bind of obj.field): pins the owning instance and
             // re-resolves the field node by id on every deref/assign-through, so it
@@ -1904,6 +1922,23 @@ namespace jai {
             // dangling).
             std::shared_ptr<class_instance> owner_instance;
             uint64_t field_id = UINT64_MAX;
+
+            // CPP-MEMBER / PROPERTY modes (null for the four modes above; checked last on
+            // every touch so those pay nothing). resolve_target() answers null for both:
+            // a missed consumer fails loudly instead of detaching the box or writing the
+            // scratch. value.cpp owns the touch logic (materialize/store re-resolve the
+            // receiver's class and accessor per touch: reload-safe, shadow-aware).
+            std::unique_ptr<property_binding> property;
+            bool cpp_member_ref() const noexcept { return property && property->live_member; }
+            bool property_ref() const noexcept { return property && !property->live_member; }
+            const script_value& materialize_property(engine* eng);                       // throws on a failed getter
+            checked_result<script_value> read_property(engine* eng, bool bind_point) const;   // checked twin
+            void store_property(const script_value& value, engine* eng);                // setter; no setter = no-op
+            // Scratch-backed modes (typed element, PROPERTY): deref() hands back the
+            // holder's inline scratch, so in-place mutators (++/--) must commit_scratch()
+            // after writing - the buffer store / the setter call.
+            bool scratch_backed() const noexcept { return typed_element() || property_ref(); }
+            void commit_scratch();
 
             // Mode-based write-target resolution for the immediate-use assignment
             // paths: re-resolves every time (realloc/erase safe), single level - never
@@ -1977,6 +2012,27 @@ namespace jai {
         static constexpr size_t TYPEID_INVALID = 13;
         static constexpr size_t TYPEID_CPP_BOUND = 14;
         static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
+
+        // The cpp_bound box encoding of a C++ type - make_cpp_bound and the binder's
+        // member-address accessors share it so the two cannot drift. `capable` is false for
+        // types the box cannot decode (the binder then registers no member accessor).
+        template<typename T>
+        struct cpp_bound_encoding {
+            static constexpr bool capable =
+                !std::is_const_v<T> &&
+                (std::is_same_v<T, bool> || std::is_integral_v<T> ||
+                 std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                 std::is_same_v<T, std::string>);
+            static constexpr uint8_t size_and_sign =
+                static_cast<uint8_t>(sizeof(T)) |
+                ((std::is_unsigned_v<T> && !std::is_same_v<T, bool>) ? uint8_t{0x80} : uint8_t{0});
+            static constexpr uint8_t semantic_index =
+                std::is_same_v<T, bool> ? static_cast<uint8_t>(TYPEID_BOOL)
+                : std::is_integral_v<T> ? static_cast<uint8_t>(TYPEID_INT)   // char included: a 1-byte int view
+                : std::is_floating_point_v<T> ? static_cast<uint8_t>(TYPEID_FLOAT)
+                : (std::is_same_v<T, std::string> || std::is_same_v<T, script_string>) ? static_cast<uint8_t>(TYPEID_STRING)
+                : static_cast<uint8_t>(TYPEID_NULL);
+        };
     private:
 
         // Type-erased storage: a hand-rolled tagged union with the EXACT layout and
@@ -2293,13 +2349,13 @@ namespace jai {
             return nullptr;
         }
 
-        // Non-null iff *this is a reference to a TYPED array element: deref() hands
-        // back the holder's materialized scratch there, so in-place mutators must
-        // commit_typed_element_scratch() after writing (typed_array_design.md).
-        reference_holder* typed_element_holder() noexcept {
+        // Non-null iff *this is a reference whose deref() hands back the holder's inline
+        // scratch (a TYPED array element or a C++ PROPERTY): in-place mutators must
+        // commit_scratch() after writing (typed_array_design.md, reference_model.md).
+        reference_holder* scratch_ref_holder() noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
-            return holder && holder->typed_element() ? holder.get() : nullptr;
+            return holder && holder->scratch_backed() ? holder.get() : nullptr;
         }
         
         

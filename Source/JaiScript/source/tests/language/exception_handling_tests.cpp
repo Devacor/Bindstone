@@ -408,7 +408,7 @@ public:
                 "int a = g();\n"              // 6
                 "int b = f();\n";             // 7
             std::string what = failure_text(*engine, src);
-            check_true(what.find("Type mismatch: expected int but got string") == 0, "text names the value type (got: " + what + ")");
+            check_true(what.find("Cannot return string from 'f' (declared -> int)") == 0, "text names the value type (got: " + what + ")");
             check_true(what.find("got any") == std::string::npos, "no var tag in the text");
             check_eq(std::string("f:3|<script>:7"), trace_shape(*engine));
             check_eq(std::string("  at f (<script>:3)\n  at <script> (<script>:7)\n"), engine->format_stack_trace());
@@ -427,7 +427,7 @@ public:
                 "}\n"                         // 8
                 "int b = g();\n";             // 9
             std::string what = failure_text(*engine, src);
-            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_true(what.find("Cannot return string from 'f' (declared -> int)") == 0, "text (got: " + what + ")");
             check_eq(std::string("f:3|g:6|<script>:9"), trace_shape(*engine));
         });
 
@@ -440,7 +440,7 @@ public:
                 "};\n"                        // 4
                 "int b = l();\n";             // 5
             std::string what = failure_text(*engine, src);
-            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_true(what.find("Cannot return string from lambda (declared -> int)") == 0, "text (got: " + what + ")");
             check_eq(std::string("<lambda>:3|<script>:5"), trace_shape(*engine));
         });
 
@@ -456,7 +456,7 @@ public:
                 "auto c = C();\n"             // 7
                 "int b = c.m();\n";           // 8
             std::string what = failure_text(*engine, src);
-            check_true(what.find("Type mismatch: expected int but got string") == 0, "text (got: " + what + ")");
+            check_true(what.find("Cannot return string from 'm' (declared -> int)") == 0, "text (got: " + what + ")");
             check_eq(std::string("m:4|<script>:8"), trace_shape(*engine));
         });
 
@@ -474,7 +474,7 @@ public:
                     "var a = h.resume();\n"   // 7
                     "var b = h.resume();\n";  // 8
                 std::string what = failure_text(*engine, src);
-                check_true(what.find("Type mismatch: expected int but got string") == 0, "top-level resume text (got: " + what + ")");
+                check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "top-level resume text (got: " + what + ")");
                 check_eq(std::string("co:4|<script>:8"), trace_shape(*engine));
             }
             // Resumed inside a function: the resumer's frames stay under the coroutine's
@@ -493,7 +493,7 @@ public:
                     "}\n"                     // 10
                     "int b = g();\n";         // 11
                 std::string what = failure_text(*engine, src);
-                check_true(what.find("Type mismatch: expected int but got string") == 0, "nested resume text (got: " + what + ")");
+                check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "nested resume text (got: " + what + ")");
                 check_eq(std::string("co:4|g:9|<script>:11"), trace_shape(*engine));
             }
             // First resume runs to completion
@@ -510,7 +510,7 @@ public:
                     "}\n"                     // 8
                     "int b = g();\n";         // 9
                 std::string what = failure_text(*engine, src);
-                check_true(what.find("Type mismatch: expected int but got string") == 0, "first-resume text (got: " + what + ")");
+                check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "first-resume text (got: " + what + ")");
                 check_eq(std::string("co:3|g:7|<script>:9"), trace_shape(*engine));
             }
         });
@@ -562,9 +562,10 @@ public:
             check_eq(std::string("f:2|<script>:4"), trace_shape(*engine));
         });
 
-        // The conversion still surfaces in the CALLER (a try around the return inside the
-        // callee does not see it) - attribution changed, catchability did not.
-        test("return_conversion_error_reaches_caller_not_callee_try", [this]() {
+        // ---- returncatch (Dev: C++ semantics): the typed-return conversion is part of the
+        // `return` statement, so a try/catch around the failing return INSIDE the callee
+        // catches it; uncaught, the attribution and text above are unchanged. ----
+        test("return_conversion_error_caught_at_return_site", [this]() {
             auto engine = make_engine();
             script_value result = engine->execute(
                 "int f() {\n"
@@ -575,10 +576,10 @@ public:
                 "    return -1;\n"
                 "  }\n"
                 "}\n"
-                "string r = \"\";\n"
-                "try { int v = f(); r = \"v\"; } catch (e) { r = \"caller:\" + e; }\n"
+                "int r = 0;\n"
+                "try { r = f(); } catch (e) { r = -99; }\n"
                 "r\n");
-            check_eq(std::string("caller:Type mismatch: expected int but got string"), result.as_string());
+            check_eq((int64_t)-1, result.as_int());
             // A caught return-conversion error leaves no stale trace behind for a later error
             auto later = make_engine();
             const char* src =
@@ -590,6 +591,275 @@ public:
                 "throw \"later\";\n";                           // 6
             check_eq(std::string("later"), failure_text(*later, src));
             check_eq(std::string("<script>:6"), trace_shape(*later));
+            // ...nor does one caught inside the callee
+            auto inner = make_engine();
+            const char* src2 =
+                "int f() {\n"                                                        // 1
+                "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"      // 2
+                "}\n"                                                                // 3
+                "int v = f();\n"                                                     // 4
+                "throw \"later\";\n";                                                // 5
+            check_eq(std::string("later"), failure_text(*inner, src2));
+            check_eq(std::string("<script>:5"), trace_shape(*inner));
+        });
+
+        test("return_conversion_caught_value_is_the_error_text", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "int f() {\n"
+                "  try { var x = \"s\"; return x; } catch (e) { throw \"caught:\" + e; }\n"
+                "}\n"
+                "string r = \"\";\n"
+                "try { f(); } catch (e) { r = e; }\n"
+                "r\n");
+            check_eq(std::string("caught:Cannot return string from 'f' (declared -> int)"), result.as_string());
+        });
+
+        test("return_conversion_catch_nested_try", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "int f() {\n"
+                "  try {\n"
+                "    try {\n"
+                "      var x = \"s\";\n"
+                "      return x;\n"
+                "    } catch (e) {\n"
+                "      if (e == \"other\") { return -2; }\n"
+                "      throw e;\n"
+                "    }\n"
+                "  } catch (e2) {\n"
+                "    return -3;\n"
+                "  }\n"
+                "}\n"
+                "f()\n");
+            check_eq((int64_t)-3, result.as_int());
+        });
+
+        test("return_conversion_catch_rethrow_attributed_to_throw", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "int f() {\n"                 // 1
+                "  try {\n"                   // 2
+                "    var x = \"s\";\n"        // 3
+                "    return x;\n"             // 4
+                "  } catch (e) {\n"           // 5
+                "    throw e;\n"              // 6
+                "  }\n"                       // 7
+                "}\n"                         // 8
+                "int b = f();\n";             // 9
+            check_eq(std::string("Cannot return string from 'f' (declared -> int)"), failure_text(*engine, src));
+            check_eq(std::string("f:6|<script>:9"), trace_shape(*engine));
+        });
+
+        test("method_return_conversion_caught_at_return_site", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "class C {\n"
+                "  int m() {\n"
+                "    try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
+                "  }\n"
+                "}\n"
+                "auto c = C();\n"
+                "c.m()\n");
+            check_eq((int64_t)-1, result.as_int());
+        });
+
+        test("lambda_return_conversion_caught_at_return_site", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "var x = \"s\";\n"
+                "auto l = []() -> int {\n"
+                "  try { return x; } catch (e) { return -1; }\n"
+                "};\n"
+                "l()\n");
+            check_eq((int64_t)-1, result.as_int());
+        });
+
+        test("coroutine_return_conversion_caught_at_return_site", [this]() {
+            {
+                auto engine = make_engine();
+                check_eq((int64_t)1, engine->execute(
+                    "coroutine int co() {\n"
+                    "  yield 1;\n"
+                    "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
+                    "}\n"
+                    "auto h = co();\n"
+                    "h.resume()\n").as_int());
+                check_eq((int64_t)-1, engine->execute("h.resume()").as_int());
+                check_true(engine->execute("h.done()").as_bool(), "completed after the caught return");
+            }
+            {
+                auto engine = make_engine();
+                check_eq((int64_t)-1, engine->execute(
+                    "coroutine int co() {\n"
+                    "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
+                    "}\n"
+                    "auto h = co();\n"
+                    "h.resume()\n").as_int());
+                check_true(engine->execute("h.done()").as_bool(), "first resume completed");
+            }
+            // Uncaught: the row-29 text/trace hold and the handle reads done (failed) afterwards
+            {
+                auto engine = make_engine();
+                const char* src =
+                    "coroutine int co() {\n"  // 1
+                    "  yield 1;\n"            // 2
+                    "  var x = \"s\";\n"      // 3
+                    "  return x;\n"           // 4
+                    "}\n"                     // 5
+                    "auto h = co();\n"        // 6
+                    "var a = h.resume();\n"   // 7
+                    "var b = h.resume();\n";  // 8
+                std::string what = failure_text(*engine, src);
+                check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "uncaught text (got: " + what + ")");
+                check_eq(std::string("co:4|<script>:8"), trace_shape(*engine));
+                check_true(engine->execute("h.done()").as_bool(), "a failed handle reads as done");
+            }
+        });
+
+        test("ref_return_error_caught_at_return_site", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "int g = 5;\n"
+                "int& f() {\n"
+                "  try { return 5; } catch (e) { return g; }\n"
+                "}\n"
+                "f()\n");
+            check_eq((int64_t)5, result.as_int());
+            auto texts = make_engine();
+            script_value caught = texts->execute(
+                "int& f() {\n"
+                "  try { return 5; } catch (e) { throw \"c:\" + e; }\n"
+                "}\n"
+                "string r = \"\";\n"
+                "try { f(); } catch (e) { r = e; }\n"
+                "r\n");
+            check_eq(std::string("c:Function with reference return type must return an lvalue reference"), caught.as_string());
+        });
+
+        test("throwing_conversion_caught_at_return_site", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "class T { int to_int() { throw \"boom\"; } }\n"
+                "int f() {\n"
+                "  try { var t = T(); return t; } catch (e) { return e == \"boom\" ? -7 : -8; }\n"
+                "}\n"
+                "f()\n");
+            check_eq((int64_t)-7, result.as_int());
+            auto ctor = make_engine();
+            script_value made = ctor->execute(
+                "class Cat { int v = 0; Cat(int n) { if (n == 1) { throw \"ctorboom\"; } v = n; } }\n"
+                "Cat f() {\n"
+                "  try { var v = 1; return v; } catch (e) { return Cat(2); }\n"
+                "}\n"
+                "auto c = f();\n"
+                "c.v\n");
+            check_eq((int64_t)2, made.as_int());
+        });
+
+        test("catch_return_converts_in_turn", [this]() {
+            auto engine = make_engine();
+            const char* src =
+                "int f() {\n"                 // 1
+                "  try {\n"                   // 2
+                "    var x = \"s\";\n"        // 3
+                "    return x;\n"             // 4
+                "  } catch (e) {\n"           // 5
+                "    var y = \"t\";\n"        // 6
+                "    return y;\n"             // 7
+                "  }\n"                       // 8
+                "}\n"                         // 9
+                "int b = f();\n";             // 10
+            std::string what = failure_text(*engine, src);
+            check_true(what.find("Cannot return string from 'f' (declared -> int)") == 0, "text (got: " + what + ")");
+            check_eq(std::string("f:7|<script>:10"), trace_shape(*engine));
+            // ...and an outer try in the same function catches the catch's own return
+            auto outer = make_engine();
+            script_value result = outer->execute(
+                "int f() {\n"
+                "  try {\n"
+                "    try { var x = \"s\"; return x; } catch (e) { var y = \"t\"; return y; }\n"
+                "  } catch (e2) { return -4; }\n"
+                "}\n"
+                "f()\n");
+            check_eq((int64_t)-4, result.as_int());
+        });
+
+        test("bare_return_in_typed_fn_inside_try_caught", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(
+                "int f() {\n"
+                "  try { return; } catch (e) { return -1; }\n"
+                "}\n"
+                "f()\n");
+            check_eq((int64_t)-1, result.as_int());
+            auto plain = make_engine();
+            const char* src =
+                "int f() {\n"                 // 1
+                "  return;\n"                 // 2
+                "}\n"                         // 3
+                "int b = f();\n";             // 4
+            std::string what = failure_text(*plain, src);
+            check_true(what.find("Cannot return null from 'f' (declared -> int)") == 0, "bare return text (got: " + what + ")");
+            check_eq(std::string("f:2|<script>:4"), trace_shape(*plain));
+        });
+
+        test("native_entry_return_conversion_caught_at_return_site", [this]() {
+            auto engine = make_engine();
+            script_value fv = engine->execute(
+                "int f() {\n"
+                "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
+                "}\n"
+                "f\n");
+            check_true(fv.is_function());
+            std::vector<script_value> no_args;
+            auto call = fv.as_function()(no_args);
+            check_true(call.has_value(), "the callee's catch handled the conversion");
+            check_eq((int64_t)-1, call.value().as_int());
+            script_value gv = engine->execute(
+                "int g() {\n"
+                "  var x = \"s\";\n"
+                "  return x;\n"
+                "}\n"
+                "g\n");
+            auto bad = gv.as_function()(no_args);
+            check_false(bad.has_value(), "an uncaught conversion error reaches the native caller");
+            std::string text = engine->format_error(bad);
+            check_true(text.find("Cannot return string from 'g' (declared -> int)") == 0, "native caller text (got: " + text + ")");
+        });
+
+        test("proven_return_inside_try_stays_identity", [this]() {
+            for (bool proofs : {true, false}) {
+                auto engine = make_engine();
+                engine->type_proofs(proofs);
+                check_eq((int64_t)1, engine->execute(
+                    "int f() {\n"
+                    "  int x = 1;\n"
+                    "  try { return x; } catch (e) { return -1; }\n"
+                    "}\n"
+                    "float g() {\n"
+                    "  int x = 2;\n"
+                    "  try { return x; } catch (e) { return -1.0; }\n"
+                    "}\n"
+                    "f()\n").as_int());
+                script_value widened = engine->execute("g()");
+                check_true(widened.is_float(), "int -> float return still converts inside a try");
+                check_near(2.0, widened.as_float(), 1e-9);
+            }
+        });
+
+        test("throw_in_return_operand_inside_try_resumes_after_catch", [this]() {
+            // The return never completes when its operand throws: the catch runs and control
+            // continues past the try (the interpreter used to keep the stale return slot)
+            auto engine = make_engine();
+            check_eq((int64_t)2, engine->execute(
+                "auto g() { throw \"x\"; }\n"
+                "int f() { try { return g(); } catch (e) { } return 2; }\n"
+                "f()\n").as_int());
+            check_eq(std::string("x"), engine->execute(
+                "string r = \"\";\n"
+                "try { return g(); } catch (e) { r = e; }\n"
+                "r\n").as_string());
         });
 
         // A throw during argument evaluation must propagate the thrown value; it must not

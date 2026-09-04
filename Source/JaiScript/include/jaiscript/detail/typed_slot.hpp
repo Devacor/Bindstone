@@ -15,35 +15,15 @@
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace jai::detail {
 
-    // Source spelling for rejection texts: the payload's own type - a class name for objects
-    // and handles, "null", the primitive names, "array" / "map" - never a var tag.
-    inline std::string slot_source_type_name(const script_value& value_in, engine* eng) {
-        const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
-        const type_info* tag = v.get_type_info().get();
-        const bool named_tag = tag && tag->base_type != script_value_type::jai_any_type && !tag->type_name.empty();
-        switch (v.raw_storage_index()) {
-            case script_value::TYPEID_NULL: return "null";
-            case script_value::TYPEID_OBJECT:
-            case script_value::TYPEID_CPP_BOUND: {
-                if (v.raw_storage_index() == script_value::TYPEID_CPP_BOUND && v.current_type() != script_value_type::jai_null_type) {
-                    return container_base_type_name(v.current_type());
-                }
-                if (named_tag) return tag->type_name;
-                auto view = resolve_slot_class(v, eng);
-                if (view.def) return view.def->get_name();
-                if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) return holder->type_name;
-                return "object";
-            }
-            default:
-                return container_base_type_name(v.current_type());
-        }
-    }
+    // Source spelling for rejection texts: detail::slot_source_type_name (class_definition.hpp,
+    // next to the slot texts both wrappers raise through).
 
     // Target spelling for the parameter/return text: the interned canonical name, with
     // shared_ptr<T> spelled in full (its canonical name is the class alone).

@@ -375,7 +375,7 @@ public:
             jai::stdlib::register_all(eng);
             std::string message;
             try { eng->execute("auto obj = null; obj.frob();"); } catch (const std::exception& e) { message = e.what(); }
-            check(message.find("Member 'frob' accessed on null") != std::string::npos);
+            check(message.find("Cannot call 'frob' on null") != std::string::npos);
             check(message.find("'obj' is null") != std::string::npos);
             message.clear();
             try { eng->execute("auto maker = []() -> var { return null; }; maker().frob();"); } catch (const std::exception& e) { message = e.what(); }

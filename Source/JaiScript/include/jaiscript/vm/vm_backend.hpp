@@ -11,7 +11,10 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/arity_diagnostic.hpp>
+#include <jaiscript/detail/slot_site.hpp>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -318,6 +321,11 @@ namespace jai::vm {
             std::shared_ptr<environment> entry_env;
             size_t stack_base = 0;
             bool top_level = false;
+            // Native-entry / fiber frames: the declared return type and its detail::return_conv
+            // class, converted against at the completion door (record frames carry theirs on
+            // the call_record). class 0 = no door conversion (top-level / default-arg chunks).
+            type_info_ptr return_type;
+            uint8_t return_conv_class = 0;
             // Stage-2 frame window: slot k lives at stack_[window_base + k] when
             // window_backed (record frames + native entries). window_live replicates
             // call_frame's grow-on-declare semantics: reads at/above it answer nullptr
@@ -488,23 +496,13 @@ namespace jai::vm {
             locals.set_local(slot, std::move(value));
         }
 
-        // Return-epilogue classification, cached per script_defined_function
-        // (backend_return_conv) and stamped on the record at push. unclassified routes
-        // through the legacy decision (method frames); the prim_* classes pass a
-        // storage-matching result through verbatim — exactly what the full path's
-        // identity try_convert produces for primitives.
-        enum class return_conv : uint8_t {
-            unclassified = 0,
-            none,          // untyped / any / void / auto: deref-only epilogue
-            ref,           // reference return: pass-through kernel (full route)
-            prim_int,
-            prim_float,
-            prim_bool,
-            prim_char,
-            prim_string,
-            check,         // typed: full convert_return_value route
-        };
-        static return_conv classify_return_conv(const type_info_ptr& t);
+        // Return classification (detail/return_conv.hpp, shared with the interpreter),
+        // cached per function (backend_return_conv) and stamped on the record at push.
+        // unclassified routes through the legacy decision (method frames); the prim_*
+        // classes pass a storage-matching result through verbatim — exactly what the full
+        // path's identity try_convert produces for primitives.
+        using return_conv = detail::return_conv;
+        static return_conv classify_return_conv(const type_info_ptr& t) { return detail::classify_return_conv(t.get()); }
 
         // One logical script->script activation executed inside the current native run()
         // (Squirrel EnterFrame shape). Records live behind unique_ptr in a grow-only pool
@@ -698,6 +696,7 @@ namespace jai::vm {
         uint64_t hot_reload_migrate_id_ = 0;
         uint64_t pair_id_ = 0;
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at init
+        detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at init
 
         builtin_method_registries builtins_;
 
@@ -781,9 +780,11 @@ namespace jai::vm {
         // Shared return epilogue (classification switch + pop + result push); the
         // return superinstructions feed it a result they resolved without the stack
         // round trip. KEEP the exact order: convert while the callee frame is live.
-        // proven = the return site's static_return_proof (V-R1): the deref-only route is
-        // taken only when detail::same_type_payload confirms the conversion is the identity
-        op_status return_with_result(frame*& fp, script_value result, bool proven = false);
+        // mode = op_return.b: 0 plain; 1 = the return site's static_return_proof (V-R1: the
+        // deref-only route is taken only when detail::same_type_payload confirms the
+        // conversion is the identity); return_mode_converted = already converted at an
+        // in-region return site (op_return_convert), landed as is
+        op_status return_with_result(frame*& fp, script_value result, uint32_t mode = 0);
         // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
@@ -792,6 +793,10 @@ namespace jai::vm {
         op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
         op_status exec_return_binary_entry(frame& f, const vm_instruction& ins);
         op_status fall_off_script_frame(frame*& fp);
+        // Return-site conversion (op_return_convert inside try regions) and the
+        // native-entry / fiber completion door; both run convert_return_at_site
+        op_status exec_return_convert(frame& f, const vm_instruction& ins);
+        op_status entry_return_finish(frame& f, script_value result, uint32_t mode);
         void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
         // Interpreter parity: arg-eval throws convert at the frame MAKING the call
         bool ip_in_call_arg_zone(const frame& f) const;
@@ -839,7 +844,10 @@ namespace jai::vm {
         void clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env);
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);
-        checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type);
+        checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type,
+                                                          std::string_view callee = {});
+        checked_result<script_value> convert_return_at_site(script_value result, const type_info_ptr& return_type,
+                                                            return_conv conv, bool proven, std::string_view callee = {});
 
         void capture_stack_trace();
 
@@ -909,11 +917,14 @@ namespace jai::vm {
         // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
         op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
 
-        checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type);
+        checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
+                                                                std::string_view var_name = {},
+                                                                detail::slot_kind kind = detail::slot_kind::assignment);
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)); interpreter twin:
         // interpreter::compound_typed_store_back
-        op_status compound_typed_store_back(script_value& target, script_value promoted);
-        checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
+        op_status compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name = {});
+        checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
+                                                               const detail::slot_site& site = detail::slot_site{});
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in);
 
         checked_result<script_value> binary_general(token_type op, const script_value& left, const script_value& right);
@@ -1204,13 +1215,18 @@ namespace jai::vm {
         // Frame-twin of environment::get_value_ptr's method-kind fallback (receiver
         // fields, then class statics) for method-lazy frames — env-resolved eager
         // frames never miss into this. KEEP BYTE-PARALLEL with environment.cpp.
+        // The bare-name ref-bind rung after the slot/env/this-member misses: a hybrid's
+        // C++ property on the frame's receiver mints a CPP-MEMBER / PROPERTY reference
+        // (nullopt = not a property here; the caller keeps its undefined-variable text).
+        // Defined in vm_backend.cpp (needs detail/ref_lvalue.hpp).
+        std::optional<checked_result<script_value>> bind_bare_cpp_property_ref(frame& f, uint64_t sym, environment* env = nullptr);
         script_value* frame_this_member_ptr(frame& f, uint64_t sym) {
             if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto instance = this_val.get_class_instance();
             if (!instance) { return nullptr; }
-            // A C++ property has no cell to alias (the interpreter's pointer form answers null too)
+            // A C++ property has no cell: the pointer form answers null (the ref arms mint instead)
             if (detail::cpp_property_getter_id(instance.get(), sym)) { return nullptr; }
             script_value& field_ref = instance->get_field(sym, false);
             if (!field_ref.is_invalid()) { return &field_ref; }
@@ -1219,7 +1235,8 @@ namespace jai::vm {
             }
             return nullptr;
         }
-        op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out);
+        op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out,
+                                      bool as_callee = false);
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
         op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
         op_status store_static_target(frame& f, member_expr* member, const script_value& result);
@@ -1253,6 +1270,8 @@ namespace jai::vm {
             pending_error_ = error_propagator{ec, msg, sym, sym2};
             return op_status::failed;
         }
+        // not_a_function with the family-B text (name_id 0 = computed callee)
+        op_status raise_not_callable(uint64_t name_id, const script_value& callee);
         op_status raise_from(const error_propagator& prop) {
             pending_error_ = prop;
             return op_status::failed;

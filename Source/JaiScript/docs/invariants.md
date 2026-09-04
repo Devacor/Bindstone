@@ -53,11 +53,13 @@ finding-2 failure mode was silent wrong loop counts in Release). The interpreter
 
 The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw
 `target` pointer or a `weak_ptr<environment> sourceEnv` — a reference NEVER holds a
-raw address + lifetime guess. Exactly four owner-pinned holder modes exist
+raw address + lifetime guess. Exactly six owner-pinned holder modes exist
 (`reference_holder`, value.hpp; long-form: docs/reference_model.md): CELL (the holder
 OWNS the value in inline storage — Lua upvalue), vector element (container+index
-re-resolve), instance field (owner+id re-resolve), and map entry (pinned map + key
-re-resolve). Rules:
+re-resolve), instance field (owner+id re-resolve), map entry (pinned map + key
+re-resolve), CPP-MEMBER (receiver + C++ object pinned; the inline storage is a
+cpp_bound box aimed at the member) and PROPERTY (receiver pinned; getter into the
+inline scratch per touch, setter on assign-through). Rules:
 
 - Holder blocks come from the per-engine pool (`script_value::acquire_reference_holder`,
   value.cpp — one pop + placement-new per mint, memory_cap-charged for cells). The pool is

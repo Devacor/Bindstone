@@ -72,6 +72,9 @@ namespace jai {
         checked_result<declaration_ptr> class_declaration(bool nocopy = false);
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
+        bool bare_coroutine_head() const;   // coroutine IDENT '(' / coroutine operator<sym>: no type, no 'function'
+        bool coroutine_modifier_run() const;   // class member: [static|override]* coroutine ...
+        checked_result<declaration_ptr> bare_coroutine_declaration();
         checked_result<declaration_ptr> variable_declaration();
         checked_result<declaration_ptr> include_declaration();
         checked_result<declaration_ptr> import_declaration();
@@ -172,6 +175,9 @@ namespace jai {
         // Context tracking for context-sensitive parsing
         bool in_switch_case_ = false;  // Track if we're inside a switch case
         bool in_coroutine_ = false;
+        // Armed by a coroutine head; parse_function_body consumes it for exactly the next
+        // body, so nested functions and lambdas never inherit yield permission
+        bool coroutine_body_pending_ = false;
 
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;

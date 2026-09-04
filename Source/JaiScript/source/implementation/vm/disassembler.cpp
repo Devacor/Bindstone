@@ -172,6 +172,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_map:
 			case opcode::op_scope_pop_n:
 			case opcode::op_return:
+			case opcode::op_return_convert:
 				out << " " << ins.a;
 				break;
 			case opcode::op_probe_callee:

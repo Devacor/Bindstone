@@ -17,21 +17,54 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
-// A dynamic_binder-bound base for hybrid (script class : C++ class) rows
+// A dynamic_binder-bound base for hybrid (script class : C++ class) rows. The
+// by-reference rows cover every property kind: box-decodable member pointers
+// (CPP-MEMBER), a class-typed member pointer and a lambda pair (PROPERTY), read-only.
+struct inner_probe {
+    int64_t x = 0;
+};
+
 struct hybrid_prop_probe {
     int64_t value = 0;
     std::string name = "n";
+    double ratio = 1.5;
+    bool flag = false;
+    int32_t narrow = 0;
+    inner_probe child;
+    int64_t lam_backing = 0;
+    int64_t lam_reads = 0;
+    int64_t lam_writes = 0;
     int64_t doubled() const { return value * 2; }
+    void bump_cpp() { value += 100; }
+    hybrid_prop_probe& self() { return *this; }
 };
 
 inline void bind_hybrid_probe(engine& e) {
+    dynamic_binder<inner_probe>(e, "InnerProbe")
+        .constructor<>()
+        .property("x", &inner_probe::x)
+        .build();
     dynamic_binder<hybrid_prop_probe>(e, "HybridProbe")
         .constructor<>()
         .method("doubled", &hybrid_prop_probe::doubled)
+        .method("bump_cpp", &hybrid_prop_probe::bump_cpp)
+        .method("self", &hybrid_prop_probe::self)
         .property("value", &hybrid_prop_probe::value)
         .property("name", &hybrid_prop_probe::name)
+        .property("ratio", &hybrid_prop_probe::ratio)
+        .property("flag", &hybrid_prop_probe::flag)
+        .property("narrow", &hybrid_prop_probe::narrow)
+        .property("child", &hybrid_prop_probe::child)
+        .property("lam",
+                  [](hybrid_prop_probe& s) -> int64_t { ++s.lam_reads; return s.lam_backing; },
+                  [](hybrid_prop_probe& s, int64_t v) { ++s.lam_writes; s.lam_backing = v; })
         .property("ro", [](const hybrid_prop_probe& s) -> int64_t { return s.value + 100; }, nullptr)
         .build();
+}
+
+// The C++ object behind a script handle (hybrid layer or plain wrapper)
+inline std::shared_ptr<hybrid_prop_probe> probe_of(engine& e, const char* expr) {
+    return e.execute(expr).get_class_instance()->get_cpp_object_as<hybrid_prop_probe>();
 }
 
 class review_regression_tests : public suite {
@@ -522,7 +555,7 @@ public:
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
                 got[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
-            check(got[0].find("co[Object has no member 'co']") != std::string::npos,
+            check(got[0].find("co[A has no member 'co']") != std::string::npos,
                   "interp: original exception surfaces from the container expression");
             check_eq(got[0], got[1], "range-for container-throw parity");
         });
@@ -767,7 +800,7 @@ public:
                 out + to_string(h.c.m8);
             )");
             std::string expected;
-            for (int i = 0; i < 7; ++i) expected += "Object has no member 'm1'|";
+            for (int i = 0; i < 7; ++i) expected += "C6 has no member 'm1'|";
             check_eq(expected + "0", r.as_string());
         });
         // Same clobber class: a receiver/base whose evaluation raised is a placeholder
@@ -1084,27 +1117,43 @@ public:
                 check_eq(expected, i_out, std::string("interp: ") + what);
                 check_eq(expected, v_out, std::string("vm: ") + what);
             };
-            const std::string mismatch = "Type mismatch: expected int but got string: Type mismatch\n";
+            auto mismatch = [](const char* who) {
+                return std::string("Cannot return string from ") + who + " (declared -> int): Type mismatch\n";
+            };
             expect_both("int f() {\n  var x = \"s\";\n  return x;\n}\nint g() { return 1; }\nint a = g();\nint b = f();\n",
-                mismatch + "  at f (<script>:3)\n  at <script> (<script>:7)\n", "plain return");
+                mismatch("'f'") + "  at f (<script>:3)\n  at <script> (<script>:7)\n", "plain return");
             expect_both("int f() {\n  var x = \"s\";\n  return x;\n}\nint g() {\n  int r = f();\n  return r;\n}\nint b = g();\n",
-                mismatch + "  at f (<script>:3)\n  at g (<script>:6)\n  at <script> (<script>:9)\n", "nested return");
+                mismatch("'f'") + "  at f (<script>:3)\n  at g (<script>:6)\n  at <script> (<script>:9)\n", "nested return");
             expect_both("var x = \"s\";\nauto l = []() -> int {\n  return x;\n};\nint b = l();\n",
-                mismatch + "  at <lambda> (<script>:3)\n  at <script> (<script>:5)\n", "lambda return");
+                mismatch("lambda") + "  at <lambda> (<script>:3)\n  at <script> (<script>:5)\n", "lambda return");
             expect_both("class C {\n  int m() {\n    var x = \"s\";\n    return x;\n  }\n}\nauto c = C();\nint b = c.m();\n",
-                mismatch + "  at m (<script>:4)\n  at <script> (<script>:8)\n", "method return");
+                mismatch("'m'") + "  at m (<script>:4)\n  at <script> (<script>:8)\n", "method return");
             expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
-                mismatch + "  at co (<script>:4)\n  at <script> (<script>:8)\n", "coroutine return, top-level resume");
+                mismatch("'co'") + "  at co (<script>:4)\n  at <script> (<script>:8)\n", "coroutine return, top-level resume");
             expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  h.resume();\n  return h.resume();\n}\nint b = g();\n",
-                mismatch + "  at co (<script>:4)\n  at g (<script>:9)\n  at <script> (<script>:11)\n", "coroutine return, nested resume");
+                mismatch("'co'") + "  at co (<script>:4)\n  at g (<script>:9)\n  at <script> (<script>:11)\n", "coroutine return, nested resume");
             expect_both("coroutine int co() {\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  return h.resume();\n}\nint b = g();\n",
-                mismatch + "  at co (<script>:3)\n  at g (<script>:7)\n  at <script> (<script>:9)\n", "coroutine return, first resume");
+                mismatch("'co'") + "  at co (<script>:3)\n  at g (<script>:7)\n  at <script> (<script>:9)\n", "coroutine return, first resume");
             expect_both("coroutine int co() {\n  yield 1;\n  var a = [];\n  int y = a[0];\n  return y;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
                 "Array index 0 out of bounds for array of size 0: Array index out of bounds\n  at co (<script>:4)\n  at <script> (<script>:9)\n", "coroutine body error");
             expect_both("coroutine int co() {\n  yield 1;\n  throw \"x\";\n  return 1;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
                 "x\n  at co (<script>:3)\n  at <script> (<script>:8)\n", "coroutine body throw");
             expect_both("int& f() {\n  return 5;\n}\nint b = f();\n",
                 "Function with reference return type must return an lvalue reference: Invalid reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return");
+            // returncatch: a try around the failing return INSIDE the callee catches it; the
+            // catch's own return converts in turn and a rethrow keeps the callee frame on top
+            expect_both("int f() {\n  try { var x = \"s\"; return x; } catch (e) { return -1; }\n}\nthrow f() == -1 ? \"callee:-1\" : \"callee:other\";\n",
+                "callee:-1\n  at <script> (<script>:4)\n", "caught at the return site");
+            expect_both("int f() {\n  try {\n    var x = \"s\";\n    return x;\n  } catch (e) {\n    var y = \"t\";\n    return y;\n  }\n}\nint b = f();\n",
+                mismatch("'f'") + "  at f (<script>:7)\n  at <script> (<script>:10)\n", "catch return converts in turn");
+            expect_both("int f() {\n  try {\n    var x = \"s\";\n    return x;\n  } catch (e) {\n    throw e;\n  }\n}\nint b = f();\n",
+                "Cannot return string from 'f' (declared -> int)\n  at f (<script>:6)\n  at <script> (<script>:9)\n", "catch rethrow");
+            expect_both("int& f() {\n  try { return 5; } catch (e) { throw \"c:\" + e; }\n}\nint b = f();\n",
+                "c:Function with reference return type must return an lvalue reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return caught at the site");
+            expect_both("coroutine int co() {\n  yield 1;\n  try { var x = \"s\"; return x; } catch (e) { return -1; }\n}\nauto h = co();\nh.resume();\nthrow h.resume() == -1 ? \"co:-1\" : \"co:other\";\n",
+                "co:-1\n  at <script> (<script>:7)\n", "coroutine return caught at the site");
+            expect_both("class T { int to_int() { throw \"boom\"; } }\nint f() {\n  try { var t = T(); return t; } catch (e) { return -7; }\n}\nthrow f() == -7 ? \"t:-7\" : \"t:other\";\n",
+                "t:-7\n  at <script> (<script>:5)\n", "throwing to_int caught at the site");
         });
         // ---- The typed-boundary texts name the VALUE's type (never the var tag): parameters,
         // returns and class targets, byte-identical across backends. ----
@@ -1128,18 +1177,18 @@ public:
             };
             const char* tail = " string r = \"\"; try { f(); } catch (e) { r = e; } r";
             auto ret = [&](const char* decl) { return std::string(decl) + " int f() { return v; }" + tail; };
-            expect_both(ret("var v = \"s\";").c_str(), "Type mismatch: expected int but got string", "string return");
-            expect_both(ret("var v = cast<char>(97);").c_str(), "Type mismatch: expected int but got char", "char return");
-            expect_both(ret("var v = null;").c_str(), "Type mismatch: expected int but got null", "null return");
-            expect_both(ret("class Cat {} var v = Cat();").c_str(), "Type mismatch: expected int but got Cat", "object return");
-            expect_both(ret("var v = [1];").c_str(), "Type mismatch: expected int but got array", "array return");
-            expect_both(ret("var v = {\"a\": 1};").c_str(), "Type mismatch: expected int but got map", "map return");
+            expect_both(ret("var v = \"s\";").c_str(), "Cannot return string from 'f' (declared -> int)", "string return");
+            expect_both(ret("var v = cast<char>(97);").c_str(), "Cannot return char from 'f' (declared -> int)", "char return");
+            expect_both(ret("var v = null;").c_str(), "Cannot return null from 'f' (declared -> int)", "null return");
+            expect_both(ret("class Cat {} var v = Cat();").c_str(), "Cannot return Cat from 'f' (declared -> int)", "object return");
+            expect_both(ret("var v = [1];").c_str(), "Cannot return array from 'f' (declared -> int)", "array return");
+            expect_both(ret("var v = {\"a\": 1};").c_str(), "Cannot return map from 'f' (declared -> int)", "map return");
             expect_both((std::string("class Cat {} var v = true; Cat f() { return v; }") + tail).c_str(),
                 "Cannot convert bool to Cat (no suitable single-argument constructor)", "bool into class return");
             expect_both((std::string("class Cat {} var v = 1.5; Cat f() { return v; }") + tail).c_str(),
                 "Cannot convert float to Cat (no suitable single-argument constructor)", "float into class return");
             expect_both("void h(int a) {} var x = \"s\"; string r = \"\"; try { h(x); } catch (e) { r = e; } r",
-                "Type mismatch: expected int but got string", "string parameter");
+                "Cannot pass string to parameter 'a' of 'h' (declared int)", "string parameter");
             expect_both("class A {} class B {} void fa(A v) {} var b = B(); string r = \"\"; try { fa(b); } catch (e) { r = e; } r",
                 "Cannot convert B to A (no suitable single-argument constructor)", "class parameter");
         });
@@ -1448,13 +1497,13 @@ public:
                 var v8 = null; var caught = "";
                 try { v8.push(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Member 'push' accessed on null: 'v8' is null", "null receiver beats arg side effects", check_mode::strict);
+            )").c_str(), "|Cannot call 'push' on null ('v8' is null)", "null receiver beats arg side effects", check_mode::strict);
             // the fuzz shape (seed 132479): the callee's null error names the CALLEE member
             auto [i, v] = run_order_both(R"(
                 auto v7 = [4611686018427387904, 5]; auto v8 = v7.reverse(); v8.push(v8.length());
             )", check_mode::strict);
             check_eq(i, v, "uncaught null-receiver what() parity");
-            check_true(i.find("Member 'push' accessed on null: 'v8' is null") != std::string::npos,
+            check_true(i.find("Cannot call 'push' on null ('v8' is null)") != std::string::npos,
                 "the callee member is blamed, not the argument's (got: " + i + ")");
             expect_order((std::string(side_prelude) + R"(
                 var v8 = null; var r = v8?.push(side());
@@ -1487,23 +1536,23 @@ public:
                 var s = "abc"; var caught = "";
                 try { s.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|String has no method 'nosuch'", "string receiver", check_mode::strict);
+            )").c_str(), "|string has no member 'nosuch'", "string receiver", check_mode::strict);
             expect_order((std::string(side_prelude) + R"(
                 var a = [1]; var caught = "";
                 try { a.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Array has no method 'nosuch'", "array receiver", check_mode::strict);
+            )").c_str(), "|array has no member 'nosuch'", "array receiver", check_mode::strict);
             expect_order((std::string(side_prelude) + R"(
                 var m = {"k": 1}; var caught = "";
                 try { m.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Map has no method or key 'nosuch'", "map receiver", check_mode::strict);
+            )").c_str(), "|map has no member or key 'nosuch'", "map receiver", check_mode::strict);
             expect_order((std::string(side_prelude) + R"(
                 class W { int x = 0; }
                 shared_ptr<W> o = W(); weak_ptr<W> w = o; var caught = "";
                 try { w.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|weak_ptr has no method 'nosuch'", "weak_ptr receiver", check_mode::warn);
+            )").c_str(), "|weak_ptr has no member 'nosuch'", "weak_ptr receiver", check_mode::warn);
         });
         test("object_receiver_lookup_before_args", [this, expect_order, side_prelude]() {
             const std::string cls = std::string(side_prelude) + R"(
@@ -1518,12 +1567,12 @@ public:
             expect_order((cls + R"(
                 try { obj.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Object has no member 'nosuch'", "unknown member beats arg side effects", check_mode::warn);
+            )").c_str(), "|O has no member 'nosuch'", "unknown member beats arg side effects", check_mode::warn);
             // a plain field is not callable: the check fires before the arguments
             expect_order((cls + R"(
                 try { obj.x(side()); } catch (e) { caught = "c:" + e; }
                 log + "|" + caught;
-            )").c_str(), "|c:", "field shadow not-callable beats arg side effects", check_mode::warn);
+            )").c_str(), "|c:Cannot call 'x': it is an int, not a function", "field shadow not-callable beats arg side effects", check_mode::warn);
             expect_order((cls + R"(
                 obj.lam = [](int a) { return a * 2; };
                 var r = obj.lam(side());
@@ -1546,17 +1595,17 @@ public:
                 var a = A(); var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Member 'g' accessed on null: 'b' is null", "inner null receiver beats the innermost call", check_mode::warn);
+            )").c_str(), "|Cannot call 'g' on null ('b' is null)", "inner null receiver beats the innermost call", check_mode::warn);
             expect_order((cls + R"(
                 var a = null; var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Member 'f' accessed on null: 'a' is null", "outer null receiver beats everything", check_mode::warn);
+            )").c_str(), "|Cannot call 'f' on null ('a' is null)", "outer null receiver beats everything", check_mode::warn);
             expect_order((cls + R"(
                 var a = A2(); var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Object has no member 'f'", "outer unknown member beats the inner null", check_mode::warn);
+            )").c_str(), "|A2 has no member 'f'", "outer unknown member beats the inner null", check_mode::warn);
         });
         test("trivial_args_unchanged", [this, expect_order, side_prelude]() {
             expect_order(R"(
@@ -1576,7 +1625,7 @@ public:
                 try { n.nosuch(1); } catch (e) { c3 = e; }
                 try { n.nosuch(side()); } catch (e) { c4 = e; }
                 log + "|" + (c1 == c2) + ":" + (c3 == c4) + "|" + c1 + "|" + c3;
-            )").c_str(), "|true:true|Member 'push' accessed on null: 'v8' is null|int has no member 'nosuch'",
+            )").c_str(), "|true:true|Cannot call 'push' on null ('v8' is null)|int has no member 'nosuch'",
                 "probed and unprobed shapes raise the same texts", check_mode::strict);
         });
         test("computed_callee_callable_check_before_args", [this, expect_order, side_prelude]() {
@@ -1584,7 +1633,7 @@ public:
                 var arr = [1]; var caught = "none";
                 try { arr[0](side()); } catch (e) { caught = "c:" + e; }
                 log + "|" + caught;
-            )").c_str(), "|c:", "non-callable element beats arg side effects", check_mode::strict);
+            )").c_str(), "|c:Cannot call a value of type int: it is not a function", "non-callable element beats arg side effects", check_mode::strict);
             expect_order((std::string(side_prelude) + R"(
                 var fs = [[](int a) -> int { return a * 2; }];
                 var r = fs[0](side());
@@ -1760,7 +1809,7 @@ public:
             check_eq((int64_t)9, run_int("w.c(); w.value", "[this] lambda store"), "[this] lambda store writes through");
             check_eq((int64_t)3, run_int("w.dq()", "[=] field snapshot"), "[=] snapshots a script field (baseline)");
             check_eq((int64_t)9, run_int("w.d()", "[=] property snapshot"), "[=] snapshots the property like a field");
-            check_eq((int64_t)9, run_int("w.r()", "[&] property snapshot"), "[&] snapshots too: a C++ property has no cell to alias");
+            check_eq((int64_t)9, run_int("w.r()", "[&] property share"), "[&] shares the member itself (by_ref_capture_of_cpp_property_is_live)");
             check_eq((int64_t)11, run_int("w.cc(); w.value", "[this] lambda compound"));
             check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
         });
@@ -1835,38 +1884,456 @@ public:
             check_eq(this_msg[0], this_msg[1], "this-store error text is byte-identical across backends");
             check_eq(undef_msg[0], undef_msg[1], "undefined-name text is byte-identical across backends");
         });
-        test("hybrid_cpp_property_has_no_reference_cell", [this]() {
-            // A C++ property is not a cell: by-reference bindings to the bare name raise the
-            // method-shadow text on both backends (docs/script_extensible.md S10; by-value
-            // arguments read through the getter as usual)
-            std::string decl_msg[2], arg_msg[2];
-            int idx = 0;
+        // ---- by-reference binding of C++ properties (Dev ruling: bind the MEMBER ITSELF;
+        // docs/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
+        auto propref_engine = [](bool use_vm) {
+            auto e = jai::engine::make();
+            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            bind_hybrid_probe(*e);
+            return e;
+        };
+        auto caught = [](engine& e, const char* src) -> std::string {
+            try { e.execute(src); } catch (const std::exception& ex) { return ex.what(); }
+            return "";
+        };
+        test("cpp_property_by_ref_param_writes_member", [this, propref_engine]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
-                e->static_checking(check_mode::off);
-                bind_hybrid_probe(*e);
+                auto e = propref_engine(use_vm);
                 e->execute(R"(
-                    void by_ref(int& p) { p = 1; }
-                    int by_val(int p) { return p + 1; }
+                    void by_ref(int& p) { p = 41; p += 1; }
+                    void by_ref_f(float& f) { f = 2.0; f *= 2; }
+                    void by_ref_b(bool& b) { b = true; }
+                    void by_ref_s(string& s) { s += "!"; }
                     class W : HybridProbe {
                         W() : super() {}
-                        int decl_ref() { auto& r = value; return r; }
                         void arg_ref() { by_ref(value); }
-                        int arg_val() { return by_val(value); }
+                        void arg_ref_this() { by_ref(this.value); }
+                        void others() { by_ref_f(ratio); by_ref_b(flag); by_ref_s(name); }
+                        void others_this() { by_ref_f(this.ratio); by_ref_b(this.flag); by_ref_s(this.name); }
+                    }
+                    W w = W();
+                )");
+                auto cpp = probe_of(*e, "w");
+                e->execute("w.arg_ref();");
+                check_eq((int64_t)42, cpp->value, "bare by-ref param wrote the C++ member");
+                check_eq((int64_t)84, e->execute("w.doubled()").as_int());
+                cpp->value = 0;
+                e->execute("w.arg_ref_this();");
+                check_eq((int64_t)42, cpp->value, "this. by-ref param wrote the C++ member");
+                e->execute("w.others();");
+                check_near(4.0, cpp->ratio, 1e-9);
+                check_true(cpp->flag, "bool member through bool&");
+                check_eq(std::string("n!"), cpp->name, "std::string member through string&");
+                cpp->ratio = 1.0; cpp->flag = false; cpp->name = "m";
+                e->execute("w.others_this();");
+                check_near(4.0, cpp->ratio, 1e-9);
+                check_true(cpp->flag);
+                check_eq(std::string("m!"), cpp->name);
+                check_false(e->execute("w").get_class_instance()->has_user_overflow_fields(),
+                            "no field materialized for a C++ property");
+            }
+        });
+        test("cpp_property_ref_decl_compound", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int decl_ref() { auto& r = value; r += 1; ++r; r = r + 1; return r; }
+                        int decl_ref_this() { auto& r = this.value; r += 1; ++r; r = r + 1; return r; }
+                        int typed_ref() { int& r = value; r -= 2; return r; }
+                        float fr() { auto& r = ratio; r += 0.5; r = r * 2; return r; }
+                        bool br() { auto& r = flag; r = !r; return r; }
+                        string sr() { auto& r = name; r += "x"; r = r + "y"; return r; }
+                        int postfix() { auto& r = value; int old = r++; r--; return old; }
                     }
                     W w = W(); w.value = 5;
                 )");
-                check_eq((int64_t)6, e->execute("w.arg_val()").as_int());
-                try { e->execute("w.decl_ref();"); } catch (const std::exception& ex) { decl_msg[idx] = ex.what(); }
-                try { e->execute("w.arg_ref();"); } catch (const std::exception& ex) { arg_msg[idx] = ex.what(); }
-                check_true(decl_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, decl_msg[idx]);
-                check_true(arg_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, arg_msg[idx]);
-                check_eq((int64_t)5, e->execute("w.value").as_int(), "nothing wrote through a shadow cell");
+                auto cpp = probe_of(*e, "w");
+                check_eq((int64_t)8, e->execute("w.decl_ref()").as_int(), "plain =, += and ++ all land");
+                check_eq((int64_t)8, cpp->value, "the C++ member advanced by 3");
+                check_eq((int64_t)11, e->execute("w.decl_ref_this()").as_int());
+                check_eq((int64_t)11, cpp->value);
+                check_eq((int64_t)9, e->execute("w.typed_ref()").as_int(), "int& declaration");
+                check_eq((int64_t)9, cpp->value);
+                check_near(4.0, e->execute("w.fr()").as_float(), 1e-9);
+                check_near(4.0, cpp->ratio, 1e-9);
+                check_true(e->execute("w.br()").as_bool());
+                check_true(cpp->flag);
+                check_eq(std::string("nxy"), e->execute("w.sr()").as_string());
+                check_eq(std::string("nxy"), cpp->name);
+                check_eq((int64_t)9, e->execute("w.postfix()").as_int(), "postfix yields the old value");
+                check_eq((int64_t)9, cpp->value);
+            }
+        });
+        test("cpp_property_ref_reads_are_live", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int live() { auto& r = value; bump_cpp(); return r; }
+                        int live_copy() { auto& r = value; int snap = r; bump_cpp(); return snap; }
+                    }
+                    W w = W(); w.value = 1;
+                )");
+                check_eq((int64_t)101, e->execute("w.live()").as_int(), "a C++-side change is visible through the reference");
+                check_eq((int64_t)101, e->execute("w.live_copy()").as_int(), "a by-value copy detaches");
+                check_eq((int64_t)201, probe_of(*e, "w")->value);
+            }
+        });
+        test("cpp_property_ref_outlives_call", [this, propref_engine, caught]() {
+            std::string retired_msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    class W : HybridProbe {
+                        W() : super() {}
+                        function grab() -> int& { return value; }
+                        function grab_this() -> int& { return this.value; }
+                    }
+                    W w = W(); w.value = 1;
+                    auto& r = w.grab(); r = 9;
+                    auto& r2 = w.grab_this(); r2 += 1;
+                )");
+                auto cpp = probe_of(*e, "w");
+                check_eq((int64_t)10, cpp->value, "a returned reference writes the member");
+                // the reference keeps the object alive after the script drops its handle
+                std::weak_ptr<hybrid_prop_probe> weak = cpp;
+                cpp.reset();
+                e->execute("w = null;");
+                check_false(weak.expired(), "the CPP-MEMBER pin keeps the object alive");
+                e->execute("r = 77;");
+                check_eq((int64_t)77, weak.lock()->value, "and the write still lands after the handle is gone");
+                // retired layer: a fresh bind reports, byte-identical on both backends
+                auto plain = std::make_shared<hybrid_prop_probe>();
+                plain->value = 3;
+                e->add_global("kept", e->extend(plain, "W"));
+                e->execute("auto& live = kept.value; live = 4;");
+                check_eq((int64_t)4, plain->value, "bound through an extended object's layer");
+                (void)e->script_layer_detach(plain);
+                retired_msg[idx] = caught(*e, "auto& again = kept.value;");
+                check_true(retired_msg[idx].find("was detached") != std::string::npos, retired_msg[idx]);
                 ++idx;
             }
-            check_eq(decl_msg[0], decl_msg[1], "decl-ref text is byte-identical across backends");
-            check_eq(arg_msg[0], arg_msg[1], "ref-arg text is byte-identical across backends");
+            check_eq(retired_msg[0], retired_msg[1], "retired-layer text is byte-identical across backends");
+        });
+        test("lambda_property_ref_routes_through_accessors", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 5; p += 1; }
+                    void by_ref_x(int& p) { p = 21; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        void arg() { by_ref(lam); }
+                        int decl() { auto& r = lam; r = 5; r += 1; return r; }
+                        void child_decl() { auto& c = child; c.x = 7; }
+                        void child_chain() { by_ref_x(child.x); }
+                        void child_chain_this() { by_ref_x(this.child.x); }
+                    }
+                    W w = W();
+                )");
+                auto cpp = probe_of(*e, "w");
+                e->execute("w.arg();");
+                check_eq((int64_t)6, cpp->lam_backing, "a lambda-pair property writes through its setter");
+                check_eq((int64_t)2, cpp->lam_writes, "one setter call per store");
+                cpp->lam_writes = 0; cpp->lam_reads = 0;
+                check_eq((int64_t)6, e->execute("w.decl()").as_int());
+                check_eq((int64_t)2, cpp->lam_writes);
+                check_gt(cpp->lam_reads, (int64_t)0, "reads go through the getter");
+                e->execute("w.child_decl();");
+                check_eq((int64_t)7, cpp->child.x, "a class-typed member property derefs to the live member");
+                e->execute("w.child_chain();");
+                check_eq((int64_t)21, cpp->child.x, "a chain through a class-typed property binds the inner member");
+                cpp->child.x = 0;
+                e->execute("w.child_chain_this();");
+                check_eq((int64_t)21, cpp->child.x);
+                check_eq((int64_t)21, e->execute("by_ref_x(w.child.x); w.child.x").as_int(), "from outside too");
+            }
+        });
+        test("read_only_property_ref_is_silent_noop", [this, propref_engine]() {
+            // Pins TODAY's contract for a setter-less property (the row-29 no-op), matched
+            // through a reference. Dev question: a strict-by-default language should
+            // arguably raise on every spelling instead (see the report).
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 1; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int decl() { auto& r = ro; r = 5; r += 1; return r; }
+                        int arg() { by_ref(ro); return ro; }
+                    }
+                    W w = W(); w.value = 5;
+                )");
+                check_eq((int64_t)105, e->execute("w.decl()").as_int(), "stores through a read-only ref are no-ops");
+                check_eq((int64_t)105, e->execute("w.arg()").as_int());
+                check_eq((int64_t)5, probe_of(*e, "w")->value);
+            }
+        });
+        test("script_field_shadows_property_for_refs", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    void by_ref(int& p) { p += 1; }
+                    class S : HybridProbe {
+                        int value = 7;
+                        S() : super() {}
+                        void go() { by_ref(value); by_ref(this.value); auto& r = value; r += 1; auto& t = this.value; t += 1; }
+                    }
+                    S s = S(); s.go();
+                )");
+                check_eq((int64_t)11, e->execute("s.value").as_int(), "the script field took every write");
+                check_eq((int64_t)0, probe_of(*e, "s")->value, "the C++ member is untouched");
+                check_eq((int64_t)12, e->execute("by_ref(s.value); s.value").as_int(), "shadowing holds from outside");
+                check_eq((int64_t)0, probe_of(*e, "s")->value);
+            }
+        });
+        test("plain_cpp_receiver_binds", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                hybrid_prop_probe raw;
+                raw.value = 10;
+                e->add_global_ref("g", raw);
+                e->execute(R"(
+                    void by_ref(int& p) { p += 1; }
+                    void by_ref_s(string& s) { s += "!"; }
+                    HybridProbe p = HybridProbe(); p.value = 41;
+                    by_ref(p.value);
+                    auto& r = p.value; r += 1;
+                    by_ref(g.value);
+                    auto& gr = g.value; gr += 1;
+                    var s = p.self(); by_ref(s.value);
+                    by_ref_s(g.name);
+                )");
+                check_eq((int64_t)44, probe_of(*e, "p")->value, "a script-constructed C++ object binds the member (T& return handle included)");
+                check_eq((int64_t)12, raw.value, "a raw add_global_ref handle binds the member");
+                check_eq(std::string("n!"), raw.name);
+            }
+        });
+        test("hybrid_receiver_from_outside", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    void by_ref(int& p) { p += 1; }
+                    class W : HybridProbe { W() : super() {} }
+                    class Holder { W w = W(); }
+                    W w = W(); w.value = 1;
+                    by_ref(w.value);
+                    auto& r = w.value; r += 1;
+                    Holder h = Holder();
+                    by_ref(h.w.value);
+                    auto& hr = h.w.value; hr += 1;
+                )");
+                check_eq((int64_t)3, probe_of(*e, "w")->value);
+                check_eq((int64_t)2, probe_of(*e, "h.w")->value, "a chain through a script field reaches the member");
+            }
+        });
+        test("by_value_still_copies", [this, propref_engine]() {
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    int by_val(int p) { p = 99; return p + 1; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int v() { return by_val(value); }
+                        int vt() { return by_val(this.value); }
+                        int copy() { int x = this.value; x = 5; auto y = value; y = 6; return x + y; }
+                    }
+                    W w = W(); w.value = 42;
+                )");
+                check_eq((int64_t)100, e->execute("w.v()").as_int());
+                check_eq((int64_t)100, e->execute("w.vt()").as_int());
+                check_eq((int64_t)11, e->execute("w.copy()").as_int());
+                check_eq((int64_t)42, probe_of(*e, "w")->value, "by-value passes and copies leave the member alone");
+            }
+        });
+        test("mistyped_store_through_property_ref_texts_match", [this, propref_engine, caught]() {
+            std::string ref_msg[2], direct_msg[2], narrow_ref[2], narrow_direct[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->static_checking(check_mode::off);   // runtime texts under test
+                e->execute(R"(
+                    void by_ref_str(string& s) { s = "z"; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        void bad() { auto& r = value; r = "str"; }
+                        void bad_direct() { this.value = "str"; }
+                        void narrow_ref() { auto& r = narrow; r = 5000000000; }
+                        void narrow_direct() { this.narrow = 5000000000; }
+                    }
+                    W w = W(); w.value = 5;
+                )");
+                ref_msg[idx] = caught(*e, "w.bad();");
+                direct_msg[idx] = caught(*e, "w.bad_direct();");
+                check_true(!ref_msg[idx].empty(), "a mistyped store through the reference raises");
+                check_eq((int64_t)5, probe_of(*e, "w")->value, "and leaves the member alone");
+                narrow_ref[idx] = caught(*e, "w.narrow_ref();");
+                check_eq((int32_t)(5000000000LL), probe_of(*e, "w")->narrow);
+                narrow_direct[idx] = caught(*e, "w.narrow_direct();");
+                ++idx;
+            }
+            check_eq(ref_msg[0], ref_msg[1], "mistyped-store text is byte-identical across backends");
+            check_eq(direct_msg[0], direct_msg[1]);
+            check_eq(direct_msg[0], ref_msg[0], "the reference raises the direct store's own conversion text");
+            // Narrow widths: the CPP-MEMBER box stores like an add_global_ref int32 (a
+            // silent truncation) where the direct setter range-checks ("Integer value out
+            // of range for int") - pinned as observed; flagged for a Dev ruling.
+            check_eq(narrow_ref[0], narrow_ref[1], "narrow-int text is byte-identical across backends");
+            check_eq(narrow_direct[0], narrow_direct[1]);
+            check_true(narrow_ref[0].empty(), "reference store into int32 truncates (bound-variable rule)");
+            check_true(narrow_direct[0].find("out of range") != std::string::npos, narrow_direct[0]);
+        });
+        test("method_name_still_not_bindable", [this, propref_engine, caught]() {
+            std::string decl_msg[2], arg_msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->static_checking(check_mode::off);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 1; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        void decl() { auto& r = doubled; }
+                        void arg() { by_ref(doubled); }
+                    }
+                    W w = W();
+                )");
+                decl_msg[idx] = caught(*e, "w.decl();");
+                arg_msg[idx] = caught(*e, "w.arg();");
+                check_true(decl_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, decl_msg[idx]);
+                check_true(arg_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, arg_msg[idx]);
+                ++idx;
+            }
+            check_eq(decl_msg[0], decl_msg[1]);
+            check_eq(arg_msg[0], arg_msg[1]);
+        });
+        test("null_receiver_ref_texts_unchanged", [this, propref_engine, caught]() {
+            std::string arg_msg[2], decl_msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->static_checking(check_mode::off);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 1; }
+                    HybridProbe n = null;
+                )");
+                arg_msg[idx] = caught(*e, "by_ref(n.value);");
+                decl_msg[idx] = caught(*e, "auto& r = n.value;");
+                check_true(!arg_msg[idx].empty() && !decl_msg[idx].empty(), "null receivers still raise");
+                ++idx;
+            }
+            check_eq(arg_msg[0], arg_msg[1], "null-receiver ref-arg text is byte-identical across backends");
+            check_eq(decl_msg[0], decl_msg[1], "null-receiver ref-decl text is byte-identical across backends");
+        });
+        test("by_ref_capture_of_cpp_property_is_live", [this, propref_engine]() {
+            // [&] follows the field rule (cell-share the member); [=] keeps the getter snapshot
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    class W : HybridProbe {
+                        W() : super() {}
+                        int live() { auto f = [&]() { return value; }; bump_cpp(); return f(); }
+                        void write() { auto f = [&]() { value = 9; value += 1; }; f(); }
+                        int snap() { auto f = [=]() { return value; }; bump_cpp(); return f(); }
+                    }
+                    W w = W(); w.value = 1;
+                )");
+                auto cpp = probe_of(*e, "w");
+                check_eq((int64_t)101, e->execute("w.live()").as_int(), "[&] sees the C++-side change");
+                e->execute("w.write();");
+                check_eq((int64_t)10, cpp->value, "[&] writes land in the member");
+                check_eq((int64_t)10, e->execute("w.snap()").as_int(), "[=] still snapshots");
+                check_eq((int64_t)110, cpp->value);
+            }
+        });
+        test("script_accessor_override_binds_through_accessors", [this, propref_engine]() {
+            // A script _set_/_get_ override in the chain wins (row 29): the reference routes
+            // through it instead of aiming at the member
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 4; }
+                    class W : HybridProbe {
+                        int sets = 0;
+                        W() : super() {}
+                        void _set_value(int v) override { sets += 1; this.name = "set"; }
+                        void go() { by_ref(value); auto& r = value; r = 5; }
+                    }
+                    W w = W(); w.go();
+                )");
+                auto cpp = probe_of(*e, "w");
+                check_eq((int64_t)2, e->execute("w.sets").as_int(), "both stores went through the script setter");
+                check_eq(std::string("set"), cpp->name);
+                check_eq((int64_t)0, cpp->value, "the member was never written directly");
+            }
+        });
+        test("property_ref_follows_reload_shadowing_field", [this, propref_engine]() {
+            // A live PROPERTY ref re-resolves per touch: a reload that adds a same-named
+            // script field re-points it at that field (the shadow rule, late); a live
+            // CPP-MEMBER ref keeps aiming at the C++ member (its address is stable)
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->execute(R"(
+                    class W : HybridProbe { W() : super() {} }
+                    W w = W(); w.value = 1; w.lam = 2;
+                    auto& lr = w.lam;
+                    auto& vr = w.value;
+                    lr = 3; vr = 4;
+                )");
+                auto cpp = probe_of(*e, "w");
+                check_eq((int64_t)3, cpp->lam_backing);
+                check_eq((int64_t)4, cpp->value);
+                e->execute("class W : HybridProbe { int lam = 50; int value = 60; W() : super() {} }");
+                check_eq((int64_t)50, e->execute("lr").as_int(), "the PROPERTY ref now reads the shadowing script field");
+                e->execute("lr = 51;");
+                check_eq((int64_t)51, e->execute("w.lam").as_int(), "and writes it");
+                check_eq((int64_t)3, cpp->lam_backing, "the C++ side is untouched");
+                e->execute("vr = 5;");
+                check_eq((int64_t)5, cpp->value, "the CPP-MEMBER ref still writes the member");
+                check_eq((int64_t)60, e->execute("w.value").as_int(), "while the spelling now reads the script field");
+            }
+        });
+        test("property_refs_inside_lambdas_and_cast", [this, propref_engine, caught]() {
+            // Bare lambdas made in a hybrid method reach the property through the env's
+            // 'this' for every ref spelling; cast<int&> binds it too. Explicit [&name] /
+            // [name] captures of a property keep today's undefined-capture text (they have
+            // no member rung - unchanged, byte-identical).
+            std::string ex_ref[2], ex_val[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->static_checking(check_mode::off);
+                e->execute(R"(
+                    void by_ref(int& p) { p += 1; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        void lam_arg() { auto f = []() { by_ref(value); }; f(); }
+                        void lam_decl() { auto f = []() { auto& r = value; r += 1; }; f(); }
+                        void cast_ref() { auto& r = cast<int&>(value); r = 40; }
+                        int ex_ref() { auto f = [&value]() { return value; }; return f(); }
+                        int ex_val() { auto f = [value]() { return value; }; return f(); }
+                    }
+                    W w = W(); w.value = 1;
+                )");
+                auto cpp = probe_of(*e, "w");
+                e->execute("w.lam_arg();");
+                check_eq((int64_t)2, cpp->value, "ref arg inside a bare lambda binds the member");
+                e->execute("w.lam_decl();");
+                check_eq((int64_t)3, cpp->value, "ref decl inside a bare lambda binds the member");
+                e->execute("w.cast_ref();");
+                check_eq((int64_t)40, cpp->value, "cast<int&> binds the member");
+                ex_ref[idx] = caught(*e, "w.ex_ref()");
+                ex_val[idx] = caught(*e, "w.ex_val()");
+                check_true(ex_ref[idx].find("Cannot capture undefined variable 'value'") != std::string::npos, ex_ref[idx]);
+                check_true(ex_val[idx].find("Cannot capture undefined variable 'value'") != std::string::npos, ex_val[idx]);
+                ++idx;
+            }
+            check_eq(ex_ref[0], ex_ref[1]);
+            check_eq(ex_val[0], ex_val[1]);
         });
         test("hybrid_two_level_chain_bare_cpp_property", [this]() {
             auto e = make_engine();
@@ -1887,6 +2354,85 @@ public:
             check_eq((int64_t)6, e->execute("w.doubled()").as_int());
             check_eq((int64_t)13, e->execute("w.bump(); w.value").as_int());
             check_false(e->execute("w").get_class_instance()->has_user_overflow_fields());
+        });
+        test("arity_text_numeric_through_computed_callees", [this]() {
+            const char* calls[] = {
+                "f(1)", "s(1)", "fs[0](1)", "pick()(1)",
+                "g(1)", "sg(1)", "gs[0](1)", "pickg()(1)",
+                "g(1,2,3)", "sg(1,2,3)", "gs[0](1,2,3)", "pickg()(1,2,3)"};
+            const char* expected[] = {
+                "'f' expects 0 arguments, got 1",
+                "'g' expects 2 arguments, got 1",
+                "'g' expects 2 arguments, got 3"};
+            std::string texts[2][12];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::off);   // strict rejects these at load; the RUNTIME text is under test
+                e->execute(R"(
+                    void f() {}
+                    void g(int a, int b) {}
+                    var pick() { return f; }
+                    var pickg() { return g; }
+                    var s = f; var fs = [f];
+                    var sg = g; var gs = [g];
+                    string r = "ok";
+                )");
+                for (int i = 0; i < 12; ++i) {
+                    texts[idx][i] = e->execute(std::string("r = \"ok\"; try { ") + calls[i] + "; } catch (err) { r = err; } r").as_string();
+                    check_eq(std::string(expected[i / 4]), texts[idx][i], calls[i]);
+                    check_eq(std::string::npos, texts[idx][i].find("this"), calls[i]);
+                    check_eq(std::string::npos, texts[idx][i].find("class_definition"), calls[i]);
+                }
+                ++idx;
+            }
+            for (int i = 0; i < 12; ++i) { check_eq(texts[0][i], texts[1][i], calls[i]); }
+        });
+        test("arity_text_defaults_lambdas_coroutines", [this]() {
+            struct row { const char* call; const char* text; };
+            const row rows[] = {
+                {"h()", "'h' expects 2 arguments, got 0"},
+                {"sh()", "'h' expects 2 arguments, got 0"},
+                {"h(1,2,3)", "'h' expects 2 arguments, got 3"},
+                {"sh(1,2,3)", "'h' expects 2 arguments, got 3"},
+                {"h(1)", "ok"},
+                {"sh(1)", "ok"},
+                {"lam()", "lambda expects 1 argument, got 0"},
+                {"lam(1,2)", "lambda expects 1 argument, got 2"},
+                {"auto c = co(); c.resume()", "'co' expects 1 argument, got 0"}};
+            std::string texts[2][9];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::off);
+                e->execute(R"(
+                    void h(int a, int b = 2) {}
+                    var sh = h;
+                    var lam = [](int a) { return a; };
+                    coroutine int co(int a) { yield a; return 0; }
+                    string r = "ok";
+                )");
+                for (int i = 0; i < 9; ++i) {
+                    texts[idx][i] = e->execute(std::string("r = \"ok\"; try { ") + rows[i].call + "; } catch (err) { r = err; } r").as_string();
+                    check_eq(std::string(rows[i].text), texts[idx][i], rows[i].call);
+                }
+                ++idx;
+            }
+            for (int i = 0; i < 9; ++i) { check_eq(texts[0][i], texts[1][i], rows[i].call); }
+        });
+        test("arity_text_uncaught_prefix", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::off);
+                bool threw = false;
+                std::string msg;
+                try { e->execute("void f() {} f(1);"); } catch (const std::exception& ex) { threw = true; msg = ex.what(); }
+                check_true(threw);
+                check_eq((size_t)0, msg.find("'f' expects 0 arguments, got 1"), msg);
+            }
         });
     }
 };

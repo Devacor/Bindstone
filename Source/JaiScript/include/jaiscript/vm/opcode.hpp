@@ -44,7 +44,8 @@ namespace jai::vm {
         op_loop_back,       // a=target; execution-budget check on the back edge
 
         op_call,            // a=argc, b=call site index; pops args+callee, pushes result
-        op_return,          // a=has value (pops it), b=return_stmt::static_return_proof
+        op_return,          // a=has value (pops it), b=return mode: return_stmt::static_return_proof
+                            // or return_mode_converted (converted at an in-region return site)
         op_implicit_return, // pops value into the program result (deref'd)
 
         op_scope_push,      // push a child environment
@@ -157,6 +158,10 @@ namespace jai::vm {
                             // kernel); pushes the cast result
 
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
+        op_return_convert,  // a=return_stmt::static_return_proof: in-region `return` (a try/catch is
+                            // open) converts the stack top against the frame's declared return
+                            // type HERE, inside this frame's try records; the op_return after the
+                            // region exits lands it as return_mode_converted
         op_halt,
     };
 
@@ -166,6 +171,10 @@ namespace jai::vm {
                                                          // (locals/captures/member scope all skipped)
     inline constexpr uint32_t load_flag_return_proven = 4; // op_return_ident only: return_stmt::static_return_proof
                                                          // (frozen at compile; return_with_result's payload guard keeps it sound)
+
+    // op_return b: 0 plain, 1 = return_stmt::static_return_proof, return_mode_converted = the value
+    // was already converted at its in-region return site (op_return_convert)
+    inline constexpr uint32_t return_mode_converted = 2;
 
     // op_store c flags
     inline constexpr uint32_t store_flag_rhs_lvalue = 1; // RHS was identifier/member/subscript
@@ -296,6 +305,7 @@ namespace jai::vm {
             case opcode::op_ref_return_lvalue: return "REF_RETURN_LVALUE";
             case opcode::op_return_ident: return "RETURN_IDENT";
             case opcode::op_return_binary: return "RETURN_BINARY";
+            case opcode::op_return_convert: return "RETURN_CONVERT";
             case opcode::op_probe_callee: return "PROBE_CALLEE";
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
             case opcode::op_probe_member: return "PROBE_MEMBER";

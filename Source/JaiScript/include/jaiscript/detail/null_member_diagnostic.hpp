@@ -16,17 +16,37 @@ inline uint64_t null_member_receiver_symbol(const expression* receiver) {
     }
 }
 
-// {0} = the member, {1} = the receiver symbol (only used by the shapes that have one)
-inline std::string_view null_member_message(const expression* receiver) {
-    if (null_member_receiver_symbol(receiver) == 0) { return "Member '{0}' accessed on null value"; }
-    return receiver->get_type() == node_type::call_expr
-        ? "Member '{0}' accessed on null: '{1}(...)' returned null"
-        : "Member '{0}' accessed on null: '{1}' is null";
+// {0} = the member, {1} = the receiver symbol (only used by the shapes that have one);
+// as_callee = the member is being called (docs/diagnostics.md family A)
+inline std::string_view null_member_message(const expression* receiver, bool as_callee = false) {
+    if (null_member_receiver_symbol(receiver) == 0) {
+        return as_callee ? "Cannot call '{0}' on null" : "Cannot access '{0}' on null";
+    }
+    if (receiver->get_type() == node_type::call_expr) {
+        return as_callee ? "Cannot call '{0}' on null ('{1}(...)' returned null)"
+                         : "Cannot access '{0}' on null ('{1}(...)' returned null)";
+    }
+    return as_callee ? "Cannot call '{0}' on null ('{1}' is null)"
+                     : "Cannot access '{0}' on null ('{1}' is null)";
 }
 
 // A non-null receiver with no member table at all (int, float, bool, char, function, ...):
 // {0} = the receiver's base type spelling, {1} = the member
 inline constexpr std::string_view scalar_member_message = "{0} has no member '{1}'";
+
+// The name a call site can attribute to its callee: an identifier's symbol, a member's
+// member id, 0 for a computed callee (fs[0](x), pick()(x))
+inline uint64_t callee_name_symbol(const expression* callee) {
+    if (!callee) { return 0; }
+    switch (callee->get_type()) {
+        case node_type::identifier_expr: return static_cast<const identifier_expr*>(callee)->symbol_id;
+        case node_type::member_expr: {
+            const uint64_t id = static_cast<const member_expr*>(callee)->member_id;
+            return id == UINT64_MAX ? 0 : id;
+        }
+        default: return 0;
+    }
+}
 
 inline constexpr std::string_view base_type_spelling(script_value_type type) {
     switch (type) {
@@ -65,5 +85,32 @@ struct base_type_symbols {
         return i < count ? ids[i] : ids[count - 1];
     }
 };
+
+// Calling a value that is not a function (docs/diagnostics.md family B): named callee ->
+// "Cannot call 'x': it is an int, not a function" ({0} = name, {1} = type), computed callee ->
+// "Cannot call a value of type int: it is not a function" ({0} = type). The type spells the
+// class for class instances, the base type otherwise; the article follows the spelling.
+struct not_callable_text {
+    std::string_view message;
+    uint64_t sym0 = 0;
+    uint64_t sym1 = 0;
+};
+
+inline not_callable_text not_callable_diagnostic(uint64_t name_id, script_value_type base, uint64_t base_id,
+                                                 std::string_view class_name, uint64_t class_id) {
+    const std::string_view spelling = class_name.empty() ? base_type_spelling(base) : class_name;
+    const uint64_t type_id = class_name.empty() ? base_id : class_id;
+    if (class_name.empty() && base == script_value_type::jai_null_type) {
+        return name_id == 0 ? not_callable_text{"Cannot call null: it is not a function", 0, 0}
+                            : not_callable_text{"Cannot call '{0}': it is null, not a function", name_id, 0};
+    }
+    if (name_id == 0) {
+        return {"Cannot call a value of type {0}: it is not a function", type_id, 0};
+    }
+    const char c = spelling.empty() ? 'x' : static_cast<char>(spelling.front() | 0x20);
+    const bool vowel = c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+    return {vowel ? "Cannot call '{0}': it is an {1}, not a function"
+                  : "Cannot call '{0}': it is a {1}, not a function", name_id, type_id};
+}
 
 }

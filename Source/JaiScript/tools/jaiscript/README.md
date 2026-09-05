@@ -106,9 +106,25 @@ helpers. (The bare engine only ships concatenating `print`, `thread_count`,
 everything.) On top, the host binds file IO so scripts can actually save things:
 
 ```
-read_file(path) -> string      write_file(path, text) -> bool
+read_file(path) -> string      write_file(path, text) -> bool   (creates missing folders)
 file_exists(path) -> bool      delete_file(path) -> bool
+sha256_file(path) -> string    zip_entries(zip) -> array<string>
+zip_extract(zip, entry, dest) -> bool                             (CRC-32 verified)
 ```
+
+and an asynchronous download the script polls from its own loop, the same shape as the
+`NetChannel` binding (`tools/jaiscript/fetch.hpp`):
+
+```
+auto d = Download();
+d.start(url, path)          // http or https; false with d.error() set when it cannot begin
+while (!d.pump()) { ... }   // d.received(), d.total() (-1 until known), d.fraction()
+d.success()  d.error()  d.cancel()
+```
+
+The transport is the platform's own: WinHTTP on Windows, libcurl on Linux and macOS when
+the build found it, otherwise the `curl` executable at run time. A failed transfer leaves no
+partial file. JaiDOOM's first run uses this to fetch and verify its own game data.
 
 plus `ARGS` (strings after `--`).
 

@@ -14,6 +14,10 @@
 //   cheats (type them): iddqd idkfa idfa idclip idclev## (E#M#)
 //                       idbehold + s/i/r/a/l, iddt (map reveal cycle)
 //
+// First run: with no WAD in ../wads/ the game fetches Freedoom and (if you say yes) the DOOM
+//            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
+//            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
+//
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
 //           jaiscript jaidoom.jai -- record demo.json  (demo writes at level exit or quit)
 //           jaiscript jaidoom.jai -- playdemo demo.json
@@ -37,6 +41,7 @@ import "hud.jai";
 import "save.jai";
 import "demo.jai";
 import "netplay.jai";
+import "boot.jai";
 
 var TICK_MS = 1000.0 / 35.0;
 var RUN_TOGGLE = false;
@@ -1174,9 +1179,15 @@ function main() -> int {
 	var mapname = "";
 	bool test = false;
 	bool flow = false;
+	bool bootstrap = false;
+	bool want_shareware = true;
+	bool want_audio = true;
 	var demopath = "";
 	for (int i = 0; i < ARGS.size(); ++i) {
 		if (ARGS[i] == "selftest") { test = true; }
+		else if (ARGS[i] == "bootstrap") { bootstrap = true; }
+		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
+		else if (ARGS[i] == "--no-audio") { want_audio = false; }
 		else if (ARGS[i] == "flowtest") { flow = true; }
 		else if (ARGS[i] == "freedoom2") { path = "../wads/freedoom2.wad"; }
 		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }
@@ -1195,12 +1206,15 @@ function main() -> int {
 		else if (ARGS[i].ends_with(".wad")) { path = ARGS[i]; }
 		else if (ARGS[i].starts_with("E") || ARGS[i].starts_with("MAP")) { mapname = ARGS[i]; }
 	}
-	if (!file_exists(path)) {                        // run from anywhere: fall back to the repo wads
-		var base = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/";
-		if (path.ends_with("freedoom2.wad")) { path = base + "freedoom2.wad"; }
-		else if (path.ends_with("freedoom1.wad")) { path = base + "freedoom1.wad"; }
-		else { path = base + "doom1.wad"; }
+	if (!file_exists(path) && file_exists("wads/" + path.substr(path.find_last_of("/") + 1))) {
+		path = "wads/" + path.substr(path.find_last_of("/") + 1);   // launched from the example folder rather than scripts/
 	}
+	if (bootstrap) { return boot_run(false, want_shareware, want_audio) ? 0 : 1; }   // headless: play.bat/bootstrap.sh, CI
+	if (!file_exists(path) && !test && !flow) {                                    // first run: the game fetches its own data
+		if (!boot_run(true, want_shareware, want_audio)) { return 1; }
+		if (!file_exists(path)) { print(`no WAD at ${path} (declined or failed); run again with -- bootstrap to retry`); return 1; }
+	}
+	if (!file_exists(path)) { print(`no WAD at ${path}: run jaidoom.jai -- bootstrap first`); return 1; }
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 	if (mapname == "") { mapname = lump_num("E1M1") >= 0 ? "E1M1" : "MAP01"; }
 	MUS_TITLE = lump_num("D_INTRO") >= 0 ? "D_INTRO" : "D_DM2TTL";

@@ -12,6 +12,7 @@
 #include <jaiscript/properties/property_serialization.hpp>   // property_manager::load template bodies
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
+#include "fetch.hpp"   // Download, sha256_file, zip_extract (runner host API)
 #endif
 
 #include <atomic>
@@ -164,7 +165,8 @@ void print_usage() {
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
 		"  type_of, math, to_json/from_json, containers) plus host file IO: read_file(path),\n"
-		"  write_file(path, text), file_exists(path), delete_file(path), and console-game IO:\n"
+		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
+		"  sha256_file(path), zip_entries(zip), zip_extract(zip, entry, dest), and console-game IO:\n"
 		"  key_down(name), read_key(), clock_ms(), sleep_ms(n), term_cols(), term_rows(),\n"
 		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
 		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
@@ -987,6 +989,10 @@ std::string slurp_file(const std::string& path) {
 }
 
 bool spill_file(const std::string& path, const std::string& content) {
+	if (const fs::path parent = fs::path(path).parent_path(); !parent.empty()) {
+		std::error_code ec;
+		fs::create_directories(parent, ec);   // a missing folder is the ofstream's failure to report
+	}
 	std::ofstream out(path, std::ios::binary | std::ios::trunc);
 	if (!out) { return false; }
 	out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -1017,6 +1023,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	});
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
+	jai_runner::register_fetch(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

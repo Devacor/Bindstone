@@ -6,6 +6,7 @@
 
 var WAD = "";                 // raw file bytes
 var WAD_ID = "";              // "IWAD" | "PWAD"
+var WAD_BASE = "";            // file name without folder or extension: "doom1", "freedoom2"
 var NUM_LUMPS = 0;
 array<int> LUMP_POS = [];
 array<int> LUMP_SIZE = [];
@@ -33,9 +34,17 @@ function name8(int ofs) -> string {
 	return WAD.substr(ofs, len);
 }
 
+// ../cache/<wad>/: the decoded sound and music files (sound.jai, mus.jai; bootstrap fills it
+// up front through extract_audio.jai, the game fills it lazily otherwise)
+function audio_cache_dir() -> string { return "../cache/" + WAD_BASE + "/"; }
+
 function wad_load(string path) -> bool {
 	WAD = read_file(path);
 	if (WAD.size() < 12) { return false; }
+	int slash = path.find_last_of("/\\");
+	string file = slash >= 0 ? path.substr(slash + 1) : path;
+	int dot = file.rfind(".");
+	WAD_BASE = dot > 0 ? file.substr(0, dot) : file;
 	WAD_ID = WAD.substr(0, 4);
 	if (WAD_ID != "IWAD" && WAD_ID != "PWAD") { return false; }
 	NUM_LUMPS = i32(4);

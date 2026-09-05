@@ -33,7 +33,7 @@ LEAKAGE = [
     (r"\bClaude\b|\bAnthropic\b", "Claude"),
     (r"\bDev ruling\b|\bruling\b|\bruled\b", "ruling"),
     (r"CLAUDE\.md|MEMORY\.md", "instruction file"),
-    (r"\bjaidoom[\\/]|examples/jaidoom|jaidoom\.zip", "jaidoom path (does not ship)"),
+    (r"jaidoom\.zip|wads[\/](doom1|doom2|doom)\.wad", "game data file (never in the repository; JaiDOOM fetches its own)"),
     (r"\bthis (?:overnight|window)\b|\bovernight\b", "session talk"),
 ]
 

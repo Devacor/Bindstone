@@ -30,11 +30,11 @@ function snd_wav_bytes(string name) -> string {
 function snd_play(string name) -> void {
 	if (!SND_ON) { return; }
 	if (!SND_READY.has(name)) {
-		var wav = snd_wav_bytes(name);
-		if (wav == "") { SND_READY[name] = ""; }
+		var path = audio_cache_dir() + ("" + name).to_lower() + ".wav";   // copy first: to_lower mutates in place
+		if (file_exists(path)) { SND_READY[name] = path; }             // bootstrap (or an earlier run) already decoded it
 		else {
-			var path = ("" + name).to_lower() + ".wav";   // copy first: to_lower mutates in place
-			if (!write_file(path, wav)) { path = ""; }
+			var wav = snd_wav_bytes(name);
+			if (wav == "" || !write_file(path, wav)) { path = ""; }
 			SND_READY[name] = path;
 		}
 	}
@@ -101,7 +101,7 @@ function snd_play_at(string name, float x, float y) -> void {
 		var wav = snd_wav_stereo(name, ln, rn, 16);
 		if (wav == "") { SND_POS_READY[key] = ""; }
 		else {
-			var path = ("" + key).to_lower() + ".wav";   // copy first: to_lower mutates in place
+			var path = audio_cache_dir() + ("" + key).to_lower() + ".wav";   // copy first: to_lower mutates in place
 			if (!write_file(path, wav)) { path = ""; }
 			SND_POS_READY[key] = path;
 		}

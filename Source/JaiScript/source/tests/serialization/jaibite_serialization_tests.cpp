@@ -433,6 +433,10 @@ public:
                 run_output pre_save_run = run_once(bite);
                 check_false(pre_save_run.threw);
                 auto bytes = bite.save_bytes();   // AST now carries runtime patches
+                // Loading is not a rewriting pass. Use the same registration surface
+                // so the saved header's host fingerprint is also expected to match.
+                auto unchanged = save_engine->jaibite_load_bytes(bytes);
+                check_true(bytes == unchanged.save_bytes(), "post-execution closure bytes stay identical");
 
                 for (bool load_vm : { false, true }) {
                     auto fresh = fresh_engine(load_vm, {});
@@ -446,6 +450,31 @@ public:
                     check_eq(expected.error, actual.error);
                     check_eq(expected.value, actual.value);
                 }
+            }
+        });
+
+        test("class_and_lambda_bytes_stable_before_and_after_execute", [this]() {
+            using namespace jaibite_test_detail;
+            const char* src = R"(
+                class StableClass {
+                    int value = 7;
+                    StableClass() {}
+                    int get() { return value; }
+                }
+                auto c = StableClass();
+                auto read = [=](int by) { return c.get() + by; };
+                read(5);
+            )";
+            for (bool use_vm : { false, true }) {
+                auto owner = fresh_engine(use_vm, {});
+                auto bite = owner->jaibite(src);
+                const auto before = bite.save_bytes();
+                auto before_loaded = owner->jaibite_load_bytes(before);
+                check_true(before == before_loaded.save_bytes(), "class/lambda bytes before execution");
+                check_eq(int64_t(12), bite.execute().as_int());
+                const auto after = bite.save_bytes();
+                auto after_loaded = owner->jaibite_load_bytes(after);
+                check_true(after == after_loaded.save_bytes(), "class/lambda bytes after execution");
             }
         });
 

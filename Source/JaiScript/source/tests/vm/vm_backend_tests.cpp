@@ -2637,7 +2637,7 @@ public:
 		// Tier-1 reference args x coroutines x deep recursion: dual-backend differentials
 		// (parity is checked as interp == vm; absolute values pin sanctioned semantics)
 
-		auto run_both_backends_in = [](jai::check_mode mode, const char* src) {
+		auto run_both_backends_in = [](jai::check_mode mode, const char* src, size_t interpreter_depth = 0) {
 			std::string out[2];
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
@@ -2645,14 +2645,15 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				e->execution_budget(0);
 				e->static_checking(mode);
+				if (interpreter_depth != 0) { e->max_call_depth(jai::backend_type::interpreter, interpreter_depth); }
 				try { out[idx] = e->execute(src).to_string(); }
 				catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
 				++idx;
 			}
 			return std::make_pair(out[0], out[1]);
 		};
-		auto run_both_backends = [run_both_backends_in](const char* src) {
-			return run_both_backends_in(jai::check_mode::strict, src);
+		auto run_both_backends = [run_both_backends_in](const char* src, size_t interpreter_depth = 0) {
+			return run_both_backends_in(jai::check_mode::strict, src, interpreter_depth);
 		};
 
 		test("tier1_field_ref_call_inside_coroutine_body", [this, run_both_backends]() {
@@ -2797,7 +2798,8 @@ public:
 				deep(b.v, 800);
 				b.v;
 			)";
-			auto [i_out, v_out] = run_both_backends(src);
+			// This tests reference lifetime at depth, not the safer default cap.
+			auto [i_out, v_out] = run_both_backends(src, 1000);
 			check_eq(std::string("42"), i_out, "interp: 800-hop tier2 ref pass-through");
 			check_eq(std::string("42"), v_out, "vm: 800-hop tier2 ref pass-through");
 		});
@@ -2847,6 +2849,7 @@ public:
 		test("recursive_generic_binary_cost_stays_linear", [this]() {
 			auto descent_ms = [this](bool use_vm, int depth) {
 				auto e = jai::engine::make();
+				e->max_call_depth(jai::backend_type::interpreter, 1000);
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				e->execution_budget(0);
 				e->execute(

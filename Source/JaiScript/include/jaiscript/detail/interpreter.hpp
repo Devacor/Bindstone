@@ -7,24 +7,8 @@
 // Configurable limits - define these before including to override
 // ============================================================
 
-// Maximum function call recursion depth (default: 10000)
-// This is high enough for complex valid code but prevents stack overflow
-#ifndef JAI_MAX_CALL_DEPTH
-#define JAI_MAX_CALL_DEPTH 10000
-#endif
-
-// One static recursion-limit message for BOTH backends and BOTH triggers (depth cap and
-// native-stack exhaustion): which limit fires first differs per backend (the vm's in-loop
-// frames never recurse natively), so byte-identical error text requires a single message.
-// The depth is baked in by stringification - checked_result messages are static string_views
-// and the old "{0}" form passed the depth as a SYMBOL id, printing an empty "()".
-// (vm_backend.cpp repeats this definition; both are #ifndef-guarded - keep them in sync.)
-#ifndef JAI_MAX_CALL_DEPTH_MESSAGE
-#define JAI_STRINGIFY_IMPL(x) #x
-#define JAI_STRINGIFY(x) JAI_STRINGIFY_IMPL(x)
-#define JAI_MAX_CALL_DEPTH_MESSAGE \
-	"Maximum recursion depth (" JAI_STRINGIFY(JAI_MAX_CALL_DEPTH) ") exceeded - possible infinite recursion"
-#endif
+// Call-depth configuration and its shared error producer live in execution_limits.hpp.
+// Hosts configure each backend through engine::max_call_depth.
 
 // Portable force-inline (MSVC and clang-cl accept __forceinline; GCC/Clang need the attribute)
 #ifndef JAI_FORCEINLINE
@@ -566,7 +550,7 @@ namespace jai {
         // Evaluate field initializers for a script class instance at construction time
         // This should be called BEFORE the constructor body executes
         // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
-        void evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+        checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                         std::shared_ptr<script_class_definition> class_def,
                                         std::shared_ptr<environment> init_env,
                                         bool skip_parent_recursion = false);

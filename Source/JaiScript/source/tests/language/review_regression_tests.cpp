@@ -972,8 +972,8 @@ public:
                 ++idx;
             }
             check_eq(msg[0], msg[1], "recursion-limit error text is byte-identical across backends");
-            check_true(msg[0].find("Maximum recursion depth (10000) exceeded") != std::string::npos,
-                "recursion-limit message carries the depth (got: " + msg[0] + ")");
+            check_true(msg[0].find("Maximum recursion depth exceeded") != std::string::npos,
+                "recursion-limit message is independent of the configured backend cap (got: " + msg[0] + ")");
         });
 
         // ---- fuzz FZ-UNDEF-VAR-THIS-DECORATION (seeds 34/28): compound-assign to an

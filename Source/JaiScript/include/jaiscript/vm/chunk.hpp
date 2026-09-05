@@ -124,8 +124,8 @@ namespace jai::vm {
         std::shared_ptr<script_defined_function> fn;
         std::shared_ptr<function_decl> decl;
         bool is_coroutine = false;
-        // Coroutines only: enclosing-frame slot locals the body references (compiler-
-        // derived, like closure_proto::outer_slot_plan) - snapshot at declaration
+        // Coroutines only: enclosing-frame slot locals the body references (derived
+        // or restored, like closure_proto::outer_slot_plan) - snapshot at declaration
         std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
     };
 
@@ -133,7 +133,7 @@ namespace jai::vm {
         std::shared_ptr<lambda_expr> lambda;
         std::shared_ptr<block_stmt> body;                  // block-wrapped lambda body
         std::shared_ptr<chunk> body_chunk;
-        // Compiler-derived capture plan (never reads interpreter AST patches):
+        // Capture plan derived by the compiler or copied from completed AST patches:
         // outer-frame locals referenced by the body, as (symbol id, outer slot).
         std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         std::vector<uint64_t> used_variables;              // for [=]/[&] default capture

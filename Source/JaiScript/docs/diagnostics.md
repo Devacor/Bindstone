@@ -152,6 +152,64 @@ This is a scalar/script-boundary change, not a redefinition of every host or
 container conversion. The public C++ `script_value::as_int()` accessor retains its
 existing saturating policy (NaN to zero).
 
+## Call-depth limits (`max_recursion_depth`)
+
+`Maximum recursion depth exceeded - possible infinite recursion`
+
+The shared `detail/execution_limits.hpp` kernel supplies this number-free text for
+both backends, whether the engine-owned call-depth cap or a Windows native-stack
+headroom check fires. Recursion errors are catchable. The ordinary uncaught
+`std::system_error::what()` adds `: Maximum environment recursion depth exceeded`;
+a native callback boundary that wraps a C++ exception may additionally append
+`: C++ exception`. These boundary suffixes do not change the shared runtime text.
+
+Default caps are 256 active calls for the interpreter and 10000 for the VM.
+`engine::max_call_depth(backend_type, depth)` sets either cap between executions;
+`engine::max_call_depth(backend_type) const` reads it. Values must be in
+`[1, INT_MAX]`. Each engine owns its settings, and parallel workers snapshot them
+at region entry. An explicitly supplied legacy `JAI_MAX_CALL_DEPTH` build macro
+seeds both defaults; the host can still override either one. Raising a call-depth
+cap does not disable the independent Windows native-stack guard. VM self tail
+calls that reuse a frame consume no additional depth; the execution budget still
+applies.
+
+Host configuration errors from `engine.cpp` are `jai::runtime_error` exceptions:
+
+| Text | Rejected configuration |
+| --- | --- |
+| `max_call_depth requires a built-in backend type` | A setter or getter backend other than interpreter or VM |
+| `max_call_depth must be between 1 and INT_MAX` | A zero or oversized setter value |
+| `Cannot change max_call_depth during execution` | A setter call while the engine is executing or a parallel region is active |
+
+## Saved-program structural validation
+
+The shared `.jaibite` reader rejects malformed structure before AST marking,
+static checking or VM compilation. Public loader failures are catchable
+`jai::runtime_error` exceptions; both backends use the same `jaibite: ` prefix
+and text. The following checks do not change the encoded format:
+
+| Text | Rejected structure |
+| --- | --- |
+| `jaibite: invalid program: local count exceeds encoded storage` | Impossible frame allocation claim or a count outside VM slot operand range |
+| `jaibite: invalid program: local slot out of range` | A local/captured slot outside its recorded lexical frame |
+| `jaibite: missing required block statement node` | Missing function, lambda, parallel, try or catch body |
+| `jaibite: expected block statement node` | A non-block node where one of those bodies requires a block |
+| `jaibite: invalid program: for initializer must be a variable or expression declaration` | Invalid traditional-for initializer kind |
+| `jaibite: invalid program: class member must be a variable or function declaration` | Invalid class-member kind |
+| `jaibite: invalid program: parallel parameter slot does not match its position` | Noncanonical/duplicate loop-parameter slots |
+| `jaibite: invalid program: inconsistent case fallthrough` | Fallthrough marker and terminal statement disagree |
+| `jaibite: invalid program: type parameter count` | Malformed built-in type arity, checked before interning can discard extra parameters |
+| `jaibite: corrupt varint` | Overlong or overflowing encoded integer |
+| `jaibite: AST nesting too deep` | AST traversal exceeds the existing 1000-level limit, or Windows native-stack headroom is low |
+| `jaibite: type nesting too deep` | Type traversal exceeds the existing 1000-level limit, or Windows native-stack headroom is low |
+
+Inferred/null type arguments remain permitted. Saved capture plans and the
+`SIZE_MAX` environment-lookup sentinel are not rewritten by validation.
+The nesting diagnostics also apply while saving. They are independent of the
+parser's weighted recursion limit of 250, which is not an AST-depth limit or a
+complete native-stack guarantee; recursive assignment and type parsing are not
+covered by that parser counter.
+
 ## Untouched families (one-line recommendation each)
 
 | family | representative texts | recommendation |
@@ -168,7 +226,7 @@ existing saturating policy (NaN to zero).
 | builtin argument checks | `find() first argument must be a string`, `sort() comparator must be a function`, `pad_left() padding character cannot be empty`, `to_int() base must be 0 or between 2 and 36` | keep; consistent `name() ... must be ...` shape |
 | method / class plumbing | `Method called without 'this' object`, `Property getter requires 'this' object`, `'this' can only be used inside methods`, `'super' can only be used inside methods`, `Cannot call super() - class has no base class`, `No matching parent constructor found for super()`, `Constructor found for 'C' but no class definition available`, `Class definition no longer exists` | `No matching parent constructor found for super()` belongs to family C's constructor shape once its site carries the argument list |
 | captures | `Cannot capture undefined variable 'x'`, `Cannot capture variable 'x' by reference` | keep |
-| limits | `Maximum recursion depth (10000) exceeded`, `Script execution budget exceeded - raise engine::execution_budget or break up the work`, memory cap | keep (terminal errors, deliberately verbose) |
+| limits | `Maximum recursion depth exceeded - possible infinite recursion`, `Script execution budget exceeded - raise engine::execution_budget or break up the work`, memory cap | keep; recursion is catchable (see above), execution budget exhaustion is terminal |
 | parallel walls | `method 'm' was not admitted in this parallel body (...)`, `only direct field stores on class instances are allowed in a parallel body (...)`, `custom operator dispatch on class instances is not admitted in a parallel body (...)` | keep (they carry the remedy) |
 | script layers | `Script layer 'C' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object`, `Cannot copy an instance of nocopy class 'C'`, `No copy constructor available for class C` | keep |
 | static stores | `Static member assignment requires a class name`, `'C' is not a class`, `'C' is not a valid class`, `Cannot assign to static member: field 's' not found` | `Cannot assign to static member: field 's' not found` -> family B's `class C has no static member 's'` (same fact, second spelling) |

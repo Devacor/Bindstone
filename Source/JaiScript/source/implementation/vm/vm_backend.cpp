@@ -40,18 +40,6 @@
 #include <system_error>
 #include <unordered_set>
 
-#ifndef JAI_MAX_CALL_DEPTH
-#define JAI_MAX_CALL_DEPTH 10000
-#endif
-// Shared recursion-limit message (defined identically in detail/interpreter.hpp for the
-// interpreter): one text for both backends and both triggers keeps error parity byte-exact
-#ifndef JAI_MAX_CALL_DEPTH_MESSAGE
-#define JAI_STRINGIFY_IMPL(x) #x
-#define JAI_STRINGIFY(x) JAI_STRINGIFY_IMPL(x)
-#define JAI_MAX_CALL_DEPTH_MESSAGE \
-	"Maximum recursion depth (" JAI_STRINGIFY(JAI_MAX_CALL_DEPTH) ") exceeded - possible infinite recursion"
-#endif
-
 #define VM_TRY(expr) 	do { 		if (vm_check((expr)) == op_status::failed) [[unlikely]] { 			return op_status::failed; 		} 	} while(0)
 #define VM_TRY_ASSIGN(var, expr) 	auto JAISCRIPT_CONCAT(__vm_result_, __LINE__) = (expr); 	if (!JAISCRIPT_CONCAT(__vm_result_, __LINE__)) [[unlikely]] { 		return raise_from(JAISCRIPT_CONCAT(__vm_result_, __LINE__)); 	} 	var = std::move(JAISCRIPT_CONCAT(__vm_result_, __LINE__).value());
 
@@ -613,7 +601,7 @@ void vm_backend::set_execution_budget(std::chrono::nanoseconds budget) {
 }
 
 void vm_backend::prepare_for_execution() {
-	if (frames_.empty()) {
+	if (!is_executing()) {
 		instance_scope_saved_.clear();
 		pending_instance_env_.reset();
 	}
@@ -629,7 +617,7 @@ void vm_backend::prepare_for_execution() {
 	// A re-entrant execute (include/import, or a host callback calling execute() mid-run)
 	// stacks a fresh frame above the live ones — leave the outer frames' value/try/iter
 	// slices intact so the outer execution (or a running fiber) resumes uncorrupted.
-	const bool reentrant = !frames_.empty();
+	const bool reentrant = is_executing();
 
 	return_value_.reset();
 	has_return_value_ = false;
@@ -786,7 +774,6 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		limits_->reset_for_execute();
 	}
 
-	auto& state = coroutine_fiber_state(handle);
 	const auto prev_status = handle.get_status();
 	if (prev_status == coroutine_handle::status::running) {
 		// Defensive twin of coroutine_handle::resume's guard (script paths never get
@@ -795,6 +782,13 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			make_error_code(runtime_error_code::evaluation_failed),
 			"Coroutine is already running");
 	}
+	// Fiber bodies recurse natively through resume, unlike ordinary in-loop calls.
+	// Count setup/default conversions too, and release the count on every exit.
+	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+		return detail::raise_call_depth();
+	}
+	detail::call_depth_guard depth_guard(current_call_depth_);
+	auto& state = coroutine_fiber_state(handle);
 	handle.set_status(coroutine_handle::status::running);
 
 	if (prev_status == coroutine_handle::status::created) {
@@ -1006,7 +1000,6 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	const bool prev_has_return = has_return_value_;
 	std::optional<script_value> prev_return = std::move(return_value_);
 	has_return_value_ = false;
-	++current_call_depth_;
 
 	std::optional<checked_result<void>> body_result;
 	std::exception_ptr pending;
@@ -1016,7 +1009,6 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		pending = std::current_exception();
 	}
 
-	--current_call_depth_;
 	// Capture while the fiber frame is still on frames_: an error raised by the
 	// coroutine's own segment names the coroutine, not the resume site (a failed
 	// return conversion is one - the door raised it in-frame)
@@ -7470,10 +7462,8 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 #else
 #define JAI_CALL_PUSH_SECTION(idx)
 #endif
-	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return raise_(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return raise_from(detail::raise_call_depth());
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -8287,6 +8277,16 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	f.stack_base = stack_.size();
 	f.top_level = true;
 
+	struct expression_scope_restore {
+		vm_backend* self;
+		std::shared_ptr<environment>& previous_env;
+		size_t stack_base;
+		~expression_scope_restore() {
+			if (self->stack_.size() > stack_base) { self->stack_.truncate(stack_base); }
+			self->environment_ = previous_env;
+		}
+	} scope_restore{this, saved_env, f.stack_base};
+
 	auto outcome = [&]() -> checked_result<script_value> {
 		frame_guard guard(this, &f);
 		auto r = run(f);
@@ -8299,10 +8299,6 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 		return make_null();
 	}();
 
-	if (stack_.size() > f.stack_base) {
-		stack_.truncate(f.stack_base);
-	}
-	environment_ = saved_env;
 	return outcome;
 }
 
@@ -10795,7 +10791,7 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 	return call_script_function(script_func, args);
 }
 
-void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
@@ -10803,7 +10799,8 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 		for (const auto& parent : class_def->get_parent_classes()) {
 			auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
 			if (parent_script_class) {
-				evaluate_field_initializers(instance, parent_script_class, init_env, false);
+				auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false);
+				if (!initialized) { return initialized.error_value(); }
 			}
 		}
 	}
@@ -10829,6 +10826,9 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 			}
 			auto result = eval_expression(initializer_ast, init_env);
 			if (!result) {
+				if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+					return result.error_value();
+				}
 				throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
 			}
 			script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
@@ -10838,6 +10838,7 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 			instance->set_field(field_id, field_value);
 		}
 	}
+	return {};
 }
 
 // Literal-only twin of evaluate_field_initializers for chains chain_initializers_all_literal
@@ -10867,7 +10868,8 @@ void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>&
 	auto init_env = std::make_shared<environment>(engine_ ? engine_->get_global_environment() : environment_, symbolizer_);
 	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
-	evaluate_field_initializers(instance, script_def, init_env, false);
+	auto initialized = evaluate_field_initializers(instance, script_def, init_env, false);
+	if (!initialized) { throw runtime_error(format_error(initialized, *symbolizer_)); }
 }
 
 // Sections 0-3 of construction (overload resolve, instance + init_env + param binds,
@@ -10879,6 +10881,12 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
                                                             const std::shared_ptr<environment>& definition_env,
                                                             const std::vector<script_value>& args,
                                                             std::shared_ptr<function_decl>& matching_ctor_out) {
+	// This native phase owns the constructor depth only until a body takes over.
+	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+		return detail::raise_call_depth();
+	}
+	std::optional<detail::call_depth_guard> initializer_depth;
+	initializer_depth.emplace(current_call_depth_);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c0 = __rdtsc();
 #endif
@@ -11001,6 +11009,9 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 				for (const auto& arg_expr : initializer.arguments) {
 					auto result = eval_expression(arg_expr, init_env);
 					if (!result) {
+						if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+							return result.error_value();
+						}
 						return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
 							"Failed to evaluate constructor initializer argument");
 					}
@@ -11052,6 +11063,9 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 											for (const auto& arg_expr : init.arguments) {
 												auto r = eval_expression(arg_expr, level_env);
 												if (!r) {
+													if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+														return r.error_value();
+													}
 													return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
 														"Failed to evaluate super() argument");
 												}
@@ -11122,6 +11136,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 										auto r = eval_expression(initializer_ast, level_init_env);
 										if (r) {
 											instance->set_field(field_id, initializer_store_value(std::move(r.value()), initializer_ast.get()));
+										} else if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+											return r.error_value();
 										}
 									}
 								}
@@ -11129,8 +11145,10 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 								auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
 								method_env->set_access_context(it->script_class.get());
 								method_env->define("this", this_value);
+								initializer_depth.reset();
 								auto ctor_result = execute_method_ast(it->ctor, method_env, it->args);
 								if (!ctor_result) return ctor_result.error_value();
+								initializer_depth.emplace(current_call_depth_);
 							}
 							handled_parent_init = true;
 						} else if (parent_ctor_asts.empty() && init_args.empty()) {
@@ -11180,6 +11198,9 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 			for (const auto& arg_expr : initializer.arguments) {
 				auto result = eval_expression(arg_expr, init_env);
 				if (!result) {
+					if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+						return result.error_value();
+					}
 					return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
 						"Failed to evaluate constructor initializer argument");
 				}
@@ -11204,15 +11225,18 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 			}
 
 			// Declared defaults BEFORE the delegated-to ctor body so the target can override
-			evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+			auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+			if (!initialized) { return initialized.error_value(); }
 			delegated_to_this = true;
 
 			auto target_method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
 			target_method_env->set_access_context(class_def.get());
 			target_method_env->define("this", this_value);
 
+			initializer_depth.reset();
 			auto target_result = execute_method_ast(target_ctor, target_method_env, init_args);
 			if (!target_result) return target_result.error_value();
+			initializer_depth.emplace(current_call_depth_);
 		}
 	}
 
@@ -11221,7 +11245,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 #endif
 	if (!delegated_to_this) {
 		if (init_env) {
-			evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+			auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+			if (!initialized) { return initialized.error_value(); }
 		} else if (!instance->seeded_from_plan() || handled_parent_init) {
 			// A literal-only chain's initializers ARE the defaults create_instance's plan just
 			// seeded (post-conversion); the re-stamp only matters after a parent ctor body ran
@@ -11347,6 +11372,11 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 			"Default constructor takes no arguments");
 	}
 
+	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+		return detail::raise_call_depth();
+	}
+	detail::call_depth_guard initializer_depth(current_call_depth_);
+
 	auto instance = class_def->create_instance();
 
 	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
@@ -11365,7 +11395,8 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 	auto init_env = std::make_shared<environment>(global_env, symbolizer_);
 	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
-	evaluate_field_initializers(instance, class_def, init_env);
+	auto initialized = evaluate_field_initializers(instance, class_def, init_env);
+	if (!initialized) { return initialized.error_value(); }
 
 	return this_value;
 }
@@ -12874,6 +12905,16 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 }
 
 script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
+	std::optional<detail::call_depth_guard> reentry_depth;
+	checked_result<void> entry_result;
+	if (is_executing()) {
+		if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+			entry_result = detail::raise_call_depth();
+		} else {
+			reentry_depth.emplace(current_call_depth_);
+		}
+	}
+
 	// Reentrant execute (include/import, or a host callback firing mid-script, e.g. hot
 	// reload): the nested program runs at TOP LEVEL - global environment - and the
 	// suspended outer run's environment (a ctor/method scope env carrying 'this') is
@@ -12882,7 +12923,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 		vm_backend* self;
 		bool reentrant;
 		std::shared_ptr<environment> saved_env;
-		explicit reentry_isolation(vm_backend* backend) : self(backend), reentrant(!backend->frames_.empty()) {
+		explicit reentry_isolation(vm_backend* backend) : self(backend), reentrant(backend->is_executing()) {
 			if (!reentrant) { self->pending_instance_env_.reset(); return; }
 			saved_env = self->environment_;
 			if (self->pending_instance_env_) { self->pending_instance_env_.reset(); return; }
@@ -12923,9 +12964,9 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 	f.top_level = true;
 
 	frame_guard guard(this, &f);
-	checked_result<void> result;
+	checked_result<void> result = entry_result;
 	try {
-		result = run(f);
+		if (result) { result = run(f); }
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
@@ -13044,10 +13085,8 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const ArgsT& args,
                                                    size_t args_base, size_t argc,
                                                    const call_site* site) {
-	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return raise_(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return raise_from(detail::raise_call_depth());
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -13246,10 +13285,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 #define JAI_MPUSH_SECTION(idx)
 #define JAI_MPUSH_SUB(idx)
 #endif
-	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return raise_(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return raise_from(detail::raise_call_depth());
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -13406,10 +13443,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
                                                    const call_site* site) {
-	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return raise_(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return raise_from(detail::raise_call_depth());
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -14482,10 +14517,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		caller_code = pending_site_ctx_.caller_code;
 	}
 	pending_site_ctx_ = {};
-	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return checked_result<script_value>(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return detail::raise_call_depth();
 	}
 	// The native entry path (constructor chains especially) stacks wide frames per
 	// level and can exhaust the native stack long before the depth cap - fail
@@ -14493,20 +14526,14 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	// Same message as the depth cap: which limit fires first differs per backend, so a
 	// distinct text here breaks backend error parity.
 	if (detail::native_stack_low()) [[unlikely]] {
-		return checked_result<script_value>(
-			make_error_code(runtime_error_code::max_recursion_depth),
-			JAI_MAX_CALL_DEPTH_MESSAGE);
+		return detail::raise_call_depth();
 	}
 
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return execution_limit_failure();
 	}
 
-	struct call_depth_guard {
-		int& depth;
-		call_depth_guard(int& d) : depth(d) { ++depth; }
-		~call_depth_guard() { --depth; }
-	} depth_guard(current_call_depth_);
+	detail::call_depth_guard depth_guard(current_call_depth_);
 
 	if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
 		return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *symbolizer_);

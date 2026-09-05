@@ -15,6 +15,16 @@ namespace jai::detail {
 	// backend caches a pointer to it, so reentrant executes share the outer run's
 	// allowance. Instance state only - never static (zero-statics/multi-engine rule).
 	struct execution_limits {
+		// Per-engine configuration, not process-wide mutable state. An explicitly
+		// supplied legacy build macro seeds both defaults; hosts can override either.
+#ifdef JAI_MAX_CALL_DEPTH
+		int interpreter_call_depth_limit = JAI_MAX_CALL_DEPTH;
+		int vm_call_depth_limit = JAI_MAX_CALL_DEPTH;
+#else
+		int interpreter_call_depth_limit = 256;
+		int vm_call_depth_limit = 10000;
+#endif
+
 		// Terminal-error latch: while set, EVERY script catch handler is skipped -
 		// try/catch, catch-all, nested, catches inside coroutines/lambdas, and catches
 		// in outer scripts around a failing reentrant execute(). The failure unwinds
@@ -52,6 +62,21 @@ namespace jai::detail {
 			memory_used = 0;
 			memory_raises = 0;
 		}
+	};
+
+	// Number-free because backend caps and available native stacks can differ.
+	// Allocation-free, including on workers whose symbolizer is frozen.
+	inline error_propagator raise_call_depth() noexcept {
+		return error_propagator{ make_error_code(runtime_error_code::max_recursion_depth),
+			"Maximum recursion depth exceeded - possible infinite recursion" };
+	}
+
+	struct call_depth_guard {
+		int& depth;
+		explicit call_depth_guard(int& value) noexcept : depth(value) { ++depth; }
+		~call_depth_guard() { --depth; }
+		call_depth_guard(const call_depth_guard&) = delete;
+		call_depth_guard& operator=(const call_depth_guard&) = delete;
 	};
 
 	// Style-matched to the budget error text; {0} resolves to the interned cap size.

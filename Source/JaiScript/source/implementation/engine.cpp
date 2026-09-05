@@ -1090,7 +1090,7 @@ struct engine::implementation {
             std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             uint64_t savedFingerprint = 0;
             uint32_t flags = 0;
-            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, sourcePath);
+            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath);
             if (savedFingerprint != self.registration_fingerprint()) {
                 return nullptr;   // registration surface moved: stale, reparse + rewrite
             }
@@ -1858,7 +1858,7 @@ jai::jaibite engine::jaibite_load(const std::string& path) {
 jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const std::string& own_path) {
     uint64_t saved_fingerprint = 0;
     uint32_t flags = 0;
-    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, own_path);
+    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, nullptr, own_path);
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
     detail::run_ast_marking_passes(declarations, get_symbolizer());
@@ -2865,6 +2865,30 @@ void engine::execution_budget(double seconds) {
 
 double engine::execution_budget() const {
     return impl->execution_budget_seconds_;
+}
+
+void engine::max_call_depth(backend_type type, size_t depth) {
+    if (type != backend_type::interpreter && type != backend_type::vm) {
+        throw runtime_error("max_call_depth requires a built-in backend type");
+    }
+    if (depth == 0 || depth > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw runtime_error("max_call_depth must be between 1 and INT_MAX");
+    }
+    if ((impl->parallel_ && impl->parallel_->active_region) ||
+        (impl->backend && impl->backend->is_executing())) {
+        throw runtime_error("Cannot change max_call_depth during execution");
+    }
+    int& result = type == backend_type::vm
+        ? impl->limits_.vm_call_depth_limit : impl->limits_.interpreter_call_depth_limit;
+    result = static_cast<int>(depth);
+}
+
+size_t engine::max_call_depth(backend_type type) const {
+    if (type != backend_type::interpreter && type != backend_type::vm) {
+        throw runtime_error("max_call_depth requires a built-in backend type");
+    }
+    return static_cast<size_t>(type == backend_type::vm
+        ? impl->limits_.vm_call_depth_limit : impl->limits_.interpreter_call_depth_limit);
 }
 
 debug::controller& engine::debugger() {

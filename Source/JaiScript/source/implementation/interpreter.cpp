@@ -2652,7 +2652,7 @@ void interpreter::prepare_for_execution() {
     // itself. Clearing here used to hand the outer frame the GLOBAL env to release
     // into the pool, which later recycled (and wiped) it. Mirrors the vm backend's
     // frames_-based reentrancy guard.
-    if (execute_depth_ != 0) {
+    if (is_executing()) {
         return;
     }
 
@@ -2727,6 +2727,16 @@ void interpreter::pop_instance_scope() {
 }
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
+    std::optional<detail::call_depth_guard> reentry_depth;
+    checked_result<void> entry_result;
+    if (is_executing()) {
+        if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+            entry_result = detail::raise_call_depth();
+        } else {
+            reentry_depth.emplace(current_call_depth_);
+        }
+    }
+
     // Reentrant execute (a host callback firing mid-script, e.g. hot reload): the
     // nested program must run at TOP LEVEL - global environment, fresh call/value
     // stacks - and restore the in-flight run's state afterwards. Without this,
@@ -2743,7 +2753,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         bool saved_has_return = false;
         detail::member_scope_ctx saved_member_scope{};
 
-        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->execute_depth_ != 0) {
+        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->is_executing()) {
             if (reentrant) {
                 saved_env = self->environment_;
                 saved_call_stack = std::move(self->call_stack_);
@@ -2782,14 +2792,17 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     trace_captured_ = false;
     top_level_node_ = nullptr;
 
-    for (size_t i = 0; i < declarations.size(); i++) {
-        const auto& decl = declarations[i];
+    // A denied entry runs only the existing error boundary, even for an empty
+    // program; no declaration is dispatched and its exception text stays identical.
+    const size_t execution_count = entry_result ? declarations.size() : 1;
+    for (size_t i = 0; i < execution_count; i++) {
+        auto* decl = entry_result ? declarations[i].get() : nullptr;
         // std::cerr << "  Declaration " << i << " type: " << typeid(*decl).name() << "\n";
 
         // Execute declaration with exception handling
         try {
             // std::cerr << "  About to visit declaration " << i << "\n";
-            auto result = dispatch_decl(decl.get());
+            auto result = entry_result ? dispatch_decl(decl) : entry_result;
             if (!result) [[unlikely]] {
                 // Convert error code to exception at boundary
                 // Include the custom error message if available, formatted with symbol resolution
@@ -2824,7 +2837,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         
         // Check if this is an implicit return expression
         if (decl->get_type() == node_type::expression_decl) {
-            auto* expr_decl = static_cast<expression_decl*>(decl.get());
+            auto* expr_decl = static_cast<expression_decl*>(decl);
             if (expr_decl->implicit_return && !valueStack_.empty()) {
                 last_script_value = pop_value();
                 // Dereference in case it's a reference (for expressions like m["key"] that return references)
@@ -12396,7 +12409,7 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
 
 // Evaluate field initializers for a script class instance at construction time
 // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
-void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
@@ -12408,7 +12421,8 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
             auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
             if (parent_script_class) {
                 // Recursively evaluate parent field initializers
-                evaluate_field_initializers(instance, parent_script_class, init_env, false);
+                auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false);
+                if (!initialized) { return initialized.error_value(); }
             }
         }
     }
@@ -12420,9 +12434,16 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     // run in the new instance's member scope (no call frame is pushed here), so the
     // shadowing ladder needs an explicit stamp - earlier fields and members of the
     // class under construction outrank same-named globals, exactly like ctor bodies.
-    auto old_env = environment_;
+    struct initializer_scope_restore {
+        interpreter* self;
+        std::shared_ptr<environment> previous_env;
+        detail::member_scope_ctx previous_scope;
+        ~initializer_scope_restore() {
+            self->environment_ = std::move(previous_env);
+            self->member_scope_ = previous_scope;
+        }
+    } scope_restore{this, environment_, member_scope_};
     environment_ = init_env;
-    const detail::member_scope_ctx old_scope = member_scope_;
     member_scope_ = {};
     if (script_value* init_this = init_env->method_this_storage()) {
         member_scope_.state = detail::member_scope_state::instance;
@@ -12435,9 +12456,9 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
             // Evaluate the initializer expression
             auto result = dispatch_expr(initializer_ast.get());
             if (!result) {
-                // Restore environment before throwing
-                environment_ = old_env;
-                member_scope_ = old_scope;
+                if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                    return result.error_value();
+                }
                 throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
             }
             script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
@@ -12452,9 +12473,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
         }
     }
 
-    // Restore environment
-    environment_ = old_env;
-    member_scope_ = old_scope;
+    return {};
 }
 
 void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
@@ -12465,7 +12484,8 @@ void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>
     auto init_env = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
     init_env->define("this", this_value);
     init_env->set_access_context(class_def.get());
-    evaluate_field_initializers(instance, script_def, init_env, false);
+    auto initialized = evaluate_field_initializers(instance, script_def, init_env, false);
+    if (!initialized) { throw runtime_error(format_error(initialized, *string_symbolizer_)); }
 }
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
@@ -12501,7 +12521,19 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
 checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                               std::shared_ptr<environment> definition_env,
                                                               const std::vector<script_value>& args) {
-    
+    // Initializers execute before call_function owns the constructor's activation.
+    // Hand the same depth back before each body call rather than counting it twice.
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+        return detail::raise_call_depth();
+    }
+    std::optional<detail::call_depth_guard> initializer_depth;
+    initializer_depth.emplace(current_call_depth_);
+    struct construction_env_restore {
+        interpreter* self;
+        std::shared_ptr<environment> previous_env;
+        ~construction_env_restore() { self->environment_ = std::move(previous_env); }
+    } env_restore{this, environment_};
+
     // Get all constructor ASTs
     const auto& ctor_asts = class_def->get_constructor_asts();
 
@@ -12641,6 +12673,9 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                     if (!result) {
                         // Restore environment before returning error
                         environment_ = old_env;
+                        if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                            return result.error_value();
+                        }
                         return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
                             "Failed to evaluate constructor initializer argument");
                     }
@@ -12714,6 +12749,9 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                                 auto r = dispatch_expr(arg_expr.get());
                                                 if (!r) {
                                                     environment_ = old_env;
+                                                    if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                                                        return r.error_value();
+                                                    }
                                                     return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
                                                         "Failed to evaluate super() argument");
                                                 }
@@ -12796,6 +12834,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                         auto r = dispatch_expr(initializer_ast.get());
                                         if (r) {
                                             instance->set_field(field_id, initializer_store_value(pop_value(), initializer_ast.get()));
+                                        } else if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                                            return r.error_value();
                                         }
                                     }
                                 }
@@ -12808,8 +12848,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                     this_value,
                                     it->script_class.get()
                                 );
+                                initializer_depth.reset();
                                 auto ctor_result = execute_method_ast(it->ctor, method_env.get(), it->args);
                                 if (!ctor_result) return ctor_result.error_value();
+                                initializer_depth.emplace(current_call_depth_);
                             }
                             // Mark that we handled all parent field initializers
                             handled_parent_init = true;
@@ -12877,6 +12919,9 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                 if (!result) {
                     // Restore environment before returning error
                     environment_ = old_env;
+                    if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                        return result.error_value();
+                    }
                     return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
                         "Failed to evaluate constructor initializer argument");
                 }
@@ -12906,7 +12951,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             // Apply this class's field initializers (declared defaults) BEFORE the
             // delegated-to ctor body, so the target can override them. Suppress the
             // post-loop re-run below so they are not applied twice (the clobber bug).
-            evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+            auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+            if (!initialized) { return initialized.error_value(); }
             delegated_to_this = true;
 
             // Call the target constructor on this instance with method environment
@@ -12918,8 +12964,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                 class_def.get()
             );
 
+            initializer_depth.reset();
             auto target_result = execute_method_ast(target_ctor, target_method_env.get(), init_args);
             if (!target_result) return target_result.error_value();
+            initializer_depth.emplace(current_call_depth_);
         }
     }
 
@@ -12933,7 +12981,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
         (!instance->seeded_from_plan() || handled_parent_init || !class_def->chain_initializers_all_literal())) {
         // A literal-only chain's initializers ARE the defaults create_instance's plan just
         // seeded (post-conversion); the re-run only matters after a parent ctor body ran
-        evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+        auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+        if (!initialized) { return initialized.error_value(); }
     }
 
     // Execute the matching constructor with method environment
@@ -12949,6 +12998,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // Execute constructor as a method so it has access to 'this' and fields
     // The constructor implicitly returns 'this', so use that return value
     // instead of creating a new script_value (which would be a duplicate reference)
+    initializer_depth.reset();
     auto result = execute_method_ast(matching_ctor, method_env.get(), args);
 
     // Constructor executed and returned 'this'
@@ -12963,6 +13013,11 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
         return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
             "Default constructor takes no arguments");
     }
+
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+        return detail::raise_call_depth();
+    }
+    detail::call_depth_guard initializer_depth(current_call_depth_);
     
     // Create instance using inherited create_instance()!
     auto instance = class_def->create_instance();
@@ -12995,7 +13050,8 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
         auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
         init_env->define("this", this_value);
         init_env->set_access_context(class_def.get());
-        evaluate_field_initializers(instance, class_def, init_env);
+        auto initialized = evaluate_field_initializers(instance, class_def, init_env);
+        if (!initialized) { return initialized.error_value(); }
     }
 
     // Default constructor object wrapped
@@ -13327,19 +13383,15 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame
 checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args,
                                                         const method_call_override* method_ctx) {
     // Check recursion depth limit FIRST
-    if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::max_recursion_depth),
-            JAI_MAX_CALL_DEPTH_MESSAGE);
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
+        return detail::raise_call_depth();
     }
     // Wide native frames (constructor chains especially) can exhaust the native stack
     // long before the depth cap - fail catchably instead of dying on 0xC00000FD.
     // Same message as the depth cap: the vm never trips this on script recursion
     // (in-loop frames), so a distinct text here breaks backend error parity.
     if (detail::native_stack_low()) [[unlikely]] {
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::max_recursion_depth),
-            JAI_MAX_CALL_DEPTH_MESSAGE);
+        return detail::raise_call_depth();
     }
 
     if (execution_limit_exhausted()) [[unlikely]] {
@@ -13347,11 +13399,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
 
     // RAII guard for call depth tracking - ensures decrement even on early return
-    struct call_depth_guard {
-        int& depth;
-        call_depth_guard(int& d) : depth(d) { ++depth; }
-        ~call_depth_guard() { --depth; }
-    } depth_guard(current_call_depth_);
+    detail::call_depth_guard depth_guard(current_call_depth_);
 
     // Consume the pending call-site context (set by visit_call around the invoke): ref
     // params bind against the caller's variables through it. Consumed exactly once -
@@ -13958,6 +14006,12 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         limits_->reset_for_execute();
     }
 
+    // Check before activating or moving any coroutine state. A first resume is
+    // counted by call_function; continuation replay below owns its own guard.
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+        return detail::raise_call_depth();
+    }
+
     auto& state = coroutine_state(handle);
 
     coroutine_handle* prev_coroutine = active_coroutine_;
@@ -14055,6 +14109,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         }
 
     } else {
+        detail::call_depth_guard depth_guard(current_call_depth_);
         auto caller_env = environment_;
         auto caller_return_value = std::move(returnValue_);
         bool caller_has_return = hasReturnValue_;

@@ -1793,6 +1793,7 @@ namespace {
 				case script_value_type::jai_float_type:
 				case script_value_type::jai_bool_type:
 				case script_value_type::jai_char_type:
+				case script_value_type::jai_string_type:   // a borrowed string read mints the bytes, never the handle
 					return true;
 				default:
 					return false;
@@ -2200,16 +2201,15 @@ namespace {
 		return proof;
 	}
 
-	// Borrow admission (content half): TRUE when every element of the container is a
-	// plain primitive, i.e. nothing reachable carries a refcount - element reads through
-	// the borrow are then raw const reads minting worker-local values, safe against the
-	// non-atomic strong counts by construction. Const walk, no handle copies.
+	// Borrow admission (content half): TRUE when every element of the container is a plain
+	// primitive or a string - element reads through the borrow are then raw const reads
+	// minting worker-local values (a string read copies the BYTES, never the handle), safe
+	// against the non-atomic strong counts by construction. Const walk, no handle copies.
 	bool parallel_content_all_primitive(const script_value& v) {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_ARRAY: {
 			if (const script_array* node = v.unchecked_array_node(); node->is_typed()) {
-				return node->kind() != script_array::kind_t::str &&
-				       node->kind() != script_array::kind_t::obj;   // numeric/byte payloads only; handles never borrow raw
+				return node->kind() != script_array::kind_t::obj;   // handles never borrow raw
 			}
 			for (const auto& elem : v.unchecked_as_array()) {
 				switch (elem.raw_storage_index()) {
@@ -2218,6 +2218,7 @@ namespace {
 				case script_value::TYPEID_FLOAT:
 				case script_value::TYPEID_CHAR:
 				case script_value::TYPEID_BOOL:
+				case script_value::TYPEID_STRING:
 					break;
 				default:
 					return false;
@@ -2232,7 +2233,7 @@ namespace {
 				auto primitive = [](size_t idx) {
 					return idx == script_value::TYPEID_NULL || idx == script_value::TYPEID_INT ||
 					       idx == script_value::TYPEID_FLOAT || idx == script_value::TYPEID_CHAR ||
-					       idx == script_value::TYPEID_BOOL;
+					       idx == script_value::TYPEID_BOOL || idx == script_value::TYPEID_STRING;
 				};
 				if (!primitive(ki) || !primitive(vi)) { return false; }
 			}
@@ -3171,6 +3172,11 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 				"Array index out of bounds reading a captured array in a parallel body");
 		}
 		if (arr->is_typed()) {
+			if (arr->kind() == script_array::kind_t::str) {
+				// the bytes, never the handle: the live string's count belongs to the main thread
+				const auto& str = arr->strs()[static_cast<size_t>(i)];
+				return str ? script_value(script_string(*str), eng) : script_value(script_string(), eng);
+			}
 			// raw buffer read -> worker-local mint, no script_value even exists to copy
 			return arr->get(static_cast<size_t>(i), eng);
 		}
@@ -3182,8 +3188,10 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 		case script_value::TYPEID_CHAR:
 		case script_value::TYPEID_BOOL:
 			return script_value(elem);   // raw const read -> worker-local mint, zero refcount traffic
+		case script_value::TYPEID_STRING:
+			return script_value(script_string(*elem.unchecked_string_handle()), eng);   // bytes, not the handle
 		default:
-			return elem.parallel_detached_copy();   // tier 3 (defensive: borrows are all-primitive)
+			return elem.parallel_detached_copy();   // tier 3 (defensive: borrows are primitives and strings)
 		}
 	}
 	if (const auto* map = borrow.parallel_borrow_map()) {
@@ -3199,6 +3207,8 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 		case script_value::TYPEID_CHAR:
 		case script_value::TYPEID_BOOL:
 			return script_value(elem);
+		case script_value::TYPEID_STRING:
+			return script_value(script_string(*elem.unchecked_string_handle()), eng);   // bytes, not the handle
 		default:
 			return elem.parallel_detached_copy();
 		}

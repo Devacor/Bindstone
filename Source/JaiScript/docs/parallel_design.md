@@ -450,17 +450,24 @@ pinned by `engine::last_parallel_captures()`):
 - **scalar** — null/int/float/char/bool (bound primitives decode once at the barrier):
   plain per-worker copy. Free.
 - **string** — per-worker detached copy (string storage is shared under plain copy).
-- **borrow** — the raw-read fast tier: the container is **all-primitive** AND every body
-  touch is a **subscript read**. Workers get ONE tagged raw pointer
+- **borrow** — the raw-read fast tier: every element of the container is a **primitive or
+  a string** (typed `array<string>` included; by declared type or by a content walk) AND
+  every body touch is a **subscript read**. Workers get ONE tagged raw pointer
   (`parallel_borrow_tag`, variant alt 15) whose copies touch no refcount; element reads
-  mint worker-local primitives — **zero copies, zero refcount traffic, zero memory_cap
-  charge**. GLOOM's bit-packed int64 map/pixel grids are literally free to read.
-- **snapshot** — everything else (non-primitive content, or any non-subscript use:
-  iteration, read-only methods, whole-value reads): ONE detached deep copy per worker at
-  the barrier, memory_cap-charged. The snapshot tier survives (Dev's escape clause)
-  because dense re-reads of heavy elements — GLOOM's glyph palettes, hundreds of escape
-  strings read per pixel row — would pay a per-READ deep clone under a borrow, but pay
-  once per region under a snapshot.
+  mint worker-local values — a primitive is read from the buffer, a string read copies
+  the BYTES into a fresh worker-owned string and never touches the live handle's count.
+  **Zero copies at the barrier, zero refcount traffic, zero memory_cap charge.** GLOOM's
+  bit-packed int64 grids are free to read, and its glyph and palette tables now ride the
+  same tier: the per-read byte copy of a short escape string is far cheaper than copying
+  hundreds of table entries per worker per region (GLOOM vm, 8 workers: 2.76 -> 1.92
+  ms/tick against 2.27 serial once the tables moved from snapshot to borrow; before, the
+  workers ran SLOWER than serial on the table copies).
+- **snapshot** — everything else (nested containers, object elements, or any
+  non-subscript use: iteration, read-only methods, whole-value reads): ONE detached deep
+  copy per worker at the barrier, memory_cap-charged, content-proven and reused across
+  regions when the shape allows (`flat_snapshot_equal`). A typed `array<string>` detach
+  mints one fresh string per slot (`detached_typed_array`) - the str buffer's handles are
+  refcounted and a buffer copy would share them across threads.
 
 ### 13c. Why the borrow is sound (and why direct shared reads never are)
 

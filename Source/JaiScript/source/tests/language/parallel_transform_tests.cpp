@@ -320,33 +320,36 @@ public:
 			check_true(saw_w);
 		});
 
-		test("captured_string_table_snapshots", [this]() {
-			auto e = make_engine();
-			jai::stdlib::register_all(*e);
-			// Non-primitive content (strings) -> per-worker snapshot at the barrier: dense
-			// re-reads then cost nothing extra (the glyph-palette workload)
-			const std::string src = R"(
-				var pal = [];
-				for (var i = 0; i < 16; i++) { pal.push("c" + to_string(i * 3)); }
-				string f(int x) { return pal[x % 16] + "|" + pal[(x * 5) % 16]; }
-				var a = [];
-				for (var i = 0; i < 64; i++) { a.push(i); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-			const auto& caps = e->last_parallel_captures();
-			const uint64_t pal_id = e->symbolize("pal");
-			bool saw = false;
-			for (const auto& [id, kind] : caps) {
-				if (id == pal_id) {
-					saw = true;
-					check_eq((int)detail::parallel_capture_kind::snapshot, (int)kind);
+		test("captured_string_table_borrows", [this]() {
+			// A string table touched only by subscript reads is a BORROW like a numeric one
+			// (the glyph-palette workload): workers read the live root storage and a string
+			// read mints the bytes, never the handle, so nothing is copied at the barrier.
+			// Both the var table and the typed array<string> table take the tier
+			for (const char* decl : {"var pal = [];", "array<string> pal = [];"}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				const std::string src = std::string(decl) + R"(
+					for (var i = 0; i < 16; i++) { pal.push("c" + to_string(i * 3)); }
+					string f(int x) { return pal[x % 16] + "|" + pal[(x * 5) % 16]; }
+					var a = [];
+					for (var i = 0; i < 64; i++) { a.push(i); }
+					var pout = parallel_transform(a, f);
+					var sout = [];
+					for (auto x : a) { sout.push(f(x)); }
+					return [pout, sout];
+				)";
+				check_matches_serial_at(e, src, {1, 2, 8});
+				const auto& caps = e->last_parallel_captures();
+				const uint64_t pal_id = e->symbolize("pal");
+				bool saw = false;
+				for (const auto& [id, kind] : caps) {
+					if (id == pal_id) {
+						saw = true;
+						check_eq((int)detail::parallel_capture_kind::borrow, (int)kind);
+					}
 				}
+				check_true(saw);
 			}
-			check_true(saw);
 		});
 
 		test("captured_map_reads", [this]() {

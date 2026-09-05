@@ -19,6 +19,9 @@
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
+//           jaiscript jaidoom.jai -- doom2.wad mypack.wad   (further WADs merge over the first; a
+//              map pack starts on its first map, LEVEL SELECT lists every map loaded, and the
+//              level chain follows doom's rules with a fall-through to the next map that exists)
 //           jaiscript jaidoom.jai -- record demo.json  (demo writes at level exit or quit)
 //           jaiscript jaidoom.jai -- playdemo demo.json
 //           jaiscript jaidoom.jai -- selftest      (headless playsim check)
@@ -203,13 +206,32 @@ function menu_build() -> void {
 		MENU_ITEMS.push("QUIT");                     // never into stale gameplay
 		return;
 	}
+	if (MENU_MODE == 6) {
+		for (auto m : map_list()) { MENU_ITEMS.push(m); }
+		MENU_ITEMS.push("BACK");
+		return;
+	}
 	if (MID_GAME) { MENU_ITEMS.push("RESUME"); }
 	MENU_ITEMS.push("NEW GAME");
+	MENU_ITEMS.push("LEVEL SELECT");
 	MENU_ITEMS.push("MULTIPLAYER");
 	MENU_ITEMS.push("DEMOS");
 	if (MID_GAME) { MENU_ITEMS.push("SAVE GAME"); }
 	if (file_exists(SAVE_PATH)) { MENU_ITEMS.push("LOAD GAME"); }
 	MENU_ITEMS.push("QUIT");
+}
+
+// A long list scrolls: `rows` entries around the selection, arrows marking more above/below
+function menu_draw_window(var& entries, int sel, int rows, string title) -> void {
+	int n = entries.size();
+	if (n <= rows) { menu_draw(entries, sel, title); return; }
+	int first = sel - rows / 2;
+	if (first < 0) { first = 0; }
+	if (first > n - rows) { first = n - rows; }
+	var view = [];
+	for (int i = first; i < first + rows; ++i) { view.push(entries[i]); }
+	string t = title + "  " + (first > 0 ? "^ " : "  ") + to_string(sel + 1) + "/" + to_string(n) + (first + rows < n ? " v" : "");
+	menu_draw(view, sel - first, t);
 }
 
 function menu_open() -> void {
@@ -321,7 +343,7 @@ function menu_key(string k) -> bool {
 	else if (k == "down") { MENU_SEL = (MENU_SEL + 1) % n; }
 	else if (k == "esc") {
 		if (MENU_MODE == 1 && DEMO_MENU_ARMED) { DEMO_ARM = ""; DEMO_MENU_ARMED = false; }
-		if (MENU_MODE == 1 || MENU_MODE == 2 || MENU_MODE == 4) { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+		if (MENU_MODE == 1 || MENU_MODE == 2 || MENU_MODE == 4 || MENU_MODE == 6) { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
 		else if (NP_WI_HOLD) { GSTATE = 3; }
 		else if (MID_GAME) { GSTATE = 2; }
 		else { GSTATE = 0; }
@@ -342,6 +364,10 @@ function menu_key(string k) -> bool {
 				MENU_MODE = 5;
 				DEMO_NAME_EDIT = DEMO_LAST_NAME;
 			}
+		} else if (MENU_MODE == 6) {
+			var lsel = MENU_ITEMS[MENU_SEL];
+			if (lsel == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+			else { START_MAP = lsel; MENU_MODE = 1; MENU_SEL = 2; menu_build(); }   // the skill pick starts it
 		} else if (MENU_MODE == 2) {
 			var msel = MENU_ITEMS[MENU_SEL];
 			if (msel == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
@@ -354,6 +380,7 @@ function menu_key(string k) -> bool {
 			var sel = MENU_ITEMS[MENU_SEL];
 			if (sel == "RESUME") { GSTATE = NP_WI_HOLD ? 3 : 2; }
 			else if (sel == "NEW GAME") { MENU_MODE = 1; MENU_SEL = 2; menu_build(); }
+			else if (sel == "LEVEL SELECT") { MENU_MODE = 6; MENU_SEL = 0; menu_build(); }
 			else if (sel == "MULTIPLAYER") { MENU_MODE = 2; MENU_SEL = 0; menu_build(); }
 			else if (sel == "DEMOS") { MENU_MODE = 4; MENU_SEL = 0; menu_build(); }
 			else if (sel == "SAVE GAME") {
@@ -668,6 +695,7 @@ function play(string mapname) -> int {
 			if (GSTATE == 0) { title_draw(); }
 			else if (GSTATE == 1 && MENU_MODE == 3) { ip_draw(NP_ADDR_EDIT); }
 			else if (GSTATE == 1 && MENU_MODE == 5) { demo_name_draw(DEMO_NAME_EDIT); }
+			else if (GSTATE == 1 && MENU_MODE == 6) { menu_draw_window(MENU_ITEMS, MENU_SEL, 8, "SELECT LEVEL"); }
 			else if (GSTATE == 1) { menu_draw(MENU_ITEMS, MENU_SEL, MENU_MODE == 1 ? "CHOOSE A SKILL" : ""); }
 			else if (GSTATE == 5) {
 				bool hosting = SESSION != null && SESSION.me == 0;
@@ -798,7 +826,7 @@ function flowtest() -> int {
 	GSTATE = 0;
 	title_draw();
 	menu_open();                                     // the any-key-at-title path
-	if (GSTATE != 1 || MENU_ITEMS.size() != 4 + mload) { fails = fails + 1; print("FAIL title -> menu"); }
+	if (GSTATE != 1 || MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL title -> menu"); }
 	menu_draw(MENU_ITEMS, MENU_SEL, "");
 	menu_key("down");
 	menu_key("up");
@@ -816,7 +844,7 @@ function flowtest() -> int {
 	automap_draw();
 	game_key("tab");
 	game_key("esc");                                 // mid-game menu gains RESUME + SAVE GAME
-	if (GSTATE != 1 || MENU_ITEMS.size() != 6 + mload) { fails = fails + 1; print("FAIL mid-game menu"); }
+	if (GSTATE != 1 || MENU_ITEMS.size() != 7 + mload) { fails = fails + 1; print("FAIL mid-game menu"); }
 	menu_key("esc");                                 // esc resumes
 	if (GSTATE != 2) { fails = fails + 1; print("FAIL menu resume"); }
 	LEVEL_DONE = true;                               // exit -> intermission
@@ -837,11 +865,12 @@ function flowtest() -> int {
 	MID_GAME = false;
 	title_draw();
 	menu_open();
-	if (MENU_ITEMS.size() != 4 + mload) { fails = fails + 1; print("FAIL RESUME lingered past episode end"); }
+	if (MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL RESUME lingered past episode end"); }
 
 	// ---- multiplayer menu + address entry (no sockets: p9 owns the wire) ----
 	menu_open();
-	MENU_SEL = MID_GAME ? 2 : 1;                     // the MULTIPLAYER row
+	MENU_SEL = 0;
+	for (int mi = 0; mi < MENU_ITEMS.size(); ++mi) { if (MENU_ITEMS[mi] == "MULTIPLAYER") { MENU_SEL = mi; } }
 	menu_key("enter");
 	if (MENU_MODE != 2 || MENU_ITEMS.size() != 4 || MENU_ITEMS[1] != "HOST CO-OP") {
 		fails = fails + 1; print("FAIL multiplayer submenu");
@@ -1180,6 +1209,8 @@ function main() -> int {
 	bool test = false;
 	bool flow = false;
 	bool bootstrap = false;
+	bool path_given = false;
+	array<string> extra_wads = [];   // PWADs merged over the base, in order
 	bool want_shareware = true;
 	bool want_audio = true;
 	var demopath = "";
@@ -1203,7 +1234,7 @@ function main() -> int {
 			if (i + 1 < ARGS.size() && ARGS[i + 1].to_int(0) > 0) { NP_QUEUE_PORT = ARGS[i + 1].to_int(28666); i = i + 1; }
 		}
 		else if (ARGS[i] == "coop") { NP_QUEUE_COOP = true; }
-		else if (ARGS[i].ends_with(".wad")) { path = ARGS[i]; }
+		else if (ARGS[i].ends_with(".wad")) { if (path_given) { extra_wads.push(ARGS[i]); } else { path = ARGS[i]; path_given = true; } }
 		else if (ARGS[i].starts_with("E") || ARGS[i].starts_with("MAP")) { mapname = ARGS[i]; }
 	}
 	if (!file_exists(path) && file_exists("wads/" + path.substr(path.find_last_of("/") + 1))) {
@@ -1216,6 +1247,11 @@ function main() -> int {
 	}
 	if (!file_exists(path)) { print(`no WAD at ${path}: run jaidoom.jai -- bootstrap first`); return 1; }
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
+	for (auto extra : extra_wads) {
+		string ep = file_exists(extra) ? extra : (file_exists("../wads/" + extra) ? "../wads/" + extra : extra);
+		if (!wad_add(ep)) { print(`cannot merge ${extra}`); return 1; }
+	}
+	if (mapname == "" && !extra_wads.empty()) { var first = map_list(); if (first.size() > 0) { mapname = first[0]; } }   // a map pack starts on its first map
 	if (mapname == "") { mapname = lump_num("E1M1") >= 0 ? "E1M1" : "MAP01"; }
 	MUS_TITLE = lump_num("D_INTRO") >= 0 ? "D_INTRO" : "D_DM2TTL";
 	MUS_INTER = lump_num("D_INTER") >= 0 ? "D_INTER" : "D_DM2INT";

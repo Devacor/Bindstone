@@ -72,6 +72,9 @@ script_value::reference_holder::~reference_holder() {
 }
 
 const script_value& script_value::reference_holder::materialize_typed_element(engine* eng) {
+    if (has_elem_scratch && container->view_current(container_index, *cell())) {
+        return *cell();   // the slot still holds this handle: no refcount round trip per touch
+    }
     script_value v = container->get(container_index, eng);
     if (has_elem_scratch) {
         *cell() = std::move(v);

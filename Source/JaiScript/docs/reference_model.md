@@ -13,7 +13,7 @@ there is no raw-pointer mode and no "is my target still alive?" question:
 | mode | pin | resolution per touch |
 |------|-----|----------------------|
 | CELL | holder owns the value in 32B inline storage (Lua upvalue; one `make_strong` alloc, memory_cap-charged) | `cell()` |
-| ELEMENT | `strong_ptr` to the owning vector + index | recompute address, bounds-check (shrink ⇒ "removed array element") |
+| ELEMENT | `strong_ptr` to the owning vector + index | recompute address, bounds-check (shrink ⇒ "removed array element"); on a typed node the boxed view in the holder's scratch is rebuilt only when the slot's handle changed (`script_array::view_current`, obj/str kinds). A by-ref range-for in a function body re-points ONE holder per iteration when nothing else shares it (`element_cursor_holder`); a retained alias keeps its element |
 | FIELD | `shared_ptr` to the owning instance + field id | `find_field_value(id)` (removed field errors; hot-reload safe) |
 | MAP-ENTRY | `strong_ptr` to the owning map + key in the inline storage | `find(key)` (erased entry errors) |
 | CPP-MEMBER | the receiver handle + the C++ object (`_cpp_object`, an extended object's weak handle locked, a raw holder's data or anchor) | the inline storage holds a `cpp_bound` box aimed at the C++ member itself: reads decode it live, writes are the box's typed memory store |

@@ -107,6 +107,39 @@ Rejected for now: dynamic work-stealing. It balances load better but makes pad c
 on the race (which thread got iteration i), destroying determinism. Revisit only with a design
 that keeps iteration→pad assignment fixed.
 
+**Thread count and the pool.** `engine::parallel_thread_count()` is the total context count
+(main runs chunk 0): the override when set, else `min(hardware_concurrency - 1, 6)` (Dev).
+The pool threads are pre-allocated once per engine, sized to that count minus main, and reused
+by every region; a region only pays a submit, a wake and a join per pool worker. Because the
+partition never changes a result, the count woken is a pure cost knob, and both sides of it
+are measured on the machine at hand: when the pool is built, three no-op round trips give the
+fixed per-worker cost (`worker_overhead_ns`, the minimum; ~4 us on the reference box), and each
+statement's region pool keeps the smoothed ns per element of main's own chunk
+(`ns_per_element`). A statement's first region fans out to every thread with an even split
+(the baseline); after that a region wakes only as many pool workers as can each be handed a
+chunk worth `k_parallel_chunk_overhead_ratio` (3x) the wake cost. Measured on the floor
+benchmark (vm, us per region, parallel vs serial): N=32 17 vs 7.5 (one context), N=256 55 vs 61,
+N=2048 280 vs 500 - below a few hundred light elements the per-element host-to-script call on
+the worker still dominates, and that call is the next lever.
+
+**The element reference is a cursor.** A by-reference body binds its element to ONE reference
+holder per chunk, minted at the barrier (the array pin and the `live_elem_refs` count are
+main-thread facts) and re-pointed at the next index on the worker before each call; an admitted
+body cannot retain it past its iteration (no lambdas, no `new`, stores dereference, captured
+state is read-only, the result is discarded), and a retained holder is an internal error rather
+than a silent re-point. The serial by-reference range-for does the same on both backends for
+frame-slot loops (`script_value::element_cursor_holder`: the previous holder moves to the next
+index when nothing else shares it, else a fresh mint) - top-level loops keep the per-iteration
+mint so destructor timing stays byte-parallel. On a typed object or string array the holder's
+boxed view is refreshed only when the slot's handle changed (`script_array::view_current`).
+
+**Body control flow.** The body runs once per element as a function: a top-level `continue`
+means the next element on both backends (rewritten to a bare `return` once, at body-function
+creation), `return` does the same, and a loop-level `break` is rejected at admission
+(`parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use
+'continue' for the next element) at line:col`); inside a nested loop or switch both keep their
+C++ meaning.
+
 ## 4. Read safety under non-atomic refcounts
 
 > CELLS caveat on (a): the alias rationale below cites the old `reference_holder` mechanism —

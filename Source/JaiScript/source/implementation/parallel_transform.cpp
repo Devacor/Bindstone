@@ -176,6 +176,135 @@ namespace jai::detail {
 namespace {
 
 	constexpr size_t k_parallel_small_n = 16;   // below this, one context on the calling thread
+	// A pool worker earns its keep when its chunk is worth k_parallel_chunk_overhead_ratio times
+	// the fixed cost of waking and joining it - both sides measured per statement on the machine
+	// at hand (no constants from one box). Chunking never changes results (iteration order wins
+	// at the join), so the count is a pure cost knob. The first region of a statement has no
+	// estimate: every thread, even split (the baseline).
+	constexpr double k_parallel_chunk_overhead_ratio = 3.0;
+	constexpr double k_parallel_min_overhead_ns = 2000.0;   // floor for a noisy first sample
+	// A parallel_for body runs once per element as a function: a top-level `continue` means the
+	// next element on both backends (rewritten to a bare return once, at body creation), a
+	// loop-level `break` has no deterministic meaning (iterations are independent) and is
+	// rejected here; inside a nested loop or switch both keep their C++ meaning. Returns the
+	// offending statement of a rejected break, null when the body is fine.
+	const statement* parallel_body_control_rewrite(statement_ptr& slot, size_t loop_depth, size_t switch_depth) {
+		if (!slot) { return nullptr; }
+		switch (slot->get_type()) {
+		case node_type::continue_stmt:
+			if (loop_depth == 0) { slot = std::make_shared<return_stmt>(slot->location); }
+			return nullptr;
+		case node_type::break_stmt:
+			return loop_depth == 0 && switch_depth == 0 ? slot.get() : nullptr;
+		case node_type::block_stmt:
+			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
+				if (d && d->get_type() == node_type::statement_decl) {
+					if (auto* bad = parallel_body_control_rewrite(static_cast<statement_decl*>(d.get())->statement, loop_depth, switch_depth)) { return bad; }
+				}
+			}
+			return nullptr;
+		case node_type::if_stmt: {
+			auto* n = static_cast<if_stmt*>(slot.get());
+			if (auto* bad = parallel_body_control_rewrite(n->then_statement, loop_depth, switch_depth)) { return bad; }
+			return parallel_body_control_rewrite(n->else_statement, loop_depth, switch_depth);
+		}
+		case node_type::while_stmt:
+			return parallel_body_control_rewrite(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+		case node_type::for_stmt:
+			return parallel_body_control_rewrite(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+		case node_type::range_for_stmt:
+			return parallel_body_control_rewrite(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+		case node_type::try_stmt: {
+			auto* n = static_cast<try_stmt*>(slot.get());
+			if (auto* bad = parallel_body_control_rewrite(n->try_block, loop_depth, switch_depth)) { return bad; }
+			return parallel_body_control_rewrite(n->catch_block, loop_depth, switch_depth);
+		}
+		case node_type::switch_stmt: {
+			auto* n = static_cast<switch_stmt*>(slot.get());
+			for (auto& c : n->cases) {
+				for (auto& st : c->body) {
+					if (auto* bad = parallel_body_control_rewrite(st, loop_depth, switch_depth + 1)) { return bad; }
+				}
+			}
+			if (n->default_case) {
+				for (auto& st : n->default_case->body) {
+					if (auto* bad = parallel_body_control_rewrite(st, loop_depth, switch_depth + 1)) { return bad; }
+				}
+			}
+			return nullptr;
+		}
+		default:
+			return nullptr;
+		}
+	}
+
+	inline size_t cap_workers_by_cost(size_t worker_count, size_t n, const parallel_engine_state& state, const parallel_engine_state::parallel_region_pool& pool) {
+		if (pool.ns_per_element <= 0.0 || state.worker_overhead_ns <= 0.0) { return worker_count; }
+		const double min_chunk_ns = k_parallel_chunk_overhead_ratio * std::max(state.worker_overhead_ns, k_parallel_min_overhead_ns);
+		const double affordable = (static_cast<double>(n) * pool.ns_per_element) / min_chunk_ns;
+		const size_t by_cost = affordable >= 1.0 ? static_cast<size_t>(affordable) : 1;
+		return std::min(worker_count, by_cost);
+	}
+
+	// This REGION's persistent slot pool by fingerprint (fn body + backend): distinct regions
+	// cycling in one frame each keep their own provisioned contexts. LRU-evict beyond the cap;
+	// selected before any slot reference is taken (the pools vector must not reallocate for
+	// the rest of the call).
+	parallel_engine_state::parallel_region_pool& acquire_region_pool(parallel_engine_state& state, const void* pool_key, bool use_vm) {
+		parallel_engine_state::parallel_region_pool* pool = nullptr;
+		for (auto& candidate : state.region_pools) {
+			if (candidate.fn_body == pool_key && candidate.use_vm == use_vm) {
+				pool = &candidate;
+				break;
+			}
+		}
+		if (!pool) {
+			if (state.region_pools.size() >= parallel_engine_state::max_region_pools) {
+				auto evict = state.region_pools.begin();
+				for (auto it = state.region_pools.begin(); it != state.region_pools.end(); ++it) {
+					if (it->last_use < evict->last_use) { evict = it; }
+				}
+				*evict = parallel_engine_state::parallel_region_pool{};
+				pool = &*evict;
+			} else {
+				state.region_pools.emplace_back();
+				pool = &state.region_pools.back();
+			}
+			pool->fn_body = pool_key;
+			pool->use_vm = use_vm;
+		}
+		pool->last_use = ++state.region_use_counter;
+		return *pool;
+	}
+
+	// Main's own chunk, timed: the element cost as the worker path runs it feeds the next region
+	inline void note_region_cost(parallel_engine_state::parallel_region_pool& pool, std::chrono::steady_clock::time_point chunk_t0, size_t main_elements) {
+		if (!main_elements) { return; }
+		const auto chunk_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - chunk_t0).count();
+		const double sample = static_cast<double>(chunk_ns) / static_cast<double>(main_elements);
+		pool.ns_per_element = pool.ns_per_element > 0.0 ? (pool.ns_per_element + sample) * 0.5 : sample;   // half-life of one region: no flapping on a noisy sample
+	}
+
+	// Once per pool build: what a pool worker costs to submit, wake and join on this machine
+	// (no-op tasks, three round trips, the minimum - the first trip also warms the threads).
+	// Paid once by the first fan-out region, ~100 us; results never depend on it.
+	inline void calibrate_pool_overhead(parallel_engine_state& state) {
+		const size_t workers = state.pool->worker_count();
+		if (!workers) { return; }
+		std::vector<std::pair<size_t, jai::thread_pool::task_type>> tasks;
+		tasks.reserve(workers);
+		for (size_t k = 0; k < workers; ++k) { tasks.emplace_back(k, [] {}); }
+		double best = 0.0;
+		for (int round = 0; round < 3; ++round) {
+			const auto t0 = std::chrono::steady_clock::now();
+			state.pool->submit_pinned_batch(tasks.data(), tasks.size());
+			state.pool->wait_idle();
+			const double ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
+			const double per_worker = ns / static_cast<double>(workers);
+			best = best > 0.0 ? std::min(best, per_worker) : per_worker;
+		}
+		state.worker_overhead_ns = best;
+	}
 
 	// v0 host whitelist: pure math (stdlib/math.hpp minus the random family) + to_string.
 	// Everything else — print, io, json, user bindings — errors at admission until the
@@ -1150,12 +1279,23 @@ namespace {
 	void run_worker_inplace(parallel_worker_slot& ctx, engine& eng) {
 		std::vector<script_value> call_args;
 		call_args.emplace_back(std::monostate{}, &eng);
+		const bool by_ref = !ctx.raw_input && !ctx.typed_input;
+		if (by_ref && !ctx.element_refs.empty()) { call_args[0] = std::move(ctx.element_refs[0]); }
 		size_t i = ctx.begin;
 		try {
 			for (; i < ctx.end; ++i) {
-				call_args[0] = ctx.raw_input ? (*ctx.raw_input)[i]
-				             : ctx.typed_input ? ctx.typed_input->get(i, &eng)
-				             : ctx.element_refs[i - ctx.begin];
+				if (by_ref) {
+					auto* cursor = call_args[0].element_cursor_holder();
+					if (!cursor) {
+						ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::unsupported_operation),
+							"parallel_for: the element reference escaped its iteration (internal) - please report this body shape",
+							ctx.limits.terminal_error };
+						return;
+					}
+					cursor->container_index = i;
+				} else {
+					call_args[0] = ctx.raw_input ? (*ctx.raw_input)[i] : ctx.typed_input->get(i, &eng);
+				}
 				auto r = ctx.backend->execute_callable(ctx.fn_payload, call_args);
 				if (ctx.backend->is_unwinding()) {
 					ctx.error = parallel_worker_error{ i,
@@ -2086,6 +2226,15 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	if (worker_count > n) { worker_count = n ? n : 1; }
 	if (n < k_parallel_small_n) { worker_count = 1; }   // the ruled small-n knob: same
 	                                                    // semantics, one context, no fan-out
+	const std::chrono::nanoseconds budget =
+		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
+	const backend_type engine_backend = eng.get_backend_type();
+	if (engine_backend == backend_type::custom) {
+		return usage("parallel_transform: custom execution backends are not supported");
+	}
+	const bool use_vm = engine_backend == backend_type::vm;
+	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(fn_payload->fn->body.get()), use_vm);
+	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
 
 	// Optional weight hint: evaluated per element at the barrier, single-threaded, on the
 	// engine's own backend (ruled §11 Q1). Chunk boundaries equalize cumulative weight.
@@ -2122,42 +2271,6 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	state.last_chunk_bounds = bounds;
 
 	// BARRIER: build the per-worker contexts, detach input slices, pre-warm type shapes.
-	const std::chrono::nanoseconds budget =
-		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
-	const backend_type engine_backend = eng.get_backend_type();
-	if (engine_backend == backend_type::custom) {
-		return usage("parallel_transform: custom execution backends are not supported");
-	}
-	const bool use_vm = engine_backend == backend_type::vm;
-
-	// Select this REGION's persistent slot pool by fingerprint (fn body + backend):
-	// distinct regions cycling in one frame each keep their own provisioned contexts.
-	// LRU-evict beyond the cap; pool selection happens before any slot reference is
-	// taken (the pools vector must not reallocate for the rest of this call).
-	const void* pool_key = static_cast<const void*>(fn_payload->fn->body.get());
-	parallel_engine_state::parallel_region_pool* pool = nullptr;
-	for (auto& candidate : state.region_pools) {
-		if (candidate.fn_body == pool_key && candidate.use_vm == use_vm) {
-			pool = &candidate;
-			break;
-		}
-	}
-	if (!pool) {
-		if (state.region_pools.size() >= parallel_engine_state::max_region_pools) {
-			auto evict = state.region_pools.begin();
-			for (auto it = state.region_pools.begin(); it != state.region_pools.end(); ++it) {
-				if (it->last_use < evict->last_use) { evict = it; }
-			}
-			*evict = parallel_engine_state::parallel_region_pool{};
-			pool = &*evict;
-		} else {
-			state.region_pools.emplace_back();
-			pool = &state.region_pools.back();
-		}
-		pool->fn_body = pool_key;
-		pool->use_vm = use_vm;
-	}
-	pool->last_use = ++state.region_use_counter;
 
 	// Acquire the first worker_count persistent slots: RESET matching ones (limits
 	// re-slice + budget re-arm + residual-state clear + host refresh), rebuild the rest.
@@ -2296,7 +2409,8 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
 			state.pool = std::make_unique<jai::thread_pool>(
-				std::max(pool_workers_needed, jai::thread_pool::default_worker_count()));
+				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));   // the engine's own worker set, pre-allocated once, not hardware_concurrency
+			calibrate_pool_overhead(state);
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits });
@@ -2330,7 +2444,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();
 #endif
+	const auto main_chunk_t0 = std::chrono::steady_clock::now();
 	run_worker(*contexts[0], out, eng);
+	note_region_cost(*pool, main_chunk_t0, bounds[1] - bounds[0]);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t3 = __rdtsc();
 #endif
@@ -2425,6 +2541,10 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// The shared body function (admission + pool key + per-worker provisioning source).
 	// Hot reload reparses into a fresh statement node, so this cache cannot go stale.
 	if (!stmt->body_fn_cache) {
+		if (const statement* bad = parallel_body_control_rewrite(stmt->body, 0, 0)) {
+			return usage("parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element) at " +
+			             std::to_string(bad->location.line) + ":" + std::to_string(bad->location.column));
+		}
 		auto body_block = std::dynamic_pointer_cast<block_stmt>(stmt->body);
 		if (!body_block) {
 			return usage("parallel_for: body is not a block (internal)");
@@ -2582,9 +2702,6 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	if (worker_count < 1) { worker_count = 1; }
 	if (worker_count > n) { worker_count = n; }
 	if (n < k_parallel_small_n) { worker_count = 1; }
-	std::vector<size_t> bounds = partition_flat(n, worker_count);
-	state.last_chunk_bounds = bounds;
-
 	const std::chrono::nanoseconds budget =
 		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
 	const backend_type engine_backend = eng.get_backend_type();
@@ -2592,32 +2709,14 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		return usage("parallel_for: custom execution backends are not supported");
 	}
 	const bool use_vm = engine_backend == backend_type::vm;
+	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(body_fn->body.get()), use_vm);
+	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
+	std::vector<size_t> bounds = partition_flat(n, worker_count);
+#ifdef JAISCRIPT_VM_PROFILE
+	fprintf(stderr, "[region-profile] parallel_for n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
+#endif
+	state.last_chunk_bounds = bounds;
 
-	// Region pool by fingerprint (body + backend), LRU-evicted - same policy as transform
-	const void* pool_key = static_cast<const void*>(body_fn->body.get());
-	parallel_engine_state::parallel_region_pool* pool = nullptr;
-	for (auto& candidate : state.region_pools) {
-		if (candidate.fn_body == pool_key && candidate.use_vm == use_vm) {
-			pool = &candidate;
-			break;
-		}
-	}
-	if (!pool) {
-		if (state.region_pools.size() >= parallel_engine_state::max_region_pools) {
-			auto evict = state.region_pools.begin();
-			for (auto it = state.region_pools.begin(); it != state.region_pools.end(); ++it) {
-				if (it->last_use < evict->last_use) { evict = it; }
-			}
-			*evict = parallel_engine_state::parallel_region_pool{};
-			pool = &*evict;
-		} else {
-			state.region_pools.emplace_back();
-			pool = &state.region_pools.back();
-		}
-		pool->fn_body = pool_key;
-		pool->use_vm = use_vm;
-	}
-	pool->last_use = ++state.region_use_counter;
 
 	std::vector<type_info*> value_types;
 	if (pool->worker_slots.size() < worker_count) {
@@ -2681,9 +2780,12 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		slot->raw_input = nullptr;
 		slot->typed_input = nullptr;
 		if (by_ref_element) {
-			slot->element_refs.reserve(slot->end - slot->begin);
-			for (size_t i = slot->begin; i < slot->end; ++i) {
-				slot->element_refs.push_back(script_value::make_element_reference(array_handle, i, &eng, element_type));
+			// ONE cursor reference per chunk, minted here (the array pin and the live_elem_refs
+			// count are main-thread facts) and re-pointed per iteration on the worker: an
+			// admitted body cannot retain it past its iteration (no lambdas, no 'new', stores
+			// deref, captured state is read-only, the result is discarded)
+			if (slot->end > slot->begin) {
+				slot->element_refs.push_back(script_value::make_element_reference(array_handle, slot->begin, &eng, element_type));
 			}
 		} else if (typed_obj) {
 			slot->typed_input = source_node;   // slots box per iteration: the same handle a vector element holds
@@ -2769,7 +2871,8 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
 			state.pool = std::make_unique<jai::thread_pool>(
-				std::max(pool_workers_needed, jai::thread_pool::default_worker_count()));
+				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));   // the engine's own worker set, pre-allocated once, not hardware_concurrency
+			calibrate_pool_overhead(state);
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits });
@@ -2807,7 +2910,9 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();
 #endif
+	const auto main_chunk_t0 = std::chrono::steady_clock::now();
 	run_worker_inplace(*contexts[0], eng);
+	note_region_cost(*pool, main_chunk_t0, bounds[1] - bounds[0]);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t3 = __rdtsc();
 #endif

@@ -113,7 +113,8 @@ Typed nodes have no `script_value` elements, so nothing can hand out `script_val
   node kind → coerce + raw primitive store, no script_value destruct/construct.
 - **reference_holder ELEMENT mode** (invariants §3) carries over: container field becomes
   `strong_ptr<script_array>`, still owner-pinned + index re-resolve per touch. On typed
-  nodes: `deref() const` materializes into a holder-embedded scratch refreshed per call
+  nodes: `deref() const` materializes into a holder-embedded scratch, rebuilt only when the
+  slot's handle changed for obj/str kinds (`view_current`; scalar kinds re-store per touch)
   (legal: the documented contract already forbids caching the returned address);
   `assign_through` dispatches on node kind. `resolve_target()` (script_value*) CANNOT
   represent a typed element — it asserts hetero, and its ~6 caller chokepoints

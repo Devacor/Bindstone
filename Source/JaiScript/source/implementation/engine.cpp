@@ -2878,10 +2878,13 @@ size_t engine::parallel_thread_count() const {
     // Auto is CAPPED, not hardware_concurrency: region entry pays a serial per-worker
     // provisioning cost, and on high-core hybrid CPUs raw hw (24 on a 285HX) was
     // measurably WORSE than serial (GLOOM 11.7 ms/tick at 24 vs 9.4 serial vs 7.0 at
-    // the sweep sweet spot). Callers that know their workload set an explicit count.
+    // the sweep sweet spot). Dev: min(hardware_concurrency - 1, 6) - a consistent set of
+    // pre-allocated pool threads, built once per engine and reused by every region; the
+    // region's cost-adaptive rule wakes fewer for light bodies. Callers that know their
+    // workload set an explicit count.
     constexpr size_t k_auto_worker_cap = 6;
     const unsigned hw = std::thread::hardware_concurrency();
-    const size_t base = hw ? hw : 1;
+    const size_t base = hw > 1 ? hw - 1 : 1;
     return base < k_auto_worker_cap ? base : k_auto_worker_cap;
 }
 

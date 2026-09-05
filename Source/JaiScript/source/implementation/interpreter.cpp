@@ -10425,7 +10425,16 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                             element_constraint = et;
                         }
                     }
-                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
+                    // Cursor (frame-slot loops only, like the vm twin - top-level loops keep the
+                    // per-iteration mint so destructor timing stays byte-parallel): the previous
+                    // iteration's holder, when nothing retained it, moves to slot i
+                    if (auto* cursor = use_slot ? loop_var_ptr->element_cursor_holder() : nullptr;
+                        cursor && cursor->container.get() == array_storage.get() &&
+                        cursor->container_element_type == element_constraint) {
+                        cursor->container_index = i;
+                    } else {
+                        *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
+                    }
                 } else {
                     // Copy binding: values deep-copy per iteration, shared_ptr
                     // elements share (for (auto e : registry) e.hurt() mutates)

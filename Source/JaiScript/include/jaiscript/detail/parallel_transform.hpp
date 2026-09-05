@@ -184,10 +184,19 @@ namespace jai::detail {
             const void* fn_body = nullptr;
             bool use_vm = false;
             uint64_t last_use = 0;
+            // Last region of this statement: ns per element as the WORKER path runs it (main's
+            // own chunk, timed). 0 = no region yet: the first region fans out to every thread
+            // with an even split (the baseline); later regions wake only the pool workers whose
+            // chunk is worth ~3x the pool's measured wake + join cost (worker_overhead_ns).
+            // Chunking never changes results, so this is a pure cost knob.
+            double ns_per_element = 0.0;
             std::vector<std::unique_ptr<parallel_worker_slot>> worker_slots;
         };
         static constexpr size_t max_region_pools = 8;
         std::vector<parallel_region_pool> region_pools;
+        // Measured once when the pool is built (three no-op round trips, the minimum): the
+        // fixed ns a pool worker costs to submit, wake and join on THIS machine. 0 = not yet.
+        double worker_overhead_ns = 0.0;
         uint64_t region_use_counter = 0;
 
 #ifdef JAISCRIPT_VM_PROFILE

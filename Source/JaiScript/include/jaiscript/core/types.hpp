@@ -100,6 +100,10 @@ namespace jai {
         inline void erase_at(size_t i);
         inline void reverse();
         inline script_value get(size_t i, engine* eng) const;
+        // A boxed view of slot i that already holds the slot's handle (obj/str kinds): a by-ref
+        // range-for touches its element several times per iteration, and only a replaced slot
+        // needs the view rebuilt. Scalar kinds answer false (their rebuild is a plain store).
+        inline bool view_current(size_t i, const script_value& view) const noexcept;
         inline void set(size_t i, script_value v);
         inline void push(script_value pre_converted);
         // Boxed snapshot of every element (typed builtin paths that need a hetero

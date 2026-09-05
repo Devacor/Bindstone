@@ -1550,6 +1550,82 @@ public:
 			}
 		});
 
+		test("body_control_flow_continue_return_break", [this]() {
+			// A body runs once per element: a top-level continue means the next element on BOTH
+			// backends (the vm used to raise 'continue' statement not in loop, the interpreter fell
+			// through), return does the same, a loop-level break is rejected at admission; nested
+			// loops and switches keep their own break/continue
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class C { int n = 0; }
+				function mk(int k) -> array<C> { array<C> a = []; for (int i = 0; i < k; i++) { a.push(C()); } return a; }
+				function sum(array<C>& a) -> int { int s = 0; for (auto& c : a) { s = s + c.n; } return s; }
+				array<C> a1 = mk(100); parallel_for (auto& c : a1) { c.n = 1; continue; c.n = 5; }
+				array<C> a2 = mk(100); parallel_for (auto& c : a2) { c.n = 1; return; c.n = 5; }
+				array<C> a3 = mk(100); parallel_for (auto& c : a3) { for (int i = 0; i < 3; i++) { if (i == 1) { break; } c.n = c.n + 1; } }
+				array<C> a4 = mk(100); parallel_for (auto& c : a4) { for (int i = 0; i < 3; i++) { if (i == 1) { continue; } c.n = c.n + 1; } }
+				array<C> a5 = mk(100); parallel_for (auto& c : a5) { switch (c.n) { case 0: c.n = 1; continue; default: c.n = 9; } c.n = 5; }
+				array<C> a6 = mk(100); parallel_for (auto& c : a6) { switch (c.n) { case 0: c.n = 1; break; default: c.n = 9; } c.n = c.n + 10; }
+				array<C> a7 = mk(100); parallel_for (auto& c : a7) { if (c.n == 0) { continue; } c.n = 5; }
+				string broke = "";
+				array<C> a8 = mk(100);
+				try { parallel_for (auto& c : a8) { c.n = 1; break; } } catch (err) { broke = err; }
+				return [sum(a1), sum(a2), sum(a3), sum(a4), sum(a5), sum(a6), sum(a7), broke, sum(a8)];
+			)");
+			const auto& v = r.as_array();
+			check_eq((int64_t)100, v[0].as_int());
+			check_eq((int64_t)100, v[1].as_int());
+			check_eq((int64_t)100, v[2].as_int());
+			check_eq((int64_t)200, v[3].as_int());
+			check_eq((int64_t)100, v[4].as_int());
+			check_eq((int64_t)1100, v[5].as_int());
+			check_eq((int64_t)0, v[6].as_int());
+			check_eq(std::string("parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element) at 14:50"), v[7].as<std::string>());
+			check_eq((int64_t)0, v[8].as_int());
+		});
+
+		test("by_ref_cursor_reference_and_typed_view", [this]() {
+			// The by-ref loop variable is ONE holder re-pointed per iteration (frame-slot loops):
+			// a retained alias keeps its element (the loop mints a fresh holder instead), a slot
+			// replaced mid-loop is seen through the reference on the next touch (typed view
+			// refresh), workers re-point their chunk cursor the same way; typed and boxed arrays
+			for (const char* decl : {"array<C> a = [];", "var a = [];"}) {
+				auto e = make_engine();
+				e->parallel_thread_count(4);
+				auto r = e->execute(std::string(R"(
+					class C { int n = 0; string s = "s"; C() {} C(int v) { n = v; } }
+					var keep = null;
+					function run() -> array<var> {
+				)") + decl + R"(
+						for (int i = 0; i < 200; i++) { a.push(C(i)); }
+						int first_seen = -1;
+						bool got = false;
+						for (auto& c : a) {
+							if (!got) { keep = [&]() { return c.n; }; got = true; }
+							if (c.n == 3) { a[3] = C(300); c.n = c.n + 1; }
+							c.s = c.s + "!";
+						}
+						int kept = keep();
+						a[3].n = a[3].n + 1;
+						int kept2 = keep();
+						parallel_for (auto& c : a) { c.n = c.n * 2; }
+						int total = 0; string tail = "";
+						for (auto& c : a) { total = total + c.n; }
+						for (auto& c : a) { tail = c.s; }
+						return [kept, kept2, a[3].n, a[5].n, total, tail];
+					}
+					return run();
+				)");
+				const auto& v = r.as_array();
+				check_eq((int64_t)0, v[0].as_int());
+				check_eq((int64_t)0, v[1].as_int());
+				check_eq((int64_t)604, v[2].as_int());
+				check_eq((int64_t)10, v[3].as_int());
+				check_eq((int64_t)40398, v[4].as_int());   // pinned on the pre-cursor runner, both backends, both kinds
+				check_eq(std::string("s!"), v[5].as<std::string>());
+			}
+		});
+
 		test("typed_object_nested_field_writes_land", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

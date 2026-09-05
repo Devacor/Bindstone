@@ -2384,6 +2384,18 @@ namespace jai {
         }
         
         
+        // The ELEMENT-mode holder this handle ALONE owns (raw index REFERENCE; container set, no
+        // map key, cell, field or property): a by-ref range-for re-points it at the next index
+        // instead of minting a holder per iteration (the scratch view refreshes on the next
+        // touch: view_current misses on a different slot). Null when anyone else shares the
+        // holder - a retained alias keeps its element - and for every other mode.
+        reference_holder* element_cursor_holder() noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            return holder && holder.unique() && holder->container && !holder->has_map_key && !holder->has_cell &&
+                   !holder->owner_instance && !holder->property ? holder.get() : nullptr;
+        }
+
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {
@@ -2552,6 +2564,19 @@ namespace jai {
             default: values_ = other.values_; break;
         }
         kind_ = other.kind_;
+    }
+
+    inline bool script_array::view_current(size_t i, const script_value& view) const noexcept {
+        switch (kind_) {
+            case kind_t::obj:
+                return view.raw_storage_index() == script_value::TYPEID_OBJECT &&
+                       view.unchecked_object_handle().get() == objs_[i].handle.get() &&
+                       view.get_type_info() == objs_[i].tag;
+            case kind_t::str:
+                return view.raw_storage_index() == script_value::TYPEID_STRING &&
+                       view.unchecked_string_handle().get() == strs_[i].get();
+            default: return false;
+        }
     }
 
     inline script_value script_array::get(size_t i, engine* eng) const {

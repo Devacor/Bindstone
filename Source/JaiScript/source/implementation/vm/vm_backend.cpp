@@ -11701,6 +11701,21 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 					element_constraint = et;
 				}
 			}
+			// Cursor (frame-slot loops only; top-level loops keep the per-iteration mint so
+			// destructor timing stays byte-parallel with the interpreter twin): the slot's
+			// previous holder, when nothing retained it, moves to this index
+			if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
+				if (script_value* cur = frame_slot(f, proto.slot)) {
+					if (auto* cursor = cur->element_cursor_holder();
+					    cursor && cursor->container.get() == array_storage.get() &&
+					    cursor->container_element_type == element_constraint) {
+						cursor->container_index = state.index;
+						++state.index;
+						stack_.push_back(script_value(true, engine_));
+						return {};
+					}
+				}
+			}
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
 		} else if (array_storage->kind() == script_array::kind_t::obj) {
 			element = clone_for_assignment(array_storage->get(state.index, engine_));   // object slots deep-copy like boxed elements

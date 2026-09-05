@@ -645,6 +645,12 @@ namespace jai::vm {
             bool is_map = false;
             bool is_string = false;    // chars by value, like s[i]
             bool env_pushed = false;   // slotted loop vars skip the iteration scope env
+            // A slotted by-reference loop variable: its slot is cleared when the loop ends
+            // (normal exit, break, or an unwind caught in `owner`), so no element cursor
+            // outlives its loop - a later parallel region over the same array must not see
+            // a live reference the program can no longer name
+            size_t slot = SIZE_MAX;
+            const frame* owner = nullptr;
             std::shared_ptr<coroutine_handle> coroutine;   // set = coroutine-driven range-for
         };
         std::vector<iter_state> iter_states_;
@@ -1419,6 +1425,7 @@ namespace jai::vm {
         op_status exec_iter_init(frame& f, const vm_instruction& ins);
         op_status exec_iter_next(frame& f, const vm_instruction& ins);
         op_status exec_iter_pop(frame& f, const vm_instruction& ins);
+        void release_iter_slots(frame& f, size_t from);
         void exec_yield(frame& f, const vm_instruction& ins);
         op_status exec_include(frame& f, const vm_instruction& ins);
         op_status exec_import(frame& f, const vm_instruction& ins);

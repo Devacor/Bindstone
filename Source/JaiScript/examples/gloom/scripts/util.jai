@@ -22,8 +22,8 @@ function mix32(int h, int v) -> int {
 // quadrant/sextant bright/dark cell partition (the doom-cli trick: N pixels
 // per cell, two colors chosen by luminosity).
 var PAL_KEYS = {};    // r<<16|g<<8|b -> index
-var PAL_FG = [];      // ESC[38;2;r;g;bm per index
-var PAL_BG = [];      // ESC[48;2;r;g;bm per index
+array<string> PAL_FG = [];      // ESC[38;2;r;g;bm per index
+array<string> PAL_BG = [];      // ESC[48;2;r;g;bm per index
 array<int> PAL_LUM = [];     // 2r+3g+b per index
 
 function rgb_idx(int r, int g, int b) -> int {

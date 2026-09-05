@@ -11482,6 +11482,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			stack_.truncate(rec.stack_size);
 		}
 		if (iter_states_.size() > rec.iter_size) {
+			release_iter_slots(f, rec.iter_size);
 			iter_states_.erase(iter_states_.begin() + rec.iter_size, iter_states_.end());
 		}
 		if (cfor_states_.size() > rec.cfor_size) {
@@ -11584,6 +11585,9 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	state.env_pushed = proto.slot == SIZE_MAX || !f.locals || f.top_level;
 	if (state.env_pushed) {
 		JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
+	} else if (proto.is_reference) {
+		state.slot = proto.slot;
+		state.owner = &f;
 	}
 	if (container.is_array()) {
 		state.container.emplace(std::move(container));
@@ -11767,10 +11771,22 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-op_status vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
+// KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt slot release
+void vm_backend::release_iter_slots(frame& f, size_t from) {
+	for (size_t i = from; i < iter_states_.size(); ++i) {
+		const iter_state& st = iter_states_[i];
+		if (st.slot == SIZE_MAX || st.owner != &f) { continue; }
+		if (script_value* cell = frame_slot(f, st.slot); cell && cell->is_reference()) {
+			*cell = script_value(std::monostate{}, engine_);
+		}
+	}
+}
+
+op_status vm_backend::exec_iter_pop(frame& f, const vm_instruction&) {
 	bool env_pushed = true;
 	if (!iter_states_.empty()) {
 		env_pushed = iter_states_.back().env_pushed;
+		release_iter_slots(f, iter_states_.size() - 1);
 		iter_states_.pop_back();
 	}
 	if (env_pushed) {

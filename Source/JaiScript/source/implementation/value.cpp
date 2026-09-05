@@ -921,10 +921,23 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 break;
             }
             if (handle->is_typed()) {
-                // all-primitive by construction: detach = one buffer copy
-                engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));
                 auto fresh = make_strong<script_array>(handle->kind());
-                fresh->assign_buffer(*handle);
+                if (handle->kind() == script_array::kind_t::str) {
+                    // The str buffer holds refcounted handles (assign_buffer would share them
+                    // across threads, and the counts are not atomic): one fresh string per slot
+                    size_t bytes = sizeof(script_array);
+                    fresh->strs().reserve(handle->size());
+                    for (const auto& str : handle->strs()) {
+                        if (!str) { fresh->strs().push_back(make_strong<script_string>()); bytes += sizeof(script_string); continue; }
+                        bytes += str->size() + sizeof(script_string);
+                        fresh->strs().push_back(make_strong<script_string>(*str));
+                    }
+                    engine_->execution_limits().memory_charge_deferred(bytes);
+                } else {
+                    // scalar kinds are all-primitive by construction: detach = one buffer copy
+                    engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));
+                    fresh->assign_buffer(*handle);
+                }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
                 break;

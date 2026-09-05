@@ -10377,6 +10377,19 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)
     const bool use_slot = stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty();
+    // The loop variable's reference dies with the loop: a slotted by-reference loop clears
+    // its slot on every exit but a yield, so no element cursor outlives the loop (a later
+    // parallel region over the same array must not see a live reference the program can no
+    // longer name). KEEP BYTE-PARALLEL with vm_backend::release_iter_slots
+    struct slot_reference_release {
+        interpreter* self; size_t slot; bool armed;
+        ~slot_reference_release() {
+            if (!armed || self->hasYieldRequest_ || self->call_stack_.empty()) { return; }
+            if (script_value* cell = self->call_stack_.back().get_local(slot); cell && cell->is_reference()) {
+                *cell = self->make_value();
+            }
+        }
+    } release_loop_reference{this, stmt->variable_slot_index, use_slot && stmt->is_reference};
 
     // Create a new scope for the loop variable
     push_scope();

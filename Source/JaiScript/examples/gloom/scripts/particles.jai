@@ -34,7 +34,7 @@ public:
 
 class ParticlePool {
 public:
-	var pool = [];
+	array<Particle> pool = [];
 
 	ParticlePool() { reset_pool(); }
 
@@ -140,7 +140,7 @@ function fx_secret_glitter(float x, float y) -> void {
 // ------------------------------------------------------------- colors -------
 // per-kind life-phase ramps, quantized to 256-color at boot (render reads
 // PART_COLS[kind * 4 + phase]; phase 0 = fresh)
-var PART_COLS = [];
+array<int> PART_COLS = [];
 
 function build_particle_colors() -> void {
 	var ramps = [

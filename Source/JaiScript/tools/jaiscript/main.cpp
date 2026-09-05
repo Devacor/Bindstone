@@ -13,9 +13,9 @@
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
 #include "fetch.hpp"   // Download, sha256_file, zip_extract (runner host API)
-#include "paths.hpp"   // executable_dir, root_script_dir, current_script_dir, app_data_dir (runner host API)
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -168,12 +168,12 @@ void print_usage() {
 		"  type_of, math, to_json/from_json, containers) plus host file IO: read_file(path),\n"
 		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
 		"  sha256_file(path), zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
-		"  make_dirs(path), list_dir(path); locations (absolute, forward slashes): executable_dir()\n"
-		"  (alias bin_dir()), root_script_dir() (the script this run started with), current_script_dir()\n"
-		"  (the file whose code is running, so an imported module finds files beside itself),\n"
-		"  *_path() twins, app_data_dir(name) / app_cache_dir(name) (per-user writable folders,\n"
-		"  created on demand) - a script dropped onto the executable runs from any working\n"
-		"  directory when its paths start from one of these; and console-game IO:\n"
+		"  make_dirs(path), list_dir(path), writable_dir(path). Locations are language builtins:\n"
+		"  executable_dir() (alias bin_dir()), root_script_dir() (the script this run started with),\n"
+		"  current_script_dir() (the file whose code is running), the *_path() twins, resolve_path(name)\n"
+		"  (the file import would load for that name), app_data_dir(name) / app_cache_dir(name),\n"
+		"  working_dir(), parent_dir(p), file_name(p) - a script dropped onto the executable runs\n"
+		"  from any working directory when its paths start from one of these; and console-game IO:\n"
 		"  key_down(name), read_key(), clock_ms(), sleep_ms(n), term_cols(), term_rows(),\n"
 		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
 		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
@@ -1028,10 +1028,40 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		std::error_code ec;
 		return fs::remove(path, ec);
 	});
+	eng->add_function("dir_exists", [](const std::string& path) -> bool {
+		std::error_code ec;
+		return fs::is_directory(path, ec);
+	});
+	eng->add_function("make_dirs", [](const std::string& path) -> bool {
+		std::error_code ec;
+		fs::create_directories(path, ec);
+		return fs::is_directory(path, ec);
+	});
+	// The save-side question resolve_path cannot answer: can this folder take a file? Creates it
+	// if missing, writes and removes a probe. A program picks its save anchor with it:
+	// root_script_dir() when writable, app_data_dir(name) otherwise.
+	eng->add_function("writable_dir", [](const std::string& path) -> bool {
+		std::error_code ec;
+		fs::create_directories(path, ec);
+		if (!fs::is_directory(path, ec)) { return false; }
+		fs::path probe = fs::path(path) / (".jai_write_probe_" + std::to_string(static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count())));
+		{
+			std::ofstream out(probe, std::ios::binary | std::ios::trunc);
+			if (!out) { return false; }
+		}
+		fs::remove(probe, ec);
+		return true;
+	});
+	eng->add_function("list_dir", [](const std::string& path) -> std::vector<std::string> {
+		std::vector<std::string> names;
+		std::error_code ec;
+		for (const auto& entry : fs::directory_iterator(path, ec)) { names.push_back(entry.path().filename().generic_string()); }
+		std::sort(names.begin(), names.end());
+		return names;
+	});
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);
-	jai_runner::register_paths(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

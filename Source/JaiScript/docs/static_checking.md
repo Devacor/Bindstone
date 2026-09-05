@@ -212,7 +212,7 @@ produces one diagnostic, not a cascade; (line, col, message) dedupe on top. Cap 
 
 A unit whose top-level `import`/`include` declarations carry literal paths is the root of a
 **program**. Before anything runs, the engine gathers the program's **closure**: every unit
-those paths reach, resolved through the include paths exactly as the runtime resolves them,
+those paths reach, resolved exactly as the runtime resolves them (the importing file's folder, then the include paths, then the working directory),
 recursively, each file once (cycles are fine), parsed into the same cache entries the unit's
 later `import` executes through. The union of every unit's top-level names — functions,
 variables, destructured names, classes, enums and their values, namespaces with every `::`

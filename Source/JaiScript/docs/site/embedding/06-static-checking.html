@@ -296,7 +296,7 @@ World G = World();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">21</code></pre></div>
 <p>A unit whose top-level <code>import</code>/<code>include</code> declarations carry literal paths is the root
 of a <strong>program</strong>. Before anything runs, the engine gathers the program's closure: every unit
-those paths reach, resolved through the include paths exactly as the runtime resolves them, recursively, each
+those paths reach, resolved exactly as the runtime resolves them (the importing file&#x27;s folder, then the include paths, then the working directory), recursively, each
 file once (cycles are fine). It then hands the union of every unit's top-level names to the checker:
 functions, variables, classes, enums and their values, namespaces and their members. The root and every
 closure unit are then checked against that union, so a function in one file may use a global or class another

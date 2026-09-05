@@ -13,6 +13,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "jaibite.hpp"
+#include "privilege.hpp"
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
@@ -109,6 +110,23 @@ namespace jai {
         
     public:
         ~engine();
+
+        using privilege = jai::privilege;
+
+        // Filesystem access is enabled by default. Changes affect the next protected
+        // operation, including after a reentrant C++ callback; started work is not
+        // cancelled. Grants are per-engine, not shared through script variables.
+        // Configure on the engine thread (or while idle), outside parallel regions.
+        // Concurrent cross-thread grant changes are not supported.
+        void enable(privilege flags);
+        void disable(privilege flags);
+        bool is_enabled(privilege flags) const noexcept;
+        checked_result<void> require_privilege(privilege flags) const noexcept;
+
+        // Attach a requirement to the actual callable, so aliases, overload dispatch
+        // and worker-local copies all recheck this engine's current grants. An empty
+        // requirement returns the original callable with no invocation overhead.
+        script_function guard_function(script_function function, privilege required);
         
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
@@ -160,7 +178,9 @@ namespace jai {
         // instead of parsing; otherwise the source parses and the sibling is rewritten.
         // Cache writes are best-effort and SILENT on failure (read-only asset dirs,
         // shipped games) — jaibite_cache_write_failures() counts them for diagnostics.
-        // String executes never touch disk. Backend-agnostic: the sibling holds the parsed
+        // Raw string roots have no disk sibling, but include/import dependencies can
+        // access files. Disabling filesystem also skips all automatic disk caching.
+        // Backend-agnostic: the sibling holds the parsed
         // AST (filename stamps included, so traces still name the .jai); the vm compiles
         // its chunk lazily and reuses it in-memory as usual.
         void jaibite_cache(bool enabled);
@@ -488,14 +508,14 @@ namespace jai {
         // Variadic functions - handle any number of arguments at runtime
         // Use this for functions like print(), max(), or functions with optional parameters
         // Example: engine.add_variadic_function("print", [](const std::vector<script_value>& args) { ... });
-        void add_variadic_function(const std::string& name, script_function func);
+        void add_variadic_function(const std::string& name, script_function func, privilege required = privilege::none);
         void add_functionWithArity(const std::string& name, script_function func, size_t arity);
         
         // Typed function registration with automatic overloading
         // Use this for functions with specific C++ signatures
         // Example: engine.add_function("add", [](int a, int b) -> int { return a + b; });
         template<typename Func>
-        void add_function(const std::string& name, Func&& func) {
+        void add_function(const std::string& name, Func&& func, privilege required = privilege::none) {
             // Check for rejected container references
             binding_traits::check_binding_validity<Func>(name);
             
@@ -508,6 +528,7 @@ namespace jai {
             
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
+            wrappedFunc = guard_function(std::move(wrappedFunc), required);
             
             std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
 
@@ -997,6 +1018,8 @@ namespace jai {
 
         size_t hot_reload_field_migrations_ = 0;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
+        void register_privilege_builtins();
+        void set_privileges(privilege flags, bool enabled);
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
 
         // Single post-parse execution pipeline shared by execute(string) and

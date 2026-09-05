@@ -24,6 +24,26 @@ Symbol arguments: `{0}`/`{1}` are the two `checked_result` symbol slots. Base-ty
 are interned once at backend init (`base_type_symbols`), arity counts once at init
 (`arity_count_symbols`), names come from parse-time symbols, class names from their definitions.
 
+## Engine privileges
+
+The engine owns the grants; script-visible flags and `reflect::is_enabled` do not
+authorize an operation. Protected operations share `engine::require_privilege`.
+
+| Text | Meaning |
+| --- | --- |
+| `Insufficient privilege: filesystem.` | A filesystem operation or location query was refused (`insufficient_privilege`). Catchable; an unhandled error reaches the host. |
+| `reflect::is_enabled expects at least 1 argument` | The query needs one or more flag arguments. |
+| `reflect::is_enabled expects valid privilege flags` | An argument is not an integer flag set or contains unimplemented bits. |
+| `Invalid privilege flags` | A host grant/requirement request contains unimplemented bits. |
+| `Cannot change privileges during a parallel region` | A host attempted to modify grants before the region's workers joined. |
+
+Grant changes apply to future operations, not work already started. Configure on
+the engine thread (including a reentrant C++ callback) or while idle, never
+concurrently from another thread. Grants use plain engine-owned bits, not atomic
+or globally shared state. Automatic cache access and checker dependency discovery
+are skipped when filesystem is disabled; explicitly requested file/path operations
+raise the refusal above. Host-supplied source and bytecode bytes remain usable.
+
 ## Family A - null receiver (`member_access_on_null`, kernel `detail/null_member_diagnostic.hpp`)
 
 | receiver shape | before | after (access) | after (call) |

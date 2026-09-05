@@ -861,6 +861,10 @@ namespace jai {
         // class-definition instance registry they register into is engine-shared, so its
         // mutations serialize on this lock while a region runs (unlocked otherwise).
         std::unique_lock<std::mutex> parallel_instance_registry_lock();
+        // The calling pool worker's deferred-registration list while a region runs (null on
+        // the main thread and outside regions): class_definition::register_instance parks
+        // worker-created instances there, the join registers the survivors.
+        std::vector<std::weak_ptr<class_instance>>* parallel_pending_registrations();
 
         // Script errors surfacing at the C++ boundary (converted callbacks, signal
         // receivers) have no error-value channel and must not throw into arbitrary game

@@ -1225,6 +1225,11 @@ std::unique_lock<std::mutex> engine::parallel_instance_registry_lock() {
     return std::unique_lock<std::mutex>(parallel_state().instance_registry_mutex);
 }
 
+std::vector<std::weak_ptr<class_instance>>* engine::parallel_pending_registrations() {
+    if (!impl->parallel_ || !impl->parallel_->active_region) { return nullptr; }
+    return impl->parallel_->active_region->find_pending(std::this_thread::get_id());
+}
+
 detail::math_rng_state& engine::math_rng() {
     return impl->math_rng_;
 }

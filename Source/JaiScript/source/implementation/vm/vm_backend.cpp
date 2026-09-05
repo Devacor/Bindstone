@@ -12480,6 +12480,18 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				stack_.push_back(*parallel_cursor_);
 				break;
+			case opcode::op_parallel_emit: {
+				if (!parallel_cursor_ || !parallel_emit_ || stack_.empty()) {
+					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+						std::string_view("__jai_parallel_emit is only valid inside a parallel_transform chunk")));
+					break;
+				}
+				script_value produced = std::move(stack_.back());
+				stack_.pop_back();
+				VM_TRY_OP(parallel_emit_(parallel_emit_ctx_, std::move(produced), parallel_cursor_->element_cursor_index()));
+				stack_.push_back(make_null());
+				break;
+			}
 
 			case opcode::op_to_bool: {
 				script_value v = std::move(stack_.back());

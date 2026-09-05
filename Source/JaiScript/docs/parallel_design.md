@@ -147,6 +147,22 @@ element, the previous shape). Floor benchmark after (vm, us per region, parallel
 N=32 14 vs 7.8, N=256 45 vs 60, N=2048 160 vs 495; an inline field-update body at N=2048
 runs 115 vs 427.
 
+**parallel_transform is the same loop.** The transform's worker runs the same in-script
+chunk loop over a cursor into the source (`k_parallel_chunk_transform`: fn called in-loop per
+element, the result handed to `op_parallel_emit`, which runs the fork's result contract - value
+semantics, no alias of a worker-private snapshot - and writes the worker's slice of the
+pre-sized output; a native on the interpreter). fn's by-value element parameter binds the
+element IN PLACE on the worker when the admission walk proved the body only reads it
+(`element_mutated`: no store through it, no mutating method on an element-rooted chain, and
+no whole use - `element_reach_all`); any of those keeps the private copy, so a mutating fn
+still never touches the source. The same rule lets a by-value `parallel_for` body that only
+reads bind in place. Instances a pool worker constructs or copies no longer register in the
+class registry under the region lock: they park in the worker's pending list and the join
+registers the survivors (a copy that died meanwhile just expires; hot reload still migrates
+everything that lived). Transform over 40k Vec3 (`v.x * v.y`): 25 -> 2-3 ms per region
+against 33 serial; over the deep node shape 241 -> 86 against 252. Not yet admitted:
+constructing objects inside a body and returning an object from fn (the 'structs out' pass).
+
 **Body control flow.** The body is the chunk loop's body: a top-level `continue` reaches
 the loop's advance on its own and a top-level `return` (any value) is rewritten to `continue`
 once, at body-function creation - both mean the next element on both backends; a loop-level

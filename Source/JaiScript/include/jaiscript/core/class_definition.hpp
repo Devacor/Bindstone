@@ -1919,7 +1919,22 @@ public:
     }
 
     void register_instance(std::weak_ptr<class_instance> instance) {
+        if (engine_ && engine_->parallel_region_active()) {
+            // A pool worker parks the registration (no lock; the join registers survivors);
+            // main's own chunk registers under the lock a worker's rare registered-instance
+            // death also takes
+            if (auto* pending = engine_->parallel_pending_registrations()) {
+                pending->push_back(std::move(instance));
+                return;
+            }
+        }
         auto lock = registry_lock();
+        if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
+        instances_.push_back(std::move(instance));
+    }
+
+    // The join (main thread, region over: the plain unlocked path): a worker's surviving instance
+    void register_instance_after_region(std::weak_ptr<class_instance> instance) {
         if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
         instances_.push_back(std::move(instance));
     }
@@ -1929,6 +1944,7 @@ public:
     // to a live instance (destruction is sequential and members die after the body), so
     // its index can be re-pointed. Never-registered instances (set_class_definition) skip.
     void unregister_instance(class_instance* instance) {
+        if (instance->registry_slot_ == SIZE_MAX) { return; }   // pending or never registered: nothing to remove, no lock
         std::shared_ptr<class_instance> moved;   // may be the last owner (a worker's copy dying concurrently): released outside the lock
         {
             auto lock = registry_lock();

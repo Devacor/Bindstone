@@ -51,6 +51,26 @@ public:
 	}
 
 	void forge_tests() override {
+		// Oracle self-test (review R8): unequal values of every representation must describe
+		// differently, including typed arrays (the old as_array() view raised on them and gave
+		// [1] and [2] the same error text), entries past the display cap, and deep nesting
+		test("oracle_tells_unequal_values_apart", [this]() {
+			auto eng = engine::make();
+			auto d = [&](const char* src) { return fuzz::describe_value(eng->execute(src)); };
+			check_ne(d("array<int> a = [1]; a;"), d("array<int> a = [2]; a;"), "typed int arrays");
+			check_ne(d("array<float> a = [1.0]; a;"), d("array<float> a = [1.5]; a;"), "typed float arrays");
+			check_ne(d("array<string> a = [\"x\"]; a;"), d("array<string> a = [\"y\"]; a;"), "typed string arrays");
+			check_ne(d("array<bool> a = [true]; a;"), d("array<bool> a = [false]; a;"), "typed bool arrays");
+			check_ne(d("array<int> a = [1]; a;"), d("var a = [1]; a;"), "typed vs var representation");
+			check_ne(d("var a = []; for (int i = 0; i < 100; i++) { a.push(i); } a;"),
+			         d("var a = []; for (int i = 0; i < 100; i++) { a.push(i); } a[99] = -1; a;"), "past the display cap");
+			check_ne(d("var a = 1; for (int i = 0; i < 10; i++) { a = [a]; } a;"),
+			         d("var a = 2; for (int i = 0; i < 10; i++) { a = [a]; } a;"), "deep nesting");
+			check_ne(d("map<string, int> m = {\"a\": 1}; m;"), d("map<string, int> m = {\"a\": 2}; m;"), "maps");
+			check_eq(d("array<int> a = [1, 2]; a;"), d("array<int> b = [1, 2]; b;"), "equal typed arrays describe alike");
+			check_true(d("array<int> a = [7]; a;").find("array<int>[int:7]") != std::string::npos, "typed elements are spelled out");
+		});
+
 		test("fixed_seeds_no_new_divergence", [this]() {
 			// Seed count is budgeted to keep this suite fast; bump it as the
 			// engines get faster. Seeds here are FIXED - failures reproduce with

@@ -219,6 +219,7 @@ namespace jai::vm {
 
         std::vector<stack_frame> last_stack_trace() const override { return captured_trace_; }
         std::string format_stack_trace() const override;
+        std::string current_source_file() const override;
 
 
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;

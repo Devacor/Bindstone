@@ -177,6 +177,9 @@ public:
     virtual std::vector<stack_frame> last_stack_trace() const { return {}; }
     virtual std::string format_stack_trace() const { return {}; }
 
+    // The file stamped on the innermost executing statement (empty when no frame names one)
+    virtual std::string current_source_file() const { return {}; }
+
     // Shelve/restore the in-flight call's argument metadata around an external (C++)
     // invocation of a script function (see engine::external_call_guard)
     virtual void push_external_call_scope() {}

@@ -13,6 +13,7 @@
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
 #include "fetch.hpp"   // Download, sha256_file, zip_extract (runner host API)
+#include "paths.hpp"   // executable_dir, root_script_dir, current_script_dir, app_data_dir (runner host API)
 #endif
 
 #include <atomic>
@@ -166,7 +167,13 @@ void print_usage() {
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
 		"  type_of, math, to_json/from_json, containers) plus host file IO: read_file(path),\n"
 		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
-		"  sha256_file(path), zip_entries(zip), zip_extract(zip, entry, dest), and console-game IO:\n"
+		"  sha256_file(path), zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
+		"  make_dirs(path), list_dir(path); locations (absolute, forward slashes): executable_dir()\n"
+		"  (alias bin_dir()), root_script_dir() (the script this run started with), current_script_dir()\n"
+		"  (the file whose code is running, so an imported module finds files beside itself),\n"
+		"  *_path() twins, app_data_dir(name) / app_cache_dir(name) (per-user writable folders,\n"
+		"  created on demand) - a script dropped onto the executable runs from any working\n"
+		"  directory when its paths start from one of these; and console-game IO:\n"
 		"  key_down(name), read_key(), clock_ms(), sleep_ms(n), term_cols(), term_rows(),\n"
 		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
 		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
@@ -1024,6 +1031,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);
+	jai_runner::register_paths(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

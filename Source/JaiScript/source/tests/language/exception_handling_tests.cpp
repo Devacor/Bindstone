@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -325,6 +326,75 @@ public:
             std::filesystem::remove(fileB);
             check(!std::filesystem::equivalent(std::filesystem::path(fileA).parent_path(), std::filesystem::temp_directory_path()),
                   "File fixtures must live in a process-owned directory, not the shared temp root");
+        });
+
+        test("current_and_root_source_file_follow_the_executing_frame", [this]() {
+            // root = the file the outermost execute was given, kept afterwards; current = the
+            // file stamped on the innermost executing statement, so an imported module's
+            // function answers with the module while its caller answers with the root.
+            namespace fs = std::filesystem;
+            fs::path dir = jai::foundry::test_temp_directory() / "jai_srcfile_a";
+            fs::create_directories(dir / "lib");
+            std::ofstream(dir / "lib" / "mod.jai") << "function where() -> string { return probe(); }\n";
+            std::ofstream(dir / "main.jai") << "import \"lib/mod.jai\";\nvar seen = [probe(), where()];\nfunction later() -> string { return probe(); }\n";
+            auto engine = make_engine();
+            jai::engine* raw = engine.get();
+            engine->add_function("probe", [raw]() -> std::string { return raw->current_source_file(); });
+            check_eq(std::string(), engine->root_source_file());
+            check_eq(std::string(), engine->current_source_file());
+            engine->add_include_path(dir.string());   // as the runner does for the entry script's folder
+            std::string mainPath = (dir / "main.jai").string();
+            engine->execute_file(mainPath);
+            check_eq(mainPath, engine->root_source_file());
+            auto seen = engine->execute("seen");
+            check_eq(fs::path(mainPath).lexically_normal(), fs::path(seen.as_array()[0].as_string()).lexically_normal());
+            check_eq((dir / "lib" / "mod.jai").lexically_normal(), fs::path(seen.as_array()[1].as_string()).lexically_normal());
+            check_eq(mainPath, engine->root_source_file());   // a raw-content execute does not replace the root
+            check_eq(fs::path(mainPath).lexically_normal(), fs::path(engine->execute("later()").as_string()).lexically_normal());
+            std::error_code ec;
+            fs::remove_all(dir, ec);
+        });
+
+        test("jaibite_siblings_name_their_files_after_the_folder_moves", [this]() {
+            // The sibling cache marks the unit's own file instead of storing its path, so a
+            // copied or moved folder loads its bites and every frame still names the file
+            // where it now lives (stack traces, breakpoints, current_source_file).
+            namespace fs = std::filesystem;
+            fs::path a = jai::foundry::test_temp_directory() / "jai_srcfile_move_a";
+            fs::path b = jai::foundry::test_temp_directory() / "jai_srcfile_move_b";
+            std::error_code ec;
+            fs::remove_all(a, ec);
+            fs::remove_all(b, ec);
+            fs::create_directories(a / "lib");
+            std::ofstream(a / "lib" / "mod.jai") << "function where() -> string { return probe(); }\n";
+            std::ofstream(a / "main.jai") << "import \"lib/mod.jai\";\nvar seen = [probe(), where()];\n";
+            auto first = make_engine();
+            jai::engine* rawFirst = first.get();
+            first->add_function("probe", [rawFirst]() -> std::string { return rawFirst->current_source_file(); });
+            first->add_include_path(a.string());
+            first->execute_file((a / "main.jai").string());
+            check_true(fs::exists(a / "main.jaibite"));
+            check_true(fs::exists(a / "lib" / "mod.jaibite"));
+
+            fs::copy(a, b, fs::copy_options::recursive, ec);
+            check_false(bool(ec));
+            for (const char* bite : {"main.jaibite", "lib/mod.jaibite"}) {   // the copy keeps the bites the fresher file
+                fs::path src = b / bite;
+                src.replace_extension(".jai");
+                fs::last_write_time(b / bite, fs::last_write_time(src, ec) + std::chrono::seconds(5), ec);
+            }
+            const auto mainBiteBefore = fs::last_write_time(b / "main.jaibite", ec);
+            auto second = make_engine();
+            jai::engine* rawSecond = second.get();
+            second->add_function("probe", [rawSecond]() -> std::string { return rawSecond->current_source_file(); });
+            second->add_include_path(b.string());
+            second->execute_file((b / "main.jai").string());
+            auto seen = second->execute("seen");
+            check_eq((b / "main.jai").lexically_normal(), fs::path(seen.as_array()[0].as_string()).lexically_normal());
+            check_eq((b / "lib" / "mod.jai").lexically_normal(), fs::path(seen.as_array()[1].as_string()).lexically_normal());
+            check_true(fs::last_write_time(b / "main.jaibite", ec) == mainBiteBefore);   // loaded, not rewritten
+            fs::remove_all(a, ec);
+            fs::remove_all(b, ec);
         });
 
         test("format_stack_trace_lists_frames", [this]() {

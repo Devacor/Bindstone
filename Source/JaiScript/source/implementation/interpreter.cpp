@@ -14509,6 +14509,13 @@ void interpreter::capture_stack_trace() {
     trace_captured_ = true;
 }
 
+std::string interpreter::current_source_file() const {
+    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+        if (it->current_node && !it->current_node->location.filename.empty()) return it->current_node->location.filename;
+    }
+    return top_level_node_ ? top_level_node_->location.filename : std::string();
+}
+
 std::string interpreter::format_stack_trace() const {
     std::string out;
     for (const auto& e : captured_trace_) {

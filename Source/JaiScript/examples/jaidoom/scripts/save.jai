@@ -19,6 +19,7 @@ var SAVE_PATH = "jaidoom_save.json";
 var SAVE_VERSION = 1;
 
 function game_save(string path) -> bool {
+	path = data_path(path);
 	if (GAME_MAP == "") { return false; }
 	var doors = [];
 	for (int i = 0; i < DOORS.size(); ++i) {
@@ -109,6 +110,7 @@ function seg_tex_restore(var& saved, var& live) -> void {
 }
 
 function game_load(string path) -> bool {
+	path = data_path(path);
 	if (!file_exists(path)) { return false; }
 	var txt = read_file(path);
 	if (txt.size() < 2) { return false; }

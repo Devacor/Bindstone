@@ -1125,6 +1125,15 @@ void vm_backend::capture_stack_trace() {
 	trace_captured_ = true;
 }
 
+std::string vm_backend::current_source_file() const {
+	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+		frame* fr = *it;
+		const ast_node* node = fr->ip < fr->code->stmt_nodes.size() ? fr->code->stmt_nodes[fr->ip] : nullptr;
+		if (node && !node->location.filename.empty()) return node->location.filename;
+	}
+	return {};
+}
+
 std::string vm_backend::format_stack_trace() const {
 	std::string out;
 	for (const auto& e : captured_trace_) {

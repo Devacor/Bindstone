@@ -30,8 +30,7 @@ function first_px() -> int {
 }
 
 function main() -> int {
-	var path = "../wads/freedoom2.wad";
-	if (!file_exists(path)) { path = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/freedoom2.wad"; }
+	var path = wad_path("freedoom2");
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 	check(lump_num("MAP01") >= 0 && lump_num("E1M1") < 0, "doom2 iwad: MAPxx markers, no ExMy");
 

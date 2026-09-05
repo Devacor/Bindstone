@@ -1,6 +1,7 @@
 // GRUBWELL on the standalone runner - a pure-JaiScript stand-in for the C++ host (../main.cpp).
 // Drag THIS file onto jaiscript.exe (it must live in scripts/ so main.jai's sibling imports
-// resolve - the runner puts the entry script's folder on the include path).
+// resolve - the runner puts the entry script's folder on the include path; the save file
+// goes beside scripts/, so the working directory the shell picked does not matter).
 //
 //   jaiscript.exe crawler.jai                                interactive run, seed 1337
 //   jaiscript.exe crawler.jai -- seed 7 god dev load
@@ -31,7 +32,7 @@ var HOST_DEV = false;
 var HOST_GOD = false;
 var HOST_LOAD = false;
 var HOST_SCRIPTED = false;
-var SAVE_PATH = "crawler_save.json";
+var SAVE_PATH = parent_dir(root_script_dir()) + "/crawler_save.json";   // beside scripts/, whatever the working directory
 var HOST_BACKEND = "vm";
 var ESC = "\x1b";
 var SHIM_QUIET = false;

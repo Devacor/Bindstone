@@ -9,7 +9,7 @@ import "vid.jai";
 import "render.jai";
 
 function main() -> int {
-	var path = "../wads/doom1.wad";
+	var path = wad_path("doom1");
 	var mapname = "E1M1";
 	int cw = 110;
 	int frames = 420;
@@ -17,7 +17,6 @@ function main() -> int {
 	if (ARGS.size() > 1) { mapname = ARGS[1]; }
 	if (ARGS.size() > 2) { cw = ARGS[2].to_int(110); }
 	if (ARGS.size() > 3) { frames = ARGS[3].to_int(420); }
-	if (!file_exists(path)) { path = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/doom1.wad"; }
 
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 	if (!map_load(mapname)) { print(`no map ${mapname}`); return 1; }

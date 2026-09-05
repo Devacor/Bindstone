@@ -6,12 +6,11 @@ import "map.jai";
 import "vid.jai";
 
 function main() -> int {
-	var path = "../wads/doom1.wad";
+	var path = wad_path("doom1");
 	var mapname = "E1M1";
 	int cells_w = 188;
 	if (ARGS.size() > 0) { path = ARGS[0]; }
 	if (ARGS.size() > 1) { mapname = ARGS[1]; }
-	if (!file_exists(path)) { path = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/doom1.wad"; }
 
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 	if (!map_load(mapname)) { print(`no map ${mapname}`); return 1; }

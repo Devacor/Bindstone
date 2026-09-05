@@ -128,6 +128,10 @@ public:
         return interpreter_->format_stack_trace();
     }
 
+    std::string current_source_file() const override {
+        return interpreter_->current_source_file();
+    }
+
     void push_external_call_scope() override {
         interpreter_->push_external_call_scope();
     }

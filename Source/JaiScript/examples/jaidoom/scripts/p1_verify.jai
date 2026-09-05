@@ -14,8 +14,7 @@ function check(bool ok, string what) -> void {
 }
 
 function main() -> int {
-	var path = "../wads/doom1.wad";
-	if (!file_exists(path)) { path = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/doom1.wad"; }
+	var path = wad_path("doom1");
 	print(`loading ${path}`);
 	check(wad_load(path), "wad_load succeeds");
 	print(`  id=${WAD_ID} lumps=${NUM_LUMPS} bytes=${WAD.size()}`);

@@ -35,9 +35,52 @@ function name8(int ofs) -> string {
 	return WAD.substr(ofs, len);
 }
 
-// ../cache/<wad>/: the decoded sound and music files (sound.jai, mus.jai; bootstrap fills it
-// up front through extract_audio.jai, the game fills it lazily otherwise)
-function audio_cache_dir() -> string { return "../cache/" + WAD_BASE + "/"; }
+// The game folder is the one holding wads/ and cache/: the folder above scripts/ in the
+// repository layout, the executable's own folder or its parent when jaiscript sits inside a
+// copied game folder. Every path the game reads or writes starts from it (or from the
+// per-user data folder when it is not writable), never from the working directory, so a
+// script dropped onto jaiscript.exe runs the same as one started from a shell.
+var GAME_ROOT = "";
+var DATA_ROOT = "";
+function game_root() -> string {
+	if (GAME_ROOT == "") {
+		array<string> roots = [parent_dir(root_script_dir()), root_script_dir(), bin_dir(), parent_dir(bin_dir())];
+		GAME_ROOT = roots[0];
+		for (auto r : roots) { if (dir_exists(r + "/wads")) { GAME_ROOT = r; break; } }
+	}
+	return GAME_ROOT;
+}
+
+// Where downloads, the audio cache, saves and demos go: the game folder when a file can be
+// created there, the per-user data folder (app_data_dir) for a read-only install
+function data_root() -> string {
+	if (DATA_ROOT == "") {
+		string probe = game_root() + "/wads/.writable";
+		DATA_ROOT = make_dirs(game_root() + "/wads") && write_file(probe, "") ? game_root() : app_data_dir("JaiDOOM");
+		delete_file(probe);
+	}
+	return DATA_ROOT;
+}
+function wad_dir() -> string { return data_root() + "/wads/"; }
+
+// A WAD by name ("doom1", "freedoom2.wad") or path: as given when that file exists, else
+// the game folder's wads/, else the data folder's (where a download lands)
+function wad_path(string name) -> string {
+	string file = name.ends_with(".wad") ? name : name + ".wad";
+	if (file_exists(file)) { return file; }
+	string base = file_name(file);
+	if (file_exists(game_root() + "/wads/" + base)) { return game_root() + "/wads/" + base; }
+	return wad_dir() + base;
+}
+
+// A save, demo or config file: a bare name lives in the data folder, a path stays as given
+function data_path(string name) -> string {
+	return file_name(name) == name ? data_root() + "/" + name : name;
+}
+
+// cache/<wad>/ under the data folder: the decoded sound and music files (sound.jai, mus.jai;
+// bootstrap fills it up front through extract_audio.jai, the game fills it lazily otherwise)
+function audio_cache_dir() -> string { return data_root() + "/cache/" + WAD_BASE + "/"; }
 
 // Merge a further WAD (a PWAD of maps, or another IWAD's resources) over what is loaded:
 // its bytes append to the buffer, its lumps join the directory with shifted offsets, and

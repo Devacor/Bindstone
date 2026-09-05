@@ -12049,6 +12049,9 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 	}
 	auto enforced = enforce_type_compatibility(operand, expr->target);
 	if (!enforced) {
+		if (enforced.error() == make_error_code(runtime_error_code::invalid_numeric_operand)) {
+			return raise_from(enforced);
+		}
 		return raise_from(detail::cast_error(operand, *expr, symbolizer_));
 	}
 	script_value out = std::move(enforced.value());

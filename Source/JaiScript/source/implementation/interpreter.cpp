@@ -9467,6 +9467,9 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
     }
     auto enforced = enforce_type_compatibility(operand, expr->target, "cast");
     if (!enforced) {
+		if (enforced.error() == make_error_code(runtime_error_code::invalid_numeric_operand)) {
+			return enforced.error_value();
+		}
         return detail::cast_error<void>(operand, *expr, string_symbolizer_);
     }
     script_value out = std::move(enforced.value());

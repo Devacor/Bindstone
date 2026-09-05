@@ -3,6 +3,8 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <cmath>
+#include <limits>
 
 namespace jai::foundry::tests {
 
@@ -31,6 +33,108 @@ public:
 	prelaunch_regression_tests() : suite("Prelaunch Regressions") {}
 
 	void forge_tests() override {
+		test("numeric_int64_selection_is_exact", [this]() {
+			auto eng = make_engine();
+			constexpr script_int low = 9007199254740992LL;
+			check_eq(low, eng->execute("math::min(9007199254740993, 9007199254740992);").as_int());
+			check_eq(low + 1, eng->execute("math::max(9007199254740992, 9007199254740993);").as_int());
+			check_eq(low, eng->execute("math::clamp(9007199254740993, 0, 9007199254740992);").as_int());
+			check_eq(-low, eng->execute("math::clamp(-9007199254740993, -9007199254740992, 0);").as_int());
+			eng->add_global("lowest", script_value((std::numeric_limits<script_int>::min)(), eng.get()));
+			eng->add_global("highest", script_value((std::numeric_limits<script_int>::max)(), eng.get()));
+			check_eq((std::numeric_limits<script_int>::max)() - 1, eng->execute("math::min(highest, highest - 1);").as_int());
+			check_eq((std::numeric_limits<script_int>::min)() + 1, eng->execute("math::max(lowest, lowest + 1);").as_int());
+			script_int bound = low + 1;
+			eng->add_global_ref("bound", bound);
+			check_eq(low, eng->execute("math::min(bound, 9007199254740992);").as_int());
+		});
+
+		test("numeric_mixed_and_float_selection_unchanged", [this]() {
+			auto eng = make_engine();
+			// Mixed pairs still promote to double, and ties still choose the first operand.
+			check_eq(script_int{9007199254740993LL}, eng->execute("math::min(9007199254740993, 9007199254740992.0);").as_int());
+			check(eng->execute("math::min(9007199254740992.0, 9007199254740993);").is_float());
+			eng->add_global("negative_zero", script_value(-0.0, eng.get()));
+			eng->add_global("not_a_number", script_value(std::numeric_limits<double>::quiet_NaN(), eng.get()));
+			check(std::signbit(eng->execute("math::min(negative_zero, 0.0);").as_float()));
+			check(std::signbit(eng->execute("math::max(negative_zero, 0.0);").as_float()));
+			check_eq(script_int{2}, eng->execute("math::min(not_a_number, 2);").as_int());
+			check(std::isnan(eng->execute("math::max(2, not_a_number);").as_float()));
+			check(std::isnan(eng->execute("math::clamp(not_a_number, 0, 1);").as_float()));
+		});
+
+		test("numeric_integer_conversion_valid_boundaries", [this]() {
+			auto eng = make_engine();
+			const double upper = std::nextafter(0x1p63, 0.0);
+			eng->add_global("upper", script_value(upper, eng.get()));
+			eng->add_global("lower", script_value(-0x1p63, eng.get()));
+			for (const std::string fn : {"math::itrunc", "math::ifloor", "cast<int>"}) {
+				check_eq(static_cast<script_int>(upper), eng->execute(fn + "(upper);").as_int());
+				check_eq((std::numeric_limits<script_int>::min)(), eng->execute(fn + "(lower);").as_int());
+				check_eq(script_int{0}, eng->execute(fn + "(0.0);").as_int());
+			}
+			check_eq(script_int{-3}, eng->execute("math::itrunc(-3.9);").as_int());
+			check_eq(script_int{-4}, eng->execute("math::ifloor(-3.9);").as_int());
+			check_eq(script_int{9223372036854775807LL}, eng->execute("math::ifloor(9223372036854775807);").as_int());
+			check_eq(script_int{9007199254740993LL}, eng->execute("math::itrunc(9007199254740993);").as_int());
+		});
+
+		test("numeric_float_to_int_errors_are_catchable", [this]() {
+			const std::string expected = "Cannot convert float to integer: non-finite or out of range";
+			for (double input : {0x1p63, std::nextafter(-0x1p63, -INFINITY), 1e100, -1e100,
+				std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+				std::numeric_limits<double>::quiet_NaN()}) {
+				for (const std::string action : {
+					"math::itrunc(source);", "math::ifloor(source);", "cast<int>(source);",
+					"int target = source;", "int target = 7; target = source;",
+					"int accept(int x) { return x; } accept(source);",
+					"int convert(var x) { return x; } convert(source);",
+					"class Box { int value = 7; } auto box = Box(); box.value = source;",
+					"class Number { var value = 0; float to_int() { return value; } } auto n = Number(); n.value = source; int target = n;"}) {
+					auto eng = make_engine();
+					eng->add_global("input", script_value(input, eng.get()));
+					auto result = eng->execute("var source = input; string message = \"\"; try { " + action +
+						" } catch (e) { message = e; } message;");
+					check_eq(expected, result.as_string());
+					check_eq(script_int{42}, eng->execute("40 + 2;").as_int());
+				}
+			}
+		});
+
+		test("numeric_failed_store_preserves_value", [this]() {
+			auto eng = make_engine();
+			check_eq(script_int{14}, eng->execute(R"(
+				var source = 1e100;
+				int target = 7;
+				class Box { int value = 7; }
+				auto box = Box();
+				try { target = source; } catch (e) {}
+				try { box.value = source; } catch (e) {}
+				target + box.value;
+			)").as_int());
+		});
+
+		test("numeric_random_seed_conversion_is_checked", [this]() {
+			auto eng = make_engine();
+			for (double input : {0x1p64, -1.0, 1e100, std::numeric_limits<double>::infinity(),
+				std::numeric_limits<double>::quiet_NaN()}) {
+				eng->add_global("seed_input", script_value(input, eng.get()));
+				check_eq(std::string("Cannot convert float to integer: non-finite or out of range"), eng->execute(R"(
+					string message = "";
+					try { math::random_seed(seed_input); } catch (e) { message = e; }
+					message;
+				)").as_string());
+			}
+			for (double input : {-0.5, 0.0, 42.75, 0x1p63, std::nextafter(0x1p64, 0.0)}) {
+				eng->add_global("seed_input", script_value(input, eng.get()));
+				eng->add_global("integer_seed", script_value(static_cast<script_int>(static_cast<uint64_t>(input)), eng.get()));
+				check(eng->execute(R"(
+					math::random_seed(integer_seed); auto expected = math::random();
+					math::random_seed(seed_input); math::random() == expected;
+				)").as_bool());
+			}
+		});
+
 		test("saved_destructuring_rejects_missing_slots", [this]() {
 			auto eng = make_engine();
 			const source_location loc{};

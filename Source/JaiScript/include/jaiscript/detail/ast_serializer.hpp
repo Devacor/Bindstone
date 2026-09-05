@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 12;   // 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 13;   // 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -394,9 +394,13 @@ namespace jai::detail {
                 }
                 case node_type::parallel_for_stmt: {
                     auto* s = static_cast<const parallel_for_stmt*>(n);
-                    parameters(std::vector<parameter>{ s->loop_param });
+                    std::vector<parameter> all{ s->loop_param };
+                    all.insert(all.end(), s->extra_params.begin(), s->extra_params.end());
+                    parameters(all);
                     varint(s->local_count);
                     node(s->container.get());
+                    varint(s->extra_containers.size());
+                    for (const auto& c : s->extra_containers) node(c.get());
                     node(s->body.get());
                     break;
                 }
@@ -1042,11 +1046,15 @@ namespace jai::detail {
                 }
                 case node_type::parallel_for_stmt: {
                     auto params = parameters();
-                    if (params.size() != 1) jaibite_fail("parallel_for_stmt parameter count");
+                    if (params.empty()) jaibite_fail("parallel_for_stmt parameter count");
                     size_t locals = size_t(varint());
                     auto cont = expr_req();
+                    auto extras = expr_list();
+                    if (extras.size() + 1 != params.size()) jaibite_fail("parallel_for_stmt zip arity");
                     auto body = stmt_req();
                     auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
+                    s->extra_params.assign(params.begin() + 1, params.end());
+                    s->extra_containers = std::move(extras);
                     s->local_count = locals;
                     result = s;
                     break;

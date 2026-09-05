@@ -163,6 +163,20 @@ everything that lived). Transform over 40k Vec3 (`v.x * v.y`): 25 -> 2-3 ms per 
 against 33 serial; over the deep node shape 241 -> 86 against 252. Not yet admitted:
 constructing objects inside a body and returning an object from fn (the 'structs out' pass).
 
+**The zip form.** `parallel_for (auto& v, auto& o : vecs, outs) { o.x = v.x * v.y; }` walks
+further arrays of the same length in lockstep: thread n owns segment n of every array, so the
+pre-allocated output struct is written in place - no construction, no result marshalling, no
+registry (the emitter pattern; Dev: `outArr[n*x] = result`, which the cursor IS). Each further
+array is proven exclusive like the range (whole reach: the body may write anything through its
+loop variable; a typed primitive kind is demoted like the range, an object kind addressed in
+place), gets its own chunk cursor, and the one advance opcode steps every cursor. Arrays of
+different length, the range itself, or a non-array are load-time errors
+(`parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same
+length)`). A by-value loop variable keeps its copy per iteration unless the body only reads (the
+in-place rule above, decided jointly for all loop variables). 40k Vec3 in, 40k Vec3 out (three
+field writes): 4-5 ms per region against 34 serial; a float output 2 ms against the transform's
+3 and 38 serial. jaibite 13 carries the extra loop variables and arrays.
+
 **Body control flow.** The body is the chunk loop's body: a top-level `continue` reaches
 the loop's advance on its own and a top-level `return` (any value) is rewritten to `continue`
 once, at body-function creation - both mean the next element on both backends; a loop-level

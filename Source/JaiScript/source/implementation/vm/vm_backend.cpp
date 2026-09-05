@@ -10127,9 +10127,12 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_parallel_for(frame& f, const vm_instruction& ins) {
 	auto* stmt = static_cast<parallel_for_stmt*>(f.code->nodes[ins.a].get());
-	script_value container = std::move(stack_.back());
-	stack_.pop_back();
-	return vm_check(detail::run_parallel_for(*engine_, stmt, container, environment_));
+	const size_t arity = ins.b == k_invalid_u32 || ins.b == 0 ? 1 : ins.b;   // zip: the containers sit on the stack left to right
+	std::vector<script_value> containers;
+	containers.reserve(arity);
+	for (size_t k = stack_.size() - arity; k < stack_.size(); ++k) { containers.push_back(std::move(stack_[k])); }
+	for (size_t k = 0; k < arity; ++k) { stack_.pop_back(); }
+	return vm_check(detail::run_parallel_for(*engine_, stmt, containers, environment_));
 }
 
 op_status vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {
@@ -12462,33 +12465,33 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
 			case opcode::op_parallel_advance: {
-				if (!parallel_cursor_ || stack_.empty()) {
+				if (!parallel_cursors_ || stack_.empty()) {
 					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 						std::string_view("__jai_parallel_advance is only valid inside a parallel_for chunk")));
 					break;
 				}
-				parallel_cursor_->element_cursor_advance();
+				for (auto& cursor : *parallel_cursors_) { cursor.element_cursor_advance(); }   // the zip's arrays step together
 				script_value& counter = stack_.back();
 				counter = script_value(counter.deref().as_int() + 1, engine_);
 				break;
 			}
 			case opcode::op_parallel_element:
-				if (!parallel_cursor_) {
+				if (!parallel_cursors_ || ins.a >= parallel_cursors_->size()) {
 					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 						std::string_view("__jai_parallel_element is only valid inside a parallel_for chunk")));
 					break;
 				}
-				stack_.push_back(*parallel_cursor_);
+				stack_.push_back((*parallel_cursors_)[ins.a]);
 				break;
 			case opcode::op_parallel_emit: {
-				if (!parallel_cursor_ || !parallel_emit_ || stack_.empty()) {
+				if (!parallel_cursors_ || parallel_cursors_->empty() || !parallel_emit_ || stack_.empty()) {
 					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 						std::string_view("__jai_parallel_emit is only valid inside a parallel_transform chunk")));
 					break;
 				}
 				script_value produced = std::move(stack_.back());
 				stack_.pop_back();
-				VM_TRY_OP(parallel_emit_(parallel_emit_ctx_, std::move(produced), parallel_cursor_->element_cursor_index()));
+				VM_TRY_OP(parallel_emit_(parallel_emit_ctx_, std::move(produced), parallel_cursors_->front().element_cursor_index()));
 				stack_.push_back(make_null());
 				break;
 			}

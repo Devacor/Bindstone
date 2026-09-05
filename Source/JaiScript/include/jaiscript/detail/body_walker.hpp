@@ -130,6 +130,7 @@ namespace jai::detail {
 				// them through the provisioned env); the loop variable is body-local.
 				auto* pf = static_cast<parallel_for_stmt*>(s.get());
 				if (on_declared && pf->loop_param.symbol_id != UINT64_MAX) on_declared(pf->loop_param.symbol_id);
+				for (const auto& extra : pf->extra_params) { if (on_declared && extra.symbol_id != UINT64_MAX) on_declared(extra.symbol_id); }
 				expr(pf->container);
 				stmt(pf->body);
 				return;

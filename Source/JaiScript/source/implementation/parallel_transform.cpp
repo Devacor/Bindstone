@@ -79,7 +79,7 @@ namespace jai::detail {
 		// Instances this worker constructed or copied during the region (pool workers only;
 		// registered by the join, expired entries skipped)
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
-		std::optional<script_value> cursor;
+		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value>* transform_out = nullptr;   // parallel_transform: the pre-sized output (workers write disjoint indices)
 		std::string error_text;                                // owns a sink error's text for the region
 		// Live input vector (Dev ruling 2026-07-09 "safe AND free"): workers read the
@@ -443,7 +443,13 @@ namespace {
 		// (capture classification cannot provision objects). Applies to the whole call
 		// graph: helper functions do member work on their own params.
 		bool inplace_root = false;
-		uint64_t element_symbol = UINT64_MAX;   // the unary body's element parameter / loop variable
+		uint64_t element_symbol = UINT64_MAX;   // the body's first element parameter / loop variable
+		std::vector<uint64_t> element_symbols;   // every element root: the zip's further loop variables too
+		bool is_element_symbol(uint64_t id) const {
+			if (id == element_symbol) { return true; }
+			for (uint64_t e : element_symbols) { if (e == id) { return true; } }
+			return false;
+		}
 		const char* prefix = "parallel_transform";
 
 		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
@@ -498,7 +504,7 @@ namespace {
 				}
 				break;
 			}
-			return cur && cur->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(cur)->symbol_id == element_symbol;
+			return cur && cur->get_type() == node_type::identifier_expr && is_element_symbol(static_cast<const identifier_expr*>(cur)->symbol_id);
 		}
 		// A chain terminal read as a value (copied: every handle below it) or replaced (the old
 		// subtree released): its whole subtree is reachable, not just the members named below it
@@ -614,7 +620,7 @@ namespace {
 				return fail(call_node, "fn has no body known at admission time");
 			}
 			if (param_mode != root_param::none) {
-				if (fn->parameters().size() != 1) {
+				if (fn->parameters().empty() || (param_mode == root_param::unary_value && fn->parameters().size() != 1)) {
 					return fail(fn->body.get(), "fn must take exactly one parameter");
 				}
 				if (param_mode == root_param::unary_value && fn->parameters()[0].is_reference) {
@@ -641,7 +647,9 @@ namespace {
 			for (const auto& p : fn->parameters()) {
 				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
 				declare(p.symbol_id);
-				if (param_mode != root_param::none && element_symbol == UINT64_MAX) { element_symbol = p.symbol_id; }
+				if (param_mode != root_param::none) {
+					if (element_symbol == UINT64_MAX) { element_symbol = p.symbol_id; } else { element_symbols.push_back(p.symbol_id); }
+				}
 				collect_type(p.type);
 				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
 			}
@@ -875,7 +883,7 @@ namespace {
 				return true;
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
-				if (n->symbol_id == element_symbol) { note_element_whole(); }
+				if (is_element_symbol(n->symbol_id)) { note_element_whole(); }
 				if (is_local(n->symbol_id)) { return true; }
 				if (self_field(n->symbol_id)) { return true; }   // element-rooted field read
 				if (method_class && method_class->defines_method(n->symbol_id)) {
@@ -967,7 +975,7 @@ namespace {
 			switch (t->get_type()) {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
-				if (n->symbol_id == element_symbol) { note_element_whole(); }   // replaced: the old element releases every handle
+				if (is_element_symbol(n->symbol_id)) { note_element_whole(); }   // replaced: the old element releases every handle
 				if (is_local(n->symbol_id)) { return true; }
 				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
@@ -1281,14 +1289,27 @@ namespace {
 	// vm, a native on the interpreter), so a `continue` in the body reaches it through the
 	// for-update. The placeholder call is replaced by the body block; __n/__k are renumbered
 	// past the body's frame slots.
-	constexpr const char* k_parallel_chunk_inline_ref =
-		"function __jai_parallel_chunk(var& __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_placeholder(); } }";
-	constexpr const char* k_parallel_chunk_inline_val =
-		"function __jai_parallel_chunk(var __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __c = __jai_parallel_element(); __jai_parallel_placeholder(); } }";
-	// Call mode (a `return` inside a nested loop must still mean the next element): the body
-	// runs as a function per element, bound to the cursor like the element itself
-	constexpr const char* k_parallel_chunk_call =
-		"function __jai_parallel_chunk(var& __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_body(__c); } }";
+	// Built per arity (the zip walks m arrays with m loop variables): params `var& __c0 .. __c{m-1},
+	// int __n`; a by-value loop variable that keeps its copy gets `__cj = __jai_parallel_element(j);`
+	// at the top of each iteration; inline mode grafts the body in place of the placeholder, call
+	// mode calls the body function per element (a `return` inside a nested loop keeps its meaning).
+	std::string chunk_skeleton_source(size_t arity, const std::vector<bool>& copy_per_iteration, bool call_mode) {
+		std::string src = "function __jai_parallel_chunk(";
+		for (size_t j = 0; j < arity; ++j) { src += "var& __c" + std::to_string(j) + ", "; }
+		src += "int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { ";
+		if (call_mode) {
+			src += "__jai_parallel_body(";
+			for (size_t j = 0; j < arity; ++j) { src += (j ? ", __c" : "__c") + std::to_string(j); }
+			src += "); ";
+		} else {
+			for (size_t j = 0; j < arity; ++j) {
+				if (copy_per_iteration[j]) { src += "__c" + std::to_string(j) + " = __jai_parallel_element(" + std::to_string(j) + "); "; }
+			}
+			src += "__jai_parallel_placeholder(); ";
+		}
+		src += "} }";
+		return src;
+	}
 
 	// parallel_transform's chunk loop: fn per element in-loop (its by-value parameter binds the
 	// element in place when the admission proved it read-only, else copies as it always did),
@@ -1308,33 +1329,38 @@ namespace {
 		return std::static_pointer_cast<function_decl>(decls.value().front());
 	}
 
-	// Renumber the skeleton's own slots (__n, __k) past the body's frame (by name: the parser's
-	// numbering is not assumed) through the for header's expressions
-	// c_name/c_sym: the loop variable's permanent (symbolizer-backed) name and symbol; the
-	// skeleton's `__c` becomes it (the vm resolves frame locals by declared name)
-	void renumber_chunk_slot(expression_ptr& e, size_t n_slot, size_t k_slot, std::string_view c_name = {}, uint64_t c_sym = UINT64_MAX) {
+	// Renumber the skeleton's own slots (__n, __k) past the body's frame and rename __cj to loop
+	// parameter j (its permanent name and symbol; the vm resolves frame locals by declared name)
+	struct chunk_names {
+		std::vector<std::pair<std::string_view, uint64_t>> params;   // (name, symbol) per loop variable
+		size_t n_slot = 0, k_slot = 0;
+	};
+	void renumber_chunk_slot(expression_ptr& e, const chunk_names& names) {
 		if (!e) { return; }
 		switch (e->get_type()) {
 		case node_type::identifier_expr: {
 			auto* id = static_cast<identifier_expr*>(e.get());
-			if (id->name == "__n") { id->slot_index = n_slot; }
-			else if (id->name == "__k") { id->slot_index = k_slot; }
-			else if (id->name == "__c" && c_sym != UINT64_MAX) { id->name = c_name; id->symbol_id = c_sym; id->slot_index = 0; }
+			if (id->name == "__n") { id->slot_index = names.n_slot; }
+			else if (id->name == "__k") { id->slot_index = names.k_slot; }
+			else if (id->name.size() > 3 && id->name.substr(0, 3) == "__c") {
+				const size_t j = static_cast<size_t>(std::stoul(std::string(id->name.substr(3))));
+				if (j < names.params.size()) { id->name = names.params[j].first; id->symbol_id = names.params[j].second; id->slot_index = j; }
+			}
 			return;
 		}
 		case node_type::binary_expr: {
 			auto* b = static_cast<binary_expr*>(e.get());
-			renumber_chunk_slot(b->left, n_slot, k_slot, c_name, c_sym); renumber_chunk_slot(b->right, n_slot, k_slot, c_name, c_sym);
+			renumber_chunk_slot(b->left, names); renumber_chunk_slot(b->right, names);
 			return;
 		}
 		case node_type::assignment_expr: {
 			auto* a = static_cast<assignment_expr*>(e.get());
-			renumber_chunk_slot(a->target, n_slot, k_slot, c_name, c_sym); renumber_chunk_slot(a->value, n_slot, k_slot, c_name, c_sym);
+			renumber_chunk_slot(a->target, names); renumber_chunk_slot(a->value, names);
 			return;
 		}
 		case node_type::call_expr: {
 			auto* c = static_cast<call_expr*>(e.get());
-			for (auto& arg : c->arguments) { renumber_chunk_slot(arg, n_slot, k_slot, c_name, c_sym); }
+			for (auto& arg : c->arguments) { renumber_chunk_slot(arg, names); }
 			return;
 		}
 		default:
@@ -1348,22 +1374,28 @@ namespace {
 	const std::shared_ptr<function_decl>& build_chunk_wrapper(engine& eng, parallel_for_stmt* stmt, const parallel_admission& adm) {
 		if (stmt->chunk_decl_cache) { return stmt->chunk_decl_cache; }
 		const bool inline_mode = stmt->chunk_mode == 1;
-		// A by-value loop variable the body only reads binds the element in place (same reads,
+		std::vector<parameter> loop_params;
+		loop_params.push_back(stmt->loop_param);
+		for (const auto& extra : stmt->extra_params) { loop_params.push_back(extra); }
+		const size_t arity = loop_params.size();
+		// A by-value loop variable the body only reads binds its element in place (same reads,
 		// no per-element copy); one it writes or uses whole keeps the copy
-		const bool bind_in_place = stmt->loop_param.is_reference || (!adm.element_reach_all && !adm.element_mutated);
-		const char* source = !inline_mode ? k_parallel_chunk_call
-		                   : bind_in_place ? k_parallel_chunk_inline_ref : k_parallel_chunk_inline_val;
-		auto decl = parse_chunk_skeleton(eng, source);
+		const bool reads_only = !adm.element_reach_all && !adm.element_mutated;
+		std::vector<bool> copy_per_iteration(arity, false);
+		for (size_t j = 0; j < arity; ++j) { copy_per_iteration[j] = !loop_params[j].is_reference && !reads_only; }
+		auto decl = parse_chunk_skeleton(eng, chunk_skeleton_source(arity, copy_per_iteration, !inline_mode).c_str());
+		chunk_names names;
+		names.n_slot = stmt->local_count; names.k_slot = stmt->local_count + 1;
+		for (size_t j = 0; j < arity; ++j) {
+			parameter lp = loop_params[j];
+			lp.slot_index = j;
+			if (lp.symbol_id == UINT64_MAX) { lp.symbol_id = eng.symbolize(lp.name); }
+			if (inline_mode) { lp.is_reference = lp.is_reference || reads_only; }
+			names.params.emplace_back(eng.get_symbolizer()->get_string(lp.symbol_id), lp.symbol_id);
+			if (inline_mode) { decl->parameters[j] = lp; }
+		}
 		if (inline_mode) {
-			const size_t n_slot = stmt->local_count, k_slot = stmt->local_count + 1;
-			parameter loop_param = stmt->loop_param;
-			loop_param.slot_index = 0;
-			loop_param.is_reference = bind_in_place;
-			if (loop_param.symbol_id == UINT64_MAX) { loop_param.symbol_id = eng.symbolize(loop_param.name); }
-			const uint64_t c_sym = loop_param.symbol_id;
-			const std::string_view c_name = eng.get_symbolizer()->get_string(c_sym);
-			decl->parameters[0] = loop_param;
-			decl->parameters[1].slot_index = n_slot;
+			decl->parameters[arity].slot_index = names.n_slot;
 			auto* body_block = static_cast<block_stmt*>(decl->body.get());
 			for (auto& d : body_block->declarations) {
 				if (d->get_type() != node_type::statement_decl) { continue; }
@@ -1371,16 +1403,16 @@ namespace {
 				if (!st || st->get_type() != node_type::for_stmt) { continue; }
 				auto* loop = static_cast<for_stmt*>(st.get());
 				if (loop->initializer && loop->initializer->get_type() == node_type::variable_decl) {
-					static_cast<variable_decl*>(loop->initializer.get())->slot_index = k_slot;
+					static_cast<variable_decl*>(loop->initializer.get())->slot_index = names.k_slot;
 				}
-				renumber_chunk_slot(loop->condition, n_slot, k_slot, c_name, c_sym);
-				renumber_chunk_slot(loop->update, n_slot, k_slot, c_name, c_sym);
+				renumber_chunk_slot(loop->condition, names);
+				renumber_chunk_slot(loop->update, names);
 				auto* inner = static_cast<block_stmt*>(loop->body.get());
 				for (auto& bd : inner->declarations) {
 					if (bd->get_type() != node_type::expression_decl) { continue; }
 					auto* ed = static_cast<expression_decl*>(bd.get());
 					if (ed->expression && ed->expression->get_type() == node_type::assignment_expr) {
-						renumber_chunk_slot(ed->expression, n_slot, k_slot, c_name, c_sym);   // `__c = __jai_parallel_element()` -> the loop variable
+						renumber_chunk_slot(ed->expression, names);   // `__cj = __jai_parallel_element(j)` -> the loop variable
 						continue;
 					}
 					if (ed->expression && ed->expression->get_type() == node_type::call_expr) {
@@ -1500,26 +1532,27 @@ namespace {
 			parallel_worker_slot* slot = ctx.get();   // slots live in the pool's unique_ptrs: stable
 			ctx->root_env->define(eng.symbolize("__jai_parallel_emit"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-					if (args.empty() || !slot->cursor) {
+					if (args.empty() || slot->cursors.empty()) {
 						return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 							std::string_view("__jai_parallel_emit is only valid inside a parallel_transform chunk"));
 					}
 					script_value produced = args[0];
-					auto landed = transform_emit_sink(slot, std::move(produced), slot->cursor->element_cursor_index());
+					auto landed = transform_emit_sink(slot, std::move(produced), slot->cursors.front().element_cursor_index());
 					if (!landed) { return checked_result<script_value>(landed.error(), std::string_view(slot->error_text)); }
 					return script_value(std::monostate{}, eng_ptr);
 				}, &eng));
 			// The interpreter calls these natives; the vm compiles the names to opcodes
 			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-					if (slot->cursor) { slot->cursor->element_cursor_advance(); }
+					for (auto& cursor : slot->cursors) { cursor.element_cursor_advance(); }
 					const script_int k = args.empty() ? 0 : args[0].deref().as_int();
 					return script_value(k + 1, eng_ptr);
 				}, &eng));
 			ctx->root_env->define(eng.symbolize("__jai_parallel_element"),
-				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>&) -> checked_result<script_value> {
-					if (!slot->cursor) { return script_value(std::monostate{}, eng_ptr); }
-					return *slot->cursor;
+				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+					const size_t which = args.empty() ? 0 : static_cast<size_t>(args[0].deref().as_int());
+					if (which >= slot->cursors.size()) { return script_value(std::monostate{}, eng_ptr); }
+					return slot->cursors[which];
 				}, &eng));
 			auto chunk_fn = std::make_shared<script_defined_function>(
 				wrapper->name, std::vector<parameter>(wrapper->parameters), wrapper->return_type,
@@ -1542,12 +1575,13 @@ namespace {
 		// ONE script entry per chunk: the wrapper loops in-script, calling the body per element
 		// with the chunk's cursor reference and advancing it through the worker's intrinsic. The
 		// failing element, when any, is the cursor's index (the advance runs after a body call).
-		ctx.cursor.emplace(std::move(ctx.element_refs[0]));
-		if (ctx.vm) { ctx.vm->set_parallel_cursor(&*ctx.cursor); }
-		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursor(nullptr); } } } cursor_guard{ ctx };
-		auto failing = [&ctx]() { const size_t i = ctx.cursor->element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
+		ctx.cursors = std::move(ctx.element_refs);   // [0] = the range, then the zip's arrays
+		ctx.element_refs.clear();
+		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); }
+		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursors(nullptr); } } } cursor_guard{ ctx };
+		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
 		std::vector<script_value> call_args;
-		call_args.push_back(*ctx.cursor);
+		for (const auto& cursor : ctx.cursors) { call_args.push_back(cursor); }
 		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
 		try {
 			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
@@ -1572,12 +1606,13 @@ namespace {
 	void run_worker(parallel_worker_slot& ctx, std::vector<script_value>& out, engine& eng) {
 		(void)out;
 		if (ctx.end <= ctx.begin || ctx.element_refs.empty()) { return; }
-		ctx.cursor.emplace(std::move(ctx.element_refs[0]));
-		if (ctx.vm) { ctx.vm->set_parallel_cursor(&*ctx.cursor); ctx.vm->set_parallel_emit(&transform_emit_sink, &ctx); }
-		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursor(nullptr); c.vm->set_parallel_emit(nullptr, nullptr); } } } cursor_guard{ ctx };
-		auto failing = [&ctx]() { const size_t i = ctx.cursor->element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
+		ctx.cursors = std::move(ctx.element_refs);
+		ctx.element_refs.clear();
+		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); ctx.vm->set_parallel_emit(&transform_emit_sink, &ctx); }
+		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursors(nullptr); c.vm->set_parallel_emit(nullptr, nullptr); } } } cursor_guard{ ctx };
+		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
 		std::vector<script_value> call_args;
-		call_args.push_back(*ctx.cursor);
+		call_args.push_back(ctx.cursors.front());
 		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
 		try {
 			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
@@ -2544,7 +2579,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 				slot->raw_input = nullptr;   // points into this call's locals - never dormant
 				slot->typed_input = nullptr;
 				slot->element_refs.clear();
-				slot->cursor.reset();
+				slot->cursors.clear();
 				slot->transform_out = nullptr;   // points at this call's output - never dormant
 			}
 		}
@@ -2775,8 +2810,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 // element reference per iteration (single-threaded; holders pin the live container),
 // and workers run the by-ref body over their chunk with no output array.
 checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
-                                      const script_value& container,
+                                      std::vector<script_value>& containers,
                                       const std::shared_ptr<environment>& capture_env) {
+	const script_value& container = containers.front();
 	parallel_engine_state& state = eng.parallel_state();
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t0 = __rdtsc();
@@ -2812,8 +2848,10 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		if (!body_block) {
 			return usage("parallel_for: body is not a block (internal)");
 		}
+		std::vector<parameter> loop_params{ stmt->loop_param };
+		for (const auto& extra : stmt->extra_params) { loop_params.push_back(extra); }
 		stmt->body_fn_cache = std::make_shared<script_defined_function>(
-			std::string_view("<parallel_for>"), std::vector<parameter>{ stmt->loop_param },
+			std::string_view("<parallel_for>"), std::move(loop_params),
 			type_info_ptr(nullptr), std::move(body_block), nullptr, stmt->local_count);
 	}
 	const std::shared_ptr<script_defined_function>& body_fn = stmt->body_fn_cache;
@@ -2932,6 +2970,36 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	}
 	const std::vector<type_info*>& tags = proof.tags;
 	std::vector<const class_definition*>& element_classes = proof.element_classes;
+	// The zip's further arrays: arrays of the same length, each proven exclusive like the range
+	// (whole reach: the body may write anything through their loop variables), typed primitive
+	// kinds demoted like the range, object kinds addressed in place
+	std::vector<script_array*> zip_nodes;
+	std::vector<type_info*> zip_tags;
+	for (size_t j = 1; j < containers.size(); ++j) {
+		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+		if (!zv.is_array()) {
+			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " is not an array");
+		}
+		script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
+		if (znode->size() != n) {
+			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
+			             " elements, the range has " + std::to_string(n) + " (zipped arrays must have the same length)");
+		}
+		if (znode == &node) {
+			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " is the range itself");
+		}
+		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
+		element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, "parallel_for");
+		if (zproof.failed != SIZE_MAX) {
+			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
+			             (zproof.what.empty() ? std::string(" cannot be mutated in place") : ": " + zproof.what));
+		}
+		zip_tags.insert(zip_tags.end(), zproof.tags.begin(), zproof.tags.end());
+		for (const class_definition* cd : zproof.element_classes) {
+			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+		}
+		zip_nodes.push_back(znode);
+	}
 	if (n == 0) {
 		return {};
 	}
@@ -3006,7 +3074,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 				}
 				slot->capture_name_ids.clear();
 				slot->element_refs.clear();
-				slot->cursor.reset();
+				slot->cursors.clear();
 				slot->raw_input = nullptr;
 				slot->typed_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
@@ -3025,6 +3093,11 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
 	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
 	value_types.insert(value_types.end(), tags.begin(), tags.end());   // subclass slots carry their own tags
+	value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
+	for (size_t j = 1; j < containers.size(); ++j) {
+		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+		if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
+	}
 
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_norm1 = __rdtsc();
@@ -3053,6 +3126,12 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		(void)by_ref_element; (void)typed_obj;
 		if (slot->end > slot->begin) {
 			slot->element_refs.push_back(script_value::make_element_reference(array_handle, slot->begin, &eng, element_type));
+			for (size_t j = 0; j < zip_nodes.size(); ++j) {
+				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
+				auto& zhandle = zc.unchecked_get_array_storage();
+				type_info_ptr zet = zc.get_type_info().get() ? zc.get_type_info()->element_type() : type_info_ptr(nullptr);
+				slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
+			}
 		}
 		slot->capture_name_ids.clear();
 		bool any_snapshot_miss = false;

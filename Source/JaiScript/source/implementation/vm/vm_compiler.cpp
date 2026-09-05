@@ -885,7 +885,8 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		// (the body never compiles into THIS chunk - workers compile their own copies)
 		auto* pf = static_cast<parallel_for_stmt*>(stmt.get());
 		compile_expression(pf->container);
-		emit(opcode::op_parallel_for, add_node(stmt));
+		for (const auto& extra : pf->extra_containers) { compile_expression(extra); }   // zip: left to right
+		emit(opcode::op_parallel_for, add_node(stmt), static_cast<uint32_t>(pf->arity()));
 		return;
 	}
 	case node_type::fallthrough_stmt:
@@ -2196,8 +2197,13 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			emit(opcode::op_parallel_advance);
 			return;
 		}
-		if (ident->name == "__jai_parallel_element" && expr->arguments.empty()) {
-			emit(opcode::op_parallel_element);
+		if (ident->name == "__jai_parallel_element" && expr->arguments.size() <= 1) {
+			uint32_t which = 0;   // the zip array index, a literal in the generated skeleton
+			if (!expr->arguments.empty() && expr->arguments[0]->get_type() == node_type::literal_expr) {
+				const auto& lit = static_cast<const literal_expr*>(expr->arguments[0].get())->value;
+				if (lit.is_int()) { which = static_cast<uint32_t>(lit.unchecked_as_int()); }
+			}
+			emit(opcode::op_parallel_element, which);
 			return;
 		}
 		if (ident->name == "__jai_parallel_emit" && expr->arguments.size() == 1) {

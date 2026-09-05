@@ -286,6 +286,7 @@ statement = expressionStatement
           | whileStatement
           | forStatement
           | forRangeStatement
+          | parallelForStatement
           | switchStatement
           | returnStatement
           | breakStatement
@@ -305,6 +306,11 @@ whileStatement = "while" "(" expression ")" statement
 forStatement = "for" "(" (variableDeclaration | expression)? ";" expression? ";" expression? ")" statement
 
 forRangeStatement = "for" "(" "const"? type "&"? IDENTIFIER ":" expression ")" statement
+
+// One loop variable per array, arrays of the SAME length walked in lockstep, the body a
+// fresh function scope (docs/parallel_design.md): `parallel_for (auto& v, auto& o : vecs, outs)`
+parallelForStatement = "parallel_for" "(" loopVariable ("," loopVariable)* ":" expression ("," expression)* ")" blockStatement
+loopVariable = "const"? type "&"? IDENTIFIER
 
 switchStatement = "switch" "(" expression ")" "{" caseClause* "}"
 
@@ -904,10 +910,13 @@ string healthLevel = health > 75 ? "healthy" :
     `+=` use (`docs/invariants.md` 11); possible future work. `char`
     supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
     char-vs-int ordering is deliberately an error (no silent promotion).
-15. **Parallel Builtins (v0.5, no new syntax)**: `parallel_transform(arr, fn)` and
+15. **Parallel Builtins and the `parallel_for` statement**: `parallel_transform(arr, fn)` and
     `parallel_transform(arr, fn, weight_fn)` are ordinary builtin CALLS — the optional
-    weight hint is simply the third argument (the `parallel_for` keyword and its hint
-    syntax are future work; see docs/parallel_design.md). `fn` must be a script-defined
+    weight hint is simply the third argument. `parallel_for (auto& x : arr) { ... }` iterates
+    an array in place (each thread a contiguous segment; `continue`/`return` = next element,
+    a loop-level `break` is rejected), and the zip form `parallel_for (auto& x, auto& o : xs, outs)`
+    walks further arrays of the same length in lockstep - the pre-allocated output written
+    in place (docs/parallel_design.md). `fn` must be a script-defined
     function of one value parameter whose body passes the parallel admission walk
     (no unwhitelisted host calls, no lambdas/classes/yield); elements and results must
     be value-semantic (null/int/float/string/char/bool + arrays/maps of the same).

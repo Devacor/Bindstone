@@ -54,11 +54,7 @@ function game_root() -> string {
 // Where downloads, the audio cache, saves and demos go: the game folder when a file can be
 // created there, the per-user data folder (app_data_dir) for a read-only install
 function data_root() -> string {
-	if (DATA_ROOT == "") {
-		string probe = game_root() + "/wads/.writable";
-		DATA_ROOT = make_dirs(game_root() + "/wads") && write_file(probe, "") ? game_root() : app_data_dir("JaiDOOM");
-		delete_file(probe);
-	}
+	if (DATA_ROOT == "") { DATA_ROOT = writable_dir(game_root() + "/wads") ? game_root() : app_data_dir("JaiDOOM"); }
 	return DATA_ROOT;
 }
 function wad_dir() -> string { return data_root() + "/wads/"; }

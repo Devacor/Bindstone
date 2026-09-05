@@ -379,6 +379,18 @@ namespace jai {
         // first file execute; a nested execute from inside a running script does not replace it.
         std::string root_source_file() const;
 
+        // Per-user folders for an app's data and cache, the platform's convention: %LOCALAPPDATA%/name
+        // (cache below it), ~/Library/Application Support/name and ~/Library/Caches/name, $XDG_DATA_HOME
+        // and $XDG_CACHE_HOME (~/.local/share, ~/.cache)/name. Queries only, nothing is created. A host
+        // on a platform the defaults do not know (Android) installs its own resolvers; the script
+        // builtins app_data_dir/app_cache_dir answer through whichever is installed.
+        void app_directory_resolvers(std::function<std::string(const std::string& app)> data,
+                                     std::function<std::string(const std::string& app)> cache);
+        std::string app_data_dir(const std::string& app) const;
+        std::string app_cache_dir(const std::string& app) const;
+        // The running executable, generic (forward-slash) spelling; empty when the platform cannot say
+        static std::string executable_path();
+
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {
@@ -984,6 +996,7 @@ namespace jai {
         std::unique_ptr<implementation> impl;
 
         size_t hot_reload_field_migrations_ = 0;
+        void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
 
         // Single post-parse execution pipeline shared by execute(string) and
@@ -1139,7 +1152,11 @@ namespace jai {
     // Resolve an include/import path against the engine's include paths. Shared by the
     // interpreter and vm backends (defined in interpreter.cpp) so path resolution stays
     // single-sourced.
-    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);
+    // One resolution ladder for include, import, the checker's closure gather and the
+    // resolve_path builtin: absolute as given; relative against from_file's folder, then the
+    // include paths in order, then the working directory. Canonical spelling on success.
+    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file);
+    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
 
     // typeid(engine) taken where engine is complete; archives compare context requests against it.
     std::type_index engine_context_type_index() noexcept;

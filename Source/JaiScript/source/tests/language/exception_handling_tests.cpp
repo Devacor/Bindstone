@@ -397,6 +397,56 @@ public:
             fs::remove_all(b, ec);
         });
 
+        test("import_resolves_from_the_importing_file_then_include_paths_then_cwd", [this]() {
+            // One ladder for import/include, the checker's closure gather and resolve_path: the
+            // importing file's folder first (a module imports its sibling by bare name), the
+            // include paths next (Bindstone's `Assets` rung), the working directory last.
+            namespace fs = std::filesystem;
+            fs::path dir = jai::foundry::test_temp_directory() / "jai_ladder";
+            fs::path inc = jai::foundry::test_temp_directory() / "jai_ladder_inc";
+            std::error_code ec;
+            fs::remove_all(dir, ec);
+            fs::remove_all(inc, ec);
+            fs::create_directories(dir / "lib");
+            fs::create_directories(inc);
+            std::ofstream(dir / "lib" / "helper.jai") << "var helper_home = current_script_dir();\nfunction helper_value() -> int { return 41; }\n";
+            std::ofstream(dir / "lib" / "shadow.jai") << "var shadow_lib = true;\n";
+            std::ofstream(dir / "shadow.jai") << "var shadow_root = true;\n";
+            std::ofstream(inc / "only.jai") << "function only_value() -> int { return 100; }\n";
+            std::ofstream(dir / "lib" / "a.jai") << "import \"helper.jai\";\nimport \"only.jai\";\nvar from_lib = resolve_path(\"shadow.jai\");\nfunction a_value() -> int { return helper_value() + only_value(); }\n";
+            std::ofstream(dir / "main.jai") << "import \"lib/a.jai\";\nvar v = a_value();\nvar from_root = resolve_path(\"shadow.jai\");\nvar found = resolve_path(\"lib/helper.jai\");\nvar missing = resolve_path(\"nope.jai\");\n";
+            auto engine = make_engine();
+            engine->add_include_path(dir.string());
+            engine->add_include_path(inc.string());
+            engine->execute_file((dir / "main.jai").string());
+            check_eq((int64_t)141, engine->execute("v").as_int());
+            auto norm = [](const std::string& p) { return fs::path(p).lexically_normal().generic_string(); };
+            check_eq(norm((dir / "lib" / "shadow.jai").string()), norm(engine->execute("from_lib").as_string()));
+            check_eq(norm((dir / "shadow.jai").string()), norm(engine->execute("from_root").as_string()));
+            check_eq(norm((dir / "lib" / "helper.jai").string()), norm(engine->execute("found").as_string()));
+            check_eq(std::string(), engine->execute("missing").as_string());
+            check_eq(norm((dir / "lib").string()), norm(engine->execute("helper_home").as_string()));
+            check_eq(norm((dir / "main.jai").string()), norm(engine->execute("root_script_path()").as_string()));
+            check_eq(norm(dir.string()), norm(engine->execute("root_script_dir()").as_string()));
+            check_true(!engine->execute("executable_dir()").as_string().empty());
+            check_true(engine->execute("bin_dir() == executable_dir()").as_bool());
+            check_eq(std::string("main.jai"), engine->execute("file_name(root_script_path())").as_string());
+            check_eq(norm(dir.string()), norm(engine->execute("parent_dir(root_script_path())").as_string()));
+            fs::remove_all(dir, ec);
+            fs::remove_all(inc, ec);
+        });
+
+        test("app_directories_answer_through_the_host_resolvers", [this]() {
+            auto engine = make_engine();
+            check_true(!engine->execute("app_data_dir(\"JaiTestApp\")").as_string().empty());
+            check_true(engine->execute("app_data_dir(\"JaiTestApp\").ends_with(\"JaiTestApp\")").as_bool());
+            check_true(!engine->execute("app_cache_dir(\"JaiTestApp\")").as_string().empty());
+            engine->app_directory_resolvers([](const std::string& app) { return "/sandbox/data/" + app; },
+                                            [](const std::string& app) { return "/sandbox/cache/" + app; });
+            check_eq(std::string("/sandbox/data/JaiTestApp"), engine->execute("app_data_dir(\"JaiTestApp\")").as_string());
+            check_eq(std::string("/sandbox/cache/JaiTestApp"), engine->execute("app_cache_dir(\"JaiTestApp\")").as_string());
+        });
+
         test("format_stack_trace_lists_frames", [this]() {
             auto engine = make_engine();
             try { engine->execute("auto f() { throw \"x\"; }\nf();\n"); } catch (...) {}

@@ -35,6 +35,12 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <climits>
+#else
+#include <unistd.h>
+#include <climits>
 #endif
 
 namespace jai {
@@ -633,6 +639,7 @@ struct engine::implementation {
     };
     struct script_cache_entry {
         std::vector<declaration_ptr> declarations;
+        std::string source_path;   // the spelling the unit was parsed under ("<script>" for raw content)
         std::shared_ptr<void> compiled;
         uint64_t epoch = 0;
         uint64_t last_used = 0;
@@ -749,11 +756,11 @@ struct engine::implementation {
     // skipped here and reported by the runtime exactly as before, when it executes. Every
     // resolved unit leaves a stamp (taken before the read, so a later edit shows as newer).
     void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
-                               std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps) {
+                               std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file) {
         for (const auto& path : paths) {
             closure_unit unit;
             try {
-                auto resolved = resolve_include_path(path, &self);
+                auto resolved = resolve_include_path(path, &self, from_file);
                 if (!resolved || !visited.insert(resolved.value()).second) { continue; }
                 unit.path = std::move(resolved.value());
                 closure_stamp stamp{unit.path, 0, 0};
@@ -774,8 +781,9 @@ struct engine::implementation {
             literal_unit_paths(unit.entry->declarations, nested);
             detail::collect_unit_names(unit.entry->declarations, program_names_);
             detail::collect_unit_classes(unit.entry->declarations, program_classes_);
+            std::string unit_path = unit.path;
             out.push_back(std::move(unit));
-            collect_closure_units(self, nested, visited, out, stamps);
+            collect_closure_units(self, nested, visited, out, stamps, unit_path);
         }
     }
 
@@ -838,7 +846,7 @@ struct engine::implementation {
                 detail::collect_unit_names(entry.declarations, program_names_);
                 detail::collect_unit_classes(entry.declarations, program_classes_);
                 std::unordered_set<std::string> visited;
-                collect_closure_units(self, roots, visited, closure, entry.closure_stamps);
+                collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path);
                 entry.checked = false;
             }
             entry.closure_epoch = check_surface_epoch_;
@@ -982,6 +990,7 @@ struct engine::implementation {
         }
         auto entry = std::make_shared<script_cache_entry>();
         entry->declarations = std::move(decls);
+        entry->source_path = sourcePath;
         entry->epoch = script_cache_epoch;
         entry->last_used = ++script_cache_clock;
         script_cache_node node;
@@ -1044,6 +1053,8 @@ struct engine::implementation {
     size_t jaibite_cache_write_failures_ = 0;
 
     std::string root_source_file_;   // engine::root_source_file
+    std::function<std::string(const std::string&)> app_data_resolver;    // engine::app_directory_resolvers
+    std::function<std::string(const std::string&)> app_cache_resolver;
     void note_root_source(const std::string& path) {
         if (path.empty() || path == "<script>") return;
         if (!backend || !backend->is_executing()) root_source_file_ = path;
@@ -1597,6 +1608,13 @@ void engine::initialize_engine_reference() {
         }
         return script_value(detail::same_object(args[0], args[1]), engine_weak);
     });
+
+    // Locations (docs/static_checking.md "Files and locations"): where the running code, the
+    // program's root file and the executable are, and the same resolution ladder import walks.
+    // Engine-core so a program answers the same on every host; the file IO that USES a path
+    // (read_file, write_file, list_dir) stays the host's to grant. Defined after the impl so
+    // the helpers above this constructor's TU position are visible: see location builtins below.
+    register_location_builtins();
 
     // extend(object, Class): a script class layer over a C++ object, or a re-derived script
     // instance (docs/script_extensible.md). Engine-core so the language feature exists on
@@ -3025,6 +3043,152 @@ std::string engine::current_source_file() const {
 }
 
 std::string engine::root_source_file() const { return impl->root_source_file_; }
+
+namespace {
+    // Absolute, forward-slash, no trailing separator: the one spelling every location
+    // builtin answers with
+    std::string location_spelling(std::filesystem::path p) {
+        std::error_code ec;
+        std::filesystem::path canon = std::filesystem::weakly_canonical(p, ec);
+        if (!ec && !canon.empty()) p = canon;
+        std::string s = p.lexically_normal().generic_string();
+        while (s.size() > 1 && s.back() == '/' && !(s.size() == 3 && s[1] == ':')) s.pop_back();
+        return s;
+    }
+    std::string env_value(const char* name) {
+        const char* v = std::getenv(name);
+        return v && *v ? std::string(v) : std::string();
+    }
+    std::string home_directory() {
+        std::string h = env_value("HOME");
+#ifdef _WIN32
+        if (h.empty()) h = env_value("USERPROFILE");
+#endif
+        return h;
+    }
+    std::string default_app_data_dir(const std::string& app) {
+        namespace fs = std::filesystem;
+#ifdef _WIN32
+        std::string local = env_value("LOCALAPPDATA");
+        if (local.empty()) local = env_value("APPDATA");
+        return location_spelling((local.empty() ? fs::path(home_directory()) : fs::path(local)) / app);
+#elif defined(__APPLE__)
+        return location_spelling(fs::path(home_directory()) / "Library" / "Application Support" / app);
+#else
+        std::string xdg = env_value("XDG_DATA_HOME");
+        return location_spelling((xdg.empty() ? fs::path(home_directory()) / ".local" / "share" : fs::path(xdg)) / app);
+#endif
+    }
+    std::string default_app_cache_dir(const std::string& app) {
+        namespace fs = std::filesystem;
+#ifdef _WIN32
+        return location_spelling(fs::path(default_app_data_dir(app)) / "cache");
+#elif defined(__APPLE__)
+        return location_spelling(fs::path(home_directory()) / "Library" / "Caches" / app);
+#else
+        std::string xdg = env_value("XDG_CACHE_HOME");
+        return location_spelling((xdg.empty() ? fs::path(home_directory()) / ".cache" : fs::path(xdg)) / app);
+#endif
+    }
+    std::string working_directory() {
+        std::error_code ec;
+        return location_spelling(std::filesystem::current_path(ec));
+    }
+}
+
+std::string engine::executable_path() {
+#ifdef _WIN32
+    std::wstring buf(MAX_PATH, L'\0');
+    for (;;) {
+        DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (n == 0) return {};
+        if (n < buf.size()) { buf.resize(n); break; }
+        buf.resize(buf.size() * 2);
+    }
+    return std::filesystem::path(buf).generic_string();
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buf(size, '\0');
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
+    buf.resize(std::char_traits<char>::length(buf.c_str()));
+    return buf;
+#else
+    char buf[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) return {};
+    buf[n] = '\0';
+    return std::string(buf);
+#endif
+}
+
+void engine::app_directory_resolvers(std::function<std::string(const std::string&)> data,
+                                     std::function<std::string(const std::string&)> cache) {
+    impl->app_data_resolver = std::move(data);
+    impl->app_cache_resolver = std::move(cache);
+}
+
+std::string engine::app_data_dir(const std::string& app) const {
+    return impl->app_data_resolver ? impl->app_data_resolver(app) : default_app_data_dir(app);
+}
+
+std::string engine::app_cache_dir(const std::string& app) const {
+    return impl->app_cache_resolver ? impl->app_cache_resolver(app) : default_app_cache_dir(app);
+}
+
+void engine::register_location_builtins() {
+    add_function("root_script_path", [this]() -> std::string {
+        std::string root = root_source_file();
+        if (root.empty() || root == "<script>") return {};
+        std::error_code ec;
+        return location_spelling(std::filesystem::absolute(root, ec));
+    });
+    add_function("root_script_dir", [this]() -> std::string {
+        std::string root = root_source_file();
+        if (root.empty() || root == "<script>") return working_directory();
+        std::error_code ec;
+        return location_spelling(std::filesystem::absolute(root, ec).parent_path());
+    });
+    add_function("current_script_path", [this]() -> std::string {
+        std::string cur = current_source_file();
+        if (cur.empty() || cur == "<script>") cur = root_source_file();
+        if (cur.empty() || cur == "<script>") return {};
+        std::error_code ec;
+        return location_spelling(std::filesystem::absolute(cur, ec));
+    });
+    add_function("current_script_dir", [this]() -> std::string {
+        std::string cur = current_source_file();
+        if (cur.empty() || cur == "<script>") cur = root_source_file();
+        if (cur.empty() || cur == "<script>") return working_directory();
+        std::error_code ec;
+        return location_spelling(std::filesystem::absolute(cur, ec).parent_path());
+    });
+    // resolve_path(name): the file import would load for `name` asked from the calling file,
+    // "" when no rung of the ladder has it (the calling file's folder, the include paths in
+    // order, the working directory; an absolute name stands or falls as given)
+    add_function("resolve_path", [this](const std::string& name) -> std::string {
+        auto r = resolve_include_path(name, this);
+        return r ? location_spelling(r.value()) : std::string();
+    });
+    add_function("executable_path", []() -> std::string { return location_spelling(executable_path()); });
+    auto executable_dir = []() -> std::string {
+        std::string exe = executable_path();
+        return exe.empty() ? working_directory() : location_spelling(std::filesystem::path(exe).parent_path());
+    };
+    add_function("executable_dir", executable_dir);
+    add_function("bin_dir", executable_dir);
+    add_function("working_dir", []() -> std::string { return working_directory(); });
+    add_function("parent_dir", [](const std::string& path) -> std::string {
+        std::filesystem::path p = std::filesystem::path(path).lexically_normal();
+        if (p.filename().empty()) p = p.parent_path();
+        return location_spelling(p.parent_path());
+    });
+    add_function("file_name", [](const std::string& path) -> std::string {
+        return std::filesystem::path(path).filename().generic_string();
+    });
+    add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); });
+    add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); });
+}
 
 std::string engine::format_stack_trace() const {
     return impl->backend ? impl->backend->format_stack_trace() : std::string();

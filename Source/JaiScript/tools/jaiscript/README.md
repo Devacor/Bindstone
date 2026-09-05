@@ -109,38 +109,19 @@ everything.) On top, the host binds file IO so scripts can actually save things:
 read_file(path) -> string      write_file(path, text) -> bool   (creates missing folders)
 file_exists(path) -> bool      delete_file(path) -> bool
 dir_exists(path) -> bool       make_dirs(path) -> bool           list_dir(path) -> array<string>
-parent_dir(path) -> string     file_name(path) -> string         working_dir() -> string
+writable_dir(path) -> bool     (creates the folder if missing, writes and removes a probe)
 sha256_file(path) -> string    zip_entries(zip) -> array<string>
 zip_extract(zip, entry, dest) -> bool                             (CRC-32 verified)
 ```
 
-and the places a program can anchor its paths to, so a script dropped onto the executable
-runs the same from any working directory (`tools/jaiscript/paths.hpp`; every answer is an
-absolute path with forward slashes and no trailing separator):
-
-```
-executable_dir()   (alias bin_dir())   the folder holding jaiscript.exe; executable_path() the file
-root_script_dir()  root_script_path()  the script the run started with (a REPL or -e run answers
-                                       the working directory and "")
-current_script_dir()  current_script_path()
-                                       the file whose code is executing: an imported module
-                                       calling this finds files beside itself, its caller finds
-                                       its own; the same answer a stack trace would give
-app_data_dir(name)  app_cache_dir(name)
-                                       per-user writable folders for the app `name`, created on
-                                       demand: %LOCALAPPDATA%/name (cache under it), ~/Library/
-                                       Application Support/name and ~/Library/Caches/name,
-                                       $XDG_DATA_HOME/name and $XDG_CACHE_HOME/name (or ~/.local/
-                                       share and ~/.cache)
-```
-
-The three roots are different things. The executable's folder is fixed for the process, the
-root script's folder is fixed for the run, and the current file's folder changes with every
-import, which is why it is a function and not a global. A host embedding the same surface
-passes its own data and cache resolvers through `path_hooks` where the platform defaults do
-not apply (Android). JaiDOOM resolves its game folder through these: the folder above
-`scripts/`, else the executable's folder or its parent, with downloads and saves falling back
-to `app_data_dir("JaiDOOM")` when the game folder is read-only.
+Where things are is not the host's to invent: every engine carries the location builtins
+(`resolve_path`, `current_script_dir`, `root_script_dir`, `executable_dir` with alias
+`bin_dir`, `app_data_dir`, `app_cache_dir`, `working_dir`, `parent_dir`, `file_name` and the
+`_path` twins; the guide's Modules chapter, "Where files are"). Loading walks the import
+ladder through `resolve_path`; saving picks an anchor and asks `writable_dir` whether it can
+take a file. A script dropped onto the executable therefore runs the same from any working
+directory. JaiDOOM chooses the folder above `scripts/` when it is writable and
+`app_data_dir("JaiDOOM")` otherwise.
 
 and an asynchronous download the script polls from its own loop, the same shape as the
 `NetChannel` binding (`tools/jaiscript/fetch.hpp`):

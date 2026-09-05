@@ -340,6 +340,15 @@ engine stays usable", not by `check_throws`.
   semantics: shadows for the block only, invisible to callees and after the block, captured
   like any local, survives yields; the exception pair + in-catch marker are parked per
   coroutine. `.jaibite` version 12.
+- **Files and locations** (guide ch. 10 "Where files are"): ONE resolution ladder for `import`, `include`,
+  the checker's closure gather and the `resolve_path(name)` builtin: absolute as given; relative against the
+  ASKING file's folder, then the include paths in order, then the working directory (canonical spelling is
+  the cache key). Engine-core location builtins on every engine: `current_script_dir/path` (the executing
+  file, a function because imports change it), `root_script_dir/path` (the outermost `execute_file`),
+  `executable_dir` (alias `bin_dir`), `app_data_dir/app_cache_dir(name)` (platform defaults,
+  `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`. The engine never
+  touches the filesystem for a program: `read_file`/`write_file`/`list_dir`/`writable_dir` are host functions
+  (the runner has them). `.jaibite` siblings mark their own file (v14) so a moved folder keeps its names.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

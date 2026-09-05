@@ -2,6 +2,7 @@
 
 #include "conversion_registry.hpp"
 #include "value.hpp"
+#include "native_cast.hpp"
 
 namespace jai {
     class engine;
@@ -37,10 +38,9 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
             if (registry && !registry->template has_conversion<T>()) { registry.reset(); }
         }
     }
-    // A class-typed buffer (kind obj) is homogeneous by exact class: prove the class
-    // against the bound C++ type ONCE, then every slot's holder hands over its object
-    // (raw C++ objects cast directly, hybrids through their _cpp_object field) - no
-    // per-element registry lookup, type-erased call, heap temporary or copy-out
+	// Prove the declared array class once, but cast each holder's ACTUAL native class:
+	// array<Base> may contain multiple subclasses with different C++ base offsets.
+	// Exact-class slots remain lookup-free; no boxed element or copy-out is needed.
     if constexpr (is_specialization_v<T, std::shared_ptr>) {
         using pointee = typename T::element_type;
         if constexpr (!std::is_void_v<pointee> && std::is_class_v<pointee>) {
@@ -52,11 +52,8 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
                     for (const auto& slot : node->objs()) {
                         const auto& holder = slot.handle;
                         if (!holder) { result.push_back(nullptr); continue; }
-                        if (holder->is_class_instance_wrapper) {
-                            result.push_back(std::static_pointer_cast<pointee>(class_instance_cpp_object(holder->data)));
-                        } else {
-                            result.push_back(std::static_pointer_cast<pointee>(holder->data));
-                        }
+						result.push_back(std::static_pointer_cast<pointee>(detail::native_cast_or_throw(
+							detail::checked_native_object(eng, *holder, typeid(pointee), bound_class->id), eng)));
                     }
                     return result;
                 }

@@ -4,6 +4,7 @@
 #define __JAISCRIPT_CORE_CLASS_DEFINITION_HPP__
 
 #include "engine.hpp"
+#include "native_cast.hpp"
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
@@ -184,11 +185,15 @@ public:
         return nullptr;
     }
 
-    template<typename T>
-    std::shared_ptr<T> get_cpp_object_as() const {
-        auto obj = get_cpp_object();
-        return std::static_pointer_cast<T>(obj);
-    }
+	template<typename T>
+	std::shared_ptr<T> get_cpp_object_as() const {
+		if (script_layer_retired_) {
+			throw_retired_script_layer();
+		}
+		auto holder = get_field(get_cpp_object_field_id()).get_object_holder();
+		return holder ? std::static_pointer_cast<T>(detail::native_cast_or_throw(
+			detail::checked_native_object(engine_, *holder, typeid(T)), engine_)) : nullptr;
+	}
 
     bool has_cpp_object() const {
         uint64_t field_id = get_cpp_object_field_id();
@@ -1470,6 +1475,41 @@ public:
     const std::type_info* cpp_type() const { return cpp_type_; }
     void set_cpp_type(const std::type_info* t) { cpp_type_ = t; }
 
+	// Engine-local native base edges. Registration preserves the C++ cast before
+	// erasing the pointer; transitive casts compose edges without heap allocation.
+	template<typename Derived, typename Base>
+	void add_cpp_base_cast() {
+		const std::type_index base{typeid(Base)};
+		for (const auto& edge : cpp_base_casts_) {
+			if (edge.base == base) {
+				return;
+			}
+		}
+		cpp_base_casts_.push_back({base, +[](void* pointer) -> void* {
+			return static_cast<Base*>(static_cast<Derived*>(pointer));
+		}});
+	}
+
+	void* adjust_cpp_pointer(void* pointer, const std::type_info& target) const {
+		if (cpp_type_ && *cpp_type_ == target) {
+			return pointer;
+		}
+		for (const auto& edge : cpp_base_casts_) {
+			if (edge.base == std::type_index(target)) {
+				return edge.adjust(pointer);
+			}
+		}
+		for (const auto& edge : cpp_base_casts_) {
+			auto base = engine_->get_class_definition_by_type(edge.base);
+			if (base) {
+				if (auto* result = base->adjust_cpp_pointer(edge.adjust(pointer), target)) {
+					return result;
+				}
+			}
+		}
+		return nullptr;
+	}
+
     // Field DECLARATION order, this class's own fields (instance fields first, then
     // statics, each in source order) — replaced wholesale on every (re)definition by
     // both backends' class-decl builders (same-commit twins). Required for reflection's
@@ -1976,6 +2016,11 @@ private:
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
     const std::type_info* cpp_type_ = nullptr;
+	struct cpp_base_cast {
+		std::type_index base;
+		void* (*adjust)(void*);
+	};
+	std::vector<cpp_base_cast> cpp_base_casts_;
     type_info_ptr type_info_;
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;

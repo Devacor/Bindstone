@@ -520,6 +520,38 @@ namespace stdlib {
         }
     }
 
+	// Every archive format restores nested script classes through the same walk.
+	// Serialized names remain data; reconstruction uses only registered classes/members.
+	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys = false) {
+		if (value.is_map()) {
+			const auto& map = value.as_map();
+			auto type_it = map.find(script_value("_type_", eng));
+			if (type_it != map.end() && type_it->second.is_string()) {
+				auto object = reconstruct_typed_object(eng, map, type_it->second.as_string(),
+					[eng, json_string_keys](const script_value& child) { return reconstruct_archive_value(eng, child, json_string_keys); });
+				if (!object.is_null()) {
+					return object;
+				}
+			}
+			auto result = script_value::make_map(json_string_keys ? eng->get_type_info_string() : nullptr, nullptr, eng);
+			auto& restored = const_cast<script_map&>(result.as_map());
+			for (const auto& [key, child] : map) {
+				restored.emplace(key, reconstruct_archive_value(eng, child, json_string_keys));
+			}
+			return result;
+		}
+		if (value.is_array()) {
+			auto result = script_value::make_array(nullptr, eng);
+			auto& restored = const_cast<std::vector<script_value>&>(result.as_array());
+			restored.reserve(value.unchecked_array_node()->size());
+			value.unchecked_array_node()->for_each(eng, [&](const script_value& child) {
+				restored.push_back(reconstruct_archive_value(eng, child, json_string_keys));
+			});
+			return result;
+		}
+		return value;
+	}
+
     // Register JSON and binary serialization functions with an engine
     inline void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
@@ -539,48 +571,10 @@ namespace stdlib {
             }
         });
         
-        eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
-            serialization::json_archive_reader reader(json, eng);
-            script_value data = reader.read_value();
-
-            std::function<script_value(const script_value&)> processValue;
-            processValue = [eng, &processValue](const script_value& val) -> script_value {
-                if (val.is_map()) {
-                    const auto& map = val.as_map();
-
-                    // Reconstruct a registered class from a {"_type_": Name, ...} map without
-                    // eval'ing attacker-controlled keys (see reconstruct_typed_object).
-                    auto typeIt = map.find(script_value("_type_", eng));
-                    if (typeIt != map.end() && typeIt->second.is_string()) {
-                        script_value obj = reconstruct_typed_object(
-                            eng, map, typeIt->second.as_string(), processValue);
-                        if (!obj.is_null()) return obj;
-                        // unknown/unregistered type -> fall through to generic map processing
-                    }
-
-                    script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                    auto& resultMap = const_cast<script_map&>(mapValue.as_map());
-                    for (const auto& [k, v] : map) {
-                        resultMap[k] = processValue(v);
-                    }
-                    return mapValue;
-
-                } else if (val.is_array()) {
-                    script_value arrayValue = script_value::make_array(nullptr, eng);
-                    auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
-
-                    val.unchecked_array_node()->for_each(eng, [&](const script_value& elem) {
-                        array.push_back(processValue(elem));
-                    });
-
-                    return arrayValue;
-                } else {
-                    return val;
-                }
-            };
-
-            return processValue(data);
-        });
+		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
+			serialization::json_archive_reader reader(json, eng);
+			return reconstruct_archive_value(eng, reader.read_value(), true);
+		});
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -609,20 +603,7 @@ namespace stdlib {
 
             serialization::binary_archive_reader reader(data, eng);
 
-            script_value result = reader.read_value();
-
-            // For objects with a _type_ field, reconstruct through the registry (no eval).
-            if (result.is_map()) {
-                const auto& map = result.as_map();
-                auto type_it = map.find(script_value("_type_", eng));
-                if (type_it != map.end() && type_it->second.is_string()) {
-                    script_value obj = reconstruct_typed_object(
-                        eng, map, type_it->second.as_string(), nullptr);
-                    if (!obj.is_null()) return obj;
-                }
-            }
-
-            return result;
+			return reconstruct_archive_value(eng, reader.read_value());
         });
 
         eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
@@ -643,20 +624,7 @@ namespace stdlib {
             std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
 
             serialization::binary_archive_reader reader(data, eng);
-            script_value result = reader.read_value();
-
-            // For objects with a _type_ field, reconstruct through the registry (no eval).
-            if (result.is_map()) {
-                const auto& map = result.as_map();
-                auto type_it = map.find(script_value("_type_", eng));
-                if (type_it != map.end() && type_it->second.is_string()) {
-                    script_value obj = reconstruct_typed_object(
-                        eng, map, type_it->second.as_string(), nullptr);
-                    if (!obj.is_null()) return obj;
-                }
-            }
-
-            return result;
+			return reconstruct_archive_value(eng, reader.read_value());
         });
 
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {

@@ -52,6 +52,10 @@ namespace jai {
     // (null once the object died); an owning _cpp_object is returned as is.
     std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
     
+	namespace detail {
+		checked_result<void*> checked_native_reference(const script_value& value, const std::type_info& target, uint64_t target_id = UINT64_MAX);
+	}
+
     // Forward declaration for friend access
     namespace detail {
         template<typename T> struct value_converter;
@@ -904,41 +908,19 @@ namespace jai {
                         if (auto* box = bound_box()) {
                             return *static_cast<base_type*>(box->ptr);
                         }
-                        if (is_object()) {
-                            // Smart pointers past this point would reinterpret the holder's
-                            // T as shared_ptr<T> — no aliasable handle exists in a holder
-                            // (only a bound_box, handled above, can legitimately be one).
-                            if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
-                                throw runtime_error("Object type mismatch");
-                            }
-                            // Non-owning C++ reference (registered class): verify the holder's
-                            // registered type before reinterpreting.
-                            if (auto* boundHolder = storage_.get_if<strong_ptr<object_holder>>();
-                                boundHolder && *boundHolder && (*boundHolder)->bound_ptr) {
-                                if (!engine_holder_matches_type(engine_, (*boundHolder)->type_name, typeid(base_type))) {
-                                    throw runtime_error("Object type mismatch");
-                                }
-                                return *static_cast<base_type*>((*boundHolder)->bound_ptr);
-                            }
-                            if (auto* holderPtr = storage_.get_if<strong_ptr<object_holder>>(); holderPtr && *holderPtr) {
-                                if (!engine_holder_matches_type(engine_, (*holderPtr)->type_name, typeid(base_type))) {
-                                    throw runtime_error("Object type mismatch");
-                                }
-                                auto objectPtr = (*holderPtr)->data;
-                                // class_instance wrappers keep the C++ object in _cpp_object; a wrapper
-                                // with no C++ payload (pure script object) must error here - it can
-                                // never be reinterpreted as T
-                                if ((*holderPtr)->is_class_instance_wrapper) {
-                                    objectPtr = engine_extract_instance_cpp_object(engine_, objectPtr);
-                                }
-                                if (objectPtr) {
-                                    if (auto typedPtr = std::static_pointer_cast<base_type>(objectPtr)) {
-                                        return *typedPtr;
-                                    }
-                                }
-                            }
-                            throw runtime_error("Object type mismatch");
-                        }
+						if (is_object()) {
+							// Smart pointers past this point would reinterpret the holder's
+							// T as shared_ptr<T> — no aliasable handle exists in a holder
+							// (only a bound_box, handled above, can legitimately be one).
+							if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
+								throw runtime_error("Object type mismatch");
+							}
+							auto result = detail::checked_native_reference(*this, typeid(base_type));
+							if (!result) {
+								throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+							}
+							return *static_cast<base_type*>(result.value());
+						}
                         throw runtime_error("Unsupported type for non-const reference extraction");
                     }
                 }
@@ -1266,18 +1248,11 @@ namespace jai {
                         }
                         return checked_result<T>(*map_result.value());
                     } else {
-                        auto t = type();
-                        if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                            auto ptr_result = checked_as<std::shared_ptr<base_type>>();
-                            if (!ptr_result) {
-                                return ptr_result.error_value();  // Preserves symbol IDs for formatting
-                            }
-                            return checked_result<T>(*ptr_result.value());
-                        }
-                        return checked_result<T>(
-                            make_error_code(runtime_error_code::type_mismatch),
-                            "Unsupported type for const reference extraction"
-                        );
+						auto result = detail::checked_native_reference(*this, typeid(base_type));
+						if (!result) {
+							return result.error_value();
+						}
+						return checked_result<T>(*static_cast<const base_type*>(result.value()));
                     }
                 } else {
                     return checked_result<T>(
@@ -1816,6 +1791,7 @@ namespace jai {
         type_info_ptr type_info_;  // Complete type information
         engine* engine_ = nullptr;  // Raw pointer to engine (no atomic ops on copy)
         
+	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
             std::string type_name;           // Type identification for serialization
@@ -1845,6 +1821,7 @@ namespace jai {
             // by ISerializer implementations to keep JaiScript dependency-free
         };
 
+	private:
         // C++ primitive/string/opaque binding box (variant alternative 14).
         // IMMUTABLE after construction - copies of bound values stay aliases.
         struct cpp_bound_holder {
@@ -2304,6 +2281,14 @@ namespace jai {
             }
             return nullptr;
         }
+
+		// Immediate read-only access without copying the strong handle. The caller
+		// must keep this value alive and must not retain the pointer across mutation.
+		const object_holder* peek_object_holder() const {
+			const auto& value = deref();
+			auto* holder = value.storage_.get_if<strong_ptr<object_holder>>();
+			return holder ? holder->get() : nullptr;
+		}
 
         // Set object holder directly (used when restoring from weak_ptr.lock())
         void set_object_holder(strong_ptr<object_holder> holder) {
@@ -2794,4 +2779,3 @@ namespace jai {
 } // namespace jai
 
 #endif // __JAISCRIPT_CORE_VALUE_HPP__
-

@@ -1331,6 +1331,7 @@ namespace jai {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
         // Barrier-provisioned method pins for the active region (worker instances only;
         // interpreter_backend forwards the execution_backend virtual here)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;

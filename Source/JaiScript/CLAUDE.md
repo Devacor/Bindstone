@@ -293,6 +293,13 @@ engine stays usable", not by `check_throws`.
   deep-copies through the store kernel (`shared_ptr` handles share, scalars/strings are copies
   already), so `f().push(4)` never grows the callee's storage; `-> T&` returns alias and the
   top-level `return` is unchanged. Kernel `detail/return_conv.hpp`, one site per backend.
+- **`==` is memberwise on heavy values** (Dev ruling 2026-09-05; `detail/structural_equality.hpp`, one
+  kernel for both backends): arrays elementwise, maps entrywise under the map's key ordering, class
+  instance VALUES fieldwise (same class only; a user `operator==` takes precedence at every level),
+  early out on size/class mismatch and the first unequal member; `shared_ptr` handles compare by
+  pointer like `std::shared_ptr`; `same_object(x, y)` (engine-core builtin) is identity (refs resolve,
+  handles unwrap, primitives/strings by value). Ordering stays off containers/instances. The C++-level
+  `script_value::operator==`/`<=>` are unchanged (map-key identity ordering).
 - **Read-only by-value parameters bind by handle** (`docs/parallel_design.md` §15): a by-value
   class/array/map parameter whose callee provably never mutates, aliases, compares, returns or
   passes it whole, reads only primitive/string terminals through it, and (with everything it

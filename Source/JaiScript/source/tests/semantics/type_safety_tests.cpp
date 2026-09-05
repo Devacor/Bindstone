@@ -250,7 +250,7 @@ public:
             check_eq(result.as<bool>(), true, "Object compared to itself returns true");
         });
 
-        test("object_reference_equality_different_instances", [this]() {
+        test("object_equality_different_instances_is_memberwise", [this]() {
             auto eng = make_engine();
 
             eng->execute(R"(
@@ -264,13 +264,13 @@ public:
             auto result = eng->execute(R"(
                 auto a = Point(1, 2);
                 auto b = Point(1, 2);
-                a == b  // Different instances, same values
+                [a == b, same_object(a, b), a == Point(1, 3)]  // memberwise like C++ containers; identity is same_object
             )");
 
-            // Without operator==, different instances are not equal (reference equality)
-            // Users should implement operator== for value comparison
-            check_eq(result.as<bool>(), false,
-                "Different instances are not equal without operator==");
+            const auto& v = result.as_array();
+            check_eq(v[0].as<bool>(), true, "equal fields compare equal without operator==");
+            check_eq(v[1].as<bool>(), false, "same_object tells the two instances apart");
+            check_eq(v[2].as<bool>(), false, "a differing field compares unequal");
         });
 
         test("object_operator_equals_custom", [this]() {

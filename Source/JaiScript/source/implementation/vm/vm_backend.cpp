@@ -12,6 +12,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
@@ -2377,16 +2378,14 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 		return script_value(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr(), engine_);
 	}
 
+	// Arrays and maps: memberwise, like C++ containers (detail/structural_equality.hpp;
+	// same_object(x, y) asks the identity question). KEEP BYTE-PARALLEL with the interpreter twin
+	auto element_equal = [this](const script_value& a, const script_value& b) { return handle_equal(a, b); };
 	if (left.is_array() && right.is_array()) {
-		auto& left_arr = const_cast<script_value&>(left).get_array_storage();
-		auto& right_arr = const_cast<script_value&>(right).get_array_storage();
-		return script_value(left_arr.get() == right_arr.get(), engine_);
+		return detail::arrays_equal(left, right, engine_, structural_equality_depth_, element_equal);
 	}
-
 	if (left.is_map() && right.is_map()) {
-		auto& left_map = const_cast<script_value&>(left).get_map_storage();
-		auto& right_map = const_cast<script_value&>(right).get_map_storage();
-		return script_value(left_map.get() == right_map.get(), engine_);
+		return detail::maps_equal(left, right, engine_, structural_equality_depth_, element_equal);
 	}
 
 	// Safe-mode workers: a custom op== would be skipped by the operator wall and the
@@ -2400,6 +2399,11 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	auto custom_result = object_equality_via_method(left, right);
 	if (custom_result.has_value()) {
 		return script_value(custom_result.value(), engine_);
+	}
+
+	// Script class instances: same class, fieldwise (a user operator== was consulted above)
+	if (auto structural = detail::instances_equal(left, right, engine_, structural_equality_depth_, element_equal)) {
+		return std::move(*structural);
 	}
 
 	auto left_holder = const_cast<script_value&>(left).get_object_holder();

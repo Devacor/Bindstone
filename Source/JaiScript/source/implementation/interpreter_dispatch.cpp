@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/detail/interpreter.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // kCheckedOverflow + jai::ints helpers
 #include "../../include/jaiscript/detail/char_promotion.hpp"
+#include "../../include/jaiscript/detail/structural_equality.hpp"
 #include <cmath>
 #include <limits>
 
@@ -693,18 +694,14 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
         return make_value(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr());
     }
 
-    // Array equality - compare by reference (same array instance)
+    // Arrays and maps: memberwise, like C++ containers (detail/structural_equality.hpp;
+    // same_object(x, y) asks the identity question). KEEP BYTE-PARALLEL with the vm twin
+    auto element_equal = [this](const script_value& a, const script_value& b) { return handle_equal(a, b); };
     if (left.is_array() && right.is_array()) {
-        auto& left_arr = const_cast<script_value&>(left).get_array_storage();
-        auto& right_arr = const_cast<script_value&>(right).get_array_storage();
-        return make_value(left_arr.get() == right_arr.get());
+        return detail::arrays_equal(left, right, engine_, structural_equality_depth_, element_equal);
     }
-
-    // Map equality - compare by reference (same map instance)
     if (left.is_map() && right.is_map()) {
-        auto& left_map = const_cast<script_value&>(left).get_map_storage();
-        auto& right_map = const_cast<script_value&>(right).get_map_storage();
-        return make_value(left_map.get() == right_map.get());
+        return detail::maps_equal(left, right, engine_, structural_equality_depth_, element_equal);
     }
 
     // Object/class instance equality
@@ -722,7 +719,12 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
         return make_value(custom_result.value());
     }
 
-    // Fall back to reference equality (same object_holder)
+    // Script class instances: same class, fieldwise (a user operator== was consulted above)
+    if (auto structural = detail::instances_equal(left, right, engine_, structural_equality_depth_, element_equal)) {
+        return std::move(*structural);
+    }
+
+    // Host objects and other holders: identity (same object_holder)
     // This enables: obj == obj to return true (self-comparison)
     auto left_holder = const_cast<script_value&>(left).get_object_holder();
     auto right_holder = const_cast<script_value&>(right).get_object_holder();

@@ -8,3 +8,5 @@ jaidoom_save.json
 scripts/*.bmp
 scripts/*.png
 scripts/*.txt
+cache/
+wads/.download/

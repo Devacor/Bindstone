@@ -123,11 +123,11 @@ var MUSIC_READY = {};         // track name -> mid path ("" = missing/failed)
 function music_want(string name) -> void {
 	if (!SND_ON || MUSIC_CUR == name) { return; }
 	if (!MUSIC_READY.has(name)) {
-		var mid = mus_midi_bytes(name);
-		if (mid == "") { MUSIC_READY[name] = ""; }
+		var path = audio_cache_dir() + ("" + name).to_lower() + ".mid";
+		if (file_exists(path)) { MUSIC_READY[name] = path; }           // bootstrap (or an earlier run) already transcoded it
 		else {
-			var path = ("" + name).to_lower() + ".mid";
-			if (!write_file(path, mid)) { path = ""; }
+			var mid = mus_midi_bytes(name);
+			if (mid == "" || !write_file(path, mid)) { path = ""; }
 			MUSIC_READY[name] = path;
 		}
 	}

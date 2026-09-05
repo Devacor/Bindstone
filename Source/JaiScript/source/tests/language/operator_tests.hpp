@@ -251,6 +251,102 @@ public:
             }
         });
 
+        // Memberwise == (Dev ruling 2026-09-05): arrays, maps and class instance values compare
+        // like C++ containers, early out on size/class mismatch and the first unequal member;
+        // shared_ptr handles compare by pointer like std::shared_ptr; same_object(x, y) is
+        // identity. detail/structural_equality.hpp, one kernel for both backends.
+        test("memberwise_equality_arrays_and_maps", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                array<int> ti = [1, 2, 3]; array<int> tj = [1, 2, 3]; array<int> tk = [1, 2, 4]; array<int> shorter = [1, 2];
+                var hv = [1, 2, 3]; var hf = [1.0, 2.0, 3.0];
+                array<string> sa = ["a", "b"]; array<string> sb = ["a", "b"]; array<string> sc = ["a", "c"];
+                var nested = [[1, 2], [3]]; var nested2 = [[1, 2], [3]]; var nested3 = [[1, 2], [4]];
+                map<string, int> m1 = {"a": 1, "b": 2}; map<string, int> m2 = {"b": 2, "a": 1}; map<string, int> m3 = {"a": 1, "b": 3}; map<string, int> m4 = {"a": 1, "c": 2};
+                var mk1 = {1: "x"}; var mk2 = {1.0: "x"};
+                var deep = {"k": [1, {"z": 2}]}; var deep2 = {"k": [1, {"z": 2}]}; var deep3 = {"k": [1, {"z": 3}]};
+                return [ti == tj, ti == tk, ti == shorter, ti != tk, ti == hv, hv == hf, sa == sb, sa == sc,
+                        nested == nested2, nested == nested3, m1 == m2, m1 == m3, m1 == m4, mk1 == mk2, deep == deep2, deep == deep3,
+                        [] == [], {} == {}];
+            )");
+            const auto& v = r.as_array();
+            const bool expected[] = {true, false, false, true, true, true, true, false, true, false, true, false, false, false, true, false, true, true};
+            for (size_t i = 0; i < std::size(expected); ++i) { check_eq(expected[i], v[i].as<bool>(), "row " + std::to_string(i)); }
+        });
+
+        test("memberwise_equality_instances_and_handles", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Inner { int z = 0; Inner() {} Inner(int v) { z = v; } }
+                class P { int a = 1; string s = "x"; array<int> xs = [1, 2]; Inner in = Inner(3); P child; P() {} P(int v) { a = v; } }
+                class D : P { int extra = 0; D() {} }
+                class Cmp { int a = 1; Cmp() {} Cmp(int v) { a = v; } bool operator==(Cmp other) { return true; } }
+                nocopy class Ledger { int total = 5; Ledger() {} }
+                P p1 = P(); P p2 = P(); P p3 = P(2); P p4 = P(); p4.in = Inner(9); P p5 = P(); p5.xs.push(3);
+                D d = D();
+                Cmp c1 = Cmp(1); Cmp c2 = Cmp(2);
+                Ledger l1 = Ledger(); Ledger l2 = Ledger();
+                var h1 = new P(); var h2 = h1; var h3 = new P();
+                var& rp = p1;
+                return [p1 == p2, p1 == p3, p1 == p4, p1 == p5, p1 == d, p1 != p2, c1 == c2, l1 == l2,
+                        h1 == h2, h1 == h3, h1 != h3, rp == p1, rp == p2, p1 == null, p1.child == p2.child];
+            )");
+            const auto& v = r.as_array();
+            const bool expected[] = {true, false, false, false, false, false, true, true, true, false, true, true, true, false, true};
+            for (size_t i = 0; i < std::size(expected); ++i) { check_eq(expected[i], v[i].as<bool>(), "row " + std::to_string(i)); }
+        });
+
+        test("memberwise_equality_early_out_and_depth_cap", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class E { int a = 0; static int calls = 0; E() {} E(int v) { a = v; } bool operator==(E o) { E::calls = E::calls + 1; return a == o.a; } }
+                var xs = [E(1), E(2), E(3)]; var ys = [E(1), E(9), E(3)]; var zs = [E(1), E(2)];
+                bool r1 = xs == ys; int after_mismatch = E::calls;
+                bool r2 = xs == zs; int after_size = E::calls;
+                bool r3 = xs == xs; int after_self = E::calls;
+                var deep = []; var deep2 = [];
+                for (int i = 0; i < 205; i++) { deep = [deep]; deep2 = [deep2]; }
+                string err = "";
+                try { bool x = deep == deep2; } catch (e) { err = e; }
+                return [r1, after_mismatch, r2, after_size, r3, after_self, err];
+            )");
+            const auto& v = r.as_array();
+            check_eq(false, v[0].as<bool>());
+            check_eq((int64_t)2, v[1].as_int(), "stops at the first unequal element");
+            check_eq(false, v[2].as<bool>());
+            check_eq((int64_t)2, v[3].as_int(), "a size mismatch compares no element");
+            check_eq(true, v[4].as<bool>());
+            check_eq((int64_t)2, v[5].as_int(), "the same node compares no element");
+            check_eq(std::string("Cannot compare: the values nest deeper than 200 levels"), v[6].as<std::string>());
+        });
+
+        test("same_object_is_identity", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class P { int a = 1; P() {} }
+                P p = P(); P q = P(); var& rp = p; P copy = p;
+                var h = new P(); var h2 = h; var h3 = new P();
+                array<int> xs = [1]; array<int> ys = [1]; var& rxs = xs;
+                map<string, int> m = {"a": 1}; map<string, int> m2 = {"a": 1};
+                string s = "ab"; string t = "a" + "b";
+                P n = null;
+                return [same_object(p, p), same_object(p, rp), same_object(p, q), same_object(p, copy),
+                        same_object(h, h2), same_object(h, h3), same_object(xs, rxs), same_object(xs, ys),
+                        same_object(m, m), same_object(m, m2), same_object(s, t), same_object(1, 1), same_object(1, 2),
+                        same_object(n, null), same_object(p, null), same_object(xs, m)];
+            )");
+            const auto& v = r.as_array();
+            const bool expected[] = {true, true, false, false, true, false, true, false, true, false, true, true, false, true, false, false};
+            for (size_t i = 0; i < std::size(expected); ++i) { check_eq(expected[i], v[i].as<bool>(), "row " + std::to_string(i)); }
+            std::string message;
+            try { eng->execute("same_object(1);"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("'same_object' expects 2 arguments, got 1") != std::string::npos, message);
+        });
+
         test("operator_subscript_returns_class", [this]() {
             const char* src = R"(
                 class Cell {

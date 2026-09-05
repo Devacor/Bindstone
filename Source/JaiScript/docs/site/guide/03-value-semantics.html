@@ -210,7 +210,7 @@ original:     77  copy: 0</code></pre></div>
 <li>A <strong>value of an unrelated class, or a primitive</strong> (<code>p = Bar();</code>, <code>p = 5;</code>) <strong>rebinds</strong> <code>p</code> to an independent copy. This is the one move <code>var</code> adds, and it sits precisely where a typed holder would raise.</li>
 <li><code>auto q = p;</code> taken from a var-held handle locks <code>q</code> as a <code>shared_ptr&lt;Foo&gt;</code>; the typed rungs themselves are unchanged.</li>
 </ul>
-<p>The same four moves, in order, with <code>alias</code> watching (<code>same_as</code> asks whether two handles point at one object):</p>
+<p>The same four moves, in order, with <code>alias</code> watching. <code>same_as</code> asks whether two handles point at one object; the general form is <code>same_object(x, y)</code>, which answers identity for handles, references, containers and instances alike, because <code>==</code> compares values memberwise (see <a href="../guide/04-operators.html#equality">Equality</a>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { int x = 1; }
 class Bar { int y = 2; }
 var p = new Foo();

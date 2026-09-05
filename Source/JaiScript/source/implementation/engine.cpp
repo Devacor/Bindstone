@@ -10,6 +10,7 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
+#include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <charconv>
@@ -1577,6 +1578,17 @@ void engine::initialize_engine_reference() {
             throw runtime_error("unsupported format spec ':" + raw + "'");
         }
         return script_value(detail::format_value_with_spec(args[0], spec, raw), engine_weak);
+    });
+
+    // same_object(x, y): the identity question `==` no longer asks (== is memberwise on
+    // arrays, maps and class instances). References resolve to their referents, shared_ptr
+    // handles to the shared object; primitives and strings carry no identity and compare
+    // as values (detail/structural_equality.hpp). Engine-core so it exists on every engine.
+    add_variadic_function("same_object", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            throw runtime_error("'same_object' expects 2 arguments, got " + std::to_string(args.size()));
+        }
+        return script_value(detail::same_object(args[0], args[1]), engine_weak);
     });
 
     // extend(object, Class): a script class layer over a C++ object, or a re-derived script

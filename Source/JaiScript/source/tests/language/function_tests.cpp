@@ -485,8 +485,8 @@ public:
             const auto& v = r.as_array();
             check_eq((int64_t)11, v[0].as_int());
             check_eq((int64_t)2, v[1].as_int());
-            check_eq((int64_t)0, v[2].as_int());     // a copy is never the global
-            check_eq((int64_t)0, v[3].as_int());
+            check_eq((int64_t)1, v[2].as_int());     // memberwise ==: the copy equals the global it was copied from
+            check_eq((int64_t)1, v[3].as_int());     // memberwise ==: equal child values compare equal
             check_eq((int64_t)1, v[4].as_int());     // x untouched by every callee
             check_eq((int64_t)1, v[5].as_int());
             check_eq((int64_t)99, v[6].as_int());

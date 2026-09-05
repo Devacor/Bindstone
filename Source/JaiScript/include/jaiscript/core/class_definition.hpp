@@ -5,6 +5,7 @@
 
 #include "engine.hpp"
 #include "native_cast.hpp"
+#include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
@@ -2458,7 +2459,7 @@ inline bool class_slot_admits(const slot_class_view& view, const script_value& v
     return !view.def && !tagged;
 }
 
-inline slot_conversion convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
+inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
     using verdict = slot_conversion::verdict;
     if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
         return slot_conversion::of(verdict::identity);
@@ -2496,7 +2497,11 @@ inline slot_conversion convert_for_typed_slot_core(const script_value& value_in,
     switch (target) {
         case script_value_type::jai_int_type:
             if (src == script_value_type::jai_int_type && primitive_src) return slot_conversion::of(verdict::identity);
-            if (src == script_value_type::jai_float_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_int>(v.unchecked_as_float()), eng));
+			if (src == script_value_type::jai_float_type && primitive_src) {
+				auto result = checked_float_to_integer(v.unchecked_as_float());
+				if (!result) { return result.error_value(); }
+				return slot_conversion::converted_to(script_value(result.value(), eng));
+			}
             if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::converted_to(script_value(static_cast<script_int>(v.unchecked_as_bool() ? 1 : 0), eng));
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::of(verdict::reject);
@@ -2799,7 +2804,9 @@ inline checked_result<script_value> field_store_convert(const script_value& valu
             return stored;
         }
     }
-    slot_conversion out = convert_for_typed_slot_core(value, declared, eng);
+	auto result = convert_for_typed_slot_core(value, declared, eng);
+	if (!result) { return result.error_value(); }
+	slot_conversion out = std::move(result.value());
     if (out.needs_script()) {
         auto resolved = convert_typed_slot_script_rows(std::move(out), value, declared, eng);
         if (!resolved) {
@@ -2821,8 +2828,9 @@ inline checked_result<script_value> field_store_convert(const script_value& valu
 // The no-script table (set_field, hot-reload migration): nullopt where a conversion would
 // have to run script or does not exist.
 inline std::optional<script_value> field_store_convert_no_script(const script_value& value, const type_info_ptr& declared, engine* eng) {
-    slot_conversion out = convert_for_typed_slot_core(value, declared, eng);
-    return field_store_value(out, value, declared, eng);
+	auto result = convert_for_typed_slot_core(value, declared, eng);
+	if (!result) { return std::nullopt; }
+	return field_store_value(result.value(), value, declared, eng);
 }
 
 // Script-surface member access enforcement kernel — the ONE check both backends call

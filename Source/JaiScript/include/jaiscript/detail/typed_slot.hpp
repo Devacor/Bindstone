@@ -82,7 +82,9 @@ namespace jai::detail {
                 }
                 // the result converts once more through the primitive rows, never through script again
                 script_value produced = result.value().is_reference() ? result.value().deref() : std::move(result.value());
-                slot_conversion again = convert_for_typed_slot_core(produced, target_type, eng);
+				auto converted = convert_for_typed_slot_core(produced, target_type, eng);
+				if (!converted) { return converted.error_value(); }
+				slot_conversion again = std::move(converted.value());
                 if (again.v == verdict::identity || again.v == verdict::identity_exact) {
                     return slot_conversion::converted_to(std::move(produced));
                 }
@@ -166,7 +168,9 @@ namespace jai::detail {
 
     // The full table: the script-free core, then the script rows where the core asked.
     inline checked_result<slot_conversion> convert_for_typed_slot(const script_value& value, const type_info_ptr& target_type, engine* eng) {
-        slot_conversion out = convert_for_typed_slot_core(value, target_type, eng);
+		auto result = convert_for_typed_slot_core(value, target_type, eng);
+		if (!result) { return result.error_value(); }
+		slot_conversion out = std::move(result.value());
         if (out.needs_script()) {
             return convert_typed_slot_script_rows_impl(std::move(out), value, target_type, eng);
         }

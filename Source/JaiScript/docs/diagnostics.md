@@ -131,6 +131,27 @@ Hot-reload migration never raises (an unconvertible value falls back to the new 
 no text there. `value.cpp`'s two `Type mismatch in assignment` throws are unreachable defensive
 walls behind typed-buffer references and stay.
 
+## Checked float-to-integer conversion (`invalid_numeric_operand`)
+
+`Cannot convert float to integer: non-finite or out of range`
+
+One checked kernel (`detail/numeric_conversion.hpp`) owns the range check and text
+for scalar typed slots (declarations, assignments, fields, parameters, returns and
+`to_int()` results), `cast<int>`, `math::itrunc`, `math::ifloor`, and floating-point
+`math::random_seed` arguments. These errors are catchable and identical on both
+backends; a failed conversion does not write the scalar destination or seed the RNG.
+
+Signed conversion truncates toward zero and requires a finite result in
+`[-2^63, 2^63)`. `ifloor` floors first. Integer inputs to the intrinsics remain
+exact. Floating RNG seeds retain their unsigned range: their truncated value must
+be in `[0, 2^64)`. Integer seeds retain their existing modulo-2^64 interpretation.
+The upper bounds are exclusive because converting either maximum integer to a
+double rounds up. These checks apply even in a wrapping integer-arithmetic build.
+
+This is a scalar/script-boundary change, not a redefinition of every host or
+container conversion. The public C++ `script_value::as_int()` accessor retains its
+existing saturating policy (NaN to zero).
+
 ## Untouched families (one-line recommendation each)
 
 | family | representative texts | recommendation |

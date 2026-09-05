@@ -7,6 +7,7 @@
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/numeric_conversion.hpp>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -202,13 +203,19 @@ namespace jai::detail {
                 if (argc != 1) return bad_arity("math::itrunc expects 1 argument");
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::itrunc expects a numeric argument");
-                return checked_result<script_value>(script_value(a.is_int ? a.i : static_cast<script_int>(a.f), eng));
+				if (a.is_int) { return script_value(a.i, eng); }
+				auto result = checked_float_to_integer(a.f);
+				if (!result) { return result.error_value(); }
+				return script_value(result.value(), eng);
             }
             case math_fn::ifloor: {
                 if (argc != 1) return bad_arity("math::ifloor expects 1 argument");
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::ifloor expects a numeric argument");
-                return checked_result<script_value>(script_value(a.is_int ? a.i : static_cast<script_int>(std::floor(a.f)), eng));
+				if (a.is_int) { return script_value(a.i, eng); }
+				auto result = checked_float_to_integer(std::floor(a.f));
+				if (!result) { return result.error_value(); }
+				return script_value(result.value(), eng);
             }
             case math_fn::sqrt_: {
                 if (argc != 1) return bad_arity("math::sqrt expects 1 argument");
@@ -241,7 +248,10 @@ namespace jai::detail {
                 if (argc != 2) return bad_arity(fn == math_fn::min_ ? "math::min expects 2 arguments" : "math::max expects 2 arguments");
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) return bad_type(fn == math_fn::min_ ? "math::min expects numeric arguments" : "math::max expects numeric arguments");
-                const bool pick_a = fn == math_fn::min_ ? (a.d() <= b.d()) : (a.d() >= b.d());
+				// Integer pairs stay exact above 2^53; mixed pairs keep double promotion.
+				const bool pick_a = a.is_int && b.is_int
+					? (fn == math_fn::min_ ? a.i <= b.i : a.i >= b.i)
+					: (fn == math_fn::min_ ? a.d() <= b.d() : a.d() >= b.d());
                 const num& p = pick_a ? a : b;
                 if (p.is_int) return checked_result<script_value>(script_value(p.i, eng));
                 return checked_result<script_value>(script_value(p.f, eng));
@@ -250,7 +260,8 @@ namespace jai::detail {
                 if (argc != 3) return bad_arity("math::clamp expects 3 arguments (value, lo, hi)");
                 const num v = read(*args[0]), lo = read(*args[1]), hi = read(*args[2]);
                 if (!v.ok || !lo.ok || !hi.ok) return bad_type("math::clamp expects numeric arguments");
-                const num& p = v.d() < lo.d() ? lo : (v.d() > hi.d() ? hi : v);
+				const bool below = v.is_int && lo.is_int ? v.i < lo.i : v.d() < lo.d();
+				const num& p = below ? lo : ((v.is_int && hi.is_int ? v.i > hi.i : v.d() > hi.d()) ? hi : v);
                 if (p.is_int) return checked_result<script_value>(script_value(p.i, eng));
                 return checked_result<script_value>(script_value(p.f, eng));
             }
@@ -330,7 +341,13 @@ namespace jai::detail {
                 if (argc != 1) return bad_arity("math::random_seed expects 1 argument");
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::random_seed expects a numeric argument");
-                rng.seed(a.is_int ? static_cast<uint64_t>(a.i) : static_cast<uint64_t>(a.f));
+				if (a.is_int) {
+					rng.seed(static_cast<uint64_t>(a.i));
+				} else {
+					auto result = checked_float_to_integer<uint64_t>(a.f);
+					if (!result) { return result.error_value(); }
+					rng.seed(result.value());
+				}
                 return checked_result<script_value>(script_value(std::monostate{}, eng));
             }
             case math_fn::wrap_add_:

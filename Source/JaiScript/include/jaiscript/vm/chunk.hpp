@@ -70,6 +70,12 @@ namespace jai::vm {
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
         uint32_t call_node = k_invalid_u32;        // chunk::nodes index of the call_expr (static_arg_proofs, read live)
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
+        uint32_t receiver_slot = k_invalid_u32;    // op_call_method: caller frame slot of that receiver (k_invalid_u32 = env)
+        // op_call_method whose receiver is a member-call chain rooted at an identifier
+        // (`t.trim().to_upper()`): that root, resolved like receiver_symbol/receiver_slot
+        // when a string mutator redirects to it (detail/string_mutator_receiver.hpp)
+        uint64_t chain_root_symbol = UINT64_MAX;
+        uint32_t chain_root_slot = k_invalid_u32;
         // Compile-time builtin dispatch indices (name-sorted, engine-independent — see
         // builtin_method_registries): 0xFFFF = the member is not a builtin of that
         // registry. Valid only when the owning chunk's builtin_indexed is set.

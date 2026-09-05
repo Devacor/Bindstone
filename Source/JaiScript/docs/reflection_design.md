@@ -45,7 +45,7 @@ promotion later without script changes. Earlier drafts of this doc used flat nam
 | Field-name→member write dispatch precedent (setter-first, data-not-code) | `reconstruct_typed_object` in from_json/from_binary | stdlib/json.hpp:463-518 |
 | Hot-reload field walk | `redefine_class` + `class_instance::migrate_fields` (defaults replaced **before** the migrate-hook loop runs) | class_definition.hpp:1077-1230, 1588-1639 |
 | Access-enforcement kernel + caller context | shared `detail::enforce_member_access(cls, member_id, ctx)`; both backends pass `environment_->find_access_context()` | class_definition.hpp:1527-1542, environment.hpp:160, interpreter.cpp:3861, vm_backend.cpp:5662 |
-| Coarse dynamic type | `type_of` (kind names only — objects report `"object"`, never the class name) | stdlib/io.hpp:349-366 |
+| Coarse dynamic type | `type_of` (kind names; the object row is `stdlib::object_type_name`, shared with `reflect::type_name`, so an instance reports its class) | stdlib/io.hpp:174-190, 376-395 |
 | Opaque-token predicate | `is_registered_type` (§13 ruling: unregistered host pass-through tokens answer false) | stdlib/io.hpp:336-347 |
 | Registration-surface enumeration precedent | `registration_fingerprint()` iterates sorted registered function/class names | engine.hpp:190-193 |
 
@@ -126,7 +126,8 @@ reflect::is_cpp_bound(v | "Class")   // -> bool; VALUE form: C++-backed (cpp_bou
                                      //    deref); CLASS form: host-registered vs script-declared
 ```
 
-`type_of` is unchanged (back-compat: coarse kinds). `reflect::type_name` is its precise sibling —
+`type_of` keeps its coarse kind names everywhere except the object row, which it shares verbatim
+with `reflect::type_name` (`stdlib::object_type_name`). `reflect::type_name` is its precise sibling —
 class name for objects (**the naming-ladder name**: `class_definition::get_name()`, which the
 does-all-things work keeps identical to the serialization `$type` and the script-visible
 constructor name — reflection must never mint a third name), the type_info `canonical_name()`

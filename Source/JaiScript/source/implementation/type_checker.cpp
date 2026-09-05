@@ -93,6 +93,9 @@ struct ctype {
     // globals) - tentative kinds propagate through operators and are never proof sources.
     const type_info* ti = nullptr;
     bool tentative = false;
+    // A map key read through a range-for pair (`kv.first`, C++ `const Key`): copies freely,
+    // never mutated or aliased (reference, shared_ptr, T& parameter, T& return, cast<T&>)
+    bool const_key = false;
 
     bool is_unknown() const { return kind == unknown; }
     static ctype make(kind_t k) { return ctype{k, {}}; }
@@ -353,6 +356,7 @@ private:
         bool dynamic = false;             // var (or untyped) — assignments never checked
         bool is_reference = false;        // T&/auto&/var& decl, & parameter, auto& loop variable
         bool is_handle = false;           // declared shared_ptr<T> / shared_ptr<auto>
+        bool map_pair = false;            // range-for variable over a map: .first is the read-only key
         const type_info* declared = nullptr;   // for message text; null for auto-inferred
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
@@ -752,6 +756,7 @@ private:
         bool foreign = false;      // declared by another closure unit: no related location in this source
         bool provable = true;      // the declaring class is this unit's or registered: its types may seed proofs
         bool unresolved = false;
+        bool read_only = false;    // a getter-only binder property on a closed class: every store is the runtime raise
     };
 
     member_hit lookup_member(std::string_view cls, std::string_view member, bool want_static, int depth = 0) {
@@ -777,7 +782,10 @@ private:
             member_hit result;
             for (auto base : c->decl->base_classes) {
                 member_hit h = lookup_member(base, member, want_static, depth + 1);
-                if (h.found) { return h; }
+                if (h.found) {
+                    if (h.read_only && c->methods.count("_set_" + std::string(member))) { h.read_only = false; }   // a script _set_ override takes the stores
+                    return h;
+                }
                 result.certain = result.certain && h.certain;
                 result.unresolved = result.unresolved || h.unresolved;
             }
@@ -801,7 +809,11 @@ private:
         } else {
             uint64_t getter_id = eng_.symbolize("_get_" + std::string(member));
             if (engine_instance_member(*def, id, getter_id)) {
-                return member_hit{true, true, nullptr, nullptr};
+                member_hit h{true, true, nullptr, nullptr};
+                if (closed && def->is_read_only_property(id)) {
+                    h.read_only = !derived_opens_property(*def, id, eng_.symbolize("_set_" + std::string(member)));
+                }
+                return h;
             }
             // A binder surface is a lower bound on the C++ declaration: a virtual bound only
             // on registered subclasses still dispatches through a base-typed handle.
@@ -938,6 +950,83 @@ private:
             }
         }
         return false;
+    }
+
+    // A registered subclass owning a _set_ for id that is not its own read-only rejection (a
+    // writable re-registration, a script override, a shadowing field's synthesized setter):
+    // the store dispatches there through a base-typed handle, so the base's read-only answer
+    // is not certain.
+    static bool derived_opens_property(const class_definition& def, uint64_t id, uint64_t setter_id, int depth = 0) {
+        if (depth > 32) { return true; }
+        for (const auto& weak : def.derived_classes()) {
+            auto derived = weak.lock();
+            if (!derived) { continue; }
+            if ((derived->has_method(setter_id) && !derived->owns_read_only_property(id)) ||
+                derived_opens_property(*derived, id, setter_id, depth + 1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void read_only_store(const source_location& loc, std::string_view name) {
+        diag(diag_level::error, loc, "cannot assign to read-only property '" + std::string(name) + "'");
+    }
+
+    // `kv.first` of a range-for over a statically known map: the pair variable's name, or
+    // empty. Map keys are read-only (C++ `const Key`, the ordering invariant); mutating the
+    // pair's key copy is a load error here and a copy-on-write no-op at runtime
+    // (docs/invariants.md 11). A `var`-typed map is dynamic and leaves it to the runtime.
+    std::string_view map_key_operand(const expression* e) {
+        if (!e || e->get_type() != node_type::member_expr) { return {}; }
+        const auto* m = static_cast<const member_expr*>(e);
+        if (m->is_static || m->member != "first" || !m->object || m->object->get_type() != node_type::identifier_expr) { return {}; }
+        const auto* id = static_cast<const identifier_expr*>(m->object.get());
+        const var_entry* local = find_local(id->name);
+        return local && local->map_pair ? id->name : std::string_view{};
+    }
+
+    void map_key_mutation(const source_location& loc, std::string_view pair_name) {
+        diag(diag_level::error, loc, "cannot mutate '" + std::string(pair_name) + ".first': map keys are read-only");
+    }
+
+    // `kv.first` spelled directly, or any expression whose inferred type carries const_key
+    // (a ternary over keys); the text names the spelling when there is one
+    std::string map_key_text(const expression* e) {
+        std::string_view pair_name = map_key_operand(e);
+        return pair_name.empty() ? std::string("a map key") : "'" + std::string(pair_name) + ".first'";
+    }
+
+    void map_key_mutation(const source_location& loc, const expression* e) {
+        diag(diag_level::error, loc, "cannot mutate " + map_key_text(e) + ": map keys are read-only");
+    }
+
+    // Every mutable-alias spelling: T&/auto&/var& decl, shared_ptr<T> decl or store, cast<T&>,
+    // cast<shared_ptr<T>>, a T&/shared_ptr<T> parameter or return. Copying is the way out.
+    void map_key_alias(const source_location& loc, const expression* e) {
+        std::string_view pair_name = map_key_operand(e);
+        std::string copy_hint = pair_name.empty() ? std::string("var k = kv.first") : "var k = " + std::string(pair_name) + ".first";
+        diag(diag_level::error, loc, "cannot alias " + map_key_text(e) + ": map keys are read-only (copy it instead: " + copy_hint + ")");
+    }
+
+    static bool handle_type(const type_info* t) {
+        return t && t->base_type == script_value_type::jai_shared_ptr_type;
+    }
+
+    static bool string_mutator_name(std::string_view name) {
+        for (std::string_view m : k_string_mutator_method_names) {
+            if (m == name) { return true; }
+        }
+        return false;
+    }
+
+    // ++/-- on a bare identifier (member targets desugar to += 1 and take the assignment rule)
+    void check_incdec_target(unary_expr* u) {
+        if (!class_ctx_ || u->operand->get_type() != node_type::identifier_expr) { return; }
+        auto* id = static_cast<identifier_expr*>(u->operand.get());
+        if (find_local(id->name)) { return; }
+        member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
+        if (hit.found && hit.read_only && !global_tier_name(id->name)) { read_only_store(u->location, id->name); }
     }
 
     // -------------------------------------------------------------- type proofs
@@ -1495,6 +1584,7 @@ private:
                         return is_numeric(operand.kind) ? operand : ctype{};
                     case token_type::plus_plus:
                     case token_type::minus_minus:
+                        check_incdec_target(u);
                         return is_numeric(operand.kind) ? operand : ctype{};
                     case token_type::tilde:
                         return operand.kind == ctype::int_k ? operand : ctype{};
@@ -1505,8 +1595,12 @@ private:
                 return infer_assignment(static_cast<assignment_expr*>(e));
             case node_type::call_expr:
                 return infer_call(static_cast<call_expr*>(e));
-            case node_type::member_expr:
-                return infer_member(static_cast<member_expr*>(e), /*writing=*/false);
+            case node_type::member_expr: {
+                auto* m = static_cast<member_expr*>(e);
+                ctype t = infer_member(m, /*writing=*/false);
+                if (!map_key_operand(m).empty()) { t.const_key = true; }
+                return t;
+            }
             case node_type::lambda_expr:
                 walk_lambda(static_cast<lambda_expr*>(e));
                 return ctype::make(ctype::function_k);
@@ -1535,12 +1629,15 @@ private:
                 if (a.kind == b.kind && a.cls == b.cls) {
                     if (a.ti != b.ti) { a.ti = nullptr; }   // two spellings (value vs handle) are not one certain type
                     a.tentative = a.tentative || b.tentative;
+                    a.const_key = a.const_key || b.const_key;
                     return a;
                 }
                 if (!a.is_unknown() && !b.is_unknown()) {
                     last_mixed_ternary_ = {e, a, b};
                 }
-                return ctype{};
+                ctype mixed{};
+                mixed.const_key = a.const_key || b.const_key;
+                return mixed;
             }
             case node_type::array_literal_expr: {
                 auto* a = static_cast<array_literal_expr*>(e);
@@ -1577,6 +1674,9 @@ private:
                 }
                 if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
                     warn_cast_copy(c, operand_t);
+                }
+                if (operand_t.const_key && (c->by_reference || handle_type(c->target.get()))) {
+                    map_key_alias(c->location, c->operand.get());
                 }
                 if (c->by_reference) { t.tentative = true; }
                 return t;
@@ -1721,6 +1821,22 @@ private:
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ctype t = infer_call_impl(c, args, ov);
         stamp_call_proofs(c, ov, args);
+        if (ov) {
+            // a map key passed where every viable overload binds the parameter by reference
+            // or as a shared_ptr handle (a by-value parameter copies)
+            for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
+                if (!args[i].const_key) { continue; }
+                bool aliasing = false, viable = false;
+                for (const auto* fn : *ov) {
+                    if (!script_fn_viable(fn, args)) { continue; }
+                    viable = true;
+                    aliasing = i < fn->parameters.size() &&
+                               (fn->parameters[i].is_reference || handle_type(fn->parameters[i].type.get()));
+                    if (!aliasing) { break; }
+                }
+                if (viable && aliasing) { map_key_alias(c->arguments[i]->location, c->arguments[i].get()); }
+            }
+        }
         return t;
     }
 
@@ -1787,6 +1903,7 @@ private:
                 if (namespace_path_receiver(m)) { return {}; }
             }
             ctype recv = infer(m->object.get());
+            if (recv.const_key && string_mutator_name(m->member)) { map_key_mutation(m->location, m->object.get()); }
             if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) {
                 bool want_static = (recv.kind == ctype::class_ref_k);
                 member_hit hit = lookup_member(recv.cls, m->member, want_static);
@@ -1848,6 +1965,7 @@ private:
             size_t scope_index = 0;
             if (var_entry* local = find_local(id->name, &scope_index)) {
                 if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
+                if (rhs.const_key && local->is_handle && !compound) { map_key_alias(a->location, a->value.get()); return done(rhs); }
                 if (local->dynamic) { return done(rhs); }
                 check_store(rhs, compound, base_op, local->type, local->display,
                             "'" + std::string(id->name) + "'", a->location, local->line, local->column);
@@ -1860,6 +1978,7 @@ private:
                     // Writes resolve through the global tier before fields too (audited
                     // order) - a name that is both is flow-order-ambiguous: stay lenient.
                     if (global_tier_name(id->name)) { return done(rhs); }
+                    if (hit.read_only) { read_only_store(a->location, id->name); return done({}); }
                     if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
                     if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
                     if (hit.field && hit.field->type) {
@@ -1901,8 +2020,16 @@ private:
             std::optional<field_proof> fp;
             member_hit hit;
             auto* m = static_cast<member_expr*>(target);
+            if (std::string_view pair_name = map_key_operand(m); !pair_name.empty()) {
+                map_key_mutation(a->location, pair_name);
+                return rhs;
+            }
             ctype recv;
             infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
+            if (hit.found && hit.read_only && recv.kind == ctype::object_k && !m->is_static) {
+                read_only_store(a->location, m->member);
+                return rhs;
+            }
             if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
             if (typed_field && typed_field->type) {
                 ctype ft = member_type(hit);
@@ -1997,13 +2124,14 @@ private:
             }
             case node_type::range_for_stmt: {
                 auto* f = static_cast<range_for_stmt*>(s);
-                infer(f->container.get());
+                const ctype container = infer(f->container.get());
                 scopes_.emplace_back();
                 var_entry entry;
                 entry.type = ctype_from_type_info(f->element_type.get());
                 entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
                                 f->is_reference;
                 entry.is_reference = f->is_reference;
+                entry.map_pair = container.kind == ctype::map_k;
                 entry.is_handle = f->element_type && f->element_type->base_type == script_value_type::jai_shared_ptr_type;
                 entry.declared = f->element_type.get();
                 entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
@@ -2089,6 +2217,9 @@ private:
         ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
         if (fn_stack_.empty()) { return; }
         const fn_ctx& fn = fn_stack_.back();
+        if (r->value && value.const_key && (r->binds_reference || handle_type(fn.ret))) {
+            map_key_alias(r->location, r->value.get());
+        }
         if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
         ctype ret = ctype_from_type_info(fn.ret);
         if (ret.is_unknown()) { return; }
@@ -2207,13 +2338,22 @@ private:
         ctype init{};
         bool has_init = decl->initializer != nullptr;
         bool is_reference_decl = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
+        bool is_handle_decl = handle_type(decl->type.get());
         if (has_init) {
             init = infer(decl->initializer.get());
+            if (init.const_key && (is_reference_decl || is_handle_decl)) {
+                map_key_alias(decl->location, decl->initializer.get());
+            }
         }
 
         var_entry entry;
         entry.line = decl->location.line;
         entry.column = decl->location.column;
+        // `var p = kv;` / `auto& p = kv;`: the copy or alias of a map pair still holds the key
+        if (has_init && decl->initializer->get_type() == node_type::identifier_expr) {
+            const var_entry* src = find_local(static_cast<const identifier_expr*>(decl->initializer.get())->name);
+            entry.map_pair = src && src->map_pair;
+        }
         // shared_ptr<auto>: pointee INFERRED from the initializer's class then enforced
         // like the explicit spelling; null/missing initializer has nothing to infer
         // (runtime errors identically - Dev ruling 2026-07)

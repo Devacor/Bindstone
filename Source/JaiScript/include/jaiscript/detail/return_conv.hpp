@@ -70,6 +70,83 @@ namespace jai::detail {
         }
     }
 
+
+    // ---- By-value return materialization (C++ [stmt.return]) ----
+    // The result of a by-value `return e;` aliases nothing the callee could name. Operand
+    // classes (return_stmt::return_operand_class memo on the interpreter, the compiler's
+    // operand on the vm): a temporary (call, literal, operator, `this`, construction) moves;
+    // an lvalue read (member, element, ternary over lvalues, assignment) copies through the
+    // ONE store kernel (clone_for_assignment: values deep-copy, shared_ptr handles share,
+    // scalars/strings are copies already); an identifier copies too unless it names the
+    // callee's OWN slot, whose payload moves out of the dying frame instead (NRVO /
+    // implicit move). A reference result (element read, ref-returning call) copies its
+    // target the same way. `-> T&` returns and the top-level program's `return` never
+    // enter here. Both backends run exactly these functions.
+    inline constexpr uint8_t return_operand_unclassified = 0;
+    inline constexpr uint8_t return_operand_temporary = 1;
+    inline constexpr uint8_t return_operand_ident = 2;
+    inline constexpr uint8_t return_operand_lvalue = 3;
+
+    inline uint8_t classify_return_operand(const expression* e) noexcept {
+        if (!e) return return_operand_temporary;
+        switch (e->get_type()) {
+            case node_type::identifier_expr: return return_operand_ident;
+            case node_type::member_expr:
+            case node_type::assignment_expr: return return_operand_lvalue;
+            case node_type::binary_expr:
+                return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket
+                    ? return_operand_lvalue : return_operand_temporary;
+            case node_type::ternary_expr: {
+                const auto* t = static_cast<const ternary_expr*>(e);
+                return classify_return_operand(t->then_expression.get()) != return_operand_temporary ||
+                       classify_return_operand(t->else_expression.get()) != return_operand_temporary
+                    ? return_operand_lvalue : return_operand_temporary;
+            }
+            default: return return_operand_temporary;
+        }
+    }
+
+    // Raw indexes a by-value return hands out as they are: scalars, strings, functions and
+    // handles are copies already (the prim_* identity lanes see exactly the value they saw).
+    // The ONE-test fast head of every return door: a plain result runs the pre-materialization
+    // door byte for byte.
+    inline constexpr uint32_t return_plain_mask =
+        (1u << script_value::TYPEID_NULL) | (1u << script_value::TYPEID_INT) | (1u << script_value::TYPEID_FLOAT) |
+        (1u << script_value::TYPEID_STRING) | (1u << script_value::TYPEID_CHAR) | (1u << script_value::TYPEID_BOOL) |
+        (1u << script_value::TYPEID_FUNCTION) | (1u << script_value::TYPEID_SHARED_PTR) | (1u << script_value::TYPEID_WEAK_PTR);
+    inline bool return_value_plain(const script_value& v) noexcept {
+        return ((1u << v.raw_storage_index()) & return_plain_mask) != 0;
+    }
+
+    // In place: a reference copies its target; a heavy lvalue read deep-copies (bound values
+    // decode); a heavy temporary and every plain value stay as they are.
+    inline void materialize_return_value(script_value& v, bool lvalue_read) {
+        if (return_value_plain(v)) return;
+        if (lvalue_read || v.is_reference()) { v = clone_for_assignment(v); }
+    }
+
+    inline bool same_heavy_node(const script_value& a, const script_value& b) noexcept {
+        const size_t idx = a.raw_storage_index();
+        if (idx != b.raw_storage_index()) return false;
+        switch (idx) {
+            case script_value::TYPEID_ARRAY: return a.unchecked_array_node() == b.unchecked_array_node();
+            case script_value::TYPEID_MAP: return &a.unchecked_as_map() == &b.unchecked_as_map();
+            case script_value::TYPEID_OBJECT: return a.unchecked_object_handle().get() == b.unchecked_object_handle().get();
+            default: return false;
+        }
+    }
+
+    // The dying frame slot behind `return <ident>;` when it carries the returned heavy node
+    // itself (unboxed) or through a cell nobody else holds (a finished ref-param bind): the
+    // payload to release so the returned copy becomes a move. Null = copy (a global, a
+    // member, a cell a live closure or alias shares, a scalar).
+    inline script_value* return_own_slot_payload(script_value* slot, const script_value& returned) noexcept {
+        if (!slot) return nullptr;
+        script_value* payload = slot->raw_storage_index() == script_value::TYPEID_REFERENCE
+            ? slot->unique_cell_payload() : slot;
+        return payload && same_heavy_node(*payload, returned) ? payload : nullptr;
+    }
+
 } // namespace jai::detail
 
 #endif // __JAISCRIPT_DETAIL_RETURN_CONV_HPP__

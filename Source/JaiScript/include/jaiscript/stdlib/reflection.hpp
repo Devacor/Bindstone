@@ -18,6 +18,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/properties/property_schema.hpp>
+#include <jaiscript/stdlib/io.hpp>
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -35,18 +36,7 @@ namespace reflect_detail {
 inline std::string semantic_type_name(const script_value& val, engine* eng) {
     const script_value& d = val.is_reference() ? val.deref() : val;
     if (d.is_object()) {
-        try {
-            auto instance = d.as<std::shared_ptr<class_instance>>();
-            if (instance) {
-                if (auto def = instance->get_class_definition()) {
-                    return def->get_name();
-                }
-            }
-        } catch (...) {}
-        if (auto ti = d.get_type_info()) {
-            if (!ti->type_name.empty() && ti->type_name != "any") { return ti->type_name; }
-        }
-        return "object";
+        return object_type_name(d);
     }
     // Typed containers carry their canonical tag ("array<int>"); untyped report the kind
     if (d.is_array() || d.is_map()) {

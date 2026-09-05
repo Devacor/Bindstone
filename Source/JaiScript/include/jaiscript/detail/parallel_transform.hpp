@@ -106,6 +106,18 @@ namespace jai::detail {
             const ast_node* site = nullptr;   // pinned transitively via script_functions
         };
         std::vector<element_method_call> element_method_calls;
+        // Member ids the body names on chains rooted at the element (its own fields and their
+        // members, any depth), recorded for both forms. parallel_for's barrier normalization
+        // descends an object only through fields the body can reach: a field no worker can
+        // name is never copied by one, so its shared strings may stay shared (the transform
+        // reaches every element whole - its by-value binding clones the entire element).
+        // element_reach_all = the element is used whole somewhere (bare read, argument,
+        // method receiver, store), so every field counts.
+        // element_reached_whole = chain terminals used as a VALUE or REPLACED (a copy or a
+        // release touches every handle below them), so their whole subtree counts.
+        std::vector<uint64_t> element_reached_members;
+        std::vector<uint64_t> element_reached_whole;
+        bool element_reach_all = false;
     };
 
     // One barrier-admitted script-class method, provisioned per worker. The method value
@@ -146,6 +158,7 @@ namespace jai::detail {
     struct parallel_engine_state {
         std::unique_ptr<jai::thread_pool> pool;
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
+        std::mutex instance_registry_mutex;                // class_definition instance registry, region-time only
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
         bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
@@ -217,8 +230,8 @@ namespace jai::detail {
     // (parallel_for v1). Both backends call this after evaluating the container in the
     // enclosing scope: `container` must hold (or reference) the LIVE array handle so
     // element writes land in the script-visible storage. Admission runs the same
-    // fail-closed walk in "in-place root" mode (member access/stores rooted at locals
-    // admitted, by-ref element required, no valued returns); the barrier proves every
+    // fail-closed walk in "in-place root" mode (the element may bind by reference; member
+    // access/stores rooted at locals are admitted in both forms); the barrier proves every
     // element safe for exclusive in-place mutation (primitives, typed primitive
     // containers, flat-value-class instances — engine::allow_unsafe_parallel skips the
     // proof) and pre-mints the element references single-threaded. capture_env is the

@@ -28,6 +28,22 @@ struct probe_object {
     int64_t doubled() const { return value * 2; }
 };
 
+// A getter-only property beside writable ones (member pointer, lambda pair)
+struct read_only_probe {
+    int64_t value = 0;
+    int64_t lam_backing = 0;
+};
+void bind_read_only_probe(jai::engine& e) {
+    dynamic_binder<read_only_probe>(e, "RoProbe")
+        .constructor<>()
+        .property("value", &read_only_probe::value)
+        .property("lam",
+                  [](read_only_probe& s) -> int64_t { return s.lam_backing; },
+                  [](read_only_probe& s, int64_t v) { s.lam_backing = v; })
+        .property("ro", [](const read_only_probe& s) -> int64_t { return s.value + 100; }, nullptr)
+        .build();
+}
+
 size_t error_count(const check_report& r) { return r.error_count(); }
 size_t warning_count(const check_report& r) {
     return r.diagnostics.size() - r.error_count();
@@ -341,6 +357,63 @@ public:
             check_eq((size_t)0, error_count(e->check(std::string(mk) + "p.value = 5;")));
             check_eq((size_t)1, error_count(e->check(std::string(mk) + "p.zzz_nope();")));
             check_eq((size_t)1, error_count(e->check(std::string(mk) + "p.zzz_nope;")));
+        });
+
+        test("read_only_property_store_is_a_check_error", [this]() {
+            // A store to a getter-only binder property is the mistake the runtime raises
+            // (`Cannot assign to 'ro': it is read-only`); on a closed class the checker
+            // reports it at load, in its own voice.
+            const char* text = "cannot assign to read-only property 'ro'";
+            auto fresh = [](bool use_vm) {
+                auto e = make_engine();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                bind_read_only_probe(*e);
+                return e;
+            };
+            auto e = fresh(false);
+            const std::string mk = "RoProbe h = RoProbe();\n";
+            const std::string hybrid = "class W : RoProbe { W() : super() {} ";
+            for (const char* bad : {"h.ro = 5;", "h.ro += 1;", "h.ro++;", "--h.ro;", "h.ro *= 2;"}) {
+                auto r = e->check(mk + bad);
+                check_eq((size_t)1, error_count(r), bad);
+                check_true(has_diag(r, dlevel::error, text), bad);
+            }
+            for (const char* body : {"void go() { ro = 5; }", "void go() { ro += 1; }", "void go() { ro++; }",
+                                     "void go() { --ro; }", "void go() { this.ro = 5; }", "void go() { this.ro += 1; }",
+                                     "void go() { this.ro++; }"}) {
+                auto r = e->check(hybrid + body + " }");
+                check_eq((size_t)1, error_count(r), body);
+                check_true(has_diag(r, dlevel::error, text), body);
+            }
+            // the getter reads; properties with a setter store; overrides and shadows are lenient
+            check_eq((size_t)0, error_count(e->check(mk + "int x = h.ro;")));
+            check_eq((size_t)0, error_count(e->check(mk + "h.value = 5; h.value += 1; h.value++; h.lam = 5; h.lam++;")));
+            check_eq((size_t)0, error_count(e->check(hybrid + "void go() { value = 5; lam += 1; value++; this.value = 2; int x = ro; } }")));
+            check_eq((size_t)0, error_count(e->check(hybrid + "int stored = 0; void _set_ro(int v) override { stored = v; } void go() { ro = 5; this.ro += 1; } }"
+                                                     "W w = W(); w.ro = 5; w.ro++;")));
+            check_eq((size_t)0, error_count(e->check(hybrid + "int ro = 1; void go() { ro = 5; this.ro++; } } W w = W(); w.ro = 2;")));
+            check_eq((size_t)0, error_count(e->check(mk + "var v = h; v.ro = 5; v.ro++;")));
+            // strict: the load fails before anything runs, on both backends
+            for (bool use_vm : {false, true}) {
+                auto s = fresh(use_vm);
+                check_throws([&]() { s->execute(mk + "h.ro = 5;"); });
+                check_throws([&]() { s->execute(hybrid + "void go() { ro++; } } W w = W(); w.go();"); });
+                bool static_err = false;
+                try { s->execute(mk + "h.ro = 5;"); } catch (const static_check_error&) { static_err = true; } catch (...) {}
+                check_true(static_err, "strict rejects at load");
+            }
+            // warn: a warning, and the runtime raise stands
+            for (bool use_vm : {false, true}) {
+                auto w = fresh(use_vm);
+                auto r = w->check("[[warn_mode]]\n" + mk + "h.ro = 5;");
+                check_eq((size_t)0, error_count(r));
+                check_eq((size_t)1, warning_count(r));
+                check_true(has_diag(r, dlevel::warning, text));
+                std::string got;
+                try { w->execute("[[warn_mode]]\n" + mk + "h.ro = 5;"); } catch (const std::exception& ex) { got = ex.what(); }
+                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
+                check_eq((int64_t)100, w->execute("h.ro").as_int(), "the getter still reads");
+            }
         });
 
         // ------------------------------------------------------------ script classes

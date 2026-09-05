@@ -1221,6 +1221,10 @@ bool engine::parallel_region_active() const {
     return impl->parallel_ && impl->parallel_->active_region;
 }
 
+std::unique_lock<std::mutex> engine::parallel_instance_registry_lock() {
+    return std::unique_lock<std::mutex>(parallel_state().instance_registry_mutex);
+}
+
 detail::math_rng_state& engine::math_rng() {
     return impl->math_rng_;
 }

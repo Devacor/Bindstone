@@ -12,6 +12,8 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/string_mutator_receiver.hpp>
+#include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
@@ -754,6 +756,11 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::vector<iter_state> iter_storage;
 	std::vector<counted_for_state> cfor_storage;
 	std::vector<pending_callee> pending_storage;   // f(yield x) suspends between probe and call
+	// The exception trio is fiber state too: a yield inside a catch keeps the caught
+	// exception (bare throw;) and the in-catch marker across the resumer's own try/catch
+	std::optional<script_exception> parked_exception;
+	std::optional<script_value> parked_exception_value;
+	uint64_t parked_catch_marker = 0;
 	bool started = false;
 };
 
@@ -866,6 +873,44 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			std::swap(vm->pending_callees_, st->pending_storage);
 		}
 	} stacks_guard(this, &state);
+
+	// The exception trio follows the stacks: the resumer's is saved here and comes back
+	// on every exit (a throw escaping the fiber keeps its exception pair live for the
+	// resumer's unwind_to_handler); a suspend parks the fiber's own for the next resume.
+	// A fresh fiber starts with no active exception.
+	struct fiber_exception_swap {
+		vm_backend* vm;
+		vm_coroutine_state* st;
+		std::optional<script_exception> resumer_exception;
+		std::optional<script_value> resumer_exception_value;
+		uint64_t resumer_marker;
+		bool park = false;
+		fiber_exception_swap(vm_backend* v, vm_coroutine_state* c)
+			: vm(v), st(c), resumer_exception(std::move(v->current_exception_)),
+			  resumer_exception_value(std::move(v->active_exception_value_)), resumer_marker(v->current_catch_var_id_) {
+			if (st->started) {
+				vm->current_exception_ = std::move(st->parked_exception);
+				vm->active_exception_value_ = std::move(st->parked_exception_value);
+				vm->current_catch_var_id_ = st->parked_catch_marker;
+			} else {
+				vm->current_exception_.reset();
+				vm->active_exception_value_.reset();
+				vm->current_catch_var_id_ = 0;
+			}
+		}
+		~fiber_exception_swap() {
+			if (park) {
+				st->parked_exception = std::move(vm->current_exception_);
+				st->parked_exception_value = std::move(vm->active_exception_value_);
+				st->parked_catch_marker = vm->current_catch_var_id_;
+			}
+			vm->current_catch_var_id_ = resumer_marker;
+			if (park || !vm->is_unwinding_) {
+				vm->current_exception_ = std::move(resumer_exception);
+				vm->active_exception_value_ = std::move(resumer_exception_value);
+			}
+		}
+	} exception_guard(this, &state);
 
 	auto prev_env = environment_;
 	environment_ = state.current_env ? state.current_env : state.entry_env;
@@ -997,6 +1042,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		}
 		handle.set_status(coroutine_handle::status::suspended);
 
+		exception_guard.park = true;
 		yielding_ = prev_yielding;
 		has_return_value_ = prev_has_return;
 		return_value_ = std::move(prev_return);
@@ -1488,6 +1534,13 @@ script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t
 		}
 	}
 	return environment_->get_value_ptr(symbol_id);
+}
+
+script_value* vm_backend::string_receiver_cell(frame& f, const call_site& site, const identifier_expr* ident) {
+	if (ident->global_qualified) {
+		return engine_->get_global_environment()->get_value_ptr(site.receiver_symbol);
+	}
+	return resolve_local_or_env(f, site.receiver_slot, site.receiver_symbol);
 }
 
 // resolve_local_or_env with the env path memoized per instruction (slot 2*ip); the
@@ -2939,17 +2992,13 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 #endif
 	const uint64_t sym = f.code->symbols[ins.b];
 	if (ins.c & load_flag_global_only) {
-		// ::name - GLOBAL env only (locals, captures, catch var, member scope all skipped)
+		// ::name - GLOBAL env only (locals, captures, member scope all skipped)
 		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
 			stack_.push_back(g->deref());
 			return {};
 		}
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Undefined variable '{0}'", sym);
-	}
-	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
-		stack_.push_back(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
-		return {};
 	}
 	if (ins.a != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* local = frame_slot(f, ins.a)) {
@@ -4377,10 +4426,6 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
 		return nullptr;
 	}
-	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
-		scratch.emplace(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
-		return &scratch.value();
-	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* local = frame_slot(f, operand.slot)) {
 			return &local->deref();
@@ -4623,8 +4668,8 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 	// Identifier operands try the nullable fast head first (the exact subset of
 	// fused_ident_value's ladder that exec_fused_cmp_jump already trusts: slot cell,
 	// member-scope field cell, or armed env cell); a null answer runs the full ladder,
-	// so every error and side effect keeps its place. Catch-var shadows bypass the head.
-	const bool ident_fast_head = current_catch_var_id_ == 0;
+	// so every error and side effect keeps its place.
+	constexpr bool ident_fast_head = true;
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else if (p.left.is_subscript()) {
@@ -4896,7 +4941,7 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
 	// round-trip through the value stack. Any non-trivial shape bails to the pair.
-	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
+	if (!has_custom_numeric_ops_) {
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t prof_c0 = __rdtsc();
 #endif
@@ -4996,7 +5041,7 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 	const compound_fused_proto& cp = f.code->compound_fused_protos[ins.a];
 	const bool bare_rhs = cp.rhs_proto == k_invalid_u32;
 
-	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
+	if (!has_custom_numeric_ops_) {
 		script_value* varPtr = nullptr;
 		if (cp.slot != k_invalid_u32 && f.locals && !f.top_level) {
 			varPtr = frame_slot(f, cp.slot);
@@ -5794,8 +5839,8 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	bool have_raw_index = false;
 	script_int raw_index = 0;
 	if (p.index_binary != k_invalid_u32) {
-		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops, no
-		// catch-var shadow) run no user code, so the container POINTER stays valid
+		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops) run
+		// no user code, so the container POINTER stays valid
 		// across the compute. Int arithmetic short-circuits to a RAW index — no
 		// script_value is born at all; error spellings replicate binary_fused_compute's
 		// int row verbatim. Everything else snapshots the container first — exactly
@@ -5803,7 +5848,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
 		const token_type bop = static_cast<token_type>(bp.op);
 		bool pure = false;
-		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 && is_numeric_binary_op(bop)) {
+		if (!has_custom_numeric_ops_ && is_numeric_binary_op(bop)) {
 			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
 			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
 			if (pr) {
@@ -6201,7 +6246,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
 		const token_type bop = static_cast<token_type>(bp.op);
 		bool pure = false;
-		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 && is_numeric_binary_op(bop)) {
+		if (!has_custom_numeric_ops_ && is_numeric_binary_op(bop)) {
 			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
 			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
 			if (pr) {
@@ -8012,86 +8057,47 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				}
 				if (is_overridden) continue;
 
-				// Member scope: the capture env is self-contained (parent = global env),
-				// so a FIELD used under [=]/[&] must be materialized here with the C++
-				// shadowing order - the old contains()/get() walk snapshotted a
-				// same-named GLOBAL over the member. (KEEP BYTE-PARALLEL with the
-				// interpreter's visit_lambda_expr default-capture loop.)
-				script_value* scoped_target = nullptr;
-				std::optional<script_value> property_capture;
+				// The capture source in the runtime's order (detail/capture_ladder.hpp): the
+				// outer frame's slot, the member scope, then the env chain - a same-named
+				// global never wins over a local or a field. [&] cell-shares the source
+				// (escape-legal; share_env_ref also demotes counted-for cached pointers),
+				// [=] snapshots it; a hybrid's C++ property follows the field rule through
+				// its accessors (reference_model.md CPP-MEMBER / PROPERTY). KEEP BYTE-PARALLEL
+				// with the interpreter's visit_lambda_expr default-capture loop.
+				script_value* slot_val = nullptr;
+				detail::member_scope_ctx scope;
 				if (f.locals && !f.top_level) {
-					ensure_frame_member_scope(f, environment_.get());
-					if (frame_scope_active(f)) {
-						scoped_target = member_scope_env_lookup(f, var_id, SIZE_MAX);
-						// A hybrid's C++ property follows the field rule: [=] snapshots through
-						// the getter, [&] shares the member itself / its accessors
-						// (reference_model.md CPP-MEMBER / PROPERTY)
-						if (!scoped_target && frame_scope_state(f) == detail::member_scope_state::instance &&
-						    f.locals->scope_this) {
-							auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
-							                                         f.locals->scope_static, var_id, /*want_methods*/ true);
-							if (member.what == detail::member_probe_hit::kind::cpp_property) {
-								auto read = capture_by_ref_default
-									? detail::bind_cpp_property_ref(*f.locals->scope_this, var_id, engine_, symbolizer_)
-									: detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
-									                                 member.method_value, member.getter_id, var_id);
-								if (!read) {
-									return raise_from(read);
-								}
-								property_capture = std::move(read.value());
-							}
-						}
-					}
-				}
-				if (scoped_target) {
-					if (capture_by_ref_default) {
-						captureEnv->define(var_id, share_env_ref(*scoped_target));
-					} else {
-						captureEnv->define(var_id, vm_clone_for_capture(scoped_target->deref(), symbolizer_));
-					}
-				} else if (property_capture) {
-					captureEnv->define(var_id, capture_by_ref_default ? std::move(*property_capture)
-					                                                  : vm_clone_for_capture(*property_capture, symbolizer_));
-				} else if (!(f.locals && !f.top_level && frame_scope_active(f)) && environment_->contains(var_id)) {
-					if (capture_by_ref_default) {
-						script_value* targetPtr = environment_->get_value_ptr(var_id);
-						if (targetPtr) {
-							// Cell share (escape-legal): the capture stays live after
-							// the captured env dies
-							captureEnv->define(var_id, share_env_ref(*targetPtr));
-						}
-					} else {
-						auto capture_result = environment_->get(var_id);
-						if (capture_result) {
-							captureEnv->define(var_id, vm_clone_for_capture(capture_result.value(), symbolizer_));
-						}
-					}
-				} else if (f.locals && !f.top_level) {
 					for (const auto& [sym, slot] : outer_refs) {
 						if (sym == var_id) {
-							script_value* slot_val = frame_slot(f, slot);
-							if (slot_val) {
-								if (capture_by_ref_default) {
-									// Cell share (escape-legal, C++ [&] semantics): the slot
-									// boxes in place and the capture shares the cell - writes
-									// land in the original local, the cell outlives the frame
-									// (share_env_ref also demotes counted-for cached pointers)
-									captureEnv->define(var_id, share_env_ref(*slot_val));
-								} else {
-									captureEnv->define(var_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
-								}
-							}
+							slot_val = frame_slot(f, slot);
 							break;
 						}
 					}
+					ensure_frame_member_scope(f, environment_.get());
+					scope = detail::frame_member_scope(*f.locals);
+				}
+				auto src = detail::resolve_capture_source(slot_val, environment_.get(), scope, var_id);
+				if (src.cell) {
+					if (capture_by_ref_default) {
+						captureEnv->define(var_id, share_env_ref(*src.cell));
+					} else {
+						captureEnv->define(var_id, vm_clone_for_capture(src.cell->deref(), symbolizer_));
+					}
+				} else if (src.what == detail::capture_source::kind::cpp_property) {
+					auto read = capture_by_ref_default
+						? detail::bind_cpp_property_ref(*f.locals->scope_this, var_id, engine_, symbolizer_)
+						: detail::read_bare_cpp_property(*f.locals->scope_this, src.property.instance,
+						                                 src.property.method_value, src.property.getter_id, var_id);
+					if (!read) {
+						return raise_from(read);
+					}
+					captureEnv->define(var_id, capture_by_ref_default ? std::move(read.value())
+					                                                  : vm_clone_for_capture(read.value(), symbolizer_));
 				}
 			}
 		}
 
 		for (const auto& capture : proto.captures) {
-			// Enclosing-frame slots (params/locals) shadow env-resident and global names
-			bool can_capture = false;
-			bool capture_from_slot = false;
 			script_value* slot_val = nullptr;
 			if (f.locals && !f.top_level) {
 				if (capture.outer_slot != SIZE_MAX && capture.outer_slot < frame_slot_count(f)) {
@@ -8105,49 +8111,55 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 						}
 					}
 				}
-				if (slot_val) { can_capture = true; capture_from_slot = true; }
 			}
-			if (!can_capture) {
-				can_capture = environment_->contains(capture.symbol_id);
+			if (!slot_val && capture.symbol_id == this_id_) {
+				// 'this' - the method env provides it via get() even though contains()
+				// might return false
+				if (!environment_->contains(this_id_) && !environment_->get(this_id_)) {
+					return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
+						"Cannot capture undefined variable '{0}'", capture.symbol_id);
+				}
+				if (capture.by_reference) {
+					script_value* targetPtr = environment_->get_value_ptr(this_id_);
+					if (!targetPtr) {
+						return raise_(make_error_code(runtime_error_code::capture_reference_failed),
+							"Cannot capture variable '{0}' by reference", capture.symbol_id);
+					}
+					captureEnv->define(this_id_, share_env_ref(*targetPtr));
+				} else {
+					auto capture_result = environment_->get(this_id_);
+					if (!capture_result) return raise_from(capture_result);
+					captureEnv->define(this_id_, vm_clone_for_capture(capture_result.value(), symbolizer_));
+				}
+				continue;
 			}
-			if (!can_capture && capture.symbol_id == this_id_) {
-				auto this_test_result = environment_->get(this_id_);
-				if (this_test_result) can_capture = true;
+			// The capture source in the runtime's order (detail/capture_ladder.hpp): the
+			// outer frame's slot, the function's own scopes, then the env chain - a member
+			// shadows the chain and is not a capturable variable
+			detail::member_scope_ctx scope;
+			if (f.locals && !f.top_level) {
+				ensure_frame_member_scope(f, environment_.get());
+				scope = detail::frame_member_scope(*f.locals);
 			}
-
-			if (!can_capture) {
+			auto src = detail::resolve_capture_source(slot_val, environment_.get(), scope, capture.symbol_id);
+			if (!src.is_variable()) {
 				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
 					"Cannot capture undefined variable '{0}'", capture.symbol_id);
 			}
-
-			if (capture_from_slot) {
-				if (capture.by_reference) {
-					// Cell share (escape-legal, C++ [&x] semantics): the slot boxes in
-					// place; the closure and the original local share the cell
-					captureEnv->define(capture.symbol_id, share_env_ref(*slot_val));
-				} else {
-					captureEnv->define(capture.symbol_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
-				}
-			} else if (capture.by_reference) {
-				script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
-				if (targetPtr) {
-					// Cell share (escape-legal): the capture stays live after the
-					// captured env dies
-					captureEnv->define(capture.symbol_id, share_env_ref(*targetPtr));
-				} else {
-					return raise_(make_error_code(runtime_error_code::capture_reference_failed),
-						"Cannot capture variable '{0}' by reference", capture.symbol_id);
-				}
+			if (capture.by_reference) {
+				// Cell share (escape-legal, C++ [&x] semantics): the storage boxes in
+				// place; the closure and the original share the cell
+				captureEnv->define(capture.symbol_id, share_env_ref(*src.cell));
 			} else {
-				auto capture_result = environment_->get(capture.symbol_id);
-				if (!capture_result) return raise_from(capture_result);
-				captureEnv->define(capture.symbol_id, vm_clone_for_capture(capture_result.value(), symbolizer_));
+				captureEnv->define(capture.symbol_id, vm_clone_for_capture(src.cell->deref(), symbolizer_));
 			}
 		}
 
 		if (f.locals && !f.top_level) {
 			for (const auto& [sym, slot] : outer_refs) {
-				if (captureEnv->contains(sym)) {
+				// Already captured above - OWN storage only, a same-named global behind
+				// the parent is not a capture
+				if (captureEnv->get_own_value_ptr(sym)) {
 					continue;
 				}
 				script_value* slot_val = frame_slot(f, slot);
@@ -8174,22 +8186,19 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			auto method_env = std::make_shared<environment>(closure_env, symbolizer_, this_obj);
 			method_env->define(this_id_, this_obj);
 
+			// The capture env's OWN storage only, never a global behind its parent
 			for (const auto& capture : proto.captures) {
-				if (capture.symbol_id != this_id_ && captureEnv->contains(capture.symbol_id)) {
-					auto capture_result = captureEnv->get(capture.symbol_id);
-					if (capture_result) {
-						method_env->define(capture.symbol_id, std::move(capture_result.value()));
-					}
+				if (capture.symbol_id == this_id_) continue;
+				if (script_value* captured = captureEnv->get_own_value_ptr(capture.symbol_id)) {
+					method_env->define(capture.symbol_id, *captured);
 				}
 			}
 
 			if (has_default_capture) {
 				for (uint64_t var_id : proto.used_variables) {
-					if (var_id != this_id_ && captureEnv->contains(var_id)) {
-						auto var_result = captureEnv->get(var_id);
-						if (var_result) {
-							method_env->define(var_id, std::move(var_result.value()));
-						}
+					if (var_id == this_id_) continue;
+					if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
+						method_env->define(var_id, *captured);
 					}
 				}
 			}
@@ -9210,15 +9219,16 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
 
-	// A :: target carries no object operand (its class resolves in the write-back)
-	script_value objectValueRaw = member->is_static ? make_null() : std::move(stack_.back());
-	if (!member->is_static) {
-		stack_.pop_back();
-	}
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());
 	stack_.pop_back();
+	// The receiver was evaluated once (op_dup under the read); a :: target carries no
+	// object operand (its class resolves in the write-back)
+	script_value objectValueRaw = member->is_static ? make_null() : std::move(stack_.back());
+	if (!member->is_static) {
+		stack_.pop_back();
+	}
 	currentValue = currentValue.deref();
 	script_value postfix_old = old_result ? currentValue : make_null();
 	if (ins.c & compound_flag_incdec) {
@@ -9391,26 +9401,30 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	// the args above it bind IN PLACE for pin-path and method-IC dispatches — no
 	// pooled vector, no per-arg move, the receiver slot is the pin. Guarded by the
 	// string-builtin pre-gate: identifier-receiver sites whose NAME is a string
-	// builtin keep today's probe-first order exactly (the env variable, not the
+	// builtin keep today's probe-first order exactly (the variable, not the
 	// stack value, decides — receiver-mutating arg expressions depend on it).
+	// string_recv = the resolved string VARIABLE cell (the builtin mutates it in
+	// place). Valid across the arg-vector move below: the stack only shrinks
+	// between here and the bind (invariant 2b), env cells and field cells are
+	// stable, and no user code runs in between.
+	script_value* string_recv = nullptr;
 	{
-		// The string-builtin pre-gate probes the ENV VARIABLE, not just the name: a
-		// method NAME that collides with a string builtin (insert/count/find/...) must
-		// not exile instance dispatch to the vector path when the variable isn't a
-		// string. Probe order is identical to the vector path's (both run post-args —
-		// exec_call_method fires with receiver+args already pushed), and the probe
-		// spellings mirror line-for-line: get_value_ptr IS get_ref's ladder minus the
-		// error wrapper, is_string() un-derefed exactly like the vector probe's.
+		// The pre-gate probes the VARIABLE, not just the name: a method NAME that
+		// collides with a string builtin (insert/count/find/...) must not exile
+		// instance dispatch to the vector path when the variable isn't a string.
+		// The probe runs post-args (exec_call_method fires with receiver+args already
+		// pushed) through the identifier ladder — locals, members, globals — the same
+		// cell an op_load of the receiver reads.
 		bool maybe_string_builtin = site.receiver_symbol != UINT64_MAX &&
 			(f.code->builtin_indexed
 				? site.bi_string != builtin_method_registries::k_no_builtin
 				: builtins_.string_methods.find(member->member_id) != builtins_.string_methods.end());
 		if (maybe_string_builtin) {
-			// ::name receivers probe the GLOBAL env only (the interpreter's identifier-receiver ladder)
-			script_value* recv_cell = static_cast<identifier_expr*>(member->object.get())->global_qualified
-				? engine_->get_global_environment()->get_value_ptr(site.receiver_symbol)
-				: environment_->get_value_ptr(site.receiver_symbol);
-			maybe_string_builtin = recv_cell && recv_cell->is_string();
+			script_value* recv_cell = string_receiver_cell(f, site, static_cast<identifier_expr*>(member->object.get()));
+			if (recv_cell && recv_cell->is_string()) {
+				string_recv = recv_cell;
+			}
+			maybe_string_builtin = string_recv != nullptr;
 		}
 		if (!maybe_string_builtin && member->member_id != same_as_id_ &&
 		    !(member->object && member->object->get_type() == node_type::super_expr)) {
@@ -9523,49 +9537,34 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	}
 	stack_.truncate(base);
 
+	if (string_recv) {
+		// The pre-gate proved the name is a registered string builtin AND the variable
+		// holds a string (indexed chunks bake bi_string; raw-compiler chunks find)
+		const builtin_method* string_builtin = f.code->builtin_indexed
+			? builtins_.string_by_index[site.bi_string]
+			: &builtins_.string_methods.find(member->member_id)->second;
+		// Resolve through references (ref decls/cells): string builtins read self's
+		// storage RAW, and in-place mutation must land in the target; a scratch-backed
+		// alias (typed element, C++ property) writes back after. The LOADed receiver
+		// copy is dropped first - alive, it would only make the write gate copy the
+		// node (KEEP BYTE-PARALLEL with the interpreter's identifier-receiver path)
+		stack_.pop_back();
+		script_value& var_ref = string_recv->deref();
+		detail::deref_builtin_args_in_place(arguments);
+#ifdef JAISCRIPT_VM_PROFILE
+		profile_call_method_paths_[3]++;
+#endif
+		auto result = (*string_builtin)(builtin_ctx(), var_ref, arguments);
+		if (!result) {
+			return raise_from(result);
+		}
+		if (auto* scratch_ref = string_recv->scratch_ref_holder()) [[unlikely]] { scratch_ref->commit_scratch(); }
+		stack_.push_back(std::move(result.value()));
+		return {};
+	}
+
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
-
-	if (site.receiver_symbol != UINT64_MAX) {
-		// Name-first gate: the env walk only pays off when the member could be a string
-		// builtin at all (the registry is fixed after init). Indexed chunks answer that
-		// with the baked bi_string (one compare); raw-compiler chunks keep the find.
-		// Outcome-identical: the builtin fires iff the name is registered AND the
-		// variable is a string, same as the old order.
-		const builtin_method* string_builtin = nullptr;
-		if (f.code->builtin_indexed) {
-			if (site.bi_string != builtin_method_registries::k_no_builtin) {
-				string_builtin = builtins_.string_by_index[site.bi_string];
-			}
-		} else {
-			auto methodIt = builtins_.string_methods.find(member->member_id);
-			if (methodIt != builtins_.string_methods.end()) {
-				string_builtin = &methodIt->second;
-			}
-		}
-		if (string_builtin) {
-			// ::name receivers resolve in the GLOBAL env only (same ladder as the pre-gate)
-			script_value* recv_cell = static_cast<identifier_expr*>(member->object.get())->global_qualified
-				? engine_->get_global_environment()->get_value_ptr(site.receiver_symbol)
-				: environment_->get_value_ptr(site.receiver_symbol);
-			if (recv_cell && recv_cell->is_string()) {
-				// Resolve through references (ref decls/cells): string builtins read
-				// self's storage RAW, and in-place mutation must land in the target
-				// (KEEP BYTE-PARALLEL with the interpreter's identifier-receiver path)
-				script_value& var_ref = recv_cell->deref();
-				detail::deref_builtin_args_in_place(arguments);
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_call_method_paths_[3]++;
-#endif
-				auto result = (*string_builtin)(builtin_ctx(), var_ref, arguments);
-				if (!result) {
-					return raise_from(result);
-				}
-				stack_.push_back(std::move(result.value()));
-				return {};
-			}
-		}
-	}
 
 	// Script-class instance methods enter the dispatch loop directly. The gate mirrors
 	// member_access_value's precedence exactly (super/coroutine/builtin/same_as/getter/
@@ -9738,6 +9737,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// falls through so unknown members, the map KEY-sugar spelling, and
 			// raw-compiler chunks keep member_access_value's one voice.
 			const builtin_method* direct = nullptr;
+			bool string_mutator = false;
 			switch (receiver_type) {
 			case script_value::TYPEID_ARRAY:
 				if (site.bi_array != builtin_method_registries::k_no_builtin) {
@@ -9754,6 +9754,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				// whose variable is a string returned through the env path above).
 				if (site.bi_string != builtin_method_registries::k_no_builtin) {
 					direct = builtins_.string_by_index[site.bi_string];
+					string_mutator = builtins_.string_mutates_by_index[site.bi_string] != 0;
 				}
 				break;
 			default:
@@ -9804,10 +9805,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					return {};
 				}
 				// objv IS the deref'd copy member_access_value captures (line one of its
-				// body): builtins take self unchecked, reference receivers (pairs[0])
-				// resolved above; the node is shared so mutation lands the same.
-				// Pending-site arming exactly as invoke_callee's opaque branch (callback
-				// builtins re-enter the vm); the boundary armor is guarded_native_call.
+				// body): builtins take self unchecked. Pending-site arming exactly as
+				// invoke_callee's opaque branch (callback builtins re-enter the vm); the
+				// boundary armor is guarded_native_call.
 				detail::deref_builtin_args_in_place(arguments);
 				pending_call_site saved_pending = pending_site_ctx_;
 				pending_site_ctx_ = arguments.empty() ? saved_pending
@@ -9816,6 +9816,38 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					vm_backend* vm; pending_call_site saved;
 					~pending_restore() { vm->pending_site_ctx_ = saved; }
 				} restore_pending{this, saved_pending};
+				if (string_mutator) {
+					// A string MUTATOR binds the receiver LVALUE (detail/string_mutator_receiver.hpp;
+					// C++ `string& to_upper()`): the popped reference, the resolved field /
+					// property, or the chain root whose node the receiver still is (an
+					// identifier root through the baked chain_root cell, the identifier
+					// ladder). Unbound = a temporary: the builtin mutates the copy alone. The
+					// spare copies are dropped first - alive, they would only make the write
+					// gate copy the node. (KEEP BYTE-PARALLEL with interpreter::member_read_on)
+					if (!object.is_reference()) {
+						ensure_frame_member_scope(f, environment_.get());   // the kernel reads the frame's member scope
+					}
+					detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(
+						object, member->object.get(), caller_view(&f), environment_.get(), engine_, symbolizer_);
+					return guarded_native_call([&] {
+						script_value* root_cell = nullptr;
+						if (binding.root_ident) {
+							root_cell = binding.root_ident->global_qualified
+								? engine_->get_global_environment()->get_value_ptr(site.chain_root_symbol)
+								: resolve_local_or_env(f, site.chain_root_slot, site.chain_root_symbol);
+						}
+						script_value* self = detail::string_mutator_self(binding, root_cell, objv);
+						object = make_null();   // a reference moved into the pin; a copy only inflates the count
+						if (self) {
+							objv = make_null();
+						} else {
+							self = &objv;
+						}
+						auto result = (*direct)(builtin_ctx(), *self, arguments);
+						binding.commit();
+						return result;
+					});
+				}
 				return guarded_native_call([&] { return (*direct)(builtin_ctx(), objv, arguments); });
 			}
 		}
@@ -10305,7 +10337,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 					if (!init_result) {
 						return raise_from(init_result);
 					}
-					default_val = std::move(init_result.value());
+					default_val = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
 					if (!default_val.has_valid_engine() && engine_) {
 						default_val.set_engine(engine_);
 					}
@@ -10421,7 +10453,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				if (!init_result) {
 					return raise_from(init_result);
 				}
-				evaluated_value = std::move(init_result.value());
+				evaluated_value = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
 			}
 
 			if (!evaluated_value.has_valid_engine() && engine_) {
@@ -10782,7 +10814,7 @@ void vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> ins
 			if (!result) {
 				throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
 			}
-			script_value field_value = std::move(result.value());
+			script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
 			if (!field_value.has_valid_engine() && engine_) {
 				field_value.set_engine(engine_);
 			}
@@ -11072,7 +11104,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 									if (initializer_ast) {
 										auto r = eval_expression(initializer_ast, level_init_env);
 										if (r) {
-											instance->set_field(field_id, std::move(r.value()));
+											instance->set_field(field_id, initializer_store_value(std::move(r.value()), initializer_ast.get()));
 										}
 									}
 								}
@@ -11349,6 +11381,7 @@ op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 	rec.owner = &f;
 	rec.handler_ip = ins.a;
 	rec.catch_var = f.code->symbols[ins.b];
+	rec.catch_slot = ins.c;
 	rec.saved_exception = current_exception_;
 	rec.saved_exception_value = active_exception_value_;
 	rec.saved_catch_var_id = current_catch_var_id_;
@@ -11387,6 +11420,9 @@ op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
 	}
 	try_record rec = std::move(try_records_.back());
 	try_records_.pop_back();
+	if (rec.catch_env_pushed) {
+		pop_scopes_pooled(1);
+	}
 	current_catch_var_id_ = 0;
 	if (!is_unwinding_) {
 		current_exception_.reset();
@@ -11452,6 +11488,19 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			pending_callees_.erase(pending_callees_.begin() + rec.pending_size, pending_callees_.end());
 		}
 		environment_ = rec.entry_env;
+		// Bind the catch variable as a local of the catch body (KEEP BYTE-PARALLEL with
+		// the interpreter's visit_try_stmt bind): frame slot, or a scope env the matching
+		// op_catch_end pops (exec_iter_init's env_pushed shape)
+		if (rec.catch_var != 0 && !symbolizer_->get_string(rec.catch_var).empty()) {
+			script_value caught = active_exception_value_ ? *active_exception_value_ : make_null();
+			if (rec.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
+				frame_slot_set(f, rec.catch_slot, std::move(caught));
+			} else {
+				JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
+				environment_->define(rec.catch_var, std::move(caught));
+				rec.catch_env_pushed = true;
+			}
+		}
 		f.ip = rec.handler_ip;
 		rec.in_catch = true;
 		return true;
@@ -11677,9 +11726,9 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			args.push_back(script_value::make_map_entry_reference(state.container->get_map_storage(),
 			                                                      state.map_it->first, engine_, nullptr));
 		} else {
-			// Keys stay detached snapshots (a shared key handle would let mutation
-			// break map ordering); values deep-copy, shared_ptr values share
-			args.push_back(state.map_it->first.clone());
+			// String keys share their node (the copy-on-write gate detaches any write -
+			// invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
+			args.push_back(state.map_it->first.is_string() ? state.map_it->first : state.map_it->first.clone());
 			args.push_back(clone_for_assignment(state.map_it->second));
 		}
 		const script_function& pair_func = state.pair_ctor->as_function();
@@ -12656,6 +12705,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					script_value v = ins.a ? std::move(stack_.back()) : make_null();
 					if (ins.a) {
 						stack_.pop_back();
+						if (ins.c && !detail::return_value_plain(v)) { materialize_return(f, v, ins.c, k_invalid_u32); }
 					}
 					VM_TRY_OP_SHARED(entry_return_finish(f, std::move(v), ins.b));
 					return {};
@@ -13530,10 +13580,27 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 #undef JAI_POP_SUB
 }
 
+// Cold bodies of the return doors (kept out of the hot epilogues and the dispatch loop)
+void vm_backend::copy_reference_result(script_value& result) {
+	detail::materialize_return_value(result, false);
+}
+
+void vm_backend::materialize_return(frame& f, script_value& result, uint32_t operand_class, uint32_t own_slot) {
+	if (detail::return_value_plain(result) || f.top_level || operand_class == detail::return_operand_unclassified) return;
+	if (operand_class == detail::return_operand_ident && own_slot != k_invalid_u32 && f.locals) {
+		if (script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result)) {
+			*payload = make_null();
+			return;
+		}
+	}
+	detail::materialize_return_value(result, operand_class != detail::return_operand_temporary);
+}
+
 op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
 	script_value result = ins.a ? std::move(stack_.back()) : make_null();
 	if (ins.a) {
 		stack_.pop_back();
+		if (ins.c && !detail::return_value_plain(result)) { materialize_return(*fp, result, ins.c, k_invalid_u32); }
 	}
 	return return_with_result(fp, std::move(result), ins.b);
 }
@@ -13593,8 +13660,8 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		}
 	}
 	if (deref_only) {
-		if (result.is_reference()) {
-			result = result.deref();
+		if (result.is_reference()) [[unlikely]] {
+			copy_reference_result(result);   // a reference result copies its target
 		}
 		if (rec.method_result_anchor) {
 			anchor_method_result(result, rec.locals.get_this());
@@ -13640,7 +13707,8 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 
 // Fused `return <ident>;` (stage 6): resolution mirrors op_load byte-for-byte via
 // fused_ident_value (same errors, same order - the fusion is adjacent, nothing is
-// reordered); the value takes ONE copy exactly like op_load's push did.
+// reordered); the value takes ONE copy exactly like op_load's push did, then the
+// by-value materialization moves the own slot out or deep-copies another lvalue.
 op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
 	fused_operand operand;
@@ -13651,7 +13719,12 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
+	if (detail::return_value_plain(*resolved)) {
+		return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
+	}
+	script_value value(*resolved);
+	materialize_return(f, value, detail::return_operand_ident, ins.a);
+	return return_with_result(fp, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
 }
 
 op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
@@ -13663,7 +13736,12 @@ op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& in
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	return entry_return_finish(f, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
+	if (detail::return_value_plain(*resolved)) {
+		return entry_return_finish(f, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
+	}
+	script_value value(*resolved);
+	materialize_return(f, value, detail::return_operand_ident, ins.a);
+	return entry_return_finish(f, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
 }
 
 // Fused `return <a op b>;` (stage 6): computes exactly like exec_binary (same fast
@@ -13883,6 +13961,7 @@ op_status vm_backend::exec_return_convert(frame& f, const vm_instruction& ins) {
 			conv = static_cast<return_conv>(rec.return_conv_class);
 		}
 	}
+	if (ins.b && !detail::return_value_plain(stack_.back())) { materialize_return(f, stack_.back(), ins.b, ins.c); }
 	if (conv == return_conv::none || (conv == return_conv::unclassified && !*return_type)) {
 		return {};
 	}
@@ -13903,6 +13982,10 @@ op_status vm_backend::exec_return_convert(frame& f, const vm_instruction& ins) {
 // in-frame, so the trace names the return line) unless the value was converted at an
 // in-region return site (return_mode_converted); class 0 = no declared type on this frame
 op_status vm_backend::entry_return_finish(frame& f, script_value result, uint32_t mode) {
+	if (result.is_reference() && !f.top_level &&
+	    !(f.return_type && f.return_type->base_type == script_value_type::jai_reference_type)) [[unlikely]] {
+		copy_reference_result(result);   // a reference result copies its target
+	}
 	if (mode != return_mode_converted && f.return_conv_class != 0) {
 		auto converted = convert_return_at_site(std::move(result), f.return_type,
 		                                        static_cast<return_conv>(f.return_conv_class), mode != 0, f.code->function_name);
@@ -13929,7 +14012,7 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	}
 	if (result.is_reference()) {
 		// Value returns flatten: a plain function's result is a copy, never an alias
-		result = result.deref();
+		copy_reference_result(result);
 	}
 	// base_type first: the common any/auto return rejects on one enum compare
 	// instead of three string compares (same conjunction, reordered)

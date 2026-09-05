@@ -1818,10 +1818,10 @@ public:
             check_quad(q("array<K> ks = [K(1), K(2)]; for (auto& k : ks) { k.a = k.a * 10; } to_string(ks[0].a + ks[1].a)").c_str(), "30", "range-for by reference writes through");
             check_quad(q("array<K> ks = [K(1), K(2)]; ks.reverse(); to_string(ks[0].a)").c_str(), "2", "reverse");
             check_quad(q("array<K> ks = [K(1), K(2)]; ks[1].f()").c_str(), "k2", "method call on an element");
-            check_quad(q("array<K> ks = [K(1)]; type_of(ks) + \"|\" + type_of(ks[0])").c_str(), "array|object", "type_of");
+            check_quad(q("array<K> ks = [K(1)]; type_of(ks) + \"|\" + type_of(ks[0])").c_str(), "array|K", "type_of");
             check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"_type_\":\"K\",\"a\":1},{\"_type_\":\"K\",\"a\":2}]", "json");
             check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c)").c_str(), "false,false", "equality is identity");
-            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|object", "a shared_ptr element shares its instance");
+            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|K", "a shared_ptr element shares its instance");
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "7,7", "copying an array with a shared element clones it");
             check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(ks.filter([](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
             check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
@@ -1839,6 +1839,15 @@ public:
             check_quad_error(q("class J { int b = 0; } array<K> x = [J()]").c_str(), "another class does not declare");
             check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks[0] = J()").c_str(), "another class does not store");
             check_quad(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds; to_string(ks.size()) + \",\" + to_string(ks[0].a)").c_str(), "1,1", "array<Derived> converts to array<Base> (Dev ruling 2026-09-02: subclasses admitted)");
+        });
+
+        test("type_of_names_the_held_class_through_casts", [check_quad]() {
+            // type_of answers what reflect::type_name answers - the INSTANCE's class, never
+            // the value tag. cast<Base>(d) copies rather than slices, so all four spellings
+            // still hold a Derived.
+            check_quad("class Base { int a = 1; } class Derived : Base { int b = 2; } Derived d = Derived(); auto v = cast<Base>(d); "
+                       "type_of(v) + \",\" + type_of(cast<Base&>(d)) + \",\" + type_of(cast<shared_ptr<Base>>(d)) + \",\" + type_of(d)",
+                       "Derived,Derived,Derived,Derived", "value / reference / handle casts and the variable");
         });
 
         test("map_behaviour_battery", [check_quad, check_quad_error]() {
@@ -2357,7 +2366,7 @@ public:
                        "[\"z\",\"b\",5]|[\"a\",\"b\"]|int", "string buffer -> array<var>");
             check_quad("class K { int a = 1; K(int v) { a = v; } } array<K> ks = [K(1), K(2)]; array<var> m = ks; m.push(\"x\"); m[0].a = 9; "
                        "to_string(m.size()) + \"|\" + type_of(m[0]) + \"|\" + to_string(m[0].a) + \"|\" + to_string(ks[0].a) + \"|\" + type_of(m[2])",
-                       "3|object|9|1|string", "object buffer -> array<var> (decl copies the instances)");
+                       "3|K|9|1|string", "object buffer -> array<var> (decl copies the instances)");
             check_quad("array<int> ints = []; array<var> m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)", "[\"x\"]|[]", "empty buffer -> array<var>");
             // the same table at every boundary: assignment, parameter, return, field store,
             // field initializer, cast
@@ -2393,6 +2402,67 @@ public:
             auto strs = quad("array<string> ss = [\"a\"]; array<int> ints = ss; ints.size()");
             check_eq(strs[0], strs[1], "string buffer -> array<int> parity");
             check(strs[0].find("Cannot store string in array<int>") != std::string::npos, "string buffer -> array<int> raises the boundary text: " + strs[0]);
+        });
+
+        test("field_initializers_copy_like_declarations", [this, quad, check_quad]() {
+            // `T f = expr;` in a class body is an initialization: an lvalue-shaped or
+            // reference-wrapped initializer copies through clone_for_assignment exactly
+            // like `T local = expr;` (containers and value objects deep-copy, shared_ptr
+            // handles share, temporaries move). Pre-fix every instance aliased the
+            // global's node on both backends.
+            check_quad("array<int> ints = [1, 2, 3]; class C { array<int> f = ints; } C c = C(); c.f.push(4); to_json(ints) + \"|\" + to_json(c.f)",
+                       "[1,2,3]|[1,2,3,4]", "typed array field from a global");
+            check_quad("array<int> ints = [1, 2, 3]; class C { var f = ints; } C c = C(); c.f.push(4); to_json(ints) + \"|\" + to_json(c.f)",
+                       "[1,2,3]|[1,2,3,4]", "var field from a global");
+            check_quad("array<int> ints = [1, 2, 3]; class C { auto f = ints; } C c = C(); c.f.push(4); to_json(ints) + \"|\" + to_json(c.f)",
+                       "[1,2,3]|[1,2,3,4]", "auto field from a global");
+            check_quad("array<int> ints = [1, 2, 3]; class C { array<int> f = ints; } C c = C(); ints.push(9); to_json(c.f)",
+                       "[1,2,3]", "the global's later growth never reaches the field");
+            check_quad("array<int> ints = [1, 2, 3]; class C { array<int> f = ints; } C a = C(); C b = C(); a.f.push(4); to_string(b.f.size()) + \"|\" + to_string(ints.size())",
+                       "3|3", "two instances are independent of each other and the global");
+            check_quad("map<string, int> gm = {\"a\": 1}; class C { map<string, int> f = gm; } C c = C(); c.f[\"b\"] = 2; to_string(gm.size()) + \"|\" + to_string(c.f.size())",
+                       "1|2", "map field from a global");
+            check_quad("class P { int x = 1; } P gp = P(); class C { P f = gp; } C c = C(); c.f.x = 9; to_string(gp.x) + \"|\" + to_string(c.f.x)",
+                       "1|9", "value-object field from a global");
+            check_quad("class P { int x = 1; } class C { P a = P(); P b = a; } C c = C(); c.b.x = 7; to_string(c.a.x) + \"|\" + to_string(c.b.x)",
+                       "1|7", "value-object field from an earlier field");
+            check_quad("string gs = \"hi\"; class C { string f = gs; } C c = C(); c.f += \"!\"; gs + \"|\" + c.f",
+                       "hi|hi!", "string field from a global");
+            check_quad("class H { array<int> inner = [5]; } H gh = H(); class C { array<int> f = gh.inner; } C c = C(); c.f.push(6); to_json(gh.inner) + \"|\" + to_json(c.f)",
+                       "[5]|[5,6]", "member-expression initializer");
+            // subscript initializers arrive as element reference wrappers: the field holds
+            // the VALUE (pre-fix a var field kept the wrapper and died with the element)
+            check_quad("array<array<int>> grid = [[1, 2], [3, 4]]; class C { var f = grid[0]; } C c = C(); c.f.push(9); grid.clear(); to_string(c.f.size())",
+                       "3", "var field from a subscript survives the source element");
+            check_quad("array<int> ints = [1, 2, 3]; class C { var f = ints[0]; } C c = C(); c.f = 50; to_string(ints[0]) + \"|\" + to_string(c.f)",
+                       "1|50", "var field from a scalar element: the write lands on the field");
+            check_quad("array<int> ints = [1, 2, 3]; class C { int f = ints[1]; } C c = C(); c.f = 60; to_string(ints[1]) + \"|\" + to_string(c.f)",
+                       "2|60", "typed field from a scalar element");
+            check_quad("class C { int a = 1; int b = a; array<int> xs = [1, 2]; array<int> ys = xs; } C c = C(); c.a = 5; c.ys.push(3); "
+                       "to_string(c.b) + \"|\" + to_json(c.xs) + \"|\" + to_json(c.ys)",
+                       "1|[1,2]|[1,2,3]", "field from an earlier field");
+            check_quad("class P { int x = 1; } shared_ptr<P> sp = new P(); class C { shared_ptr<P> f = sp; var g = sp; } C c = C(); c.f.x = 42; c.g.x = 43; to_string(sp.x)",
+                       "43", "shared_ptr initializers share the handle");
+            check_quad("class C { array<int> f; C(array<int> a) { f = a; } } array<int> src = [1]; C c = C(src); c.f.push(2); to_json(src) + \"|\" + to_json(c.f)",
+                       "[1]|[1,2]", "ctor-body store from a parameter (pin)");
+            check_quad("array<int> ints = [1, 2, 3]; class A { array<int> f = ints; A(int v) {} } class B : A { B() : super(1) {} } B b = B(); b.f.push(4); to_json(ints) + \"|\" + to_json(b.f)",
+                       "[1,2,3]|[1,2,3,4]", "super-chain per-level initializer pass");
+            check_quad("array<int> ints = [1, 2, 3]; class B1 { array<int> bf = ints; } class D1 : B1 { int d = 0; } D1 d = D1(); d.bf.push(4); to_json(ints) + \"|\" + to_json(d.bf)",
+                       "[1,2,3]|[1,2,3,4]", "inherited initializer through the recursive pass");
+            check_quad("array<int> ints = [1, 2, 3]; class S { static array<int> s = ints; } S::s.push(7); to_json(ints) + \"|\" + to_json(S::s)",
+                       "[1,2,3]|[1,2,3,7]", "static initializer");
+            check_quad("array<int> ints = [1]; class C { int a = 1; } C c1 = C(); C c2 = C(); class C { int a = 1; array<int> g = ints; } "
+                       "c1.g.push(2); C c3 = C(); c3.g.push(3); to_json(ints) + \"|\" + to_json(c1.g) + \"|\" + to_json(c2.g) + \"|\" + to_json(c3.g)",
+                       "[1]|[1,2]|[1]|[1,3]", "hot reload seeds per instance; later constructions stay independent");
+            check_quad("function mk() { return [1, 2]; } class C { array<int> f = mk(); } C c = C(); c.f.push(3); to_json(c.f)",
+                       "[1,2,3]", "temporaries still initialize");
+            check_quad("array<int> ints = [1, 2, 3]; class B { int x = 0; } class C : B { array<int> f = ints; } B b = B(); extend(b, C); b.f.push(4); to_json(ints) + \"|\" + to_json(b.f)",
+                       "[1,2,3]|[1,2,3,4]", "extend() runs the same pass");
+            // the field table still converts and rejects with its own text
+            check_quad("float gf = 2.5; class C { int f = gf; } C c = C(); type_of(c.f) + \":\" + to_string(c.f)", "int:2", "conversion through the field table");
+            auto rej = quad("var gs = \"s\"; class CD { int f = gs; } CD cd = CD(); cd.f");
+            check_eq(rej[0], rej[1], "rejection parity");
+            check(rej[0].find("Cannot assign string to field 'f' of CD (declared int)") != std::string::npos, "rejection keeps the field-store text: " + rej[0]);
         });
 
         test("typed_storage_parallel_bridge", [check_quad]() {
@@ -2480,17 +2550,17 @@ public:
             check(stamped.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "stamping an open-element tag demotes the node");
         });
 
-        // type_of on a shared-pointer-semantic instance must match a value instance: both "object".
-        test("type_of_shared_and_value_instance_both_object", [this, check_both]() {
+        // type_of on a shared-pointer-semantic instance must match a value instance: both name the class.
+        test("type_of_shared_and_value_instance_both_name_the_class", [this, check_both]() {
             const char* decl = "class P { int v = 0; } ";
-            check_both((std::string(decl) + "auto p = P(); type_of(p)").c_str(), "object", "value instance");
-            check_both((std::string(decl) + "var p = new P(); type_of(p)").c_str(), "object", "new P()");
-            check_both((std::string(decl) + "shared_ptr<P> p = P(); type_of(p)").c_str(), "object", "shared_ptr<P> p = P()");
-            check_both((std::string(decl) + "auto p = shared_ptr<P>(); type_of(p)").c_str(), "object", "auto p = shared_ptr<P>()");
+            check_both((std::string(decl) + "auto p = P(); type_of(p)").c_str(), "P", "value instance");
+            check_both((std::string(decl) + "var p = new P(); type_of(p)").c_str(), "P", "new P()");
+            check_both((std::string(decl) + "shared_ptr<P> p = P(); type_of(p)").c_str(), "P", "shared_ptr<P> p = P()");
+            check_both((std::string(decl) + "auto p = shared_ptr<P>(); type_of(p)").c_str(), "P", "auto p = shared_ptr<P>()");
             // value == shared, on the same class, in one program
             check_both((std::string(decl) +
                 "auto a = P(); auto b = new P(); type_of(a) + \"==\" + type_of(b)").c_str(),
-                "object==object", "value == shared");
+                "P==P", "value == shared");
         });
 
         // ===== PARSE-TIME TYPE PROOFS (docs/static_checking.md "Proofs") =====
@@ -2581,7 +2651,7 @@ public:
                 "K fn(K v) { K local = v; local = K(2); return local; }\n"
                 "C c = C(); c.f = K(2); K r = c.set(K(1)); r = c.viaArg(K(2)); K q = c.pass(K(1));\n"
                 "type_of(g) + \":\" + to_string(g.n) + \":\" + type_of(c.f) + \":\" + to_string(c.f.n) + \":\" + to_string(r.n) + \":\" + to_string(q.n) + \":\" + to_string(fn(K(1)).n)";
-            check_proof_run(thrice(obj_unit), "object:2:object:2:2:1:2", "object same-type lanes");
+            check_proof_run(thrice(obj_unit), "K:2:K:2:2:1:2", "object same-type lanes");
             check_proof_run(thrice_then(obj_unit, "c.f = 5; g = 6; to_string(c.f.n) + \":\" + to_string(g.n)"), "", "int into an object slot takes the ctor-conversion ladder");
             check_proof_error(thrice_then(obj_unit, "class J { int m = 0; } g = J(); g.n"), "unrelated class into an object slot raises");
             check_proof_run(thrice_then(obj_unit, "c.f = null; type_of(c.f)"), "", "null into an object field takes the ladder");
@@ -2606,7 +2676,7 @@ public:
             check_proof_run({"coroutine int gen(int n) { yield n; return n + 1; } auto h = gen(3); to_string(h.resume()) + \":\" + to_string(h.resume())"}, "3:4", "coroutine callee");
             check_proof_run({cls + "C a = C(); a = null; type_of(a)"}, "", "null into an object slot");
             check_proof_run({cls + "C a; C b = a; type_of(b)"}, "", "typed-null placeholder");
-            check_proof_run({cls + "C b = D(); to_string(b.v) + \":\" + type_of(b)"}, "1:object", "derived into base");
+            check_proof_run({cls + "C b = D(); to_string(b.v) + \":\" + type_of(b)"}, "1:D", "derived into base");
             check_proof_run({cls + "shared_ptr<C> sp = C(); C c = sp; c.v = 9; to_string(sp.v) + \":\" + to_string(c.v)"}, "", "handle into a value slot");
             check_proof_error({"int x = 1; x = \"s\"; x"}, "string into int raises");
             check_proof_error({"char c = 'a'; c = 65; c"}, "int into char raises");
@@ -3189,10 +3259,103 @@ public:
             )JAI", "bang|bang", "a throwing to_X() surfaces on every path");
         });
 
+        // Typed by-value returns land on the copy (the conversion runs on the return's own
+        // value, never on the callee's storage), identically under every proof lane.
+        test("typed_return_lands_on_copy", [check_both, check_proof_run]() {
+            check_both(R"JAI(
+                array<var> src = [1, 2];
+                array<int> f() { return src; }
+                var r = f(); r.push(3);
+                class Base { int b = 1; }
+                class Derived : Base { int d = 2; }
+                Derived dg = Derived();
+                Base g() { return dg; }
+                var x = g(); x.b = 9;
+                class H { array<int> items = [1]; array<int> get() { return items; } }
+                H hd = H();
+                var hi = hd.get(); hi.push(2);
+                to_string(src.size()) + ":" + type_of(r) + ":" + to_string(r.size()) + "|" + to_string(dg.b) + ":" + to_string(x.b) + "|" + to_string(hd.items.size()) + ":" + to_string(hi.size())
+            )JAI", "2:array:3|1:9|1:2", "typed returns of a global, a derived global and a field are copies");
+            check_proof_run({"array<int> src = [1, 2]; array<int> f() { return src; } var r = f(); r.push(3); to_string(src.size()) + \":\" + to_string(r.size())"},
+                            "2:3", "same-type proven return of a global still copies under every lane");
+            check_proof_run({"class T { int v = 1; } T obj = T(); T f() { return obj; } T mk() { T t = T(); t.v = 5; return t; } var a = f(); a.v = 9; var b = mk(); to_string(obj.v) + \":\" + to_string(a.v) + \":\" + to_string(b.v)"},
+                            "1:9:5", "proven object return copies the global and moves the local under every lane");
+        });
+
         test("typed_slot_proof_lanes", [check_proof_run]() {
             check_proof_run({"string f(string t) { return t + \"!\"; } string r = f(5); r = r + f(2.5); r"}, "5!2.500000!", "string parameter bound from an int under every lane");
             check_proof_run({"int sum(array<int> a) { int s = 0; for (auto x : a) { s += x; } return s; } to_string(sum([1, 2.5, 3]))"}, "6", "array<int> parameter bound from a hetero literal under every lane");
             check_proof_run({"bool b(bool x) { return x; } to_string(b(5)) + to_string(b(0))"}, "truefalse", "bool parameter bound from an int under every lane");
+        });
+
+        // ===== STRINGS ARE VALUES (copy-on-write at the in-place write gate) =====
+        // A by-value string copy (declaration, =, parameter, capture, element, map value,
+        // field, return) is observationally a deep copy: "strings never alias at a distance
+        // ... the mutation is strictly local to the variable you called the method on"
+        // (OPEN_NOTES.md; guide ch.9 copy-first idiom). Storage stays one shared node per
+        // value; the copy materializes at the first in-place write - the 17 mutators, +=,
+        // a host std::string& (value.hpp unchecked_as_string_ref, docs/invariants.md 11).
+
+        test("string_value_semantics_battery", [check_quad]() {
+            check_quad("string a = \"hello\"; string b = a; b.to_upper(); a + \"|\" + b", "hello|HELLO", "typed decl copy");
+            check_quad("var a = \"hello\"; var b = a; b.to_upper(); a + \"|\" + b", "hello|HELLO", "var decl copy");
+            check_quad("auto a = \"hello\"; auto b = a; b.to_upper(); a + \"|\" + b", "hello|HELLO", "auto decl copy (the documented copy-first idiom)");
+            check_quad("string a = \"hello\"; string b = \"\"; b = a; b.to_upper(); a + \"|\" + b", "hello|HELLO", "assignment copy");
+            check_quad("function f(string s) { s.to_upper(); return s; } string a = \"hello\"; f(a) + a", "HELLOhello", "by-value string parameter");
+            check_quad("function f(var s) { s.to_upper(); return s; } string a = \"hello\"; f(a) + a", "HELLOhello", "by-value var parameter");
+            check_quad("function f(string& s) { s.to_upper(); } string a = \"hello\"; string b = a; f(b); a + \"|\" + b", "hello|HELLO", "string& parameter mutates its argument alone");
+            check_quad("string a = \"c\"; var lam = [=]() { a.to_upper(); return a; }; lam() + a", "Cc", "[=] capture is a copy");
+            check_quad("string a = \"c\"; var lam = [&]() { a.to_upper(); return a; }; lam() + a", "CC", "[&] capture aliases");
+            check_quad("string a = \"e\"; var arr = [a]; arr[0].to_upper(); arr.push(a); arr[1].to_lower(); a + to_json(arr)", "e[\"E\",\"e\"]", "array literal element and push are copies; the elements mutate");
+            check_quad("string a = \"e\"; array<string> arr = [a]; arr[0].to_upper(); a + to_json(arr)", "e[\"E\"]", "array<string> element is a copy");
+            check_quad("string a = \"e\"; var m = {\"k\": a}; m[\"k\"].to_upper(); a + to_json(m)", "e{\"k\":\"E\"}", "map value is a copy");
+            check_quad("class D { string s = \"x\"; void m() { s += \"!\"; s.to_upper(); } } string h = \"q\"; var d = D(); d.s = h; d.m(); h + d.s", "qQ!", "field store is a copy; bare-field += and mutator land in the field");
+            check_quad("string a = \"x\"; string b = a; b += \"y\"; a + b", "xxy", "+= on a copy");
+            check_quad("string a = \"x\"; string b = a; for (int i = 0; i < 3; ++i) { b += \"y\"; } a + b", "xxyyy", "loop += on a copy");
+            check_quad("string a = \"z\"; var b = a; auto c = b; c.to_upper(); a + b + c", "zzZ", "chained copies mutate the last only");
+            check_quad("class R { string n = \"n\"; string get() { return n; } } var r = R(); string g = r.get(); g.to_upper(); r.n + g", "nN", "returned field copy");
+            check_quad("string a = \"hello\"; string b = a; to_string(b.length()) + b.substr(1) + to_string(b.find(\"l\")) + a", "5ello2hello", "observers on a copy");
+            check_quad("string a = \"ab\"; string b = a; b.repeat(2); a + b", "ababab", "repeat on a copy");
+            check_quad("string s = \"x\"; s.insert(0, s); s.replace_all(\"x\", s); s", "xxxx", "an argument aliasing the receiver reads the pre-write content");
+        });
+
+        test("string_mutator_receiver_lvalue_battery", [check_quad]() {
+            // C++ `string& to_upper()`: the receiver binds like a reference parameter -
+            // every lvalue spelling mutates its target, sources stay intact
+            check_quad("var arr = [\"ab\", \"cd\"]; arr[1].to_upper(); to_json(arr)", "[\"ab\",\"CD\"]", "array<var> element receiver");
+            check_quad("array<string> ts = [\"ab\", \"cd\"]; ts[0].to_upper(); to_json(ts)", "[\"AB\",\"cd\"]", "array<string> element receiver (scratch commit)");
+            check_quad("array<string> ts = [\"ab\", \"cd\"]; for (auto& s : ts) { s.to_upper(); } to_json(ts)", "[\"AB\",\"CD\"]", "array<string> range-for by reference");
+            check_quad("var strs = [\"ab\", \"cd\"]; for (auto& s : strs) { s.to_upper(); } strs[0] + strs[1]", "ABCD", "array<var> range-for by reference");
+            check_quad("array<string> ts = [\"ab\"]; auto& r = ts[0]; r.to_upper(); to_json(ts)", "[\"AB\"]", "ref alias of a typed element");
+            check_quad("var arr = [\"ab\"]; auto& r = arr[0]; r.to_upper(); to_json(arr)", "[\"AB\"]", "ref alias of an element");
+            check_quad("var i = 0; var arr = [\"ab\", \"cd\"]; arr[i + 1].to_upper(); to_json(arr)", "[\"ab\",\"CD\"]", "computed-index element receiver");
+            check_quad("var m = {\"k\": \"v\"}; m[\"k\"].to_upper(); string k = \"k\"; m[k].pad_left(3, '-'); to_json(m)", "{\"k\":\"--V\"}", "map entry receiver, literal and variable key");
+            check_quad("class D { string s = \"x\"; string t = \"y\"; void m() { s.to_upper(); this.t.to_upper(); } } var d = D(); d.m(); d.s.pad_left(3, '-'); d.s + d.t", "--XY", "bare field, this.field and obj.field receivers");
+            check_quad("class D { string s = \"x\"; } class O { D d = D(); } var o = O(); o.d.s.to_upper(); o.d.s", "X", "nested field chain receiver");
+            check_quad("class D { string s = \"x\"; } var ds = [D()]; ds[0].s.to_upper(); ds[0].s", "X", "field of an element receiver");
+            check_quad("class P { string _n = \"a\"; string _get_n() { return _n; } } var p = P(); p.n.to_upper(); p.n", "a", "a computed property is a temporary");
+            check_quad("string s = \"abc\"; s.substr(1).to_upper(); s", "abc", "a call result is a temporary");
+            check_quad("function mk() { return \"t\"; } mk().to_upper()", "T", "temporary mutation lands in the result");
+            check_quad("string q = \"hello\"; var f = q.to_upper; f(); q", "hello", "an escaped bound mutator mutates its own copy");
+            check_quad("string a = \"hello\"; string b = a; b.to_lower(); b.trim(); b.trim_left(); b.trim_right(); b.pad_left(6, ' '); b.pad_right(7, ' '); b.pad_center(9, '*'); b.replace_first(\"h\", \"j\"); b.replace_last(\"o\", \"y\"); b.replace_all(\"l\", \"L\"); b.insert(0, \">\"); b.erase(0, 1); b.remove_prefix(1); b.remove_suffix(1); b.reverse(); b.repeat(1); b.to_upper(); a + \"|\" + b",
+                       "hello| YLLEJ ", "all seventeen mutators on a copy leave the source");
+            check_quad("var arr = [\"hello\"]; string a = arr[0]; arr[0].to_lower(); arr[0].trim(); arr[0].trim_left(); arr[0].trim_right(); arr[0].pad_left(6, ' '); arr[0].pad_right(7, ' '); arr[0].pad_center(9, '*'); arr[0].replace_first(\"h\", \"j\"); arr[0].replace_last(\"o\", \"y\"); arr[0].replace_all(\"l\", \"L\"); arr[0].insert(0, \">\"); arr[0].erase(0, 1); arr[0].remove_prefix(1); arr[0].remove_suffix(1); arr[0].reverse(); arr[0].repeat(1); arr[0].to_upper(); a + \"|\" + arr[0]",
+                       "hello| YLLEJ ", "all seventeen mutators through an element receiver land in the element");
+        });
+
+        test("string_mutator_chain_battery", [check_quad]() {
+            // Mutators return self for chaining; a chain rooted at an lvalue keeps writing
+            // to the root (guide ch.9 pins `t.trim().to_upper().replace_all(...)` -> t)
+            check_quad("var t = \"  hello world  \"; t.trim().to_upper().replace_all(\"WORLD\", \"JAI\"); t", "HELLO JAI", "guide ch.9 chain on a variable");
+            check_quad("auto name = \"jai\"; auto upper = name.to_upper(); name + upper", "JAIJAI", "guide ch.9: the mutator's result is the mutated receiver");
+            check_quad("auto name = \"jai\"; auto upper = name; upper.to_upper(); name + \"|\" + upper", "jai|JAI", "guide ch.9: copy first keeps the original");
+            check_quad("string a = \"  x \"; string b = a; b.trim().to_upper(); a + \"|\" + b", "  x |X", "chain on a copy leaves the source");
+            check_quad("var arr = [\"  ab \"]; arr[0].trim().to_upper(); arr[0]", "AB", "chain rooted at an element");
+            check_quad("array<string> ts = [\"  ab \"]; ts[0].trim().to_upper(); ts[0]", "AB", "chain rooted at a typed element");
+            check_quad("class D { string t = \" y \"; void m() { this.t.trim().to_upper(); } } var d = D(); d.m(); d.t.pad_left(2, '-').pad_right(3, '+'); d.t", "-Y+", "chain rooted at this.field and obj.field");
+            check_quad("string s = \"abc\"; s.substr(1).to_upper().reverse(); s", "abc", "chain rooted at a temporary");
+            check_quad("class H { string name = \"  n \"; string get() { return name; } } var h = H(); h.get().trim().to_upper(); h.name", "  n ", "chain rooted at a by-value method result");
+            check_quad("string t = \"ab\"; t.to_upper().to_lower().reverse(); t", "ba", "three-deep chain on a variable");
         });
 
     }

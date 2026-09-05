@@ -431,6 +431,137 @@ public:
             check_eq(eng->execute("m[\"1\"]").as<std::string>(), "one");
             check_eq(eng->execute("m[\"2\"]").as<std::string>(), "two");
         });
+
+        // A map key is read-only (C++ `const Key`, the ordering invariant), by value AND by
+        // reference; `auto& kv` aliases the value only. The pair's `first` stays a SHARED
+        // handle of the key (no per-iteration copy - Dev ruling 2026-09-04); the checker
+        // rejects the mutation spellings it can see under strict, and the runtime backstop
+        // is the string copy-on-write gate (docs/invariants.md 11): whatever the checker
+        // cannot see mutates a copy and the map is never touched. Every row runs on both
+        // backends and pins byte-identical output.
+        auto both_mode = [](const char* src, check_mode mode) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                e->static_checking(mode);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+
+        test("map_key_read_only_static_battery", [this, both_mode]() {
+            const std::string text = "map keys are read-only";   // the operand spelling follows the pair variable (kv.first, p.first)
+            auto rejected = [&](const char* src, const char* what) {
+                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                check_eq(i_out, v_out, std::string("backend parity: ") + what);
+                check(i_out.find("ERROR: static check failed") == 0, std::string("load error: ") + what + " (got: " + i_out + ")");
+                check(i_out.find("cannot mutate ") != std::string::npos && i_out.find(text) != std::string::npos, std::string("text: ") + what + " (got: " + i_out + ")");
+            };
+            auto accepted = [&](const char* src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                check_eq(expected, i_out, std::string("interp: ") + what);
+                check_eq(expected, v_out, std::string("vm: ") + what);
+            };
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.to_upper(); } 0", "by-value pair, string mutator");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.first.to_upper(); } 0", "by-reference pair, string mutator");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.insert(0, \"x\"); } 0", "insert");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.erase(0, 1); } 0", "erase");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.replace_all(\"a\", \"b\"); } 0", "replace_all");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first = \"z\"; } 0", "store");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first += \"!\"; } 0", "compound store");
+            rejected("map<int,int> m = {1: 1}; for (auto kv : m) { kv.first++; } 0", "postfix ++ (desugars to += 1)");
+            rejected("map<int,int> m = {1: 1}; for (auto& kv : m) { --kv.first; } 0", "prefix -- by reference");
+            rejected("auto m = {\"a\": 1}; for (auto kv : m) { kv.first.to_upper(); } 0", "auto map literal is statically a map");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.first += \"hey\"; } 0", "Dev's spelling: kv.first += \"hey\" by reference");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var p = kv; p.first.to_upper(); } 0", "a copied pair still holds the key (C++ pair<const K, V>)");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { auto& p = kv; p.first.insert(0, \"x\"); } 0", "an alias of the pair still holds the key");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { auto f = [&]() { kv.first.to_upper(); }; f(); } 0", "the pair reached through a [&] lambda");
+            // Alias spellings: a mutable alias of a key has no C++ equivalent (const Key) - the
+            // fix is always the copy, which is copy-on-write at runtime
+            auto rejected_alias = [&](const char* src, const char* what) {
+                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                check_eq(i_out, v_out, std::string("backend parity: ") + what);
+                check(i_out.find("ERROR: static check failed") == 0, std::string("load error: ") + what + " (got: " + i_out + ")");
+                check(i_out.find("cannot alias ") != std::string::npos &&
+                      i_out.find("map keys are read-only (copy it instead: var k = ") != std::string::npos,
+                      std::string("alias text: ") + what + " (got: " + i_out + ")");
+            };
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { var& cheeky = kv.first; } 0", "Dev's spelling: var& cheeky = kv.first");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { auto& k = kv.first; } 0", "auto& alias of the key");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var& k = kv.first; } 0", "var& alias of the key");
+            rejected_alias("function up(string& s) { s.to_upper(); } map<string,int> m = {\"a\": 1}; for (auto kv : m) { up(kv.first); } 0", "passed to a string& parameter");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { shared_ptr<auto> cheeky = kv.first; } 0", "Dev's spelling (shared_ptr<var> is not a spelling; shared_ptr<auto> is): shared_ptr<auto> cheeky = kv.first");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { shared_ptr<string> c = kv.first; } 0", "shared_ptr<string> from the key");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { shared_ptr<auto> c = kv.first; } 0", "shared_ptr<auto> from the key");
+            rejected_alias("map<string,int> m = {\"a\": 1}; shared_ptr<string> h = null; for (auto kv : m) { h = kv.first; } 0", "store into a shared_ptr-declared variable");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var& c = cast<string&>(kv.first); } 0", "cast<string&> of the key");
+            rejected_alias("function keep(shared_ptr<string> s) { return 0; } map<string,int> m = {\"a\": 1}; for (auto kv : m) { keep(kv.first); } 0", "passed to a shared_ptr<string> parameter");
+            rejected_alias("map<string,int> m = {\"a\": 1}; function first_key() -> string& { for (auto& kv : m) { return kv.first; } } first_key(); 0", "returned by reference (a map<K,V>& parameter is dynamic to the checker: a global map here)");
+            rejected_alias("map<string,int> m = {\"a\": 1}; function first_key() -> shared_ptr<string> { for (auto kv : m) { return kv.first; } return null; } first_key(); 0", "returned as a shared_ptr");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var p = kv; var& c = p.first; } 0", "alias through a copied pair");
+            rejected_alias("map<string,int> m = {\"a\": 1}; string other = \"o\"; bool flag = true; for (auto kv : m) { var& c = flag ? kv.first : other; } 0", "a ternary over the key keeps the marker");
+            accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto& kv : m) { var okay = kv.first; okay.to_upper(); okay += \"!\"; r += okay; } r + to_json(m)", "A!{\"a\":1}", "Dev's spelling: var okay = kv.first is the copy-on-write path");
+            accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto kv : m) { string s2 = kv.first; s2.to_upper(); string u = cast<string>(kv.first); u += \"?\"; r += s2 + u; } r + to_json(m)", "Aa?{\"a\":1}", "typed copies and a by-value cast");
+            accepted("map<string,int> m = {\"a\": 1}; function first_key() -> string { for (auto kv : m) { return kv.first; } return \"\"; } string k = first_key(); k.to_upper(); k + to_json(m)", "A{\"a\":1}", "returned by value: a copy");
+            accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto kv : m) { auto f = [=]() { return kv.first + \"x\"; }; r += f(); } r", "ax", "reading the key inside a lambda");
+            accepted("map<string,int> m = {\"a\": 1, \"b\": 2}; string s = \"\"; for (auto kv : m) { s += kv.first; s += to_string(kv.first.length()); } s", "a1b1", "reads of the key are fine");
+            accepted("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.second = kv.second * 10; kv.second += 1; } to_string(m[\"a\"])", "11", "the value stays writable by reference");
+            accepted("map<string,string> m = {\"a\": \"v\"}; for (auto& kv : m) { kv.second.to_upper(); } m[\"a\"]", "V", "a string value mutator by reference");
+            accepted("function show(string s) { return s; } map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto kv : m) { r += show(kv.first); } r", "a", "passed by value");
+            accepted("var m = {\"a\": 1}; for (auto kv : m) { kv.first.to_upper(); } to_json(m)", "{\"a\":1}", "a var map is dynamic: the runtime backstop keeps the key");
+            accepted("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var k = kv.first; k.to_upper(); } to_json(m)", "{\"a\":1}", "a var copy of the key is the checker-invisible path: runtime backstop");
+            accepted("var arr = [[\"a\", 1]]; for (auto kv : arr) { kv[0].to_upper(); } string s = to_json(arr); for (auto& kv : arr) { kv[0].to_upper(); } s + to_json(arr)", "[[\"a\",1]][[\"A\",1]]", "an array of pairs is not a map: by value copies, by reference writes through");
+        });
+
+        test("map_key_immutable_battery", [this, both_mode]() {
+            auto row = [&](const char* src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = both_mode(src, check_mode::off);
+                check_eq(expected, i_out, std::string("interp: ") + what);
+                check_eq(expected, v_out, std::string("vm: ") + what);
+            };
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; string seen = \"\"; for (auto kv : m) { kv.first.to_upper(); seen += kv.first; } to_json(m) + seen + to_string(m.contains(\"a\"))",
+                "{\"a\":1,\"b\":2}ABtrue", "by-value pair: kv.first mutates the pair's copy, never the key");
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; for (auto& kv : m) { kv.first.to_upper(); kv.second = kv.second * 10; } to_json(m)",
+                "{\"a\":10,\"b\":20}", "by-reference pair: second aliases the value, first is a copy");
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; for (auto& kv : m) { kv.first.to_upper(); kv.first += \"!\"; } to_json(m)",
+                "{\"a\":1,\"b\":2}", "by-reference pair: mutator and += on first leave the key");
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; for (auto kv : m) { var k = kv.first; k.to_upper(); k += \"!\"; } to_json(m)",
+                "{\"a\":1,\"b\":2}", "var-sourced key copy mutated");
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; string r = \"\"; for (auto kv : m) { var p = kv; p.first.to_upper(); r += p.first + kv.first; } to_json(m) + r",
+                "{\"a\":1,\"b\":2}AaBb", "the pair escaping whole: the copy's first mutates, the loop pair and the key do not");
+            row("map<string,int> m = {\"a\": 1, \"b\": 2}; var ks = m.keys(); ks[0].to_upper(); to_json(m) + to_json(ks)",
+                "{\"a\":1,\"b\":2}[\"A\",\"b\"]", "keys() hands out shared handles; the element detaches on write");
+            row("map<string,int> m = {\"b\": 2, \"a\": 1, \"c\": 3}; for (auto& kv : m) { kv.first.to_upper(); } m[\"a\"] = 100; string o = \"\"; for (auto kv : m) { o += kv.first; } o + to_string(m.size()) + to_string(m[\"a\"])",
+                "abc3100", "iteration order and lookups hold after the attempt");
+            row("map<var,int> m = {\"a\": 1, \"b\": 2}; for (auto kv : m) { kv.first.to_upper(); } for (auto& kv : m) { kv.first.to_upper(); } to_json(m) + to_string(m.contains(\"a\"))",
+                "{\"a\":1,\"b\":2}true", "string keys in map<var,V>, both shapes");
+            row("string k = \"a\"; map<string,int> m = {}; m[k] = 1; k.to_upper(); k += \"!\"; to_json(m) + to_string(m.contains(\"a\")) + k",
+                "{\"a\":1}trueA!", "a key inserted through a variable shares its node until the variable is written");
+            row("map<string,int> m = {\"y\": 1}; var f = m.filter([](k, v) { k.to_upper(); return true; }); to_json(m) + to_json(f)",
+                "{\"y\":1}{\"y\":1}", "filter predicate argument detaches on write");
+            row("map<string,int> m = {\"z\": 1}; m.remove_if([](k, v) { k.to_upper(); return false; }); to_json(m)",
+                "{\"z\":1}", "remove_if predicate argument detaches on write");
+            row("map<string,int> m = {\"v\": 1}; var e = m.to_array(); e[0][0].to_upper(); to_json(m) + to_json(e)",
+                "{\"v\":1}[[\"V\",1]]", "to_array() entries detach on write");
+            row("function tk(string s) { s.to_upper(); return s; } function tkr(string& s) { s.to_upper(); return s; } map<string,int> m = {\"u\": 1}; string r = \"\"; for (auto kv : m) { r += tk(kv.first) + kv.first; tkr(kv.first); r += kv.first; } to_json(m) + r",
+                "{\"u\":1}UuU", "kv.first through a by-value and a string& parameter: the pair's own copy is the lvalue");
+            row("map<string,int> m = {\"s\": 1}; string r = \"\"; for (auto kv : m) { auto& kr = kv.first; kr.to_upper(); r += kr + kv.first; } to_json(m) + r",
+                "{\"s\":1}SS", "auto& kr = kv.first aliases the pair's copy");
+            row("map<string,int> m = {\"w\": 1}; for (auto kv : m) { kv.first += \"!\"; kv.first = \"zzz\"; } to_json(m)",
+                "{\"w\":1}", "stores to kv.first replace the pair field");
+            row("map<int,string> m = {1: \"a\", 2: \"b\"}; for (auto kv : m) { kv.second.to_upper(); } string s1 = to_json(m); for (auto& kv : m) { kv.second.to_upper(); } s1 + to_json(m)",
+                "{\"1\":\"a\",\"2\":\"b\"}{\"1\":\"A\",\"2\":\"B\"}", "int keys: by-value second is a copy, by-reference second writes through");
+            row("map<string,string> m = {\"k\": \"v\"}; m[\"k\"].to_upper(); string a = to_json(m); string key = \"k\"; m[key].to_lower(); a + to_json(m)",
+                "{\"k\":\"V\"}{\"k\":\"v\"}", "map value through a subscript receiver mutates in place");
+            row("string src = \"v\"; map<string,string> m = {\"k\": src}; m[\"k\"].to_upper(); to_json(m) + src",
+                "{\"k\":\"V\"}v", "a map value copied from a variable detaches on write");
+        });
     }
 };
 

@@ -99,6 +99,12 @@ public:
     // throws instead of reaching an object another layer now speaks for.
     void retire_script_layer() { script_layer_retired_ = true; }
     bool script_layer_retired() const { return script_layer_retired_; }
+    // Live field references pinned on this instance (make_field_reference / ~reference_holder).
+    // Zero = no reference can alias a field: a parallel fork may treat the instance and its
+    // value-semantic subtree as exclusive without the per-node use_count walk.
+    uint32_t live_field_refs() const noexcept { return live_field_refs_; }
+    void note_field_ref_minted() noexcept { ++live_field_refs_; }
+    void note_field_ref_released() noexcept { if (live_field_refs_) { --live_field_refs_; } }
     [[noreturn]] void throw_retired_script_layer() const {
         throw runtime_error("Script layer '" + class_name_ + "' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
     }
@@ -272,6 +278,7 @@ private:
     engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
     bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
+    uint32_t live_field_refs_ = 0;
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
     // swap-removes in O(1) instead of scanning and locking the whole list
     size_t registry_slot_ = SIZE_MAX;
@@ -647,6 +654,15 @@ public:
     // Cached against engine::class_definition_epoch (a nested field class redefining
     // must invalidate containing classes). Defined out of line in class_registry.cpp.
     bool flat_value_semantics() const;
+    // The flat slots whose declared type can reach a refcount (strings, containers, objects);
+    // a parallel fork visits only these when normalizing an element of this class. Scalar-only
+    // classes answer an empty list. Memoized under the class-definition epoch like flat_value_semantics.
+    const std::vector<uint32_t>& handle_bearing_slots() const;
+    // The flat slots whose declared type can hold a STRING anywhere in its value closure (a
+    // string, a container of strings, a nested value class with one): the only alias a
+    // reference-free value-semantic subtree can still carry is a shared string buffer.
+    const std::vector<uint32_t>& string_reachable_slots() const;
+    bool type_can_hold_string(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     type_info_ptr get_field_declared_type(uint64_t id) const {
         auto it = field_declared_types_.find(id);
@@ -1316,7 +1332,30 @@ public:
 
     void register_property_setter(uint64_t field_id, uint64_t setter_id) {
         property_setter_ids_[field_id] = setter_id;
+        read_only_property_ids_.erase(field_id);
         bump_field_shape_epoch();
+    }
+
+    // A getter-only .property() registers a REJECTING setter (dynamic_binder
+    // register_read_only_setter), so its setter id is non-zero like any other and every
+    // store spelling raises through it; this set is the checker's writability answer.
+    void register_property_read_only(uint64_t field_id) {
+        read_only_property_ids_.insert(field_id);
+        bump_field_shape_epoch();
+    }
+
+    bool owns_read_only_property(uint64_t field_id) const {
+        return read_only_property_ids_.find(field_id) != read_only_property_ids_.end();
+    }
+    // The class whose setter answers for field_id (own table, then the bases in
+    // get_property_setter_id order) decides: a derived binding re-registering the
+    // property writable is writable
+    bool is_read_only_property(uint64_t field_id) const {
+        if (property_setter_ids_.find(field_id) != property_setter_ids_.end()) { return owns_read_only_property(field_id); }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->get_property_setter_id(field_id)) { return parent->is_read_only_property(field_id); }
+        }
+        return false;
     }
 
     // Chain-aware (this class, then its bound C++ bases): a property registered on a
@@ -1872,7 +1911,15 @@ public:
         }
     }
 
+    // Parallel workers construct and copy instances: registry mutations serialize on the
+    // engine's region lock while a region runs (a never-taken branch otherwise).
+    std::unique_lock<std::mutex> registry_lock() const {
+        return engine_ && engine_->parallel_region_active() ? engine_->parallel_instance_registry_lock()
+                                                            : std::unique_lock<std::mutex>();
+    }
+
     void register_instance(std::weak_ptr<class_instance> instance) {
+        auto lock = registry_lock();
         if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
         instances_.push_back(std::move(instance));
     }
@@ -1882,15 +1929,20 @@ public:
     // to a live instance (destruction is sequential and members die after the body), so
     // its index can be re-pointed. Never-registered instances (set_class_definition) skip.
     void unregister_instance(class_instance* instance) {
-        const size_t i = instance->registry_slot_;
-        instance->registry_slot_ = SIZE_MAX;
-        if (i >= instances_.size()) { return; }
-        const size_t last = instances_.size() - 1;
-        if (i != last) {
-            instances_[i] = std::move(instances_[last]);
-            if (auto moved = instances_[i].lock()) { moved->registry_slot_ = i; }
+        std::shared_ptr<class_instance> moved;   // may be the last owner (a worker's copy dying concurrently): released outside the lock
+        {
+            auto lock = registry_lock();
+            const size_t i = instance->registry_slot_;
+            instance->registry_slot_ = SIZE_MAX;
+            if (i >= instances_.size()) { return; }
+            const size_t last = instances_.size() - 1;
+            if (i != last) {
+                instances_[i] = std::move(instances_[last]);
+                moved = instances_[i].lock();
+                if (moved) { moved->registry_slot_ = i; }
+            }
+            instances_.pop_back();
         }
-        instances_.pop_back();
     }
 
     // After a compaction the surviving entries' indexes must be reassigned
@@ -1982,6 +2034,7 @@ private:
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
     std::unordered_map<uint64_t, uint64_t> property_getter_ids_;
+    std::unordered_set<uint64_t> read_only_property_ids_;
     std::unordered_map<uint64_t, cpp_member_accessor> property_member_accessors_;
 
     bool has_property_getters_ = false;
@@ -2020,6 +2073,10 @@ private:
     mutable bool flat_value_cached_ = false;
     mutable uint64_t flat_value_epoch_ = 0;
     bool flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const;
+    mutable std::vector<uint32_t> handle_slots_cached_;
+    mutable std::vector<uint32_t> string_slots_cached_;
+    mutable uint64_t string_slots_epoch_ = 0;
+    mutable uint64_t handle_slots_epoch_ = 0;
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref) {

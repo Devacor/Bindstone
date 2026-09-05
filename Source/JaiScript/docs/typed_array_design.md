@@ -261,12 +261,26 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     or a subclass (exact id first, then `class_derives_from`'s parent walk); the per-slot tag
     is what makes a Derived element keep its own fields inside `array<Base>`; whole-array
     conversions prove the source class once; the boundary fast path accepts a derived tag.
+    **`parallel_for` over an object-kind source keeps the node typed (Dev ruling 2026-09-04:
+    the declared type is a proven fact about every element).** The barrier scans the slot
+    tags (16 B each, no instance read) and takes the declared-type proof
+    (`declared_class_exclusive`): every present class and every class a reached nested
+    field can hold - registered subclasses included - is value-closed and no field the body
+    reaches can touch a shared string; with `script_array::live_elem_refs == 0` (direct
+    element references AND references minted through an element, `arr[i].f`, both count)
+    the element walk is skipped entirely. A body naming a string-reachable field, a live
+    reference, a shared_ptr-tagged or host slot, or a non-flat subclass falls back to the
+    per-element walk over the slots. Workers bind `auto&` to element references on the typed
+    node (the slot's handle materializes per touch) and `auto` to a per-iteration boxed slot.
+    Primitive kinds still demote at the barrier until stage 3.
   - **maps** (`map<string,int>` …): the same rule — typed key/value storage keyed by the
     declared types, `map<var,var>` the only dynamic form, ordering contract kept
     (`script_map` stays ordered). Wins: key compare without a `script_value` per entry,
     value footprint. The boundary kernel's map branch is the producer, as for arrays.
-  - **parallel_transform stage 3**: workers read typed inputs raw (today a typed input is
-    read through a boxed snapshot — no demote — one copy per region).
+  - **parallel_transform stage 3**: workers read typed primitive inputs raw (today a typed
+    primitive/string input is read through a boxed snapshot — no demote — one copy per
+    region; an object-kind input already lends its slots, `typed_input`, and its elements
+    pass the same declared-type proof as `parallel_for`'s).
 
 ## Stage 6 — typed maps (designed 2026-09-02, not built)
 

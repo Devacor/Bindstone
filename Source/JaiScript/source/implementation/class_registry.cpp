@@ -24,6 +24,65 @@ bool class_definition::flat_value_semantics() const {
     return flat_value_cached_;
 }
 
+const std::vector<uint32_t>& class_definition::handle_bearing_slots() const {
+    const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
+    if (handle_slots_epoch_ == epoch && engine_) { return handle_slots_cached_; }
+    handle_slots_cached_.clear();
+    const uint32_t n = field_slot_count();
+    for (uint32_t slot = 0; slot < n; ++slot) {
+        const type_info_ptr t = get_field_declared_type(slot_field(slot));
+        bool scalar = false;
+        if (t) {
+            switch (t->base_type) {
+            case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+            case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+                scalar = true; break;
+            default: break;
+            }
+        }
+        if (!scalar) { handle_slots_cached_.push_back(slot); }
+    }
+    handle_slots_epoch_ = epoch;
+    return handle_slots_cached_;
+}
+bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
+    if (!t) { return true; }   // auto/var: no store-enforced shape
+    switch (t->base_type) {
+    case script_value_type::jai_string_type: return true;
+    case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+    case script_value_type::jai_bool_type: case script_value_type::jai_char_type: return false;
+    case script_value_type::jai_array_type: return type_can_hold_string(t->element_type(), in_progress);
+    case script_value_type::jai_map_type: return type_can_hold_string(t->key_type(), in_progress) || type_can_hold_string(t->value_type(), in_progress);
+    case script_value_type::jai_object_type: {
+        if (!engine_ || t->type_name.empty()) { return true; }
+        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
+        if (!nested) { return true; }
+        for (const class_definition* visiting : in_progress) { if (visiting == nested.get()) { return false; } }
+        in_progress.push_back(nested.get());
+        bool any = false;
+        const uint32_t n = nested->field_slot_count();
+        for (uint32_t slot = 0; slot < n && !any; ++slot) {
+            any = nested->type_can_hold_string(nested->get_field_declared_type(nested->slot_field(slot)), in_progress);
+        }
+        in_progress.pop_back();
+        return any;
+    }
+    default: return true;
+    }
+}
+
+const std::vector<uint32_t>& class_definition::string_reachable_slots() const {
+    const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
+    if (string_slots_epoch_ == epoch && engine_) { return string_slots_cached_; }
+    string_slots_cached_.clear();
+    std::vector<const class_definition*> in_progress;
+    const uint32_t n = field_slot_count();
+    for (uint32_t slot = 0; slot < n; ++slot) {
+        if (type_can_hold_string(get_field_declared_type(slot_field(slot)), in_progress)) { string_slots_cached_.push_back(slot); }
+    }
+    string_slots_epoch_ = epoch;
+    return string_slots_cached_;
+}
 bool class_definition::flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const {
     if (class_type_ != script_class && class_type_ != vm_class) {
         return false;

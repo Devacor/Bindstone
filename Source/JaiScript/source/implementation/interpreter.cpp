@@ -8,6 +8,8 @@
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/detail/string_mutator_receiver.hpp>
+#include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
@@ -2096,6 +2098,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     build_index(out.array_methods, out.array_by_index, out.array_index);
     build_index(out.map_methods, out.map_by_index, out.map_index);
     build_index(out.string_methods, out.string_by_index, out.string_index);
+    out.string_mutator_ids.clear();
+    out.string_mutates_by_index.assign(out.string_by_index.size(), 0);
+    for (std::string_view name : k_string_mutator_method_names) {
+        const uint64_t id = symbolizer->intern(name);
+        assert(out.string_methods.count(id) && "k_string_mutator_method_names names a builtin the registry lacks");
+        out.string_mutator_ids.insert(id);
+        out.string_mutates_by_index[out.string_index.at(id)] = 1;
+    }
 }
 
 namespace detail {
@@ -2123,6 +2133,7 @@ void interpreter::init_builtin_methods() {
     array_methods_ = std::move(registries.array_methods);
     map_methods_ = std::move(registries.map_methods);
     string_methods_ = std::move(registries.string_methods);
+    string_mutator_ids_ = std::move(registries.string_mutator_ids);
     weak_ptr_methods_ = std::move(registries.weak_ptr_methods);
     shared_ptr_methods_ = std::move(registries.shared_ptr_methods);
 }
@@ -2159,32 +2170,8 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
     return make_bound_method(this_obj, method);
 }
 
-// Helper to check if an expression is an lvalue (existing object that should be cloned)
-// Lvalues: identifiers, member access, subscript access
-// Non-lvalues (temporaries): function calls, constructors, literals, operators
 bool interpreter::is_lvalue_expression(expression* e) const {
-    if (!e) return false;
-
-    // Direct identifier - always an lvalue
-    if (e->get_type() == node_type::identifier_expr) {
-        return true;
-    }
-
-    // Member access - always an lvalue
-    if (e->get_type() == node_type::member_expr) {
-        return true;
-    }
-
-    // Array/map subscript (binary expr with left_bracket) - lvalue
-    if (e->get_type() == node_type::binary_expr) {
-        auto* bin = static_cast<binary_expr*>(e);
-        if (bin->op.type == token_type::left_bracket) {
-            return true;
-        }
-    }
-
-    // Everything else (function calls, constructors, literals, etc.) is a temporary
-    return false;
+    return is_lvalue_shaped_expr(e);
 }
 
 script_value interpreter::member_target::method(uint64_t id) const {
@@ -2940,7 +2927,7 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
 }
 
 checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
-    // ::name - GLOBAL env only (locals, captures, catch var, member scope all skipped).
+    // ::name - GLOBAL env only (locals, captures, member scope all skipped).
     // KEEP BYTE-PARALLEL with vm exec_load's global-only door.
     if (expr->global_qualified) {
         if (script_value* g = get_global_environment()->get_value_ptr(expr->symbol_id)) {
@@ -2951,11 +2938,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             "Undefined variable '{0}'", expr->symbol_id);
     }
     if (expr->symbol_id == getValue_id_) {
-    }
-    // Check if this identifier is the current catch variable (fast symbol_id comparison)
-    if (current_catch_var_id_ != 0 && expr->symbol_id == current_catch_var_id_) {
-        push_value(active_exception_value_.value());
-        return checked_result<void>();
     }
 
     // ============================================================
@@ -3132,8 +3114,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
 	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
 	// Skip logical operators - they need short-circuit evaluation
-	// Skip if we're in a catch block - catch variables need special handling
-	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe && current_catch_var_id_ == 0) {
+	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe) {
 		if (expr->left->get_type() == node_type::identifier_expr) {
 			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
 			if (expr->right->get_type() == node_type::identifier_expr) {
@@ -4834,14 +4815,28 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return {};
             };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
-            // First, get the current value of the property (replay: parked, read once)
+            // The receiver is evaluated ONCE and held raw (a reference receiver re-resolves by
+            // mode at the store) across the read, the rhs and the store-back; a :: target has
+            // no receiver (replay: receiver 0, rhs 1, partial {object, current, old})
+            script_value objectValue;
             script_value currentValue;
             script_value postfix_old;
             if (parked<Replaying>(rs, 0)) {
-                currentValue = rs->partial[0];
-                postfix_old = rs->partial[1];
+                objectValue = rs->partial[0];
+                currentValue = rs->partial[1];
+                postfix_old = rs->partial[2];
             } else {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 0), expr, rp_asg_member_compound, 0, {});
+                if (memberExpr->is_static) {
+                    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 0), expr, rp_asg_member_compound, 0, {});
+                } else {
+                    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 0), expr, rp_asg_member_compound, 0, {});
+                    objectValue = pop_value();
+                    if (is_unwinding_) {
+                        push_value(make_value());
+                        return {};
+                    }
+                    JAISCRIPT_TRY(member_read_on(memberExpr, objectValue, false));
+                }
                 currentValue = pop_value().deref();
                 if (is_unwinding_) {
                     // Target read raised: surface it, not the ++/-- gate's error on the placeholder
@@ -4858,7 +4853,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
 
             // Evaluate the right-hand side
-            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{currentValue, postfix_old}));
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{objectValue, currentValue, postfix_old}));
             if (is_unwinding_) {
                 // RHS raised: surface the original exception, don't run the compound
                 // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
@@ -4887,10 +4882,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return {};
                         }
                         // Assign the result back to the property
-                        JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
-                        script_value objectValue = pop_value().deref();
-                        if (objectValue.is_object()) {
-                            JAISCRIPT_TRY(assign_member_value(objectValue, memberExpr, custom_result.value()));
+                        script_value target_obj = objectValue.deref();
+                        if (target_obj.is_object()) {
+                            JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, custom_result.value()));
                             if (is_unwinding_) {
                                 push_value(make_value());
                                 return {};
@@ -5001,13 +4995,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return {};
             }
 
-            // Now assign the result back to the property
-            // We need to evaluate the object again to get a fresh reference
-            JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
-            script_value objectValue = pop_value().deref();
+            // Now assign the result back to the property (the receiver evaluated once above)
+            script_value target_obj = objectValue.deref();
 
             // Check if it's an object
-            if (!objectValue.is_object()) {
+            if (!target_obj.is_object()) {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value(std::string("Cannot assign to member of non-object type"));
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
@@ -5016,7 +5008,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return {};
             }
 
-            JAISCRIPT_TRY(assign_member_value(objectValue, memberExpr, resultValue));
+            JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, resultValue));
             if (is_unwinding_) {
                 push_value(make_value());
                 return {};
@@ -5268,7 +5260,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
                 }
                 push_value(std::move(returnValue));
-            } else if (expr->target->get_type() == node_type::binary_expr && currentValue.is_reference()) {
+            } else if (currentValue.is_reference()) {
                 // The target read minted the element reference: store through it, never
                 // re-evaluate the subscript (its side effects, and any yield, ran once)
                 JAISCRIPT_TRY(store_through_subscript_reference(currentValue, std::move(resultValue)));
@@ -5277,19 +5269,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     push_value(std::move(postfix_old));
                 }
             } else {
-                // Fall back to AST creation for complex lvalues
-                auto regularAssignment = std::make_shared<assignment_expr>(
-                    expr->location,
-                    expr->target,
-                    token(token_type::equal, "=", expr->op.location),
-                    std::make_shared<literal_expr>(expr->location, resultValue)
-                );
-                JAISCRIPT_TRY(dispatch_expr(regularAssignment.get()));
-                if (expr->postfix_old_result && !valueStack_.empty()) {
-                    // the synthetic store left the NEW value; postfix yields the old one
-                    valueStack_.discard();
-                    push_value(std::move(postfix_old));
-                }
+                // No lvalue came back (rvalue base, string subscript, missing map key): the
+                // vm's exec_index_compound position and text (KEEP BYTE-PARALLEL)
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
             }
         }
     } else {
@@ -6987,35 +6969,31 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         }
     }
 
-    // Special handling for string method calls on variables - mutate in place
-    // Pattern: identifier.method() where identifier is a string variable
+    // Identifier-receiver string builtins mutate the VARIABLE in place: the receiver
+    // resolves through the identifier ladder (locals -> members -> globals, ::global)
+    // and the builtin lands on that cell.
     if (expr->callee->get_type() == node_type::member_expr) {
         auto* member = static_cast<member_expr*>(expr->callee.get());
         if (!member->is_static && member->object->get_type() == node_type::identifier_expr) {
             auto* ident = static_cast<identifier_expr*>(member->object.get());
-
-            // Try to get a mutable reference to the variable. Member scope reorders
-            // the ladder (a string FIELD shadows a same-named global string): resolve
-            // through the shadowing ladder first, then wrap the same way get_ref would.
-            checked_result<std::reference_wrapper<script_value>> ref_result =
-                (member_scope_.active() || ident->global_qualified)
-                    ? [&]() -> checked_result<std::reference_wrapper<script_value>> {
-                          script_value* scoped = ident->global_qualified
-                              ? get_global_environment()->get_value_ptr(ident->symbol_id)
-                              : scoped_env_lookup(ident->symbol_id);
-                          if (scoped) {
-                              return std::ref(*scoped);
-                          }
-                          return checked_result<std::reference_wrapper<script_value>>(
-                              make_error_code(runtime_error_code::undefined_variable),
-                              "Undefined variable '{0}'", ident->symbol_id);
-                      }()
-                    : environment_->get_ref(ident->symbol_id);
-            if (ref_result && ref_result.value().get().is_string()) {
-                // Found a string variable - check if method exists
+            script_value* recv_cell = string_receiver_cell(ident);
+            if (recv_cell && recv_cell->is_string()) {
                 auto methodIt = string_methods_.find(member->member_id);
                 if (methodIt != string_methods_.end()) {
-                    // Evaluate arguments
+                    // C++17 [expr.call]: the receiver resolves before the arguments. An
+                    // argument that runs code may rebind or retype the variable, so the
+                    // cell is re-resolved after them; a cell that no longer holds a string
+                    // runs the builtin on the pre-args value (KEEP BYTE-PARALLEL with
+                    // vm_backend::exec_call_method's post-args probe + stack-copy fallback)
+                    std::optional<script_value> pre_args;
+                    for (const auto& arg : expr->arguments) {
+                        const auto arg_type = arg->get_type();
+                        if (arg_type != node_type::literal_expr && arg_type != node_type::identifier_expr &&
+                            arg_type != node_type::this_expr) {
+                            pre_args.emplace(recv_cell->deref());
+                            break;
+                        }
+                    }
                     std::vector<script_value> arguments;
                     arguments.reserve(expr->arguments.size());
                     if constexpr (Replaying) { if (rs) arguments = rs->partial; }
@@ -7027,17 +7005,26 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             return {};
                         }
                     }
+                    if (pre_args) {
+                        recv_cell = string_receiver_cell(ident);
+                        if (recv_cell && recv_cell->is_string()) {
+                            pre_args.reset();   // a live copy would only make the write gate copy the node
+                        } else {
+                            recv_cell = &*pre_args;
+                        }
+                    }
 
-                    // Call method directly on the variable reference. Resolve through
-                    // references (ref decls/cells): string builtins read self's storage
-                    // RAW, and in-place mutation must land in the target
+                    // Resolve through references (ref decls/cells): string builtins read
+                    // self's storage RAW, and in-place mutation must land in the target; a
+                    // scratch-backed alias (typed element, C++ property) writes back after
                     // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method)
-                    script_value& var_ref = ref_result.value().get().deref();
+                    script_value& var_ref = recv_cell->deref();
                     detail::deref_builtin_args_in_place(arguments);
                     auto result = methodIt->second(builtin_method_context{engine_, string_symbolizer_}, var_ref, arguments);
                     if (!result) {
                         return result.error_value();
                     }
+                    if (auto* scratch_ref = recv_cell->scratch_ref_holder()) [[unlikely]] { scratch_ref->commit_scratch(); }
                     push_value(std::move(result.value()));
                     return {};
                 }
@@ -7763,14 +7750,50 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             "class {0} has no static member '{1}'", name_id, expr->member_id);
     }
 
-    // Check if this is a super:: member access
-    bool is_super_access = expr->object->get_type() == node_type::super_expr;
-
     // Evaluate the object expression
     JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->object.get(), rs, 0), expr, rp_operand, 0, {});
     script_value objectValue = pop_value();
     if (is_unwinding_) {
         push_value(make_value());
+        return {};
+    }
+    return member_read_on(expr, std::move(objectValue), as_callee);
+}
+
+// The member read on an already-evaluated receiver: the compound-member store evaluates the
+// receiver once and holds it across the read, the rhs and the store-back
+checked_result<void> interpreter::member_read_on(member_expr* expr, script_value objectValue, bool as_callee) {
+    const bool is_super_access = expr->object->get_type() == node_type::super_expr;
+
+    // A string MUTATOR called on a non-identifier receiver binds the receiver LVALUE
+    // (detail/string_mutator_receiver.hpp; C++ `string& to_upper()`): the popped reference,
+    // the resolved field / property, or the chain root whose node the receiver still is.
+    // An identifier chain root re-resolves at call time, after the arguments, like the
+    // identifier fast path. Unbound = a temporary: the builtin mutates the copy alone.
+    // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method's builtin-direct string branch)
+    if (as_callee && objectValue.deref().raw_storage_index() == script_value::TYPEID_STRING &&
+        string_mutator_ids_.count(expr->member_id)) {
+        const builtin_method& method = string_methods_.find(expr->member_id)->second;
+        script_value copy(objectValue.deref());
+        detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(objectValue, expr->object.get(),
+            detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+            environment_.get(), engine_, string_symbolizer_);
+        script_function boundMethod = [this, ctx = builtin_method_context{engine_, string_symbolizer_}, method,
+                                       binding = std::move(binding), copy = std::move(copy)]
+                                      (const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            script_value* root_cell = binding.root_ident ? string_receiver_cell(binding.root_ident) : nullptr;
+            script_value* self = detail::string_mutator_self(binding, root_cell, copy);
+            if (self) {
+                copy = script_value(std::monostate{}, engine_);   // the copy's count would make the gate copy the node
+            } else {
+                self = &copy;
+            }
+            std::vector<script_value> scratch;
+            auto result = method(ctx, *self, detail::deref_builtin_args(args, scratch));
+            binding.commit();
+            return result;
+        };
+        push_value(script_value::make_function(boundMethod, engine_));
         return {};
     }
 
@@ -8583,6 +8606,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             case node_type::try_stmt: {
                 auto* tr = static_cast<try_stmt*>(s);
                 if (tr->try_block) collect_outer_slots_stmt(tr->try_block.get());
+                if (tr->catch_var_id != UINT64_MAX) {
+                    lambda_declared.insert(tr->catch_var_id);
+                }
                 if (tr->catch_block) collect_outer_slots_stmt(tr->catch_block.get());
                 break;
             }
@@ -8694,75 +8720,38 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
 
                 if (!is_overridden) {
-                    // Member scope: the capture env is self-contained (parent = global
-                    // env), so a FIELD used under [=]/[&] must be materialized here with
-                    // the C++ shadowing order - the old contains()/get() walk snapshotted
-                    // a same-named GLOBAL over the member.
-                    script_value* scoped_target = member_scope_.active()
-                        ? scoped_env_lookup(var_id) : nullptr;
-                    // A hybrid's C++ property follows the field rule: [=] snapshots through
-                    // the getter, [&] shares the member itself / its accessors
-                    // (reference_model.md CPP-MEMBER / PROPERTY)
-                    std::optional<script_value> property_capture;
-                    if (!scoped_target && member_scope_.state == detail::member_scope_state::instance &&
-                        member_scope_.this_storage) {
-                        auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
-                                                                 member_scope_.statics, var_id, /*want_methods*/ true);
-                        if (member.what == detail::member_probe_hit::kind::cpp_property) {
-                            auto read = capture_by_ref
-                                ? detail::bind_cpp_property_ref(*member_scope_.this_storage, var_id, engine_, string_symbolizer_)
-                                : detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
-                                                                 member.method_value, member.getter_id, var_id);
-                            if (!read) {
-                                return read.error_value();
-                            }
-                            property_capture = std::move(read.value());
-                        }
-                    }
-                    if (scoped_target) {
-                        if (capture_by_ref) {
-                            captureEnv->define(var_id, share_boxed_env_storage(*scoped_target, engine_));
-                        } else {
-                            captureEnv->define(var_id, clone_for_capture(scoped_target->deref(), string_symbolizer_));
-                        }
-                    } else if (property_capture) {
-                        captureEnv->define(var_id, capture_by_ref ? std::move(*property_capture)
-                                                                  : clone_for_capture(*property_capture, string_symbolizer_));
-                    } else if (!member_scope_.active() && environment_->contains(var_id)) {
-                        if (capture_by_ref) {
-                            script_value* targetPtr = environment_->get_value_ptr(var_id);
-                            if (targetPtr) {
-                                // Cell share (escape-legal): the capture stays live after
-                                // the captured env dies
-                                captureEnv->define(var_id, share_boxed_env_storage(*targetPtr, engine_));
-                            }
-                        } else {
-                            auto capture_result = environment_->get(var_id);
-                            if (capture_result) {
-                                captureEnv->define(var_id, clone_for_capture(capture_result.value(), string_symbolizer_));
-                            }
-                        }
-                    } else if (!call_stack_.empty()) {
-                        // Local lives in the outer call frame (slot-based storage).
-                        // Find it via the outer_slot_refs we already collected — the
-                        // slot-scan above already resolved outer slots to symbol_ids.
+                    // The capture source in the runtime's order (detail/capture_ladder.hpp):
+                    // the outer frame's slot, the member scope, then the env chain - a
+                    // same-named global never wins over a local or a field. [&] cell-shares
+                    // the source (escape-legal: the cell outlives the frame), [=] snapshots
+                    // it; a hybrid's C++ property follows the field rule through its
+                    // accessors (reference_model.md CPP-MEMBER / PROPERTY).
+                    script_value* slot_val = nullptr;
+                    if (!call_stack_.empty()) {
                         for (const auto& ref : outer_slot_refs) {
                             if (ref.symbol_id == var_id) {
-                                script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
-                                if (slot_val) {
-                                    if (capture_by_ref) {
-                                        // Cell share (escape-legal, C++ [&] semantics):
-                                        // the slot boxes in place and the capture shares
-                                        // the cell - writes land in the original local
-                                        // and the cell outlives the frame
-                                        captureEnv->define(var_id, share_boxed_env_storage(*slot_val, engine_));
-                                    } else {
-                                        captureEnv->define(var_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
-                                    }
-                                }
+                                slot_val = call_stack_.back().get_local(ref.outer_slot);
                                 break;
                             }
                         }
+                    }
+                    auto src = detail::resolve_capture_source(slot_val, environment_.get(), member_scope_, var_id);
+                    if (src.cell) {
+                        if (capture_by_ref) {
+                            captureEnv->define(var_id, share_boxed_env_storage(*src.cell, engine_));
+                        } else {
+                            captureEnv->define(var_id, clone_for_capture(src.cell->deref(), string_symbolizer_));
+                        }
+                    } else if (src.what == detail::capture_source::kind::cpp_property) {
+                        auto read = capture_by_ref
+                            ? detail::bind_cpp_property_ref(*member_scope_.this_storage, var_id, engine_, string_symbolizer_)
+                            : detail::read_bare_cpp_property(*member_scope_.this_storage, src.property.instance,
+                                                             src.property.method_value, src.property.getter_id, var_id);
+                        if (!read) {
+                            return read.error_value();
+                        }
+                        captureEnv->define(var_id, capture_by_ref ? std::move(read.value())
+                                                                  : clone_for_capture(read.value(), string_symbolizer_));
                     }
                 }
             }
@@ -8770,14 +8759,6 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         
         // Process explicit captures
         for (const auto& capture : expr->captures) {
-            // Special handling for 'this' - method_environment provides it via get() override
-            // even though contains() might return false
-            // Check environment first; if not there check the outer call-frame
-            // (locals with slot_index live there, not in environment_).
-            // Enclosing-frame slots (params/locals) shadow env-resident and global names:
-            // a global spelled like the parameter must not be what [name] captures.
-            bool can_capture = false;
-            bool capture_from_slot = false;
             script_value* slot_val = nullptr;
             if (!call_stack_.empty()) {
                 if (capture.outer_slot != SIZE_MAX && capture.outer_slot < call_stack_.back().local_count()) {
@@ -8791,42 +8772,42 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         }
                     }
                 }
-                if (slot_val) { can_capture = true; capture_from_slot = true; }
             }
-            if (!can_capture) {
-                can_capture = environment_->contains(capture.symbol_id);
-            }
-            if (!can_capture && capture.symbol_id == this_id) {
-                if (environment_->get_value_ptr(this_id)) can_capture = true;
-            }
-
-            if (can_capture) {
-                if (capture_from_slot) {
-                    if (capture.by_reference) {
-                        // Cell share (escape-legal, C++ [&x] semantics): the slot boxes
-                        // in place; the closure and the original local share the cell
-                        captureEnv->define(capture.symbol_id, share_boxed_env_storage(*slot_val, engine_));
-                    } else {
-                        captureEnv->define(capture.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
-                    }
-                } else if (capture.by_reference) {
-                    script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
-                    if (targetPtr) {
-                        // Cell share (escape-legal): the capture stays live after the
-                        // captured env dies
-                        captureEnv->define(capture.symbol_id, share_boxed_env_storage(*targetPtr, engine_));
-                    } else {
+            if (!slot_val && capture.symbol_id == this_id) {
+                // 'this' - method_environment provides it via get() / get_value_ptr()
+                // even though contains() might return false
+                if (!environment_->contains(this_id) && !environment_->get_value_ptr(this_id)) {
+                    return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+                        "Cannot capture undefined variable '{0}'", capture.symbol_id);
+                }
+                if (capture.by_reference) {
+                    script_value* targetPtr = environment_->get_value_ptr(this_id);
+                    if (!targetPtr) {
                         return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
                             "Cannot capture variable '{0}' by reference", capture.symbol_id);
                     }
+                    captureEnv->define(this_id, share_boxed_env_storage(*targetPtr, engine_));
                 } else {
-                    auto capture_result = environment_->get(capture.symbol_id);
+                    auto capture_result = environment_->get(this_id);
                     if (!capture_result) return capture_result.error_value();
-                    captureEnv->define(capture.symbol_id, clone_for_capture(capture_result.value(), string_symbolizer_));
+                    captureEnv->define(this_id, clone_for_capture(capture_result.value(), string_symbolizer_));
                 }
-            } else {
+                continue;
+            }
+            // The capture source in the runtime's order (detail/capture_ladder.hpp): the
+            // outer frame's slot, the function's own scopes, then the env chain - a member
+            // shadows the chain and is not a capturable variable
+            auto src = detail::resolve_capture_source(slot_val, environment_.get(), member_scope_, capture.symbol_id);
+            if (!src.is_variable()) {
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
                     "Cannot capture undefined variable '{0}'", capture.symbol_id);
+            }
+            if (capture.by_reference) {
+                // Cell share (escape-legal, C++ [&x] semantics): the storage boxes in
+                // place; the closure and the original share the cell
+                captureEnv->define(capture.symbol_id, share_boxed_env_storage(*src.cell, engine_));
+            } else {
+                captureEnv->define(capture.symbol_id, clone_for_capture(src.cell->deref(), string_symbolizer_));
             }
         }
 
@@ -8835,9 +8816,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // (O(1) hash lookup) rather than the wrong call-frame slot.
         if (!call_stack_.empty()) {
             for (auto& ref : outer_slot_refs) {
-                // Skip if already captured explicitly / by default-capture above
+                // Skip if already captured explicitly / by default-capture above - OWN
+                // storage only, a same-named global behind the parent is not a capture
                 // (ref.node is null when replaying a stored plan — already patched then)
-                if (captureEnv->contains(ref.symbol_id)) {
+                if (captureEnv->get_own_value_ptr(ref.symbol_id)) {
                     if (ref.node) { ref.node->slot_index = SIZE_MAX; }
                     continue;
                 }
@@ -8877,13 +8859,12 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             );
             method_env->define(this_id, this_obj);
 
-            // Copy all captured variables (except 'this') into the method_environment
+            // Copy all captured variables (except 'this') into the method_environment -
+            // the capture env's OWN storage only, never a global behind its parent
             for (const auto& capture : expr->captures) {
-                if (capture.symbol_id != this_id && captureEnv->contains(capture.symbol_id)) {
-                    auto capture_result = captureEnv->get(capture.symbol_id);
-                    if (capture_result) {
-                        method_env->define(capture.symbol_id, std::move(capture_result.value()));
-                    }
+                if (capture.symbol_id == this_id) continue;
+                if (script_value* captured = captureEnv->get_own_value_ptr(capture.symbol_id)) {
+                    method_env->define(capture.symbol_id, *captured);
                 }
             }
 
@@ -8891,11 +8872,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             if (has_default_capture) {
                 for (const auto& varName : used_variables) {
                     uint64_t var_id = string_symbolizer_->intern(varName);
-                    if (var_id != this_id && captureEnv->contains(var_id)) {
-                        auto var_result = captureEnv->get(var_id);
-                        if (var_result) {
-                            method_env->define(var_id, std::move(var_result.value()));
-                        }
+                    if (var_id == this_id) continue;
+                    if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
+                        method_env->define(var_id, *captured);
                     }
                 }
             }
@@ -10627,10 +10606,10 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         args.push_back(it->first);  // Don't clone - just pass the key
                         args.push_back(script_value::make_map_entry_reference(map_storage, it->first, engine_, nullptr));
                     } else {
-                        // Copy binding: keys stay detached snapshots (a shared key
-                        // handle would let mutation break map ordering); values
-                        // deep-copy, shared_ptr values share
-                        args.push_back(it->first.clone());
+                        // Copy binding: string keys share their node (the copy-on-write
+                        // gate detaches any write - invariants.md 11), other key kinds
+                        // snapshot; values deep-copy, shared_ptr values share
+                        args.push_back(it->first.is_string() ? it->first : it->first.clone());
                         args.push_back(clone_for_assignment(it->second));
                     }
 
@@ -10815,6 +10794,31 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
         return {};
     }
 
+    // By-value return materialization (detail/return_conv.hpp), before the typed
+    // conversion so a converted value is never copied twice: the callee's own slot moves
+    // out, every other lvalue read (and a reference result) copies, a temporary moves.
+    // KEEP BYTE-PARALLEL with the vm's return doors (exec_return_ident / exec_return_convert /
+    // return_from_script_frame).
+    if (!detail::return_value_plain(*out) && !stmt->binds_reference && !call_stack_.empty()) {
+        uint8_t operand_class = stmt->return_operand_class;
+        if (operand_class == detail::return_operand_unclassified) {
+            operand_class = stmt->return_operand_class = detail::classify_return_operand(stmt->value.get());
+        }
+        bool moved = false;
+        if (operand_class == detail::return_operand_ident) {
+            auto* ident = static_cast<identifier_expr*>(stmt->value.get());
+            if (!ident->global_qualified && ident->slot_index != SIZE_MAX) {
+                if (script_value* payload = detail::return_own_slot_payload(call_stack_.back().get_local(ident->slot_index), *out)) {
+                    *payload = make_value();
+                    moved = true;
+                }
+            }
+        }
+        if (!moved) {
+            detail::materialize_return_value(*out, operand_class != detail::return_operand_temporary);
+        }
+    }
+
     // The typed-return conversion is part of the statement (C++ semantics): it runs here,
     // inside the callee's try regions, so a catch around the `return` sees its failure.
     // KEEP BYTE-PARALLEL with the vm's convert_return_at_site.
@@ -10934,14 +10938,32 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // Reset unwinding flag
         is_unwinding_ = false; trace_captured_ = false;
 
-        // Set the current catch variable ID so identifier lookup can find it (symbolize once here)
+        // In-catch marker of the rethrow protocol (symbolize once here)
         if (auto eng = engine_) {
             current_catch_var_id_ = eng->symbolize(stmt->catch_var);
+        }
+
+        // Bind the catch variable as a local of the catch body (KEEP BYTE-PARALLEL with
+        // vm_backend::unwind_to_handler): frame slot, or a scope env popped on every exit
+        // of the block. A catch resume skips the bind - the restored frame holds it.
+        bool catch_env_pushed = false;
+        if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
+            script_value caught = active_exception_value_ ? *active_exception_value_ : make_value();
+            if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
+                call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
+            } else {
+                push_scope();
+                environment_->define(stmt->catch_var_id, std::move(caught));
+                catch_env_pushed = true;
+            }
         }
 
         // Execute catch block
         auto catch_result = resuming_catch ? dispatch_stmt_resuming(stmt->catch_block.get())
                                            : dispatch_stmt(stmt->catch_block.get());
+        if (catch_env_pushed) {
+            pop_scope();
+        }
         // Propagate errors from catch block
         if (!catch_result) {
             current_catch_var_id_ = saved_catch_var_id;
@@ -10959,7 +10981,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
             return {};
         }
 
-        // Clear catch variable
+        // Clear the in-catch marker
         current_catch_var_id_ = 0;
 
         // Only clear exception if it wasn't re-thrown
@@ -11609,7 +11631,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Static fields must be evaluated immediately (they're shared across all instances)
                 if (initializer_ast && !preserve_existing) {
                     JAISCRIPT_TRY(dispatch_expr(initializer_ast.get()));
-                    default_val = pop_value();
+                    default_val = initializer_store_value(pop_value(), initializer_ast.get());
 
                     // Ensure the default value has an engine reference
                     if (!default_val.has_valid_engine() && engine_) {
@@ -11832,7 +11854,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Evaluate the initializer AST in the current (definition) environment
                 // to get the actual default value
                 JAISCRIPT_TRY(dispatch_expr(initializer_ast.get()));
-                evaluated_value = pop_value();
+                evaluated_value = initializer_store_value(pop_value(), initializer_ast.get());
             }
 
             // Ensure the value has an engine reference
@@ -12381,7 +12403,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
                 member_scope_ = old_scope;
                 throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
             }
-            script_value field_value = pop_value();
+            script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
 
             // Ensure the field value has an engine reference
             if (!field_value.has_valid_engine() && engine_) {
@@ -12736,9 +12758,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                     if (initializer_ast) {
                                         auto r = dispatch_expr(initializer_ast.get());
                                         if (r) {
-                                            script_value field_value = pop_value();
-                                            // field_id is already the interned ID (map is keyed by ID)
-                                            instance->set_field(field_id, std::move(field_value));
+                                            instance->set_field(field_id, initializer_store_value(pop_value(), initializer_ast.get()));
                                         }
                                     }
                                 }
@@ -13231,6 +13251,7 @@ static void collect_frame_slot_names(const statement* s,
     case node_type::try_stmt: {
         auto* tr = static_cast<const try_stmt*>(s);
         if (tr->try_block) collect_frame_slot_names(tr->try_block.get(), out);
+        if (tr->catch_slot_index != SIZE_MAX) out.emplace_back(tr->catch_slot_index, tr->catch_var);
         if (tr->catch_block) collect_frame_slot_names(tr->catch_block.get(), out);
         break;
     }
@@ -13657,9 +13678,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         return result;
     }
 
-    // The return site (visit_return_stmt) validated a reference return / ran the typed
-    // conversion inside the callee's try regions; value returns flatten BEFORE cleanup
-    // destroys the call frame: a plain function's result is a copy, never an alias
+    // The return site (visit_return_stmt) validated a reference return / materialized the
+    // by-value result (own slot moved, lvalue reads copied) and ran the typed conversion
+    // inside the callee's try regions; a stray reference still flattens BEFORE cleanup
+    // destroys the call frame
     if (hasReturnValue_ && !is_unwinding_) {
         if (function.return_type && function.return_type->base_type == script_value_type::jai_reference_type) {
             result = std::move(returnValue_.value());
@@ -13893,6 +13915,46 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
     auto prev_status = handle.get_status();
     handle.set_status(coroutine_handle::status::running);
+
+    // The exception trio follows the frames (KEEP BYTE-PARALLEL with vm_backend::run_fiber's
+    // fiber_exception_swap): the resumer's is saved here and comes back on every exit (a
+    // throw escaping the body keeps its exception pair live for the resumer's catch); a
+    // suspend parks the body's own for the next resume. A fresh coroutine starts with no
+    // active exception.
+    struct coroutine_exception_swap {
+        interpreter* in;
+        interpreter_coroutine_state* st;
+        coroutine_handle* handle;
+        std::optional<script_exception> resumer_exception;
+        std::optional<script_value> resumer_exception_value;
+        uint64_t resumer_marker;
+        coroutine_exception_swap(interpreter* i, interpreter_coroutine_state* s, coroutine_handle* h, bool fresh)
+            : in(i), st(s), handle(h), resumer_exception(std::move(i->current_exception_)),
+              resumer_exception_value(std::move(i->active_exception_value_)), resumer_marker(i->current_catch_var_id_) {
+            if (fresh) {
+                in->current_exception_.reset();
+                in->active_exception_value_.reset();
+                in->current_catch_var_id_ = 0;
+            } else {
+                in->current_exception_ = std::move(st->parked_exception);
+                in->active_exception_value_ = std::move(st->parked_exception_value);
+                in->current_catch_var_id_ = st->parked_catch_marker;
+            }
+        }
+        ~coroutine_exception_swap() {
+            const bool park = handle->get_status() == coroutine_handle::status::suspended;
+            if (park) {
+                st->parked_exception = std::move(in->current_exception_);
+                st->parked_exception_value = std::move(in->active_exception_value_);
+                st->parked_catch_marker = in->current_catch_var_id_;
+            }
+            in->current_catch_var_id_ = resumer_marker;
+            if (park || !in->is_unwinding_) {
+                in->current_exception_ = std::move(resumer_exception);
+                in->active_exception_value_ = std::move(resumer_exception_value);
+            }
+        }
+    } exception_guard(this, &state, &handle, prev_status == coroutine_handle::status::created);
 
     // A runtime error in the (re)started segment must reach the caller as an error;
     // falling through to `return handle.yield_value_` would hand back the PREVIOUS

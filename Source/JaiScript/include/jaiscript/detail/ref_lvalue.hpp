@@ -366,6 +366,14 @@ namespace jai::detail {
 			cur = std::move(derefed.value());
 		}
 
+		// The outermost array a non-final subscript descended into: every reference minted
+		// below it counts in that array's live_elem_refs (parallel forks prove exclusivity
+		// from the declared type when it is zero)
+		strong_ptr<script_array> chain_root;
+		auto rooted = [&chain_root](script_value ref) -> checked_result<script_value> {
+			if (chain_root) { script_value::pin_element_root(ref, chain_root); }
+			return ref;
+		};
 		for (size_t i = step_count; i-- > 0;) {
 			const bool is_final = (i == 0);
 			const expression* step = step_at(i);
@@ -428,7 +436,7 @@ namespace jai::detail {
 					    tag->base_type != script_value_type::jai_null_type) {
 						constraint = tag;
 					}
-					return script_value::make_field_reference(instance, member_id, eng, constraint);
+					return rooted(script_value::make_field_reference(instance, member_id, eng, constraint));
 				}
 				auto derefed = ref_checked_deref(*field_value);
 				if (!derefed) { return derefed; }
@@ -471,11 +479,11 @@ namespace jai::detail {
 					}
 					auto array_type_info = cur.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-					return script_value::make_element_reference(storage, static_cast<size_t>(index), eng, element_type);
+					return rooted(script_value::make_element_reference(storage, static_cast<size_t>(index), eng, element_type));
 				}
+				if (!chain_root) { chain_root = storage; }
 				if (storage->is_typed()) {
-					// non-final steps only descend into containers; a typed element is a
-					// primitive, so the next step will produce the same non-lvalue error
+					// no element cell: a boxed read (an object slot's handle) carries the chain on
 					cur = storage->get(static_cast<size_t>(index), eng);
 					continue;
 				}

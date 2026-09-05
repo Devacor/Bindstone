@@ -4,8 +4,10 @@
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/transient_read.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <cassert>
 #include <functional>
 
@@ -15,14 +17,7 @@ using jai::detail::body_walker;
 
 namespace {
 
-	inline bool is_lvalue_shaped(const expression* e) {
-		if (!e) return false;
-		if (e->get_type() == node_type::identifier_expr || e->get_type() == node_type::member_expr) return true;
-		if (e->get_type() == node_type::binary_expr) {
-			return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
-		}
-		return false;
-	}
+	inline bool is_lvalue_shaped(const expression* e) { return is_lvalue_shaped_expr(e); }
 
 	inline std::shared_ptr<block_stmt> as_block(const statement_ptr& body, const source_location& loc) {
 		if (auto block = std::dynamic_pointer_cast<block_stmt>(body)) {
@@ -848,14 +843,25 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		} else {
 			emit(opcode::op_null);
 		}
+		// By-value materialization operand (detail/return_conv.hpp): ref returns and a
+		// bare `return;` carry nothing; an identifier names its own-frame slot for the move
+		uint32_t operand_class = detail::return_operand_unclassified;
+		uint32_t own_slot = k_invalid_u32;
+		if (rs->value && !rs->binds_reference) {
+			operand_class = detail::classify_return_operand(rs->value.get());
+			if (operand_class == detail::return_operand_ident) {
+				own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
+			}
+		}
 		if (!clean_exit) {
 			// The typed-return conversion runs at the site, inside this frame's try
 			// records (a catch around the return sees it); the op_return after the
-			// exits lands the converted value without converting again
-			emit(opcode::op_return_convert, rs->static_return_proof);
+			// exits lands the converted value without converting or materializing again
+			emit(opcode::op_return_convert, rs->static_return_proof, operand_class, own_slot);
+			operand_class = detail::return_operand_unclassified;
 		}
 		emit_region_exits(SIZE_MAX);
-		emit(opcode::op_return, 1, clean_exit ? rs->static_return_proof : return_mode_converted);
+		emit(opcode::op_return, 1, clean_exit ? rs->static_return_proof : return_mode_converted, operand_class);
 		return;
 	}
 	case node_type::break_stmt:
@@ -1306,7 +1312,14 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 
 void vm_compiler::compile_try(try_stmt* stmt) {
 	const uint32_t catch_sym = add_symbol(symbolizer_->intern(stmt->catch_var));
-	size_t try_push = emit(opcode::op_try_push, k_invalid_u32, catch_sym);
+	// The catch variable is a frame-slot local of the catch body (compile_range_for's
+	// slot test); a top-level catch binds it in a scope env pushed at handler entry
+	uint32_t catch_slot = k_invalid_u32;
+	if (stmt->catch_slot_index != SIZE_MAX && stmt->catch_var_id != UINT64_MAX && callable_.active &&
+	    callable_.declared.find(stmt->catch_var_id) != callable_.declared.end()) {
+		catch_slot = static_cast<uint32_t>(stmt->catch_slot_index);
+	}
+	size_t try_push = emit(opcode::op_try_push, k_invalid_u32, catch_sym, catch_slot);
 
 	loops_.push_back({});
 	loops_.back().kind = region_kind::try_block;
@@ -2132,15 +2145,13 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			if (member->is_static) {
 				emit(opcode::op_get_static, add_node(member));
 			} else {
+				// The receiver is evaluated once: op_dup keeps it under the read for the
+				// write-back (a :: target resolves its class inside op_member_compound)
 				compile_expression(member->object);
+				emit(opcode::op_dup);
 				emit(opcode::op_get_member, add_node(member));
 			}
 			compile_expression(expr->value);
-			// Interpreter re-evaluates the object expression for the write-back; a :: target
-			// resolves its class inside op_member_compound instead
-			if (!member->is_static) {
-				compile_expression(member->object);
-			}
 			uint32_t kind;
 			switch (expr->op.type) {
 			case token_type::plus_equal: kind = compound_plus; break;
@@ -2208,7 +2219,14 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			site.member_node = add_node(member);
 			site.call_node = add_node(expr);
 			if (member->object->get_type() == node_type::identifier_expr) {
-				site.receiver_symbol = static_cast<identifier_expr*>(member->object.get())->symbol_id;
+				auto* recv_ident = static_cast<identifier_expr*>(member->object.get());
+				site.receiver_symbol = recv_ident->symbol_id;
+				site.receiver_slot = identifier_slot_operand(recv_ident);   // the receiver's own op_load slot
+			} else if (const expression* root = detail::string_mutator_chain_root(member->object.get());
+			           root && root->get_type() == node_type::identifier_expr) {
+				auto* root_ident = static_cast<identifier_expr*>(const_cast<expression*>(root));
+				site.chain_root_symbol = root_ident->symbol_id;
+				site.chain_root_slot = identifier_slot_operand(root_ident);
 			}
 			if (builtins_) {
 				auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {

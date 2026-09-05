@@ -172,7 +172,10 @@ dynamic_binder<MyClass>(engine, "MyClass")
 ```
 Zero-copy const& bindings, operator overloading, ctor overloading. A method returning `T&`
 into its receiver (the chaining idiom) is kept alive across temporaries via the
-`object_holder::keep_alive` anchor — don't remove it.
+`object_holder::keep_alive` anchor — don't remove it. A getter-only `.property()` (`nullptr`
+setter, or a member whose type is not copy-assignable) registers a REJECTING setter: every
+store spelling raises `Cannot assign to 'x': it is read-only` on both backends and the strict
+checker reports it at load (`docs/diagnostics.md` family B).
 
 ```cpp
 engine engine;
@@ -283,6 +286,13 @@ engine stays usable", not by `check_throws`.
   element boundary on every path; each site owns its rejection text.
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
+- **By-value returns copy, own locals move** (C++ [stmt.return]; `docs/script_extensible.md`
+  6.5): `return e;` from a by-value function yields a value aliasing nothing the callee could
+  name - a temporary moves, the callee's own local/parameter moves out of its dying slot
+  (NRVO, no extra destructor), a global/field/element/captured read or a reference result
+  deep-copies through the store kernel (`shared_ptr` handles share, scalars/strings are copies
+  already), so `f().push(4)` never grows the callee's storage; `-> T&` returns alias and the
+  top-level `return` is unchanged. Kernel `detail/return_conv.hpp`, one site per backend.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the
@@ -310,6 +320,11 @@ engine stays usable", not by `check_throws`.
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.
+- **Catch variable = block-scoped local** (`docs/EXCEPTION_DESIGN.md` addendum): `catch (e)`
+  binds `e` as a frame-slot local of the catch body (scope env at top level) - C++ `catch`
+  semantics: shadows for the block only, invisible to callees and after the block, captured
+  like any local, survives yields; the exception pair + in-catch marker are parked per
+  coroutine. `.jaibite` version 12.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

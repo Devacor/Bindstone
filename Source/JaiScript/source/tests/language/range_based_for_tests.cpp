@@ -83,6 +83,9 @@ public:
         test("map_key_const_check", [this]() {
             auto engine = make_engine();
             stdlib::register_all(engine);
+            // `kv.first = ...` is a strict load error (Map Tests :: map_key_read_only_static_battery);
+            // this pins the runtime backstop: the store lands on the pair's copy, never the key
+            engine->static_checking(check_mode::off);
             
             auto result = engine->execute(R"(
                 auto test_map = {"key1": 100, "key2": 200};

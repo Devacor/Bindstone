@@ -202,6 +202,19 @@ public:
             )");
         });
 
+        // Map range-for hands the pair a SHARED key handle (no per-iteration key copy -
+        // docs/invariants.md 11); this row guards that cost, by value and by reference
+        benchmark("Map Range-For (64 string keys, by value + by ref)", [this]() {
+            test_engine->execute(R"(
+                map<string,int> m = {};
+                for (int i = 0; i < 64; ++i) { m["key_" + to_string(i)] = i; }
+                int acc = 0;
+                for (auto kv : m) { acc += kv.second + kv.first.length(); }
+                for (auto& kv : m) { kv.second += 1; acc += kv.first.length(); }
+                acc;
+            )");
+        });
+
         benchmark("Class Creation", [this]() {
             test_engine->execute(R"(
                 class Point {

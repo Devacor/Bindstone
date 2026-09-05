@@ -338,6 +338,26 @@ namespace jai {
         return target.clone();
     }
 
+    // Lvalue-shaped initializer / assignment source (identifier, member, subscript): an
+    // existing object the store must copy. Everything else (call, construction, literal,
+    // operator result) is a temporary the store may move. Shared by both backends.
+    inline bool is_lvalue_shaped_expr(const expression* e) noexcept {
+        if (!e) return false;
+        const node_type t = e->get_type();
+        if (t == node_type::identifier_expr || t == node_type::member_expr) return true;
+        return t == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+    }
+
+    // The decl copy rule for an evaluated initializer (`T x = e`, `T f = e` in a class body,
+    // `static T s = e`): a reference-wrapped read (subscript, ternary over elements) or an
+    // lvalue-shaped initializer copies through clone_for_assignment; a temporary moves.
+    inline script_value initializer_store_value(script_value&& evaluated, const expression* initializer) {
+        if (evaluated.is_reference() || is_lvalue_shaped_expr(initializer)) {
+            return clone_for_assignment(evaluated);
+        }
+        return std::move(evaluated);
+    }
+
     struct script_defined_function;
 
     /// Stack-based call frame for fast function parameter access - avoids hash map

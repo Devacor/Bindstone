@@ -729,6 +729,20 @@ public:
     }
 
 private:
+    // A getter-only property rejects every store spelling through its setter (the bare,
+    // this., obj. and reference-store landings all funnel to _set_<name>), so the text
+    // lives once. field_id is interned here, never on the error path.
+    void register_read_only_setter(const std::string& name) {
+        const uint64_t field_id = engine_.symbolize(name);
+        const uint64_t setter_id = engine_.symbolize("_set_" + name);
+        class_def_->add_method("_set_" + name, [field_id](const std::vector<script_value>&) -> checked_result<script_value> {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_assignment_target),
+                                                "Cannot assign to '{0}': it is read-only", field_id);
+        });
+        class_def_->register_property_setter(field_id, setter_id);
+        class_def_->register_property_read_only(field_id);
+    }
+
     // Internal implementation for property registration with validation
     template<typename P>
     dynamic_binder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
@@ -767,6 +781,7 @@ private:
         serialization::property_metadata prop_meta;
         prop_meta.name = name;
         prop_meta.type = engine_.get_type_info_for_cpp_type<P>();
+        prop_meta.read_only = !std::is_copy_assignable_v<P>;
         serialization_metadata_.properties.push_back(prop_meta);
         
         // Add a special method that handles property access
@@ -843,6 +858,8 @@ private:
             uint64_t field_id = engine_.symbolize(name);
             uint64_t setter_id = engine_.symbolize("_set_" + name);
             class_def_->register_property_setter(field_id, setter_id);
+        } else {
+            register_read_only_setter(name);
         }
 
         // A box-decodable member binds BY REFERENCE as the member itself (reference_model.md
@@ -938,12 +955,9 @@ public:
         class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
 
         // Add setter method - use different implementations based on setter type
-        if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
-            // Readonly property - add a no-op setter
-            class_def_->add_method("_set_" + name, [engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-                // Read-only property, do nothing
-                return script_value(std::monostate{}, engine_ptr);
-            });
+        if constexpr (is_read_only) {
+            register_read_only_setter(name);
+            return *this;
         } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
             // Member function pointer setter
             class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {

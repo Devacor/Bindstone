@@ -3060,19 +3060,30 @@ checked_result<statement_ptr> parser::try_statement() {
     // Must have catch block
     JAISCRIPT_TRY(consume(token_type::catch_keyword, "Expected 'catch' after try block"));
 
-    // Optional catch variable
+    // Optional catch variable: a block-scoped local of the catch body (slot in a
+    // function frame, scope env at top level), exactly the range-for variable's shape
     std::string catch_var;
+    uint64_t catch_var_id = UINT64_MAX;
+    size_t catch_slot = SIZE_MAX;
+    block_scope_guard catch_var_scope(*this);
     if (match(token_type::left_paren)) {
         JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "Expected variable name in catch"));
         catch_var = var_name.lexeme;
         JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after catch variable"));
+        catch_var_id = get_symbol_id(var_name);
+        if (in_function_scope() && catch_var_id != UINT64_MAX) {
+            catch_slot = allocate_slot(catch_var_id);
+        }
     }
 
     // Parse catch block
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after 'catch'"));
     JAISCRIPT_TRY_ASSIGN(statement_ptr catch_block, block_statement());
 
-    return std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
+    auto result = std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
+    result->catch_var_id = catch_var_id;
+    result->catch_slot_index = catch_slot;
+    return result;
 }
 
 // declaration parsing implementations

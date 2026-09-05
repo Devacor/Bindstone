@@ -59,6 +59,9 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
 
 
 script_value::reference_holder::~reference_holder() {
+    if (container && container->live_elem_refs) { --container->live_elem_refs; }
+    if (elem_root && elem_root->live_elem_refs) { --elem_root->live_elem_refs; }
+    if (owner_instance) { owner_instance->note_field_ref_released(); }
     if (has_cell || has_map_key || has_elem_scratch ||
         (property && (property->live_member || property->has_scratch))) {
         cell()->~script_value();
@@ -126,8 +129,9 @@ void script_value::reference_holder::store_property(const script_value& value, e
     if (site.view.instance && site.view.instance->script_layer_retired()) {
         site.view.instance->throw_retired_script_layer();
     }
-    if (!site.setter_id) {
-        return;   // read-only: the silent no-op `receiver.name = v` is today
+    if (!site.setter_id) {   // unreachable for binder properties (a getter-only one registers the rejecting setter)
+        throw runtime_error(format_error_message("Cannot assign to '{0}': it is read-only",
+                                                 eng->get_symbolizer()->get_string(property->field_id)));
     }
     auto stored = detail::write_cpp_property(receiver, site.view.def, site.setter_id, value);
     if (!stored) {
@@ -516,6 +520,7 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     ref->container_element_type = element_type;
     ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
     ref->container_index = index;
+    ++container->live_elem_refs;
     v.storage_ = ref;
     return v;
 }
@@ -536,10 +541,20 @@ script_value script_value::make_field_reference(const std::shared_ptr<class_inst
     v.type_info_ = eng->get_type_info_reference(field_value->get_type_info());
     auto ref = acquire_reference_holder(eng);
     ref->owner_instance = owner;          // pins the instance for the reference's lifetime
+    owner->note_field_ref_minted();
     ref->field_id = field_id;
     ref->container_element_type = field_type;
     v.storage_ = ref;
     return v;
+}
+
+void script_value::pin_element_root(script_value& reference, const strong_ptr<script_array>& root) {
+    auto holder = reference.get_reference_holder();
+    if (!holder || !root || holder->elem_root || holder->container == root) {
+        return;   // a direct element reference on root already counts
+    }
+    holder->elem_root = root;
+    ++root->live_elem_refs;
 }
 
 type_info_ptr script_value::cpp_bound_type_info(engine* eng, uint8_t semantic_index) {
@@ -836,6 +851,18 @@ script_value script_value::clone() const {
     }
 
     return result;
+}
+
+// The copy-on-write half of unchecked_as_string_ref (value.hpp): the caller proved the
+// node is shared. Deferred charge like every internal clone; a null engine (a parse-time
+// literal) is never written through this gate.
+script_string& script_value::unshare_string_node() {
+    auto& node = *storage_.get_if<TYPEID_STRING>();
+    if (engine_) {
+        engine_->execution_limits().memory_charge_deferred(node->size() + sizeof(script_string));
+    }
+    node = make_strong<script_string>(*node);
+    return *node;
 }
 
 // Parallel-region detach (see value.hpp): fresh strong_ptr for EVERY heavy node

@@ -136,6 +136,12 @@ namespace jai {
         // chain (call_function's yield path skips cleanup, so the ordinary
         // save/restore never runs for a suspending body).
         detail::member_scope_ctx saved_member_scope{};
+        // The exception trio is coroutine state too (vm run_fiber parity): a yield inside a
+        // catch keeps the caught exception (bare throw;) and the in-catch marker across the
+        // resumer's own try/catch
+        std::optional<script_exception> parked_exception;
+        std::optional<script_value> parked_exception_value;
+        uint64_t parked_catch_marker = 0;
         // The body's function object outlives its first resume: the saved frames point at
         // it across every later resume (return-site conversion, debugger locals)
         std::optional<script_defined_function> function;
@@ -802,7 +808,10 @@ namespace jai {
             bool in_method = false;
         };
         std::optional<class_context> current_class_context_;
-        uint64_t current_catch_var_id_ = 0;  // Symbol ID of current catch variable (0 = none)
+        // "Inside a catch block" marker of the rethrow protocol (0 = none); the catch
+        // VARIABLE is a frame slot / scope local bound by visit_try_stmt, never resolved
+        // through this. Parked per coroutine with the exception pair (resume_coroutine).
+        uint64_t current_catch_var_id_ = 0;
 
         // Switch statement control flow state
         bool in_switch_ = false;
@@ -1026,6 +1035,13 @@ namespace jai {
                                        : environment_->get_value_ptr(symbol_id);
         }
 
+        // The cell an identifier RECEIVER of a string builtin mutates: visit_identifier_expr's
+        // ladder as a pointer (:: door, slot, member scope, env). KEEP BYTE-PARALLEL
+        // with vm_backend::string_receiver_cell.
+        [[nodiscard]] script_value* string_receiver_cell(const identifier_expr* ident) noexcept {
+            return resolve_local_or_env(ident->slot_index, ident->symbol_id, ident->global_qualified);
+        }
+
         // The bare-name ref-bind rung after resolve_local_or_env misses: a hybrid's C++
         // property under the current member scope mints a CPP-MEMBER / PROPERTY reference
         // (nullopt = not a property here; the caller keeps its undefined-variable text).
@@ -1143,6 +1159,9 @@ namespace jai {
         // setters (including on cpp_bound receivers) take precedence over instance fields.
         // Raises a script exception (is_unwinding_) for non-existent members.
         checked_result<void> assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value);
+        // The member read on an already-evaluated receiver (visit_member_expr's tail; the
+        // compound-member store evaluates the receiver once and reads through this)
+        checked_result<void> member_read_on(member_expr* expr, script_value objectValue, bool as_callee);
 
         // Helper to check if an expression is an lvalue (existing object that should be cloned)
         // Lvalues: identifiers, member access, subscript access
@@ -1247,6 +1266,7 @@ namespace jai {
         std::unordered_map<uint64_t, builtin_method> array_methods_;
         std::unordered_map<uint64_t, builtin_method> map_methods_;
         std::unordered_map<uint64_t, builtin_method> string_methods_;
+        std::unordered_set<uint64_t> string_mutator_ids_;   // k_string_mutator_method_names (receiver lvalue binding)
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods_;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods_;
 

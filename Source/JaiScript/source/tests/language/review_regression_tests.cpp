@@ -34,6 +34,7 @@ struct hybrid_prop_probe {
     int64_t lam_backing = 0;
     int64_t lam_reads = 0;
     int64_t lam_writes = 0;
+    jai::signal_emitter<void(int)> sig;   // non-copy-assignable member: a getter-only property by type
     int64_t doubled() const { return value * 2; }
     void bump_cpp() { value += 100; }
     hybrid_prop_probe& self() { return *this; }
@@ -59,6 +60,7 @@ inline void bind_hybrid_probe(engine& e) {
                   [](hybrid_prop_probe& s) -> int64_t { ++s.lam_reads; return s.lam_backing; },
                   [](hybrid_prop_probe& s, int64_t v) { ++s.lam_writes; s.lam_backing = v; })
         .property("ro", [](const hybrid_prop_probe& s) -> int64_t { return s.value + 100; }, nullptr)
+        .property("sig", &hybrid_prop_probe::sig)
         .build();
 }
 
@@ -1308,6 +1310,56 @@ public:
             check_eq(std::string("ABCD"), r.as_string());
         });
 
+        // The string copy-on-write gate at the host boundary (docs/invariants.md 11): a
+        // script_value copy the host keeps is a VALUE - a later script mutation of the
+        // variable never reaches it; a host std::string& over a plain argument stays a
+        // private copy (the S9/12.4 confinement pin in test_cpp_bound); a bound global
+        // keeps write-through; the unshare charges the memory cap like any internal clone.
+        test("string_cow_host_boundary", [this]() {
+            for (bool use_vm : {false, true}) {
+                const std::string tag = use_vm ? "vm: " : "interp: ";
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                e->execute("string a = \"x\";");
+                script_value held = e->execute("a");
+                e->execute("a.to_upper(); a += \"!\";");
+                check_eq(std::string("x"), held.as<std::string>(), tag + "a host-held copy keeps its value");
+                check_eq(std::string("X!"), e->execute("a").as<std::string>(), tag + "the variable took both writes");
+                e->add_function("up", [](std::string& s) { s += "!"; });
+                check_eq(std::string("y|y"), e->execute("string p = \"y\"; string q = p; up(q); p + \"|\" + q").as<std::string>(),
+                         tag + "host std::string& over a plain argument stays a private copy");
+                std::string live = "b";
+                e->add_global_ref("live", live);
+                e->execute("live.to_upper(); up(live);");
+                check_eq(std::string("B!"), live, tag + "bound strings keep write-through");
+                e->execute("string c = live; c.to_lower();");
+                check_eq(std::string("B!"), live, tag + "a copy of a bound string detaches on write");
+                check_eq(std::string("b!"), e->execute("c").as<std::string>(), tag + "the copy took the write");
+            }
+        });
+
+        test("string_cow_unshare_charges_memory_cap", [this]() {
+            for (bool use_vm : {false, true}) {
+                const std::string tag = use_vm ? "vm: " : "interp: ";
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(5.0);
+                e->memory_cap(65536);
+                auto r = e->execute(R"(
+                    string big = "";
+                    int i = 0;
+                    while (i < 4000) { big += "0123456789"; i += 1; }
+                    string c = big;
+                    string msg = "";
+                    try { c.to_upper(); int n = 0; while (n < 10) { n += 1; } } catch (err) { msg = err; }
+                    msg;
+                )");
+                check_eq(std::string("Script memory cap exceeded (65536 bytes) - raise engine::memory_cap or break up the work"),
+                         r.as<std::string>(), tag + "the unshared copy counts toward the cap");
+            }
+        });
+
         test("array_map_builtins_through_ref_decl", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(e);
@@ -1695,6 +1747,211 @@ public:
             )").c_str(), "A|true", "handle method with a non-trivial argument", check_mode::strict);
         });
 
+        // ---- Compound member assignment evaluates its receiver ONCE (C++ `a.b op= c`
+        // evaluates `a` exactly once): `pk().v += 5`, `pk().v++`, `++pk().v`,
+        // `arr[side()].v += 1`, `mp[key()].v++`, nested chains and operator-overloaded
+        // compounds used to run the receiver expression twice on BOTH backends (the
+        // interpreter re-dispatched the object for the store-back, the vm compiled it
+        // twice). Order stays target-read -> rhs -> arithmetic -> store. The interpreter's
+        // general subscript path lost its synthetic re-dispatching fallback: a compound
+        // whose target read yields no lvalue raises `Cannot assign to rvalue expression`
+        // (the vm's text) - `s[i] op= v` on a string and `m[k] += "s"` on a missing key
+        // (which silently inserted "nulls" on the interpreter alone) now say so. ----
+        const char* recv_prelude =
+            "var log = \"\";\n"
+            "class P { int v = 10; }\n"
+            "P shared = P();\n"
+            "P& pk() { log += \"A\"; return shared; }\n";
+        test("member_compound_receiver_once_call", [this, expect_order, recv_prelude]() {
+            expect_order((std::string(recv_prelude) + R"(
+                pk().v += 5; string s1 = log + ":" + ("" + shared.v);
+                pk().v -= 2; string s2 = log + ":" + ("" + shared.v);
+                pk().v *= 3; string s3 = log + ":" + ("" + shared.v);
+                pk().v /= 2; string s4 = log + ":" + ("" + shared.v);
+                pk().v %= 4;
+                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + shared.v);
+            )").c_str(), "A:15|AA:13|AAA:39|AAAA:19|AAAAA:3", "call receiver runs once per compound", check_mode::strict);
+            expect_order((std::string(recv_prelude) + R"(
+                var r = (pk().v += 5);
+                log + ":" + ("" + r) + ":" + ("" + shared.v);
+            )").c_str(), "A:15:15", "expression-position compound", check_mode::strict);
+        });
+        test("member_incdec_receiver_once", [this, expect_order, recv_prelude]() {
+            expect_order((std::string(recv_prelude) + R"(
+                pk().v++; string s1 = log + ":" + ("" + shared.v);
+                ++pk().v; string s2 = log + ":" + ("" + shared.v);
+                pk().v--; string s3 = log + ":" + ("" + shared.v);
+                --pk().v; string s4 = log + ":" + ("" + shared.v);
+                int r = pk().v++;
+                int q = ++pk().v;
+                int t = pk().v--;
+                int u = --pk().v;
+                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + r) + ":" + ("" + q) + ":" + ("" + t) + ":" + ("" + u) + ":" + ("" + shared.v);
+            )").c_str(), "A:11|AA:12|AAA:11|AAAA:10|AAAAAAAA:10:12:12:10:10", "++/-- pre and post on a call receiver", check_mode::strict);
+        });
+        test("member_compound_receiver_once_index_and_key", [this, expect_order]() {
+            expect_order(R"(
+                var log = "";
+                class P { int v = 10; }
+                int side(string tag) { log += tag; return 1; }
+                string key(string tag) { log += tag; return "k"; }
+                array<P> arr = [P(), P(), P()];
+                var varr = [P(), P()];
+                map<string, P> mp = {"k": P()};
+                var vm = {"k": P()};
+                arr[side("a")].v += 1;
+                arr[side("b")].v++;
+                ++varr[side("c")].v;
+                mp[key("d")].v += 1;
+                mp[key("e")].v++;
+                vm[key("f")].v -= 3;
+                log + "|" + ("" + arr[1].v) + ":" + ("" + varr[1].v) + ":" + ("" + mp["k"].v) + ":" + ("" + vm["k"].v);
+            )", "abcdef|12:11:12:7", "index / key receivers run once", check_mode::strict);
+        });
+        test("member_compound_receiver_once_nested", [this, expect_order]() {
+            expect_order(R"(
+                var log = "";
+                class C { int c = 1; }
+                class B { C cc = C(); }
+                class A { B bb = B(); }
+                A a0 = A();
+                A& ga() { log += "A"; return a0; }
+                class Holder { A a = A(); function getb() -> B& { log += "B"; return this.a.bb; } }
+                Holder h = Holder();
+                ga().bb.cc.c += 1; string s1 = log + ":" + ("" + a0.bb.cc.c);
+                ga().bb.cc.c++; string s2 = log + ":" + ("" + a0.bb.cc.c);
+                h.getb().cc.c += 3; string s3 = log + ":" + ("" + h.a.bb.cc.c);
+                --h.getb().cc.c; string s4 = log + ":" + ("" + h.a.bb.cc.c);
+                s1 + "|" + s2 + "|" + s3 + "|" + s4;
+            )", "A:2|AA:3|AAB:4|AABB:3", "every level of a nested chain runs once", check_mode::strict);
+        });
+        test("member_compound_receiver_once_operator_overload", [this, expect_order]() {
+            expect_order(R"(
+                var log = "";
+                class V { int x = 0; V(int a) { x = a; } V operator+(V o) { log += "+"; return V(x + o.x); } }
+                class Hold { V v = V(1); }
+                Hold hh = Hold();
+                Hold& gh() { log += "H"; return hh; }
+                gh().v += V(4); string s1 = log + ":" + ("" + hh.v.x);
+                var r = (gh().v += V(1));
+                s1 + "|" + log + ":" + ("" + r.x) + ":" + ("" + hh.v.x);
+            )", "H+:5|H+H+:6:6", "operator+ compound evaluates the receiver once", check_mode::strict);
+        });
+        test("member_compound_receiver_once_hybrid", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                bind_hybrid_probe(*e);
+                e->execute(R"(
+                    var log = "";
+                    HybridProbe hp = HybridProbe();
+                    HybridProbe& g() { log += "A"; return hp; }
+                    g().value += 5;
+                    g().lam += 1;
+                )");
+                const std::string tag = use_vm ? "vm: " : "interp: ";
+                auto cpp = probe_of(*e, "hp");
+                check_eq(std::string("AA"), e->execute("log").as_string(), tag + "the C++ receiver runs once per compound");
+                check_eq((int64_t)5, cpp->value, tag + "member-pointer property compound");
+                check_eq((int64_t)1, cpp->lam_backing, tag + "lambda property compound");
+                check_eq((int64_t)1, cpp->lam_reads, tag + "one getter call");
+                check_eq((int64_t)1, cpp->lam_writes, tag + "one setter call");
+            }
+        });
+        test("member_compound_order_pinned", [this, expect_order, recv_prelude]() {
+            expect_order((std::string(recv_prelude) + R"(
+                int boom() { log += "R"; throw "boom"; }
+                string caught = "";
+                try { pk().v += boom(); } catch (e) { caught = e; }
+                log + "|" + caught + ":" + ("" + shared.v);
+            )").c_str(), "AR|boom:10", "receiver before the rhs; an rhs raise leaves the field alone", check_mode::strict);
+            expect_order((std::string(recv_prelude) + R"(
+                var n = null;
+                var& gn() { log += "N"; return n; }
+                string caught = "";
+                try { gn().v += 1; } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "N|Cannot access 'v' on null ('gn(...)' returned null)", "null receiver: named call-result text, once", check_mode::strict);
+            expect_order((std::string(recv_prelude) + R"(
+                int gi() { log += "I"; return 5; }
+                string caught = "";
+                try { gi().v += 1; } catch (e) { caught = e; }
+                log + "|" + caught;
+            )").c_str(), "I|int has no member 'v'", "scalar receiver: once", check_mode::strict);
+            expect_order((std::string(recv_prelude) + R"(
+                class S { string s = "a"; }
+                S so = S();
+                S& gs() { log += "S"; return so; }
+                string caught = "none";
+                try { gs().s++; } catch (e) { caught = "raised"; }
+                log + "|" + caught + ":" + so.s;
+            )").c_str(), "S|raised:a", "++ gate on a string member: the receiver still runs once (the vm used to run it twice)", check_mode::strict);
+            expect_order((std::string(recv_prelude) + R"(
+                string caught = "none";
+                try { pk().v += "s"; } catch (e) { caught = e; }
+                log + "|" + caught + ":" + ("" + shared.v);
+            )").c_str(), "A|Invalid operands for +=:10", "operand mismatch after the receiver ran once", check_mode::off);   // the checker rejects int += string at load; the RUNTIME text is under test
+        });
+        test("subscript_compound_rvalue_base_once", [this, expect_order]() {
+            expect_order(R"(
+                var log = "";
+                var arr = [1, 2, 3];
+                var ga() { log += "A"; return arr; }
+                string c1 = ""; string c2 = ""; string c3 = "";
+                try { ga()[1] += 1; } catch (e) { c1 = e; }
+                try { ga()[1]++; } catch (e) { c2 = e; }
+                try { [1, 2][0] += 1; } catch (e) { c3 = e; }
+                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + arr[1]);
+            )", "AA|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Cannot assign to rvalue expression|2",
+                "an rvalue subscript base runs once and raises the vm's text", check_mode::strict);
+        });
+        test("subscript_compound_string_base_text", [this, expect_order]() {
+            // Pinned alignment (interpreter -> vm): the interpreter used to re-dispatch a
+            // synthetic `=` (index twice, the read-only-string text)
+            expect_order(R"(
+                var log = "";
+                string s = "abc";
+                int idx() { log += "I"; return 0; }
+                string c1 = ""; string c2 = "";
+                try { s[idx()] += 1; } catch (e) { c1 = e; }
+                try { s[idx()] += "x"; } catch (e) { c2 = e; }
+                log + "|" + c1 + "|" + c2 + "|" + s;
+            )", "II|Cannot assign to rvalue expression|Cannot assign to rvalue expression|abc",
+                "a string subscript compound runs the index once and leaves the string alone", check_mode::strict);
+        });
+        test("map_compound_missing_key_concat_raises", [this, expect_order]() {
+            // Pinned alignment (interpreter -> vm): the interpreter's fallback silently
+            // inserted "nulls" with the key expression run twice
+            expect_order(R"(
+                var log = "";
+                string key() { log += "K"; return "k"; }
+                var m = {};
+                map<string, string> ms = {};
+                map<string, int> mi = {};
+                string c1 = ""; string c2 = ""; string c3 = "";
+                try { m[key()] += "s"; } catch (e) { c1 = e; }
+                try { ms[key()] += "s"; } catch (e) { c2 = e; }
+                try { mi[key()] += 1; } catch (e) { c3 = e; }
+                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
+            )", "KKK|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Left operand must be numeric|000",
+                "a compound on a missing map key inserts nothing and runs the key once", check_mode::strict);
+            expect_order(R"(
+                var log = "";
+                string key() { log += "K"; return "k"; }
+                map<string, int> m = {"k": 1};
+                var ms = {"k": "a"};
+                m[key()] += 5; m[key()]++; ms[key()] += "b";
+                log + "|" + ("" + m["k"]) + ms["k"];
+            )", "KKK|7ab", "present keys keep working", check_mode::strict);
+        });
+        test("static_compound_unchanged", [this, expect_order]() {
+            expect_order(R"(
+                class Cnt { static int n = 0; }
+                Cnt::n += 5; Cnt::n++; ++Cnt::n; Cnt::n -= 1;
+                ("" + Cnt::n);
+            )", "6", "static compounds carry no receiver", check_mode::strict);
+        });
+
         // ---- hybrid methods: a bare C++ property name reads/writes through the binder
         // accessors exactly like this.name (lookup ladder: locals -> members -> globals) ----
         test("hybrid_bare_cpp_property_read", [this]() {
@@ -1871,8 +2128,12 @@ public:
                 check_true(threw, "a mistyped this. store raises");
                 check_eq((int64_t)5, e->execute("w.value").as_int(), "a rejected store leaves the member alone");
                 check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "bare read of a getter-only property");
-                e->execute("w.ro_store(); w.ro_store_this();");
-                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "read-only stores are silent no-ops both ways");
+                std::string ro_bare, ro_this;
+                try { e->execute("w.ro_store();"); } catch (const std::exception& ex) { ro_bare = ex.what(); }
+                try { e->execute("w.ro_store_this();"); } catch (const std::exception& ex) { ro_this = ex.what(); }
+                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), ro_bare, "a bare store to a getter-only property raises");
+                check_eq(ro_bare, ro_this, "the this. spelling raises the same text");
+                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "the getter still reads after the rejected stores");
                 check_eq((int64_t)5, e->execute("w.value").as_int());
                 threw = false;
                 try { e->execute("w.undef();"); } catch (const std::exception& ex) { threw = true; undef_msg[idx] = ex.what(); }
@@ -2053,24 +2314,123 @@ public:
                 check_eq((int64_t)21, e->execute("by_ref_x(w.child.x); w.child.x").as_int(), "from outside too");
             }
         });
-        test("read_only_property_ref_is_silent_noop", [this, propref_engine]() {
-            // Pins TODAY's contract for a setter-less property (the row-29 no-op), matched
-            // through a reference. Dev question: a strict-by-default language should
-            // arguably raise on every spelling instead (see the report).
+        test("read_only_property_store_raises_every_spelling", [this, propref_engine]() {
+            // Dev ruling (row 30 follow-up): assigning to a getter-only property is an error on
+            // every spelling, produced once by the binder's read-only setter - C++ semantics.
+            const std::string ro_text = "Cannot assign to 'ro': it is read-only";
+            std::vector<std::string> texts[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = propref_engine(use_vm);
+                e->static_checking(check_mode::off);   // the checker catches these at load; the RUNTIME texts are under test
+                stdlib::register_all(*e);
+                e->execute(R"(
+                    void by_ref(int& p) { p = 1; }
+                    void by_ref_any(var& p) { p = 1; }
+                    string caught(function f) { try { f(); } catch (e) { return e; } return "no error"; }
+                    class W : HybridProbe {
+                        W() : super() {}
+                        string s_bare() { return caught([this]() { ro = 5; }); }
+                        string s_this() { return caught([this]() { this.ro = 5; }); }
+                        string c_bare() { return caught([this]() { ro += 1; }); }
+                        string c_this() { return caught([this]() { this.ro += 1; }); }
+                        string i_bare_post() { return caught([this]() { ro++; }); }
+                        string i_bare_pre() { return caught([this]() { --ro; }); }
+                        string i_this() { return caught([this]() { this.ro++; }); }
+                        string r_decl() { return caught([this]() { auto& r = ro; r = 5; }); }
+                        string r_decl_c() { return caught([this]() { auto& r = ro; r += 1; }); }
+                        string r_arg() { return caught([this]() { by_ref(ro); }); }
+                        string r_arg_this() { return caught([this]() { by_ref(this.ro); }); }
+                        string sig_bare() { return caught([this]() { sig = 5; }); }
+                        string sig_this() { return caught([this]() { this.sig = 5; }); }
+                        string sig_ref() { return caught([this]() { by_ref_any(sig); }); }
+                        int ro_read() { return ro; }
+                    }
+                    W w = W(); w.value = 5;
+                    HybridProbe h = HybridProbe(); h.value = 7;
+                )");
+                auto& out = texts[idx];
+                const char* rows[] = {
+                    "w.s_bare()", "w.s_this()", "w.c_bare()", "w.c_this()",
+                    "w.i_bare_post()", "w.i_bare_pre()", "w.i_this()",
+                    "w.r_decl()", "w.r_decl_c()", "w.r_arg()", "w.r_arg_this()",
+                    "caught(function() { w.ro = 5; })", "caught(function() { w.ro += 1; })", "caught(function() { w.ro++; })",
+                    "caught(function() { by_ref(w.ro); })", "caught(function() { auto& r = w.ro; r = 5; })",
+                    "caught(function() { h.ro = 5; })", "caught(function() { h.ro++; })", "caught(function() { by_ref(h.ro); })",
+                    "caught(function() { reflect::set(w, \"ro\", 1); })", "caught(function() { reflect::set(h, \"ro\", 1); })",
+                    "w.sig_bare()", "w.sig_this()", "w.sig_ref()", "caught(function() { w.sig = 5; })", "caught(function() { h.sig = 5; })",
+                };
+                const std::string tag = use_vm ? "vm: " : "interp: ";
+                for (const char* row : rows) {
+                    std::string got = e->execute(row).as_string();
+                    out.push_back(got);
+                    const std::string want = std::string(row).find("sig") != std::string::npos
+                        ? "Cannot assign to 'sig': it is read-only" : ro_text;
+                    check_eq(want, got, tag + row);
+                }
+                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), tag + "the getter still reads");
+                check_eq((int64_t)105, e->execute("w.ro").as_int());
+                check_eq((int64_t)107, e->execute("h.ro").as_int());
+                check_eq((int64_t)5, probe_of(*e, "w")->value, tag + "the C++ member is untouched");
+                check_eq((int64_t)7, probe_of(*e, "h")->value);
+                // a property WITH a setter still stores on every spelling
+                e->execute(R"(
+                    class V : HybridProbe {
+                        V() : super() {}
+                        void go() { value = 8; lam = 3; auto& q = value; q += 1; this.value += 1; value++; }
+                    }
+                    V v = V(); v.go(); v.value += 10; v.lam++;
+                )");
+                check_eq((int64_t)21, probe_of(*e, "v")->value, tag + "writable properties store");
+                check_eq((int64_t)4, probe_of(*e, "v")->lam_backing);
+                // a script _set_ro override in the chain wins over the rejection
+                e->execute(R"(
+                    class O : HybridProbe {
+                        int stored = 0;
+                        O() : super() {}
+                        void _set_ro(int v) override { stored = v; }   // the base's _set_ro is the C++ rejection: a shadow needs override
+                        void go() { ro = 1; this.ro = 2; ro += 1; }
+                    }
+                    O o = O(); o.go();
+                )");
+                check_eq((int64_t)101, e->execute("o.stored").as_int(), tag + "a script _set_ro override takes the stores (compound reads the C++ getter)");
+                check_eq((int64_t)40, e->execute("o.ro = 40; o.stored").as_int());
+                check_eq((int64_t)102, e->execute("o.ro += 2; o.stored").as_int());
+                // a same-named script field shadows the property
+                e->execute(R"(
+                    class S : HybridProbe {
+                        int ro = 1;
+                        S() : super() {}
+                        void go() { ro = 2; this.ro += 1; ro++; }
+                    }
+                    S s = S(); s.go(); s.ro += 10;
+                )");
+                check_eq((int64_t)14, e->execute("s.ro").as_int(), tag + "a shadowing script field takes the stores");
+                ++idx;
+            }
+            check_eq(texts[0].size(), texts[1].size());
+            for (size_t i = 0; i < texts[0].size(); ++i) {
+                check_eq(texts[0][i], texts[1][i], "read-only texts are byte-identical across backends");
+            }
+        });
+        test("read_only_property_store_raises_under_warn_mode", [this, propref_engine]() {
+            // [[warn_mode]] downgrades the checker's diagnostic; the runtime still raises
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
                 e->execute(R"(
-                    void by_ref(int& p) { p = 1; }
+                    [[warn_mode]]
                     class W : HybridProbe {
                         W() : super() {}
-                        int decl() { auto& r = ro; r = 5; r += 1; return r; }
-                        int arg() { by_ref(ro); return ro; }
+                        void go() { ro = 5; }
                     }
-                    W w = W(); w.value = 5;
+                    W w = W();
                 )");
-                check_eq((int64_t)105, e->execute("w.decl()").as_int(), "stores through a read-only ref are no-ops");
-                check_eq((int64_t)105, e->execute("w.arg()").as_int());
-                check_eq((int64_t)5, probe_of(*e, "w")->value);
+                std::string got;
+                try { e->execute("[[warn_mode]] w.ro = 5;"); } catch (const std::exception& ex) { got = ex.what(); }
+                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
+                got.clear();
+                try { e->execute("w.go();"); } catch (const std::exception& ex) { got = ex.what(); }
+                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
             }
         });
         test("script_field_shadows_property_for_refs", [this, propref_engine]() {
@@ -2433,6 +2793,313 @@ public:
                 check_true(threw);
                 check_eq((size_t)0, msg.find("'f' expects 0 arguments, got 1"), msg);
             }
+        });
+        // ---- string-builtin identifier receiver: the receiver resolves like every other
+        // identifier (locals -> members -> globals, catch var, ::global) and the in-place
+        // builtin mutates THAT variable; a same-named global is never the fallback ----
+        test("string_builtin_identifier_receiver_ladder", [this]() {
+            auto run_both = [](const std::string& src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect = [&](const std::string& src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string(what) + " (interpreter)");
+                check_eq(i_out, v_out, std::string(what) + " parity");
+            };
+            const std::string glob = "string s = \"glob\";\n";
+            expect(glob + R"(
+                string f() { string s = "loc"; s.insert(0, "x"); s.erase(1, 1); return s + ":" + s.length() + ":" + s.find("o"); }
+                f() + "|" + s
+            )", "xoc:3:1|glob", "local shadow");
+            expect(glob + R"(
+                string g(string s) { s.to_upper(); return s + ":" + s.length() + ":" + s.find("A"); }
+                g("par") + "|" + s
+            )", "PAR:3:1|glob", "parameter shadow");
+            expect(glob + R"(
+                class C {
+                    string s = "fld";
+                    string m() { s.insert(0, "x"); return s + ":" + s.length(); }
+                    string t() { this.s.reverse(); return this.s + ":" + this.s.length(); }
+                }
+                auto c = C();
+                c.m() + "|" + c.t() + "|" + c.s + "|" + s
+            )", "xfld:4|dlfx:4|dlfx|glob", "field shadow, bare and this.s");
+            expect(R"(
+                class D {
+                    string s = "fld";
+                    string m() { string s = "loc"; s.insert(0, "x"); return s + "/" + this.s + "/" + s.length(); }
+                    string p(string s) { s.to_upper(); return s + "/" + this.s; }
+                }
+                auto d = D();
+                d.m() + "|" + d.p("par") + "|" + d.s
+            )", "xloc/fld/4|PAR/fld|fld", "method local and parameter shadowing the field");
+            expect(glob + R"(
+                string c() { string s = "cap"; auto l = [&s]() { s.insert(0, "y"); return s + ":" + s.length(); }; return l() + "/" + s; }
+                c() + "|" + s
+            )", "ycap:4/ycap|glob", "by-reference captured local");
+            {
+                auto [i_out, v_out] = run_both(glob + R"(
+                    string c() { string s = "cap"; auto l = [s]() { s.insert(0, "y"); return s + ":" + s.length(); }; return l(); }
+                    c() + "|" + s
+                )");
+                check_eq(std::string("ycap:4|glob"), i_out, "by-value captured local (interpreter)");
+                check_eq(i_out, v_out, "by-value captured local parity");
+            }
+            expect(glob + R"(
+                string q() { string out = ""; for (int i = 0; i < 2; i++) { string s = "it"; s.to_upper(); out = out + s + s.length(); } return out; }
+                q() + "|" + s
+            )", "IT2IT2|glob", "loop-scoped local");
+            expect(glob + R"(
+                string b() { string out = ""; { string s = "blk"; s.erase(0, 1); out = out + s + s.find("k"); } return out; }
+                b() + "|" + s
+            )", "lk1|glob", "block-scoped local in a function");
+            expect(glob + R"(
+                string log = "";
+                { string s = "top"; s.insert(0, "x"); log = log + s; }
+                for (int i = 0; i < 1; i++) { string s = "lp"; s.to_upper(); log = log + s; }
+                log + "|" + s
+            )", "xtopLP|glob", "top-level block and loop scopes");
+            expect(glob + R"(
+                class S { static string s = "sta"; static string m() { s.insert(0, "x"); return s + ":" + s.length(); } }
+                S::m() + "|" + s
+            )", "xsta:4|glob", "static field in a static method");
+            expect(R"(
+                string e = "glob";
+                string k() { try { throw "err"; } catch (e) { e.to_upper(); return e + ":" + e.length(); } return "no"; }
+                k() + "|" + e
+            )", "ERR:3|glob", "catch variable over a same-named global");
+            expect(glob + R"(
+                string z() { string s = "loc"; ::s.insert(0, "g"); return s + ":" + ::s.length(); }
+                z() + "|" + s
+            )", "loc:5|gglob", "::s still the global");
+            expect(R"(
+                class T { int n = 0; void insert(int v) { n = n + v; } int find(int v) { return n; } int size() { return n * 10; } }
+                string w() { T t = T(); t.insert(3); return "" + t.find(0) + "/" + t.size(); }
+                w()
+            )", "3/30", "builtin-colliding class methods keep dispatching");
+        });
+        // ---- the receiver is resolved before the arguments (C++17 [expr.call]); after the
+        // arguments the builtin runs on the variable's CURRENT contents when it still holds a
+        // string, and on the pre-args value when an argument retyped a var receiver (the
+        // variable stays retyped) - pinned parity, the interpreter used to crash here ----
+        test("string_builtin_receiver_argument_order_parity", [this]() {
+            auto run_both = [](const std::string& src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->static_checking(check_mode::off);
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect = [&](const std::string& src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string(what) + " (interpreter)");
+                check_eq(i_out, v_out, std::string(what) + " parity");
+            };
+            expect(R"(
+                var s = "glob";
+                string f() { s = 5; return "x"; }
+                var r = s.insert(0, f());
+                r + "/" + s
+            )", "xglob/5", "argument retypes the receiver");
+            expect(R"(
+                var t = "abc";
+                string g() { t = "zzz"; return "y"; }
+                var r2 = t.insert(0, g());
+                r2 + "/" + t
+            )", "yzzz/yzzz", "argument reassigns the receiver");
+            expect(R"(
+                string u = "ab";
+                u.insert(0, "c") + "/" + u
+            )", "cab/cab", "pure arguments");
+            expect(R"(
+                string p() { return "q"; }
+                string h() { string u = "ab"; u.insert(1, p()); return u + "/" + u.length(); }
+                h()
+            )", "aqb/3", "local receiver with a calling argument");
+        });
+        // ---- the catch variable is an ordinary block-scoped local of the catch body (Dev
+        // contract, C++ catch (e) semantics): a frame slot in functions, a scope env at top
+        // level; locals -> members -> globals like any local, shadows for the block only,
+        // invisible to callees and to code after the block, captured like any local.
+        // Both backends used to resolve it dynamically through a backend-global intercept
+        // (a callee's own 'int e = 5' read the caller's exception). ----
+        test("catch_variable_block_scope", [this]() {
+            auto run_both = [](const std::string& src) {
+                std::string out[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->static_checking(check_mode::off);   // the after-the-block rows are RUNTIME texts
+                    jai::stdlib::register_all(e);
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+                return std::make_pair(out[0], out[1]);
+            };
+            auto expect = [&](const std::string& src, const std::string& expected, const char* what) {
+                auto [i_out, v_out] = run_both(src);
+                check_eq(expected, i_out, std::string(what) + " (interpreter)");
+                check_eq(expected, v_out, std::string(what) + " (vm)");
+            };
+            expect(R"(
+                int callee() { int e = 5; return e; }
+                var r = 0;
+                try { throw "x"; } catch (e) { r = callee(); }
+                r
+            )", "5", "a callee's own local e");
+            expect(R"(
+                var e = "global";
+                string callee() { return e; }
+                string f() { var r = ""; try { throw "x"; } catch (e) { r = callee() + "/" + e; } return r + "|" + e; }
+                f()
+            )", "global/x|global", "a callee reads the global e; e after the block is the global again");
+            // Top level: a plain function's env parents on the CALLER's chain, so every
+            // top-level block local is visible to a callee today ({ var e = "y"; callee(); }
+            // reads "y" on both backends - pre-existing, outside this item); the catch
+            // variable follows the block-local rule exactly, and is gone after the block
+            expect(R"(
+                var e = "global";
+                string callee() { return e; }
+                var r = "";
+                try { throw "y"; } catch (e) { r = callee(); }
+                var r2 = "";
+                { var e = "y"; r2 = callee(); }
+                to_string(r == r2) + "|" + e
+            )", "true|global", "top-level catch variable = top-level block local for a callee");
+            expect(R"(
+                var f = null;
+                try { throw "x"; } catch (e) { f = [=]() { return e; }; }
+                f()
+            )", "x", "lambda returned from a top-level catch captures e by value");
+            expect(R"(
+                string h() { var f = null; try { throw "x"; } catch (e) { f = [=]() { return e; }; } return f(); }
+                h()
+            )", "x", "lambda returned from a function catch captures e by value");
+            expect(R"(
+                string h() { string seen = ""; try { throw "x"; } catch (e) { auto f = [&]() { e = e + "!"; }; f(); seen = e; } return seen; }
+                h()
+            )", "x!", "[&] lambda mutates the catch variable through the cell");
+            expect(R"(
+                string seen = "";
+                try { throw "x"; } catch (e) { auto f = [&]() { e = e + "!"; }; f(); seen = e; }
+                seen
+            )", "x!", "[&] lambda at top level");
+            expect(R"(
+                var e = 1; var a = 0; var b = 0;
+                try { throw 2; } catch (e) { a = e; }
+                b = e;
+                to_string(a) + "," + to_string(b)
+            )", "2,1", "shadowing at top level");
+            expect(R"(
+                string fn() { var e = 1; var a = 0; var b = 0; try { throw 2; } catch (e) { a = e; } b = e; return to_string(a) + "," + to_string(b); }
+                fn()
+            )", "2,1", "shadowing in a function");
+            expect(R"(
+                class C { int e = 7; string m() { int a = 0; try { throw 2; } catch (e) { a = e; } return to_string(a) + "," + to_string(e) + "," + to_string(this.e); } }
+                C().m()
+            )", "2,7,7", "shadowing a field: bare e is the field again after the block");
+            expect(R"(
+                int fn() { try { throw "x"; } catch (e) { } return e; }
+                var r = "";
+                try { fn(); } catch (err) { r = err; }
+                r
+            )", "Undefined variable 'e'", "e after the block in a function body");
+            expect(R"(
+                try { throw "x"; } catch (e) { }
+                var r = "";
+                try { var q = e; } catch (err) { r = err; }
+                r
+            )", "Undefined variable 'e'", "e after the block at top level");
+            expect(R"(
+                class K { string tag = "T"; string m() { try { throw "x"; } catch (e) { } return e; } }
+                var r = "";
+                try { K().m(); } catch (err) { r = err; }
+                r
+            )", "Undefined variable 'e'", "e after the block inside a method");
+            expect(R"(
+                var r = "";
+                try { try { throw "a"; } catch { throw; } } catch (e2) { r = e2; }
+                r
+            )", "a", "catch without a variable + bare throw;");
+            expect(R"(
+                string u() { try { try { throw "k"; } catch (e) { try { throw; } catch { return "inner:" + e; } } } catch (o) { return "outer:" + o; } return "none"; }
+                u()
+            )", "inner:k", "a nested try inside the catch keeps the caught exception for throw; (the in-catch marker)");
+            expect(R"(
+                class V { int x = 1; }
+                string h() { try { try { var v = V(); throw v; } catch (e) { e.x = 9; e = 5; throw; } } catch (o) { return to_string(o.x); } return ""; }
+                h()
+            )", "9", "the catch variable binds the thrown object itself; throw; rethrows the original after e is reassigned");
+            expect(R"(
+                string f() { string s = ""; try { throw "1"; } catch (e) { s = s + e; } try { throw "2"; } catch (e) { s = s + e; } return s; }
+                string t = "";
+                try { throw "3"; } catch (e) { t = t + e; }
+                try { throw "4"; } catch (e) { t = t + e; }
+                f() + t
+            )", "1234", "two sequential catches reusing the name");
+            expect(R"(
+                string f() { string s = ""; try { throw [1, 2, 3]; } catch (e) { for (auto v : e) { s = s + to_string(v); } } return s; }
+                f()
+            )", "123", "catch variable as a range-for source");
+            expect(R"(
+                string f() { string s = ""; try { throw "x"; } catch (e) { e += "!"; s = e; } return s; }
+                int g() { int r = 0; try { throw 5; } catch (e) { e++; r = e; } return r; }
+                int h() { int out = 0; try { throw 1; } catch (e) { var& r = e; r = 5; out = e; } return out; }
+                f() + to_string(g()) + to_string(h())
+            )", "x!65", "catch variable as an lvalue: compound, ++, reference alias");
+            expect(R"(
+                string s = ""; int n = 0; int m = 0;
+                try { throw "x"; } catch (e) { e += "!"; s = e; }
+                try { throw 5; } catch (e) { e++; n = e; }
+                try { throw 1; } catch (e) { var& r = e; r = 5; m = e; }
+                s + to_string(n) + to_string(m)
+            )", "x!65", "catch variable as an lvalue at top level");
+            expect(R"(
+                string log = "";
+                for (int i = 0; i < 3; i++) {
+                    try { throw "t" + to_string(i); } catch (e) { if (i == 1) { continue; } if (i == 2) { break; } log = log + e; }
+                    log = log + "|";
+                }
+                try { var q = e; } catch (err) { log = log + err; }
+                log
+            )", "t0|Undefined variable 'e'", "continue/break out of a top-level catch body inside a loop");
+            expect(R"(
+                int f() { for (int i = 0; i < 3; i++) { try { throw i; } catch (e) { if (e == 1) { return e * 10; } continue; } } return -1; }
+                string g() { int i = 0; while (true) { i++; try { throw i; } catch (e) { if (e == 2) { break; } } } return to_string(i); }
+                to_string(f()) + g()
+            )", "102", "return/continue/break out of a function catch");
+            expect(R"(
+                string log = "";
+                for (int i = 0; i < 2; i++) { try { try { throw "a"; } catch (e) { throw "b" + e; } } catch (e2) { log = log + e2; } }
+                try { var q = e; } catch (err) { log = log + "/" + err; }
+                log
+            )", "baba/Undefined variable 'e'", "a throw out of a top-level catch drops its scope");
+            expect(R"(
+                int f() { int r = 0; try { try { throw 1; } catch (e) { throw e + 1; } } catch (e) { r = e; } return r; }
+                f()
+            )", "2", "a throw out of a function catch rebinds the outer catch variable");
+            expect(R"(
+                var a = [1, 2, 3];
+                parallel_for (auto& x : a) { try { throw x + 10; } catch (e) { x = e; } }
+                to_string(a[0]) + to_string(a[1]) + to_string(a[2])
+            )", "111213", "catch variable inside a parallel_for body (worker-frame slot)");
         });
     }
 };
@@ -3580,9 +4247,9 @@ public:
         test("shared_ptr_mint_stamps_type", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(e);
-            // type_of reports the value category ("object") on both backends; the
-            // shared_ptr stamp's observable is weak_ptr minting from the result
-            check_eq(std::string("object"), e->execute(
+            // type_of names the held class on both backends; the shared_ptr stamp's
+            // observable is weak_ptr minting from the result
+            check_eq(std::string("C"), e->execute(
                 "class C { int x = 3; C(int v) { x = v; } } var c = new shared_ptr<C>(9); type_of(c)").as_string());
             check_eq((int64_t)9, e->execute(
                 "class C { int x = 3; C(int v) { x = v; } } var c = new shared_ptr<C>(9); c.x").as_int());
@@ -3636,6 +4303,323 @@ public:
     }
 };
 
+// A dynamic_binder-bound value type whose copy constructor counts: the in-flight copy
+// counter the by-value return rows use (script instances copy without a hook)
+struct return_copy_probe {
+    std::shared_ptr<int64_t> copies = std::make_shared<int64_t>(0);
+    int64_t v = 0;
+    return_copy_probe() = default;
+    return_copy_probe(const return_copy_probe& o) : copies(o.copies), v(o.v) { ++*copies; }
+    return_copy_probe& operator=(const return_copy_probe&) = default;
+    int64_t copies_made() const { return *copies; }
+};
+
+// By-value `return e;` yields a value that aliases nothing the callee could name (C++
+// [stmt.return]): lvalue reads copy through the one store kernel, temporaries move, the
+// callee's own local/parameter moves out of its dying slot (NRVO), shared_ptr handles and
+// `-> T&` returns keep sharing. Every row runs on both backends and pins parity.
+class return_value_semantics_tests : public suite {
+public:
+    return_value_semantics_tests() : suite("Return Value Semantics") {}
+
+    void forge_tests() override {
+        auto run_both = [](const std::string& src, bool with_probe = false) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                if (with_probe) {
+                    dynamic_binder<return_copy_probe>(*e, "CopyProbe")
+                        .constructor<>()
+                        .property("v", &return_copy_probe::v)
+                        .method("copies", &return_copy_probe::copies_made)
+                        .build();
+                }
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto expect = [this, run_both](const std::string& src, const std::string& expected, const char* what, bool with_probe = false) {
+            auto [i_out, v_out] = run_both(src, with_probe);
+            check_eq(expected, i_out, std::string(what) + " (interpreter)");
+            check_eq(expected, v_out, std::string(what) + " (vm)");
+        };
+
+        test("return_global_array_copies", [expect]() {
+            expect(R"(
+                array<int> ints = [1, 2, 3];
+                var f() { return ints; }
+                var r = f(); r.push(4);
+                array<var> anys = [1, 2, 3];
+                var f2() { return anys; }
+                var r2 = f2(); r2.push(4);
+                array<int> f3() { return ints; }
+                var r3 = f3(); r3.push(5);
+                to_string(ints.size()) + "/" + to_string(r.size()) + "/" + to_string(anys.size()) + "/" +
+                    to_string(r2.size()) + "/" + to_string(r3.size())
+            )", "3/4/3/4/4", "typed and untyped global arrays returned by value are copies");
+        });
+        test("return_global_map_copies", [expect]() {
+            expect(R"(
+                map<string, int> m = {"a": 1};
+                var h() { return m; }
+                var mm = h(); mm["b"] = 2;
+                m.size() * 10 + mm.size()
+            )", "12", "a global map returned by value is a copy");
+        });
+        test("return_global_object_copies", [expect]() {
+            expect(R"(
+                class T { int v = 1; }
+                T obj = T();
+                var g() { return obj; }
+                var o = g(); o.v = 99;
+                T g2() { return obj; }
+                var o2 = g2(); o2.v = 77;
+                to_string(obj.v) + "/" + to_string(o.v) + "/" + to_string(o2.v)
+            )", "1/99/77", "a global object returned by value is a copy (var and typed returns)");
+        });
+        test("return_field_copies", [expect]() {
+            expect(R"(
+                class H {
+                    array<int> items = [1];
+                    static array<int> shared_items = [1];
+                    var get() { return items; }
+                    var get2() { return this.items; }
+                    static var gets() { return shared_items; }
+                }
+                H hd = H();
+                var a = hd.get(); a.push(2);
+                var b = hd.get2(); b.push(3);
+                var c = H::gets(); c.push(4);
+                to_string(hd.items.size()) + "/" + to_string(a.size()) + "/" + to_string(b.size()) + "/" +
+                    to_string(H::shared_items.size()) + "/" + to_string(c.size())
+            )", "1/2/2/1/2", "bare, this. and static fields returned by value are copies");
+        });
+        test("return_element_copies", [expect]() {
+            expect(R"(
+                array<var> nested = [[1], [2]];
+                var fe() { return nested[0]; }
+                var re = fe(); re.push(3);
+                map<string, array<int>> mm = {"k": [1]};
+                var fm() { return mm["k"]; }
+                var rm = fm(); rm.push(2);
+                class T { int v = 1; }
+                array<T> objs = [T()];
+                var fo() { return objs[0]; }
+                var ro = fo(); ro.v = 5;
+                to_string(nested[0].size()) + "/" + to_string(re.size()) + "/" + to_string(mm["k"].size()) + "/" +
+                    to_string(rm.size()) + "/" + to_string(objs[0].v) + "/" + to_string(ro.v)
+            )", "1/2/1/2/1/5", "array elements, map entries and object slots returned by value are copies");
+        });
+        test("return_param_moves", [expect]() {
+            expect(R"(
+                var fp(array<int> p) { return p; }
+                array<int> src = [1];
+                var rp = fp(src); rp.push(2);
+                CopyProbe id(CopyProbe p) { return p; }
+                var q = id(CopyProbe());
+                to_string(src.size()) + "/" + to_string(rp.size()) + "/" + to_string(q.copies())
+            )", "1/2/1", "a by-value parameter binds as one copy and returns by move", true);
+        });
+        test("return_local_is_nrvo", [expect]() {
+            expect(R"(
+                int dtors = 0;
+                class T { int v = 0; ~T() { dtors += 1; } }
+                var make() { T t = T(); t.v = 5; return t; }
+                var a = make();
+                int after_make = dtors;
+                var make2() { T t = T(); T u = T(); u.v = 7; return u; }
+                var b = make2();
+                int after_make2 = dtors;
+                to_string(after_make) + "/" + to_string(a.v) + "/" + to_string(after_make2) + "/" + to_string(b.v)
+            )", "0/5/1/7", "a returned local moves out of its dying slot: one object, no destructor");
+            expect(R"(
+                nocopy class L { int total = 1; }
+                var ml() { L l = L(); l.total = 3; return l; }
+                var got = ml();
+                void bump(L& l) { l.total += 1; }
+                var ml2() { L l = L(); bump(l); return l; }
+                to_string(got.total) + "/" + to_string(ml2().total)
+            )", "3/2", "a nocopy local returns by move, even after a finished by-reference bind");
+        });
+        test("return_nocopy_global_or_field_throws", [this, run_both]() {
+            const std::string text = "ERROR: Cannot copy an instance of nocopy class 'L': hold it by reference (auto&/var&) or share it (shared_ptr)";
+            {
+                auto [i_out, v_out] = run_both("nocopy class L { int total = 1; }\nL g = L();\nvar fg() { return g; }\nfg();\n");
+                check_eq(text, i_out.substr(0, text.size()), "nocopy global returned by value raises the kernel text (interpreter)");
+                check_eq(i_out, v_out, "nocopy global return: what() parity");
+            }
+            {
+                auto [i_out, v_out] = run_both("nocopy class L { int total = 1; }\nclass Box { L held = L(); var get() { return held; } }\nBox b = Box();\nb.get();\n");
+                check_eq(text, i_out.substr(0, text.size()), "nocopy field returned by value raises the kernel text (interpreter)");
+                check_eq(i_out, v_out, "nocopy field return: what() parity");
+            }
+            for (bool use_vm : {false, true}) {   // the engine stays usable after the host-visible throw
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                check_throws([&]() { e->execute("nocopy class L { int total = 1; }\nL g = L();\nvar fg() { return g; }\nfg();\n"); });
+                check_eq((int64_t)3, e->execute("1 + 2").as_int());
+            }
+        });
+        test("return_temporary_not_double_copied", [expect]() {
+            expect(R"(
+                var p = CopyProbe();
+                var f() { return p; }
+                var q = f();
+                int c1 = q.copies();
+                var g() { return CopyProbe(); }
+                var h() { return g(); }
+                int c2 = h().copies();
+                var inner() { return p; }
+                var outer() { return inner(); }
+                var o = outer();
+                int c3 = o.copies();
+                var outer2() { CopyProbe t = inner(); return t; }
+                var o2 = outer2();
+                int c4 = o2.copies();
+                o.v = 3;
+                to_string(c1) + "/" + to_string(c2) + "/" + to_string(c3 - c1) + "/" + to_string(c4 - c3) + "/" + to_string(p.v)
+            )", "1/0/1/1/0", "one copy per lvalue return; temporaries, nested returns and decl-then-return add none", true);
+        });
+        test("return_shared_ptr_shares", [expect]() {
+            expect(R"(
+                class T { int v = 1; }
+                shared_ptr<T> sp = new T();
+                var gsp() { return sp; }
+                var q = gsp(); q.v = 55;
+                class Box { shared_ptr<T> p = new T(); var getp() { return p; } }
+                Box bx = Box();
+                var q2 = bx.getp(); q2.v = 66;
+                to_string(sp.v) + "/" + to_string(bx.p.v)
+            )", "55/66", "shared_ptr handles returned by value share (global and field)");
+        });
+        test("ref_return_still_aliases", [expect]() {
+            expect(R"(
+                array<int> ints = [1];
+                array<int>& gr() { return ints; }
+                var& ra = gr(); ra.push(9);
+                class T { int v = 1; }
+                T obj = T();
+                T& gt() { return obj; }
+                gt().v = 7;
+                var x = gr(); x.push(1);
+                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(x.size())
+            )", "2/7/3", "-> T& returns alias; a plain decl from one copies");
+        });
+        test("return_ref_call_from_value_function_copies", [expect]() {
+            expect(R"(
+                int gx = 5;
+                int& gi() { return gx; }
+                var fi() { return gi(); }
+                var vi = fi(); vi = 9;
+                array<int> ints = [1];
+                array<int>& ga() { return ints; }
+                var fv() { return ga(); }
+                var c = fv(); c.push(1);
+                array<int> fvt() { return ga(); }
+                var ct = fvt(); ct.push(1);
+                to_string(gx) + "/" + to_string(vi) + "/" + to_string(ints.size()) + "/" + to_string(c.size()) + "/" + to_string(ct.size())
+            )", "5/9/1/2/2", "a reference-yielding call returned by value copies its target");
+        });
+        test("direct_call_result_mutation_is_on_temporary", [expect]() {
+            expect(R"(
+                array<int> ints = [1, 2];
+                var f() { return ints; }
+                f().push(100);
+                class T { int v = 1; }
+                T obj = T();
+                var g() { return obj; }
+                g().v = 9;
+                for (auto& x : f()) { x = 0; }
+                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(ints[0])
+            )", "2/1/1", "f().push / g().x = / for (auto& : f()) touch the temporary");
+        });
+        test("this_return_shares_receiver", [expect]() {
+            expect(R"(
+                class Chain { int n = 0; var inc() { n += 1; return this; } }
+                Chain ch = Chain();
+                ch.inc().inc();
+                ch.n
+            )", "2", "return this keeps the deliberate handle semantics");
+        });
+        test("return_inside_try_same_as_outside", [expect]() {
+            expect(R"(
+                int dtors = 0;
+                class T { int v = 0; ~T() { dtors += 1; } }
+                var make() { try { T t = T(); t.v = 5; return t; } catch (e) { return null; } }
+                var a = make();
+                int d1 = dtors;
+                array<int> ints = [1];
+                var f() { try { return ints; } catch (e) { return null; } }
+                var r = f(); r.push(2);
+                class T2 { int v = 1; }
+                T2 obj = T2();
+                T2 other = T2();
+                var g() { try { return obj.v > 0 ? obj : other; } catch (e) { return null; } }
+                var o = g(); o.v = 9;
+                class H { array<int> items = [1]; var get() { try { return items; } catch (e) { return null; } } }
+                H hd = H();
+                var hi = hd.get(); hi.push(2);
+                var five = 5;
+                array<int> h() { try { return five; } catch (e) { return [7]; } }
+                to_string(d1) + "/" + to_string(a.v) + "/" + to_string(ints.size()) + "/" + to_string(r.size()) + "/" +
+                    to_string(obj.v) + "/" + to_string(hd.items.size()) + "/" + to_string(h().size())
+            )", "0/5/1/2/1/1/1", "in-region returns move locals and copy lvalues exactly like clean ones");
+        });
+        test("return_boxed_local_copies", [expect]() {
+            expect(R"(
+                var keep = null;
+                var f() {
+                    array<int> a = [1];
+                    keep = [&]() { a.push(0); return a.size(); };
+                    return a;
+                }
+                var r = f(); r.push(2);
+                int after = keep();
+                to_string(r.size()) + "/" + to_string(after)
+            )", "2/2", "a local shared with a live closure copies; the closure's cell keeps its value");
+        });
+        test("lambda_captures_return", [expect]() {
+            expect(R"(
+                var mk() {
+                    array<int> cap = [1];
+                    var by_val = [=]() { return cap; };
+                    var by_ref = [&]() { return cap; };
+                    var a = by_val(); a.push(2);
+                    var b = by_val();
+                    var c = by_ref(); c.push(3);
+                    return to_string(a.size()) + "/" + to_string(b.size()) + "/" + to_string(cap.size()) + "/" + to_string(c.size());
+                }
+                mk()
+            )", "2/1/1/2", "[=] returns copy the captured copy, [&] returns copy the shared cell");
+        });
+        test("hot_reload_after_returned_copy", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute("class T { int v = 1; }\nT obj = T();\nvar g() { return obj; }\nvar c = g();\nc.v = 5;\n");
+                e->execute("class T { int v = 1; int w = 2; }");
+                check_eq((int64_t)9, e->execute("c.w + obj.w + c.v").as_int(), use_vm ? "vm: both migrate" : "interp: both migrate");
+                check_eq((int64_t)1, e->execute("obj.v").as_int(), use_vm ? "vm: original untouched" : "interp: original untouched");
+            }
+        });
+        test("top_level_return_unchanged", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                auto r = e->execute("array<var> a = [1]; return a;");
+                e->execute("a.push(2);");
+                check_eq((size_t)2, r.as_array().size(), use_vm ? "vm: top-level return hands the host the global's handle" : "interp: top-level return hands the host the global's handle");
+            }
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using constructor_semantics_tests = jai::foundry::tests::constructor_semantics_tests;
@@ -3654,3 +4638,5 @@ using ref_capture_semantics_tests = jai::foundry::tests::ref_capture_semantics_t
 FOUNDRY_REGISTER(ref_capture_semantics_tests)
 using flat_value_class_tests = jai::foundry::tests::flat_value_class_tests;
 FOUNDRY_REGISTER(flat_value_class_tests)
+using return_value_semantics_tests = jai::foundry::tests::return_value_semantics_tests;
+FOUNDRY_REGISTER(return_value_semantics_tests)

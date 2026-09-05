@@ -857,6 +857,10 @@ namespace jai {
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
         bool parallel_region_active() const;
+        // Workers copy and construct class instances (by-value bindings, whole reads): the
+        // class-definition instance registry they register into is engine-shared, so its
+        // mutations serialize on this lock while a region runs (unlocked otherwise).
+        std::unique_lock<std::mutex> parallel_instance_registry_lock();
 
         // Script errors surfacing at the C++ boundary (converted callbacks, signal
         // receivers) have no error-value channel and must not throw into arbitrary game

@@ -716,7 +716,21 @@ function mapxx(int n) -> string {
 	return `MAP${n}`;
 }
 
+// After the standard successor: the next map the loaded WADs actually contain (a PWAD
+// with MAP01 and MAP03 goes 01 -> 03), or the end when nothing follows
+function next_existing_map(string after) -> string {
+	var maps = map_list();
+	for (auto m : maps) { if (m > after) { return m; } }
+	return "";
+}
+
 function next_map() -> string {
+	string n = next_map_standard();
+	if (n != "" && lump_num(n) < 0) { n = next_existing_map(GAME_MAP); }
+	return n;
+}
+
+function next_map_standard() -> string {
 	if (GAME_MAP.starts_with("MAP")) {                       // doom2 chain: 15->31->32->16, 30 ends it
 		int mn = GAME_MAP.substr(3, 2).to_int(1);
 		if (SECRET_EXIT) { return mn == 31 ? "MAP32" : "MAP31"; }

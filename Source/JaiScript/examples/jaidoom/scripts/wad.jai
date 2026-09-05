@@ -7,6 +7,7 @@
 var WAD = "";                 // raw file bytes
 var WAD_ID = "";              // "IWAD" | "PWAD"
 var WAD_BASE = "";            // file name without folder or extension: "doom1", "freedoom2"
+var WAD_FILES = [];           // every file merged into the directory, base first
 var NUM_LUMPS = 0;
 array<int> LUMP_POS = [];
 array<int> LUMP_SIZE = [];
@@ -38,9 +39,54 @@ function name8(int ofs) -> string {
 // up front through extract_audio.jai, the game fills it lazily otherwise)
 function audio_cache_dir() -> string { return "../cache/" + WAD_BASE + "/"; }
 
+// Merge a further WAD (a PWAD of maps, or another IWAD's resources) over what is loaded:
+// its bytes append to the buffer, its lumps join the directory with shifted offsets, and
+// a name it repeats wins (doom's W_GetNumForName scans backward), so a PWAD's MAP01 or its
+// replaced textures take effect while everything it does not mention stays from the base.
+function wad_add(string path) -> bool {
+	string more = read_file(path);
+	if (more.size() < 12) { return false; }
+	string id = more.substr(0, 4);
+	if (id != "IWAD" && id != "PWAD") { return false; }
+	int base = WAD.size();
+	WAD = WAD + more;
+	int count = i32(base + 4);
+	int dir = base + i32(base + 8);
+	for (int i = 0; i < count; ++i) {
+		int e = dir + i * 16;
+		LUMP_POS.push(base + i32(e));
+		LUMP_SIZE.push(i32(e + 4));
+		var nm = name8(e + 8);
+		LUMP_NAME.push(nm);
+		LUMP_INDEX[nm] = NUM_LUMPS + i;
+	}
+	NUM_LUMPS = NUM_LUMPS + count;
+	WAD_FILES.push(path);
+	return true;
+}
+
+// Every map the merged directory can start: an ExMy or MAPxx marker whose THINGS lump
+// follows, later files winning, in name order (episode maps before MAPxx)
+function map_list() -> array<string> {
+	array<string> names = [];
+	var seen = {};
+	for (int i = NUM_LUMPS - 1; i >= 0; --i) {
+		string nm = LUMP_NAME[i];
+		bool episode = nm.size() == 4 && nm[0] == 'E' && nm[2] == 'M' && nm[1] >= '1' && nm[1] <= '9' && nm[3] >= '1' && nm[3] <= '9';
+		bool level = nm.size() == 5 && nm.starts_with("MAP") && nm[3] >= '0' && nm[3] <= '9' && nm[4] >= '0' && nm[4] <= '9';
+		if (!(episode || level) || seen.has(nm)) { continue; }
+		if (i + 1 >= NUM_LUMPS || LUMP_NAME[i + 1] != "THINGS") { continue; }
+		seen[nm] = true;
+		names.push(nm);
+	}
+	names.sort();
+	return names;
+}
+
 function wad_load(string path) -> bool {
 	WAD = read_file(path);
 	if (WAD.size() < 12) { return false; }
+	WAD_FILES = [path];
 	int slash = path.find_last_of("/\\");
 	string file = slash >= 0 ? path.substr(slash + 1) : path;
 	int dot = file.rfind(".");

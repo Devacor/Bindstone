@@ -30,12 +30,23 @@ weapons: 1-5   automap: tab or M (zoom -/=, B mark, C clear)   quicksave Z  quic
 menu: esc      cheats: iddqd idkfa idfa idclip idclev## idbehold iddt
 ```
 
+## Levels and your own WADs
+
+The menu's LEVEL SELECT lists every map the loaded WADs contain and starts the one you
+pick at the skill you choose. Further WADs named on the command line merge over the first:
+a map pack's levels and any resources it replaces take effect, everything else comes from
+the base. A map pack starts on its first map. Between levels the game follows DOOM's own
+chain, including the secret exits (E1M3 to E1M9, MAP15 to MAP31, MAP31 to MAP32), and when
+the standard next map is not in the loaded WADs it continues with the next map that is,
+or ends the run when nothing follows.
+
 ## Command line
 
 ```
 jaiscript jaidoom.jai                            # from scripts/; play.bat does this
 jaiscript jaidoom.jai -- freedoom2 MAP01         # another IWAD and map (MAPxx names work)
 jaiscript jaidoom.jai -- ../wads/doom2.wad MAP07 # your own registered WAD
+jaiscript jaidoom.jai -- ../wads/doom2.wad mypack.wad  # a map pack merged over it
 jaiscript jaidoom.jai -- record demo.json        # demos: record, then
 jaiscript jaidoom.jai -- playdemo demo.json
 jaiscript jaidoom.jai -- host [port] [coop]      # netplay: host (deathmatch or co-op)

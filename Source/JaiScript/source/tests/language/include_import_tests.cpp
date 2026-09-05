@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <fstream>
 #include <filesystem>
@@ -17,7 +18,7 @@ public:
     void forge_tests() override {
         // Helper to create a temporary file
         auto create_temp_file = [](const std::string& filename, const std::string& content) {
-            std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
+            std::filesystem::path temp_dir = jai::foundry::test_temp_directory();
             std::filesystem::path file_path = temp_dir / filename;
             std::ofstream file(file_path);
             file << content;
@@ -30,7 +31,7 @@ public:
             std::filesystem::remove(path);
         };
         
-        test("basic_include", [&]() {
+        test("basic_include", [=, this]() {
             auto eng = make_engine();
             
             // Create a temporary file to include
@@ -42,7 +43,7 @@ public:
             )");
             
             // Add temp directory to include paths
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Include the file
             eng->execute("include \"math_lib.jai\"");
@@ -54,7 +55,7 @@ public:
             cleanup_temp_file(math_file);
         });
         
-        test("include_with_angle_brackets", [&]() {
+        test("include_with_angle_brackets", [=, this]() {
             auto eng = make_engine();
             
             // Create a temporary file
@@ -65,7 +66,7 @@ public:
             )");
             
             // Add temp directory to include paths
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Include with angle brackets
             eng->execute("include <stdlib.jai>");
@@ -76,7 +77,7 @@ public:
             cleanup_temp_file(lib_file);
         });
         
-        test("multiple_includes_execute_multiple_times", [&]() {
+        test("multiple_includes_execute_multiple_times", [=, this]() {
             auto eng = make_engine();
             
             // Create a file with side effects
@@ -84,7 +85,7 @@ public:
                 auto counter = 0;
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Initialize counter
             eng->execute("include \"counter.jai\"");
@@ -109,7 +110,7 @@ public:
             cleanup_temp_file(counter_file);
         });
         
-        test("basic_import_once_behavior", [&]() {
+        test("basic_import_once_behavior", [=, this]() {
             auto eng = make_engine();
             
             // Create a file with side effects
@@ -121,7 +122,7 @@ public:
                 }
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             eng->set_import_behavior(engine::import_behavior::once);
             
             // Import multiple times - should only execute once
@@ -137,7 +138,7 @@ public:
             cleanup_temp_file(module_file);
         });
         
-        test("import_file_timestamp_behavior", [&]() {
+        test("import_file_timestamp_behavior", [=, this]() {
             auto eng = make_engine();
             
             // Create initial file
@@ -145,7 +146,7 @@ public:
                 auto version = 1;
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             eng->set_import_behavior(engine::import_behavior::file_timestamp);
             
             // First import
@@ -169,7 +170,7 @@ public:
             cleanup_temp_file(test_file);
         });
         
-        test("import_always_behavior", [&]() {
+        test("import_always_behavior", [=, this]() {
             auto eng = make_engine();
             
             // Create a file with counter
@@ -177,7 +178,7 @@ public:
                 auto import_count = 0;
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             eng->set_import_behavior(engine::import_behavior::always);
             
             // Initialize counter
@@ -202,11 +203,11 @@ public:
             cleanup_temp_file(always_file);
         });
         
-        test("include_path_resolution", [&]() {
+        test("include_path_resolution", [=, this]() {
             auto eng = make_engine();
             
             // Create files in different directories
-            auto temp_dir = std::filesystem::temp_directory_path();
+            auto temp_dir = jai::foundry::test_temp_directory();
             auto lib_dir = temp_dir / "lib";
             auto scripts_dir = temp_dir / "scripts";
             
@@ -235,14 +236,14 @@ public:
             std::filesystem::remove_all(scripts_dir);
         });
         
-        test("import_tracking_api", [&]() {
+        test("import_tracking_api", [=, this]() {
             auto eng = make_engine();
             
             // Create test files
             auto file1 = create_temp_file("tracked1.jai", "auto file1_loaded = true;");
             auto file2 = create_temp_file("tracked2.jai", "auto file2_loaded = true;");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             eng->set_import_behavior(engine::import_behavior::once);
             
             // Initially no imports
@@ -273,7 +274,7 @@ public:
             cleanup_temp_file(file2);
         });
         
-        test("hash_prefix_ignored", [&]() {
+        test("hash_prefix_ignored", [=, this]() {
             auto eng = make_engine();
             
             // Create a test file
@@ -281,7 +282,7 @@ public:
                 auto with_hash = 42;
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Test that # prefix is ignored
             eng->execute("#include \"hash_test.jai\"");
@@ -293,7 +294,7 @@ public:
             cleanup_temp_file(hash_file);
         });
         
-        test("file_not_found_error", [&]() {
+        test("file_not_found_error", [=, this]() {
             auto eng = make_engine();
             
             // Try to include non-existent file
@@ -306,7 +307,7 @@ public:
             });
         });
         
-        test("nested_includes", [&]() {
+        test("nested_includes", [=, this]() {
             auto eng = make_engine();
             
             // Create nested include files
@@ -319,7 +320,7 @@ public:
                 auto outer_value = inner_value + 50;
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Include outer file which includes inner
             eng->execute("include \"outer.jai\"");
@@ -331,7 +332,7 @@ public:
             cleanup_temp_file(outer_file);
         });
         
-        test("dynamic_include_with_variable", [&]() {
+        test("dynamic_include_with_variable", [=, this]() {
             auto eng = make_engine();
             
             // Create a test file
@@ -342,7 +343,7 @@ public:
                 }
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             
             // Set up a variable with the filename
             eng->execute("auto filename = \"dynamic_content.jai\";");
@@ -357,7 +358,7 @@ public:
             cleanup_temp_file(dynamic_file);
         });
         
-        test("dynamic_import_with_expression", [&]() {
+        test("dynamic_import_with_expression", [=, this]() {
             auto eng = make_engine();
             
             // Create test files
@@ -369,7 +370,7 @@ public:
                 auto module_letter = "B";
             )");
             
-            eng->add_include_path(std::filesystem::temp_directory_path().string());
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
             eng->set_import_behavior(engine::import_behavior::once);
             
             // Import using string concatenation
@@ -397,7 +398,7 @@ public:
         // what engine::execute returns for that source. Statement-position include is
         // unchanged (value discarded). include always RUNS the file (no cache), so its
         // value is always fresh — no interaction with import's once-cache.
-        test("include_expression_returns_value", [&]() {
+        test("include_expression_returns_value", [=, this]() {
             auto config_file = create_temp_file("expr_config.jai", R"(
                 { "width": 800, "height": 600 };
             )");
@@ -409,7 +410,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 auto r = eng->execute(R"(
                     var cfg = include "expr_config.jai";
                     auto calc = include "expr_calc.jai";
@@ -421,12 +422,12 @@ public:
             cleanup_temp_file(expr_file);
         });
 
-        test("include_expression_dynamic_path_and_nesting", [&]() {
+        test("include_expression_dynamic_path_and_nesting", [=, this]() {
             auto leaf = create_temp_file("expr_leaf.jai", "21;");
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 // computed path form in expression position + in-call use
                 auto r = eng->execute(R"(
                     function twice(v) { return v * 2; }
@@ -438,7 +439,7 @@ public:
             cleanup_temp_file(leaf);
         });
 
-        test("include_statement_position_unchanged", [&]() {
+        test("include_statement_position_unchanged", [=, this]() {
             // Statement include still runs for side effects and DISCARDS its value; it
             // also always re-runs (fresh evaluation each time, unlike import)
             auto counter_file = create_temp_file("expr_counter.jai", R"(
@@ -450,7 +451,7 @@ public:
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                 int bumps = 0;
                 eng->add_function("bump_count", [&bumps]() { bumps++; });
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 auto r = eng->execute(R"(
                     include "expr_counter.jai";
                     include "expr_counter.jai";
@@ -482,13 +483,13 @@ public:
             std::filesystem::last_write_time(target, ref - std::chrono::hours(1));
         };
 
-        test("jaibite_cache_creates_sibling_on_file_loads", [&]() {
+        test("jaibite_cache_creates_sibling_on_file_loads", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_make.jai", "auto cache_make_v = 11;");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 eng->execute("include \"cache_make.jai\"");
                 check(std::filesystem::exists(sibling_of(src)), "include writes the sibling");
                 check(starts_with_jbit(sibling_of(src)), "sibling is a jaibite (JBIT magic)");
@@ -506,7 +507,7 @@ public:
             }
         });
 
-        test("jaibite_cache_fresh_sibling_skips_parse", [&]() {
+        test("jaibite_cache_fresh_sibling_skips_parse", [=, this]() {
             // Proof the parse is skipped: a fresh (strictly newer, fingerprint-matching)
             // sibling loads fine even when the .jai itself no longer parses.
             for (bool use_vm : {false, true}) {
@@ -515,7 +516,7 @@ public:
                 {
                     auto writer = engine::make();
                     if (use_vm) { writer->set_backend(jai::backend_type::vm); }
-                    writer->add_include_path(std::filesystem::temp_directory_path().string());
+                    writer->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)42, writer->execute("var r = include \"cache_skip.jai\"; r;").as_int());
                 }
                 {
@@ -525,7 +526,7 @@ public:
                 force_older_than(src, sibling_of(src));
                 auto reader = engine::make();
                 if (use_vm) { reader->set_backend(jai::backend_type::vm); }
-                reader->add_include_path(std::filesystem::temp_directory_path().string());
+                reader->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, reader->execute("var r = include \"cache_skip.jai\"; r;").as_int(),
                          use_vm ? "vm: cache hit skipped the parse" : "interp: cache hit skipped the parse");
                 cleanup_temp_file(src);
@@ -533,7 +534,7 @@ public:
             }
         });
 
-        test("jaibite_cache_loaded_ast_keeps_file_attribution", [&]() {
+        test("jaibite_cache_loaded_ast_keeps_file_attribution", [=, this]() {
             // Composition pin with the debugger's path stamping: an AST loaded from the
             // sibling (parse provably skipped — the source is unparseable) still carries
             // the .jai filename in its source_locations, so stack traces name the file.
@@ -562,13 +563,13 @@ public:
             }
         });
 
-        test("jaibite_cache_edit_goes_stale_equal_mtime_included", [&]() {
+        test("jaibite_cache_edit_goes_stale_equal_mtime_included", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_edit.jai", "1;");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)1, eng->execute("var a = include \"cache_edit.jai\"; a;").as_int());
                 // edit lands on the very next include, same engine run; equal mtimes
                 // must read as stale (pin: strictly-newer freshness rule)
@@ -584,7 +585,7 @@ public:
             }
         });
 
-        test("jaibite_cache_corrupt_sibling_falls_back_and_rewrites", [&]() {
+        test("jaibite_cache_corrupt_sibling_falls_back_and_rewrites", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_corrupt.jai", "7;");
                 {
@@ -594,7 +595,7 @@ public:
                 force_older_than(src, sibling_of(src));   // corrupt sibling looks "fresh"
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)7, eng->execute("var c = include \"cache_corrupt.jai\"; c;").as_int(),
                          "corrupt sibling -> silent reparse");
                 check(starts_with_jbit(sibling_of(src)), "sibling rewritten valid");
@@ -606,14 +607,14 @@ public:
                 force_older_than(src, sibling_of(src));
                 auto eng2 = engine::make();
                 if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
-                eng2->add_include_path(std::filesystem::temp_directory_path().string());
+                eng2->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)7, eng2->execute("var d = include \"cache_corrupt.jai\"; d;").as_int());
                 cleanup_temp_file(src);
                 std::filesystem::remove(sibling_of(src));
             }
         });
 
-        test("jaibite_cache_fingerprint_mismatch_reparses", [&]() {
+        test("jaibite_cache_fingerprint_mismatch_reparses", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_fp.jai", "100;");
                 std::filesystem::remove(sibling_of(src));
@@ -621,7 +622,7 @@ public:
                     auto a = engine::make();
                     if (use_vm) { a->set_backend(jai::backend_type::vm); }
                     a->add_function("fp_extra", [](script_int v) -> script_int { return v; });
-                    a->add_include_path(std::filesystem::temp_directory_path().string());
+                    a->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)100, a->execute("var r = include \"cache_fp.jai\"; r;").as_int());
                 }
                 // source now says 200, forced older than the sibling (mtime says "fresh")
@@ -633,7 +634,7 @@ public:
                 {   // engine B: different registration surface -> stale -> parses the source
                     auto b = engine::make();
                     if (use_vm) { b->set_backend(jai::backend_type::vm); }
-                    b->add_include_path(std::filesystem::temp_directory_path().string());
+                    b->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)200, b->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
                              "fingerprint mismatch -> reparse");
                 }
@@ -643,7 +644,7 @@ public:
                 {
                     auto c = engine::make();
                     if (use_vm) { c->set_backend(jai::backend_type::vm); }
-                    c->add_include_path(std::filesystem::temp_directory_path().string());
+                    c->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)200, c->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
                              "matching fingerprint -> sibling loads");
                 }
@@ -652,7 +653,7 @@ public:
             }
         });
 
-        test("jaibite_cache_version_mismatch_reparses_and_rewrites", [&]() {
+        test("jaibite_cache_version_mismatch_reparses_and_rewrites", [=, this]() {
             // Format-version stamp (Dev ruling 2026-07-11): a sibling from an older
             // parser/format silently reparses + rewrites — stale parse-time semantics
             // (e.g. slot assignment changes) must never load
@@ -672,7 +673,7 @@ public:
                 force_older_than(src, sibling_of(src));   // stale-version sibling looks "fresh"
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, eng->execute("var v = include \"cache_ver.jai\"; v;").as_int(),
                          "version mismatch -> silent reparse");
                 check(starts_with_jbit(sibling_of(src)), "sibling rewritten");
@@ -684,7 +685,7 @@ public:
                 force_older_than(src, sibling_of(src));
                 auto eng2 = engine::make();
                 if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
-                eng2->add_include_path(std::filesystem::temp_directory_path().string());
+                eng2->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, eng2->execute("var w = include \"cache_ver.jai\"; w;").as_int(),
                          "rewritten sibling loads under the current version");
                 cleanup_temp_file(src);
@@ -692,7 +693,7 @@ public:
             }
         });
 
-        test("jaibite_cache_disable_switch", [&]() {
+        test("jaibite_cache_disable_switch", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_off.jai", "5;");
                 std::filesystem::remove(sibling_of(src));
@@ -701,21 +702,21 @@ public:
                 check(eng->jaibite_cache(), "cache defaults ON");
                 eng->jaibite_cache(false);
                 check(!eng->jaibite_cache(), "setter/getter");
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)5, eng->execute("var r = include \"cache_off.jai\"; r;").as_int());
                 check(!std::filesystem::exists(sibling_of(src)), "disabled -> no sibling written");
                 cleanup_temp_file(src);
             }
         });
 
-        test("jaibite_cache_write_failure_is_silent_and_counted", [&]() {
+        test("jaibite_cache_write_failure_is_silent_and_counted", [=, this]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_ro.jai", "9;");
                 std::filesystem::remove(sibling_of(src));
                 std::filesystem::create_directory(sibling_of(src));   // sibling path unwritable
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)9, eng->execute("var r = include \"cache_ro.jai\"; r;").as_int(),
                          "unwritable sibling never surfaces as an error");
                 check(eng->jaibite_cache_write_failures() >= 1, "failure counted for diagnostics");
@@ -724,7 +725,7 @@ public:
             }
         });
 
-        test("import_mtime_gate_sits_above_disk_cache", [&]() {
+        test("import_mtime_gate_sits_above_disk_cache", [=, this]() {
             // import's once-per-change gate decides IF the file runs at all; the disk
             // cache only decides parse-vs-load when it does (pin: hot-reload semantics).
             for (bool use_vm : {false, true}) {
@@ -734,7 +735,7 @@ public:
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                 int bumps = 0;
                 eng->add_function("cache_imp_bump", [&bumps]() { bumps++; });
-                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
                 eng->set_import_behavior(engine::import_behavior::file_timestamp);
                 eng->execute("import \"cache_imp.jai\"");
                 eng->execute("import \"cache_imp.jai\"");

@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
@@ -2612,7 +2613,7 @@ public:
 		// include inside a function body: the VM must observe the same result as the
 		// interpreter (re-entrant execute defines into the global environment).
 		test("include_inside_function_differential", [this]() {
-			auto temp_dir = std::filesystem::temp_directory_path();
+			auto temp_dir = jai::foundry::test_temp_directory();
 			auto file_path = temp_dir / "vm_include_in_fn.jai";
 			{
 				std::ofstream f(file_path);

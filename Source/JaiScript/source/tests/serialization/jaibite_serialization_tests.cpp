@@ -2,6 +2,7 @@
 // parsed bite and a load(save(bite)) bite (into a DIFFERENT engine) must produce
 // identical results and identical error text, on both backends.
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -473,7 +474,7 @@ public:
 
         test("file_save_load_roundtrip", [this]() {
             using namespace jaibite_test_detail;
-            auto path = (std::filesystem::temp_directory_path() / "jaibite_roundtrip_test.jbite").string();
+            auto path = (jai::foundry::test_temp_directory() / "jaibite_roundtrip_test.jbite").string();
             auto engine_a = fresh_engine(false, {});
             engine_a->jaibite("int x = 6; x * 7;").save(path);
             auto engine_b = fresh_engine(true, {});

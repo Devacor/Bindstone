@@ -7,6 +7,7 @@
 #define PARSE_KEY_BENCH_BASELINE 0
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
@@ -280,7 +281,7 @@ public:
 			test(std::string("execute_file_hit_") + backendName, [this, backend, backendName]() {
 				std::fprintf(stderr, "\n[execute_file re-execute (warm) + raw component costs, %s]\n", backendName);
 				namespace fs = std::filesystem;
-				fs::path dir = fs::temp_directory_path() / "jai_parse_key_bench";
+				fs::path dir = jai::foundry::test_temp_directory() / "jai_parse_key_bench";
 				fs::create_directories(dir);
 				auto eng = engine_for(backend);
 				for (size_t s : {size_t(4096), size_t(32768)}) {

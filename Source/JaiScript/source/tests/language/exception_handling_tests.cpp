@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <filesystem>
 #include <fstream>
@@ -300,7 +301,7 @@ public:
             // execute_file must attribute the script to its path: every AST node's
             // location carries the file, observable via the captured stack trace.
             auto write_tmp = [](const std::string& name, const std::string& body) {
-                std::filesystem::path p = std::filesystem::temp_directory_path() / name;
+                std::filesystem::path p = jai::foundry::test_temp_directory() / name;
                 std::ofstream(p) << body;
                 return p.string();
             };
@@ -322,6 +323,8 @@ public:
 
             std::filesystem::remove(fileA);
             std::filesystem::remove(fileB);
+            check(!std::filesystem::equivalent(std::filesystem::path(fileA).parent_path(), std::filesystem::temp_directory_path()),
+                  "File fixtures must live in a process-owned directory, not the shared temp root");
         });
 
         test("format_stack_trace_lists_frames", [this]() {

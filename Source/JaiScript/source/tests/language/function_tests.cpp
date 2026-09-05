@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <filesystem>
@@ -828,7 +829,7 @@ public:
 
         test("duplicate_warning_silent_for_include_composition", [&, this]() {
             namespace fs = std::filesystem;
-            auto dir = fs::temp_directory_path();
+            auto dir = jai::foundry::test_temp_directory();
             auto file = dir / "fn_dupwarn_lib.jai";
             { std::ofstream out(file); out << "function f(a) { return 1; }\n"; }
 

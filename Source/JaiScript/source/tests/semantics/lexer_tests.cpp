@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/jaiscript_fwd.hpp>
@@ -255,7 +256,7 @@ public:
             // matches the same script run without a BOM.
             namespace fs = std::filesystem;
             const std::string script = "print(\"file\"); 7 + 5;";
-            fs::path path = fs::temp_directory_path() / "jai_bom_lexer_test.jai";
+            fs::path path = jai::foundry::test_temp_directory() / "jai_bom_lexer_test.jai";
             {
                 std::ofstream out(path, std::ios::binary);
                 out << "\xEF\xBB\xBF" << script;

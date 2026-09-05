@@ -879,6 +879,8 @@ namespace jai {
         // the main thread and outside regions): class_definition::register_instance parks
         // worker-created instances there, the join registers the survivors.
         std::vector<std::weak_ptr<class_instance>>* parallel_pending_registrations();
+        // Cold class-reload boundary: recover surviving worker copies after a failed join.
+        void recover_parallel_registrations();
 
         // Script errors surfacing at the C++ boundary (converted callbacks, signal
         // receivers) have no error-value channel and must not throw into arbitrary game

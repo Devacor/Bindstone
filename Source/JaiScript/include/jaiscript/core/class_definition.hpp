@@ -5,6 +5,7 @@
 
 #include "engine.hpp"
 #include "native_cast.hpp"
+#include <jaiscript/detail/fault_injection.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
@@ -1769,6 +1770,7 @@ public:
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
                         engine* engine_ref,
                         bool structurally_identical = false) {
+        if (engine_ref) { engine_ref->recover_parallel_registrations(); }
         field_defaults_cache_valid_ = false; ++defaults_version_;
         field_slots_current_ = false;
         ++reflection_generation_;
@@ -1970,14 +1972,18 @@ public:
             }
         }
         auto lock = registry_lock();
-        if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
-        instances_.push_back(std::move(instance));
+        register_instance_after_region(std::move(instance));
     }
 
     // The join (main thread, region over: the plain unlocked path): a worker's surviving instance
-    void register_instance_after_region(std::weak_ptr<class_instance> instance) {
-        if (auto live = instance.lock()) { live->registry_slot_ = instances_.size(); }
+    void register_instance_after_region(std::weak_ptr<class_instance> instance,
+                                        const detail::fault_injection* faults = nullptr) {
+        const size_t index = instances_.size();
+        if (faults) { faults->checkpoint("registry.instance_append", index); }
         instances_.push_back(std::move(instance));
+        // Publish the index only after the vector owns the entry. A failed append
+        // must leave the instance unregistered, not pointing at a later survivor.
+        if (auto live = instances_.back().lock()) { live->registry_slot_ = index; }
     }
 
     // O(1) swap-remove by the instance's remembered index. Called from ~class_instance:

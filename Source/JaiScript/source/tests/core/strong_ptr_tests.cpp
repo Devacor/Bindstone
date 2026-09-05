@@ -3,6 +3,8 @@
 #include <jaiscript/detail/thread_pool.hpp>
 #include <atomic>
 #include <chrono>
+#include <future>
+#include <string_view>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -375,11 +377,137 @@ public:
     }
 };
 
+namespace thread_pool_fault_detail {
+
+struct injected_failure final : std::exception {
+    const char* what() const noexcept override { return "Injected thread_pool failure"; }
+};
+
+struct injection {
+    std::string_view point;
+    size_t index = 0;
+    size_t hits = 0;
+
+    jai::detail::fault_injection hook() {
+        return {this, [](void* context, const char* point, size_t index) {
+            auto& self = *static_cast<injection*>(context);
+            if (self.point == point && self.index == index) {
+                ++self.hits;
+                throw injected_failure{};
+            }
+        }};
+    }
+};
+
+} // namespace thread_pool_fault_detail
+
 class thread_pool_tests : public suite {
 public:
     thread_pool_tests() : suite("thread_pool") {}
 
     void forge_tests() override {
+        test("partial_batch_failure_wakes_accepted_tasks", [this]() {
+            // Baseline lacks the exceptional wake. Let its worker park before the
+            // injected partial enqueue, then observe a BOUNDED completion wait.
+            // A rescue submission wakes/drains accepted work before assertions, so
+            // this regression fails red without hanging or leaking captured storage.
+            for (size_t fail_at : {size_t{1}, size_t{2}, size_t{3}}) {
+                thread_pool pool(1);
+                pool.submit([] {});
+                pool.wait_idle();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+                std::atomic<size_t> completed{0};
+                std::promise<void> accepted_done;
+                auto done = accepted_done.get_future();
+                auto storage = std::make_shared<int>(42);
+                std::weak_ptr<int> storage_lifetime = storage;
+                std::vector<std::pair<size_t, thread_pool::task_type>> batch;
+                for (size_t i = 0; i < 4; ++i) {
+                    batch.emplace_back(0, [&, keep_alive = storage]() mutable {
+                        keep_alive.reset();
+                        if (completed.fetch_add(1) + 1 == fail_at) { accepted_done.set_value(); }
+                    });
+                }
+                thread_pool_fault_detail::injection injection{"pool.batch_enqueue", fail_at};
+                auto faults = injection.hook();
+                bool caught_original = false;
+                try {
+                    pool.submit_pinned_batch(batch.data(), batch.size(), &faults);
+                } catch (const thread_pool_fault_detail::injected_failure& error) {
+                    caught_original = std::string_view(error.what()) == "Injected thread_pool failure";
+                }
+                batch.clear();   // drop never-submitted captures before testing worker ownership
+                storage.reset();
+                const bool completed_without_rescue =
+                    done.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready;
+                if (!completed_without_rescue) {
+                    pool.submit_to(0, [] {});   // known-good wake, even on the broken baseline
+                }
+                pool.wait_idle();
+                check(caught_original, "submit must rethrow the original failure");
+                check_eq(size_t{1}, injection.hits);
+                check_eq(fail_at, completed.load(), "only the accepted prefix may execute");
+                check(storage_lifetime.expired(), "no accepted task may retain region storage after completion");
+                check(completed_without_rescue, "accepted prefix must wake without a later submission");
+
+                std::atomic<bool> following_done{false};
+                std::pair<size_t, thread_pool::task_type> following{0, [&]() { following_done = true; }};
+                pool.submit_pinned_batch(&following, 1);
+                pool.wait_idle();
+                check(following_done.load(), "following batch must execute normally");
+            }
+        });
+
+        test("first_batch_enqueue_failure_accepts_nothing", [this]() {
+            thread_pool pool(1);
+            std::atomic<int> completed{0};
+            std::pair<size_t, thread_pool::task_type> batch{0, [&]() { ++completed; }};
+            thread_pool_fault_detail::injection injection{"pool.batch_enqueue", 0};
+            auto faults = injection.hook();
+            bool caught_original = false;
+            try {
+                pool.submit_pinned_batch(&batch, 1, &faults);
+            } catch (const thread_pool_fault_detail::injected_failure&) {
+                caught_original = true;
+            }
+            pool.wait_idle();   // there was no accepted task to leave outstanding
+            check(caught_original);
+            check_eq(size_t{1}, injection.hits);
+            check_eq(0, completed.load());
+            pool.submit_to(0, [&]() { ++completed; });
+            pool.wait_idle();
+            check_eq(1, completed.load());
+        });
+
+        test("constructor_startup_failure_joins_partial_threads", [this]() {
+            // RUN THIS TEST ALONE IN THE BASELINE EXECUTABLE: the unfixed constructor
+            // destroys a joinable std::thread when thread_start index 1 throws, and
+            // std::terminate kills that process. After the fix every site is catchable.
+            const std::pair<const char*, size_t> cases[] = {
+                {"pool.worker_storage", 0},
+                {"pool.worker_create", 0}, {"pool.worker_create", 1}, {"pool.worker_create", 2},
+                {"pool.thread_start", 0}, {"pool.thread_start", 1}, {"pool.thread_start", 2}
+            };
+            for (const auto& [point, index] : cases) {
+                thread_pool_fault_detail::injection injection{point, index};
+                auto faults = injection.hook();
+                bool caught_original = false;
+                try {
+                    thread_pool broken(3, &faults);
+                } catch (const thread_pool_fault_detail::injected_failure& error) {
+                    caught_original = std::string_view(error.what()) == "Injected thread_pool failure";
+                }
+                check(caught_original, "construction must rethrow the original failure after joining");
+                check_eq(size_t{1}, injection.hits);
+                thread_pool following(1);
+                std::atomic<bool> completed{false};
+                following.submit_to(0, [&]() { completed = true; });
+                following.wait_idle();
+                check(completed.load(), "a following pool must remain usable");
+            }
+        });
+
         test("construction_and_teardown", [this]() {
             thread_pool one(1);
             check_eq(one.worker_count(), size_t(1));

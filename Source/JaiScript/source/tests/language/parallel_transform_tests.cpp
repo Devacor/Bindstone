@@ -851,6 +851,74 @@ public:
 			check_eq((int64_t)7, v[3].as_int());
 		});
 
+		test("transform_returns_struct_copies_and_typed_zip_out", [this]() {
+			// parallel_transform IS the zip `o = fn(x)`: an object result is the ordinary store of a
+			// call result (a temporary; the return-site rule copies anything fn could name), so
+			// structs come out, independent of the source, on both backends
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class P { int a = 1; string s = "x"; array<int> xs = [1]; P() {} P(int v) { a = v; xs = [v, v]; } }
+				array<P> ps = [];
+				for (int i = 0; i < 200; i++) { ps.push(P(i)); }
+				P identity(P p) { return p; }
+				P doubled(P p) { p.a = p.a * 2; p.xs.push(9); return p; }
+				var out1 = parallel_transform(ps, identity);
+				var out2 = parallel_transform(ps, doubled);
+				out1[3].a = -1; out1[3].xs.push(77); out1[3].s = "changed";
+				int sum = 0; for (auto& p : ps) { sum = sum + p.a + p.xs.size(); }
+				return [out1.size(), out1[7].a, out2[7].a, out2[7].xs.size(), ps[3].a, ps[3].xs.size(), ps[3].s, sum, out1[7].s];
+			)");
+			const auto& v = r.as_array();
+			check_eq((int64_t)200, v[0].as_int());
+			check_eq((int64_t)7, v[1].as_int());
+			check_eq((int64_t)14, v[2].as_int());
+			check_eq((int64_t)3, v[3].as_int());
+			check_eq((int64_t)3, v[4].as_int());
+			check_eq((int64_t)2, v[5].as_int());
+			check_eq(std::string("x"), v[6].as<std::string>());
+			check_eq((int64_t)(199 * 200 / 2 + 200 * 2), v[7].as_int());
+			check_eq(std::string("x"), v[8].as<std::string>());
+		});
+
+		test("grafted_fn_body_keeps_return_conversion_and_early_returns", [this]() {
+			// A read-only fn's body runs grafted into the chunk loop (no call per element): a
+			// converting typed return still converts (float from an int expression widens, string
+			// takes anything), a proven same-type return lands as is, `var` stays dynamic, an early
+			// top-level return picks its value, a return inside a nested loop takes the call form
+			auto e = make_engine();
+			e->parallel_thread_count(3);
+			auto r = e->execute(R"(
+				class P { float a = 0.0; int n = 0; P() {} P(int v) { a = v * 0.5; n = v; } }
+				array<P> ps = [];
+				for (int i = 0; i < 90; i++) { ps.push(P(i)); }
+				float widened(P p) { return p.n * 3; }
+				float same(P p) { return p.a; }
+				string text(P p) { return p.n; }
+				var dynamic(P p) { if (p.n % 2 == 0) { return p.n; } return p.a; }
+				int early(P p) { if (p.n < 10) { return -1; } if (p.n < 20) { return -2; } return p.n; }
+				int nested(P p) { for (int k = 0; k < 5; k++) { if (k == p.n % 5) { return k * 100 + p.n; } } return 0; }
+				var t = parallel_transform(ps, widened);
+				var s = parallel_transform(ps, same);
+				var x = parallel_transform(ps, text);
+				var d = parallel_transform(ps, dynamic);
+				var y = parallel_transform(ps, early);
+				var z = parallel_transform(ps, nested);
+				return [t[7], s[7], x[7], d[6], d[7], y[5], y[15], y[25], z[13], z[89]];
+			)");
+			const auto& v = r.as_array();
+			check_true(v[0].is_float()); check_near(21.0, v[0].as<double>(), 1e-12);
+			check_true(v[1].is_float()); check_near(3.5, v[1].as<double>(), 1e-12);
+			check_true(v[2].is_string()); check_eq(std::string("7"), v[2].as<std::string>());
+			check_true(v[3].is_int()); check_eq((int64_t)6, v[3].as_int());
+			check_true(v[4].is_float()); check_near(3.5, v[4].as<double>(), 1e-12);
+			check_eq((int64_t)-1, v[5].as_int());
+			check_eq((int64_t)-2, v[6].as_int());
+			check_eq((int64_t)25, v[7].as_int());
+			check_eq((int64_t)313, v[8].as_int());
+			check_eq((int64_t)489, v[9].as_int());
+		});
+
 		test("store_into_parameter_copy_leaves_source_unchanged", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

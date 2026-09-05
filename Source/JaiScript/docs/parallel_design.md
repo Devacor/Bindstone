@@ -147,21 +147,30 @@ element, the previous shape). Floor benchmark after (vm, us per region, parallel
 N=32 14 vs 7.8, N=256 45 vs 60, N=2048 160 vs 495; an inline field-update body at N=2048
 runs 115 vs 427.
 
-**parallel_transform is the same loop.** The transform's worker runs the same in-script
-chunk loop over a cursor into the source (`k_parallel_chunk_transform`: fn called in-loop per
-element, the result handed to `op_parallel_emit`, which runs the fork's result contract - value
-semantics, no alias of a worker-private snapshot - and writes the worker's slice of the
-pre-sized output; a native on the interpreter). fn's by-value element parameter binds the
-element IN PLACE on the worker when the admission walk proved the body only reads it
-(`element_mutated`: no store through it, no mutating method on an element-rooted chain, and
-no whole use - `element_reach_all`); any of those keeps the private copy, so a mutating fn
-still never touches the source. The same rule lets a by-value `parallel_for` body that only
-reads bind in place. Instances a pool worker constructs or copies no longer register in the
-class registry under the region lock: they park in the worker's pending list and the join
-registers the survivors (a copy that died meanwhile just expires; hot reload still migrates
-everything that lived). Transform over 40k Vec3 (`v.x * v.y`): 25 -> 2-3 ms per region
-against 33 serial; over the deep node shape 241 -> 86 against 252. Not yet admitted:
-constructing objects inside a body and returning an object from fn (the 'structs out' pass).
+**parallel_transform is the zip.** `parallel_transform(xs, fn)` is
+`parallel_for (auto& x, auto& o : xs, out) { o = fn(x); }` over a fresh output of `xs.size()`
+nulls, and nothing else: one region core (`run_region`) runs both statements, the output is
+the zip's second array (allocated by the call, so it skips the exclusivity walk the caller's
+arrays get), the result is the ordinary store of a call result (a temporary; the return-site
+rule already copies anything fn could name, so objects come out and never alias the source),
+and there is no per-element sink, opcode or result contract of its own. The call itself is
+gone too: when fn only reads its one by-value parameter (the admission verdict below) and has
+no return inside a nested loop, fn's BODY is grafted into the chunk loop at first use - the
+body cloned through the jaibite serializer, its parameter bound by reference to the source
+cursor (the in-place rule), each top-level `return e` rewritten to `{ o = cast<T>(e); continue; }`
+with the cast dropped where the checker's return proof already says the value is the declared
+type (`auto`/`var` returns store as is), a bare `return` to `continue` - built once per fn
+(cached on the engine, keyed by the body) and compiled once per worker like any chunk
+wrapper. A fn that mutates its parameter, returns from a nested loop or takes a weight
+partner keeps the call form (`o = __jai_parallel_fn(x)` in the same loop), so a mutating fn
+still never touches the source. Instances a pool worker constructs or copies no longer
+register in the class registry under the region lock: they park in the worker's pending list
+and the join registers the survivors (a copy that died meanwhile just expires; hot reload
+still migrates everything that lived). Cost: the transform is the inline zip plus the fresh
+output. 40k Vec3 -> float (`v.x * v.y`, vm, per region): inline zip 1.5, transform 1.9-2.0 (the
+call form was 2.1-2.3, the previous emit path 2.9-3.2), of which the 40k-null allocation and
+its release are the 0.35 difference; serial 33. The deep node shape runs 78 against 252.
+Not yet admitted: constructing objects inside a body (the 'structs out' pass).
 
 **The zip form.** `parallel_for (auto& v, auto& o : vecs, outs) { o.x = v.x * v.y; }` walks
 further arrays of the same length in lockstep: thread n owns segment n of every array, so the
@@ -174,8 +183,7 @@ different length, the range itself, or a non-array are load-time errors
 (`parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same
 length)`). A by-value loop variable keeps its copy per iteration unless the body only reads (the
 in-place rule above, decided jointly for all loop variables). 40k Vec3 in, 40k Vec3 out (three
-field writes): 4-5 ms per region against 34 serial; a float output 2 ms against the transform's
-3 and 38 serial. jaibite 13 carries the extra loop variables and arrays.
+field writes): 4-5 ms per region against 34 serial; a float output 1.5 ms against 38 serial. jaibite 13 carries the extra loop variables and arrays.
 
 **Body control flow.** The body is the chunk loop's body: a top-level `continue` reaches
 the loop's advance on its own and a top-level `return` (any value) is rewritten to `continue`

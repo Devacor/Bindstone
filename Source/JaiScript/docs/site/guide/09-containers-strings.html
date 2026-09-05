@@ -256,7 +256,7 @@ caught: format spec &#x27;:.2f&#x27; does not apply to string value
 3.14 vs 3.141590</code></pre></div>
 <p>The rules: <code>.N</code> means <em>fixed</em> (bare or with <code>f</code>; <code>:f</code> alone is 6 decimals), <code>^</code> centering puts the odd fill char on the right, and a malformed spec (<code>${x:q}</code>, <code>${x:06}</code>: no zero-pad flag, spell it <code>0&gt;N</code>) is rejected <strong>at lex time</strong> with <code>Unsupported format spec &#x27;:q&#x27; in template string</code>. The spec starts at a top-level <code>:</code> that closes no ternary <code>?</code>, so <code>${a ? b : c}</code> stays an expression and <code>${m[&quot;k&quot;]:6}</code> / map-literal colons just work; parenthesize a ternary to give it a spec. Splices desugar to the engine-core builtin <code>format_value(value, &quot;spec&quot;)</code>, available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>.</p>
 <h2 id="parallel-transform">Parallel loops: <code>parallel_for</code> and <code>parallel_transform</code><a class="hlink" href="#parallel-transform" aria-label="link">&#8203;</a></h2>
-<p>Two ways to put loop-shaped work on every core with <strong>deterministic results</strong>: the same output at every thread count, byte-identical to the serial loop. <code>parallel_for (auto&amp; x : arr) { &hellip; }</code> mutates elements in place, fork-join style; <code>parallel_transform(arr, fn)</code> maps a function over an array and returns a <strong>new</strong> array with <code>out[i] = fn(arr[i])</code>. <code>thread_count()</code> reports the worker count.</p>
+<p><code>parallel_for</code> runs a loop body over the elements of an array on every core with <strong>deterministic results</strong>: the same output at every thread count, byte-identical to the serial loop. The loop variable is the element, so <code>auto&amp;</code> mutates it in place. <code>parallel_transform(arr, fn)</code> returns a <strong>new</strong> array with <code>out[i] = fn(arr[i])</code>; it is the same loop in a different spelling, as the section below shows. <code>thread_count()</code> reports the worker count.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var nums = [1, 2, 3, 4, 5, 6, 7, 8];
 parallel_for (auto&amp; x : nums) {
     x = x * x;                    // each element mutated in place, across workers
@@ -267,6 +267,38 @@ int inc(int v) { return v + 1; }
 print(&quot;mapped:  {}&quot;, to_json(parallel_transform(nums, inc)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">squares: [1,4,9,16,25,36,49,64]
 mapped:  [2,5,10,17,26,37,50,65]</code></pre></div>
+<p><strong>The zip form</strong> walks several arrays of the same length in lockstep, one loop variable per array. Worker <em>n</em> owns segment <em>n</em> of every array, so a pre-allocated array of output structs is written in place: no construction per element, no result marshalling. This is the emitter shape, one input array and one output array of the same length, and the preferred way to produce several values per element.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+class Sample { float pos = 0.0; bool moving = false; }
+array&lt;Body&gt; bodies = [];
+array&lt;Sample&gt; samples = [];
+for (int i = 0; i &lt; 6; i++) { bodies.push(Body(i * 10.0, i % 3 - 1.0)); samples.push(Sample()); }
+
+parallel_for (auto&amp; b, auto&amp; s : bodies, samples) {   // one loop variable per array, walked in lockstep
+    b.x += b.vx * 0.5;                                 // the input mutated in place
+    s.pos = b.x;                                       // the pre-allocated output written in place
+    s.moving = b.vx != 0.0;
+}
+for (auto&amp; s : samples) { print(`${s.pos:.1f} ${s.moving}`); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">-0.5 true
+10.0 false
+20.5 true
+29.5 true
+40.0 false
+50.5 true</code></pre></div>
+<p>Arrays of different length, the range itself as a zipped array, or a non-array are load-time errors: <code>parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)</code>.</p>
+<p><strong><code>parallel_transform</code> is that zip.</strong> <code>parallel_transform(xs, fn)</code> is <code>parallel_for (auto&amp; x, auto&amp; o : xs, out) { o = fn(x); }</code> over a fresh output of <code>xs.size()</code> slots, and it costs exactly that loop plus the output. When <code>fn</code> only reads its parameter, its body runs inlined in the loop with the parameter bound to the element in place, so there is no call and no copy per element. A <code>fn</code> that mutates its parameter works on a private copy, so the source array is never touched either way. Any result type works, objects included: the returned array holds copies that alias nothing.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+array&lt;Body&gt; bodies = [];
+for (int i = 0; i &lt; 4; i++) { bodies.push(Body(i * 10.0, 1.0)); }
+
+float next_x(Body b) { return b.x + b.vx; }              // reads its parameter: the body runs inlined in the loop
+Body stepped(Body b) { b.x += b.vx; return b; }         // mutates its copy: the source is untouched
+
+var xs = parallel_transform(bodies, next_x);
+var moved = parallel_transform(bodies, stepped);
+print(`${to_json(xs)} moved ${moved[3].x:.1f} source ${bodies[3].x:.1f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1.0,11.0,21.0,31.0] moved 31.0 source 30.0</code></pre></div>
 <p>An optional third argument, <code>parallel_transform(arr, fn, weight_fn)</code>, balances chunks by per-element effort (e.g. weigh strings by length):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var texts = [&quot;7&quot;, &quot;42&quot;, &quot;1999&quot;, &quot;3&quot;, &quot;250&quot;];
 int parse_one(string s) {                            // digits -&gt; int, no host calls
@@ -278,6 +310,16 @@ float w(string s) { return s.size(); }               // heavier strings, fatter 
 var parsed = parallel_transform(texts, parse_one, w);
 print(&quot;parsed: {}&quot;, to_json(parsed));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parsed: [7,42,1999,3,250]</code></pre></div>
+<p><strong>Control flow in the body.</strong> The body is the loop&#x27;s body: <code>continue</code> moves to the next element, and so does a <code>return</code> written at the body&#x27;s top level (iterations are independent, there is nothing to return to). A loop-level <code>break</code> is rejected at load time with <code>parallel_for: &#x27;break&#x27; is not allowed in a parallel body (iterations are independent; use &#x27;continue&#x27; for the next element)</code>. Inside a nested loop or <code>switch</code>, <code>break</code> and <code>continue</code> keep their usual meaning.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var words = [&quot;keep&quot;, &quot;&quot;, &quot;skip&quot;, &quot;keep&quot;, &quot;&quot;, &quot;keep&quot;];
+array&lt;int&gt; kept = [0, 0, 0, 0, 0, 0];
+parallel_for (auto&amp; w, auto&amp; k : words, kept) {
+    if (w == &quot;&quot;) { continue; }        // next element
+    if (w == &quot;skip&quot;) { return; }      // also the next element: the body is the loop&#x27;s body
+    k = w.size();
+}
+print(&quot;{}&quot;, to_json(kept));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[4,0,0,4,0,4]</code></pre></div>
 <p><strong>Captured reads:</strong> the body may <em>read</em> enclosing globals: scalars, strings, and value-semantic containers. Every worker sees the content as of the call (the &quot;barrier&quot;), identical at every worker count. Provisioning is automatic and tiered: an all-primitive container touched only by subscript reads is a zero-copy <em>borrow</em> (raw reads of the shared grid; nothing is copied at all); anything else (string tables, nested containers, iterated or whole-value reads) is copied once per worker at the barrier and charged to <code>memory_cap</code>. This is what makes the &quot;shared read-only grid&quot; renderer shape cheap:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var gw = 4;
 var grid = [];                       // the shared input: three rows of gw cells
@@ -291,8 +333,8 @@ var row_indices = [0, 1, 2];
 var sums = parallel_transform(row_indices, row_sum);   // grid rides along for free
 print(&quot;row sums: {}&quot;, to_json(sums));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">row sums: [6,22,38]</code></pre></div>
-<p><strong>Writes to enclosing state are errors, always</strong>. The loop variable&#x27;s element (in <code>parallel_for</code>) is the only thing a body may mutate. Assigning to captured state in any shape (<code>g = ...</code>, <code>g[i] = ...</code>, compound stores, <code>g.push(...)</code> (any mutating or unrecognized method on a captured value), <code>var&amp; r = g</code> aliases, passing captured state to a by-reference parameter, or <code>for (auto&amp; v : g)</code>) raises an error like <code>parallel_for: body writes enclosing state &#x27;total&#x27; at 5:9</code>, as do host calls outside the pure-math/<code>to_string</code> whitelist, lambdas, classes, <code>yield</code>, and non-value-semantic elements, captures, or results (objects, functions, pointers). A throwing element fails the whole call with the <strong>first error in iteration order</strong>, so failures are as deterministic as results. Calls to other script functions (including recursion) and builtin container/string methods are fine.</p>
-<p><strong>The pair idiom</strong> is the standard approach where capture isn&#x27;t enough. Distinct per-chunk inputs or multi-value outputs travel as pair-shaped elements <code>[input..., tag]</code> and come back as <code>[tag, outputs...]</code> collected from the result in iteration order (a software renderer chunking rays into per-chunk records is the canonical shape). Use captured reads for shared inputs, pairs for everything per-chunk.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/08-coroutines.html"><span>&larr; previous</span>Coroutines</a><a class="next" rel="next" href="../guide/10-modules.html"><span>next &rarr;</span>Modules: include vs import</a></nav></article>
+<p><strong>Writes to enclosing state are errors, always</strong>. The elements behind the loop variables are the only things a body may mutate. Assigning to captured state in any shape (<code>g = ...</code>, <code>g[i] = ...</code>, compound stores, <code>g.push(...)</code> (any mutating or unrecognized method on a captured value), <code>var&amp; r = g</code> aliases, passing captured state to a by-reference parameter, or <code>for (auto&amp; v : g)</code>) raises an error like <code>parallel_for: body writes enclosing state &#x27;total&#x27; at 3:33</code>. Objects cannot be captured at all (<code>parallel_for: member access reaches captured state &#x27;cfg&#x27; (captured reads are read-only, and objects cannot be captured) at 4:45</code>); pass per-element object state through the arrays instead. Host calls outside the pure-math/<code>to_string</code> whitelist, lambdas, class definitions and <code>yield</code> are rejected too. A throwing element fails the whole call with the <strong>first error in iteration order</strong>, so failures are as deterministic as results. Calls to other script functions (including recursion) and builtin container/string methods are fine.</p>
+<p><strong>Where the output shape is not known up front</strong>, the pair idiom still serves: elements shaped <code>[input..., tag]</code> come back from <code>parallel_transform</code> as <code>[tag, outputs...]</code>, collected from the result in iteration order. Use captured reads for shared inputs, a zipped output array for per-element results, pairs only for variable-shaped ones.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/08-coroutines.html"><span>&larr; previous</span>Coroutines</a><a class="next" rel="next" href="../guide/10-modules.html"><span>next &rarr;</span>Modules: include vs import</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

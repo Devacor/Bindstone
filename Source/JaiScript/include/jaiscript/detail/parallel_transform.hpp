@@ -186,6 +186,10 @@ namespace jai::detail {
         // and provisioned per worker: one script entry per chunk, fn called in-loop per element,
         // results emitted into the worker's output slice
         std::shared_ptr<function_decl> transform_chunk_wrapper;
+        // Per fn (keyed by its body): fn's body grafted into the chunk loop - `out = fn(in)` with
+        // zero calls per element - when fn only reads its parameter and returns only from its
+        // top level; otherwise the call-form skeleton above. Hot reload mints a fresh body.
+        std::unordered_map<const void*, std::shared_ptr<function_decl>> transform_inline_wrappers;
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
         // Instrumentation: how the most recent region provisioned each captured name

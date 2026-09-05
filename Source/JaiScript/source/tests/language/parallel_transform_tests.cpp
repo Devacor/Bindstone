@@ -789,6 +789,68 @@ public:
 			check_eq((uint32_t)0, vecs.unchecked_array_node()->live_elem_refs);
 		});
 
+		test("read_only_fn_binds_in_place_mutating_shapes_still_copy", [this]() {
+			// A by-value fn parameter the body only reads binds the element in place on the worker
+			// (unobservable, no copy); any write through it, a by-ref hand-off, a mutating field
+			// method or a whole use keeps the private copy - the source never changes either way.
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class P { int a = 1; string s = "x"; array<int> xs = [1]; P() {} P(int v) { a = v; xs = [v]; } }
+				array<P> ps = [];
+				for (int i = 0; i < 200; i++) { ps.push(P(i)); }
+				int reads(P p) { return p.a + p.xs[0] + p.s.size(); }
+				int writes(P p) { p.a = p.a + 1000; p.s = "w"; return p.a; }
+				void bump(P& q) { q.a = q.a + 5000; }
+				int by_ref_helper(P p) { bump(p); return p.a; }
+				int field_mutator(P p) { p.xs.push(9); return p.xs.size(); }
+				int whole(P p) { var q = p; q.a = q.a + 1; return q.a; }   // a whole use keeps the copy
+				var r1 = parallel_transform(ps, reads);
+				var r2 = parallel_transform(ps, writes);
+				var r3 = parallel_transform(ps, by_ref_helper);
+				var r4 = parallel_transform(ps, field_mutator);
+				var r5 = parallel_transform(ps, whole);
+				int sum_a = 0; int sum_xs = 0;
+				for (auto& p : ps) { sum_a = sum_a + p.a; sum_xs = sum_xs + p.xs.size(); }
+				return [r1[7], r2[7], r3[7], r4[7], r5[7], sum_a, sum_xs, ps[3].a, ps[3].xs.size(), ps[7].s];
+			)");
+			const auto& v = r.as_array();
+			check_eq((int64_t)(7 + 7 + 1), v[0].as_int());
+			check_eq((int64_t)1007, v[1].as_int());
+			check_eq((int64_t)5007, v[2].as_int());
+			check_eq((int64_t)2, v[3].as_int());
+			check_eq((int64_t)8, v[4].as_int());
+			check_eq((int64_t)(199 * 200 / 2), v[5].as_int());
+			check_eq((int64_t)200, v[6].as_int());
+			check_eq((int64_t)3, v[7].as_int());
+			check_eq((int64_t)1, v[8].as_int());
+			check_eq(std::string("x"), v[9].as<std::string>());
+		});
+
+		test("worker_copied_instances_register_at_the_join", [this]() {
+			// An instance a worker copies (a by-value store into its element) parks in the worker's
+			// pending list and joins the class registry after the region: a later hot reload must
+			// still migrate it (the registry is how migration finds live instances)
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			e->execute(R"(
+				class Leaf { int v = 0; Leaf() {} Leaf(int n) { v = n; } }
+				class Node { Leaf a = Leaf(0); Leaf b = Leaf(0); Node() {} Node(int n) { a = Leaf(n); b = Leaf(-1); } }
+				array<Node> nodes = [];
+				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); }
+				parallel_for (auto& n : nodes) { n.b = n.a; }
+			)");
+			e->execute(R"(
+				class Leaf { int v = 0; int extra = 7; Leaf() {} Leaf(int n) { v = n; } }
+			)");
+			auto r = e->execute("return [nodes[5].b.v, nodes[5].b.extra, nodes[99].b.extra, nodes[5].a.extra];");
+			const auto& v = r.as_array();
+			check_eq((int64_t)5, v[0].as_int());
+			check_eq((int64_t)7, v[1].as_int());
+			check_eq((int64_t)7, v[2].as_int());
+			check_eq((int64_t)7, v[3].as_int());
+		});
+
 		test("store_into_parameter_copy_leaves_source_unchanged", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

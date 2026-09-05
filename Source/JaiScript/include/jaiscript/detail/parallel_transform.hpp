@@ -25,6 +25,7 @@
 #include <vector>
 
 namespace jai {
+    class class_instance;
     class ast_node;
     class engine;
     class environment;
@@ -45,12 +46,22 @@ namespace jai::detail {
         struct entry {
             std::thread::id id;
             execution_limits* limits = nullptr;
+            // Pool workers only (null for main's own chunk): instances this worker constructs
+            // or copies register HERE instead of in the class registry - no lock on the
+            // worker; the join registers the survivors, a copy that died meanwhile just expires
+            std::vector<std::weak_ptr<class_instance>>* pending_registrations = nullptr;
         };
         std::vector<entry> entries;
 
         execution_limits* find(std::thread::id tid) const noexcept {
             for (const auto& e : entries) {
                 if (e.id == tid) { return e.limits; }
+            }
+            return nullptr;
+        }
+        std::vector<std::weak_ptr<class_instance>>* find_pending(std::thread::id tid) const noexcept {
+            for (const auto& e : entries) {
+                if (e.id == tid) { return e.pending_registrations; }
             }
             return nullptr;
         }
@@ -119,6 +130,13 @@ namespace jai::detail {
         std::vector<uint64_t> element_reached_members;
         std::vector<uint64_t> element_reached_whole;
         bool element_reach_all = false;
+        // A store or a mutating method call through the element (member store, element
+        // replacement, a container/string mutator on an element-rooted chain, an alias of it).
+        // A by-value element parameter whose body neither writes through it nor uses it whole
+        // (element_reach_all) binds the element IN PLACE on the worker: every remaining use is
+        // a member read, so the copy is unobservable (Dev: a copy we can prove away goes).
+        bool element_mutated = false;
+        bool transform_cursor = false;   // the transform delivers elements through a chunk cursor (set once its chunk loop lands)
     };
 
     // One barrier-admitted script-class method, provisioned per worker. The method value
@@ -164,6 +182,10 @@ namespace jai::detail {
         bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         std::unordered_map<const void*, parallel_admission> admission_cache;
+        // parallel_transform's chunk loop (k_parallel_chunk_transform), parsed once per engine
+        // and provisioned per worker: one script entry per chunk, fn called in-loop per element,
+        // results emitted into the worker's output slice
+        std::shared_ptr<function_decl> transform_chunk_wrapper;
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
         // Instrumentation: how the most recent region provisioned each captured name

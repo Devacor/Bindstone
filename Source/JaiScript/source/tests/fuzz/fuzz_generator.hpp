@@ -33,6 +33,7 @@ namespace jai::fuzz {
 		std::string type_text; // "int", "int&", "var", "var&", "auto", "string", "C0", "C0&"
 		vt type = vt::any;
 		bool is_ref = false;
+		int class_idx = -1;    // when type == obj: a by-value class parameter (the read-only elision's shape)
 	};
 
 	struct func_info {
@@ -538,8 +539,25 @@ namespace jai::fuzz {
 			std::string out = f.name + "(";
 			for (size_t i = 0; i < f.params.size(); ++i) {
 				if (i) out += ", ";
-				out += expr(f.params[i].type, 1);
+				out += f.params[i].class_idx >= 0 ? obj_of_class(f.params[i].class_idx) : expr(f.params[i].type, 1);
 			}
+			return out + ")";
+		}
+		// An object of exactly this class (a variable in scope, else a construction) - mostly;
+		// one draw in eight hands over any object so the exact-class rejection stays exercised
+		std::string obj_of_class(int class_idx) {
+			if (class_idx < 0 || static_cast<size_t>(class_idx) >= classes_.size() || rng_.chance(12)) { return obj_expr(1); }
+			if (rng_.chance(60)) {
+				std::vector<const var_info*> same;
+				for (const auto& scope : scopes_) {
+					for (const auto& v : scope) { if (v.type == vt::obj && v.class_idx == class_idx) { same.push_back(&v); } }
+				}
+				if (!same.empty()) { return spell(same[rng_.below(static_cast<uint32_t>(same.size()))]); }
+			}
+			const class_info& ci = classes_[static_cast<size_t>(class_idx)];
+			int arity = ci.ctor_arities.empty() ? 0 : ci.ctor_arities[rng_.below(static_cast<uint32_t>(ci.ctor_arities.size()))];
+			std::string out = ci.name + "(";
+			for (int i = 0; i < arity; ++i) { if (i) out += ", "; out += int_expr(1); }
 			return out + ")";
 		}
 
@@ -760,13 +778,58 @@ namespace jai::fuzz {
 
 		// ---------- functions ----------
 		void emit_function() {
-			switch (pick_weighted({30, 15, 18, 12, 25})) {
+			switch (pick_weighted({30, 15, 18, 12, 25, classes_.empty() ? 0u : 25u})) {
 				case 0: emit_simple_function(); break;
 				case 1: emit_recursive_function(); break;
 				case 2: emit_ref_mutator(); break;
 				case 3: emit_var_ref_mutator(); break;
-				default: emit_coroutine(); break;
+				case 4: emit_coroutine(); break;
+				default: emit_object_reader(); break;
 			}
+		}
+
+		// A function taking an object of a generated class BY VALUE, its body drawn from the
+		// shapes the read-only parameter elision proves (field reads, read-only builtins on
+		// fields) and refuses (field stores, self comparison, aliasing, passing it on, a
+		// global write): proven and refused callees must agree with the elision on and off
+		void emit_object_reader() {
+			if (classes_.empty()) { emit_simple_function(); return; }
+			func_info f;
+			f.name = fresh("rd");
+			f.ret = vt::i;
+			param_info p; p.name = fresh("o"); p.type = vt::obj;
+			p.class_idx = static_cast<int>(rng_.below(static_cast<uint32_t>(classes_.size())));
+			const class_info& ci = classes_[static_cast<size_t>(p.class_idx)];
+			p.type_text = ci.name;
+			f.params.push_back(p);
+			std::string ifield;
+			for (const auto& [fname, ft] : ci.fields) { if (ft == vt::i) { ifield = fname; break; } }
+			if (ifield.empty()) { ifield = ci.typed_int_field; }
+			lines_.push_back("function " + f.name + "(" + ci.name + " " + p.name + ") -> int {");
+			begin_function_scope(f.params);
+			std::string acc = fresh("acc");
+			lines_.push_back("int " + acc + " = " + int_expr(1) + ";");
+			const int body = static_cast<int>(rng_.range(1, 3));
+			for (int i = 0; i < body; ++i) {
+				switch (pick_weighted({35, ifield.empty() ? 0u : 15u, 10, 10, 10, 10, 10})) {
+					case 0: if (!ifield.empty()) { lines_.push_back(acc + " = " + acc + " + " + p.name + "." + ifield + ";"); } break;
+					case 1: lines_.push_back(p.name + "." + ifield + " = " + p.name + "." + ifield + " + " + std::to_string(rng_.range(1, 5)) + ";"); break;
+					case 2: lines_.push_back("if (" + p.name + " == " + p.name + ") { " + acc + " = " + acc + " + 1; }"); break;
+					case 3: if (!ifield.empty()) { lines_.push_back("var& " + fresh("al") + " = " + p.name + "; " + acc + " = " + acc + " + " + p.name + "." + ifield + ";"); } break;
+					case 4: {
+						const func_info* other = nullptr;
+						for (const auto& g : funcs_) { if (g.params.size() == 1 && g.params[0].class_idx == p.class_idx && g.ret == vt::i) { other = &g; } }
+						if (other) { lines_.push_back(acc + " = " + acc + " + " + other->name + "(" + p.name + ");"); }
+						break;
+					}
+					case 5: if (!ci.methods.empty() && ci.methods[0].arity == 0) { lines_.push_back(acc + " = " + acc + " + " + p.name + "." + ci.methods[0].name + "();"); } break;
+					default: lines_.push_back(acc + " = " + acc + " + " + int_expr(1) + ";"); break;
+				}
+			}
+			lines_.push_back("return " + acc + ";");
+			end_function_scope();
+			lines_.push_back("}");
+			funcs_.push_back(std::move(f));
 		}
 
 		std::vector<param_info> gen_params(int max_params, bool allow_ref) {
@@ -775,12 +838,19 @@ namespace jai::fuzz {
 			for (int i = 0; i < n; ++i) {
 				param_info p;
 				p.name = fresh("p");
-				switch (pick_weighted({40, 15, 15, 10, allow_ref ? 20u : 0u})) {
+				switch (pick_weighted({40, 15, 15, 10, allow_ref ? 20u : 0u, classes_.empty() ? 0u : 15u})) {
 					case 0: p.type_text = "int"; p.type = vt::i; break;
 					case 1: p.type_text = "auto"; p.type = vt::i; break;
 					case 2: p.type_text = "var"; p.type = vt::any; break;
 					case 3: p.type_text = "string"; p.type = vt::s; break;
-					default: p.type_text = "int&"; p.type = vt::i; p.is_ref = true; break;
+					case 4: p.type_text = "int&"; p.type = vt::i; p.is_ref = true; break;
+					default: {
+						// By-value class parameter: bodies read fields, compare, mutate or pass it on,
+						// so the proven and refused shapes of the read-only elision both arise
+						p.class_idx = static_cast<int>(rng_.below(static_cast<uint32_t>(classes_.size())));
+						p.type_text = classes_[static_cast<size_t>(p.class_idx)].name; p.type = vt::obj;
+						break;
+					}
 				}
 				params.push_back(std::move(p));
 			}
@@ -789,7 +859,7 @@ namespace jai::fuzz {
 
 		void begin_function_scope(const std::vector<param_info>& params) {
 			scopes_.push_back({});
-			for (const auto& p : params) declare(p.name, p.type == vt::any ? vt::i : p.type);
+			for (const auto& p : params) declare(p.name, p.type == vt::any ? vt::i : p.type, p.class_idx);
 			in_function_ = true;
 		}
 		void end_function_scope() {

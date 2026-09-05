@@ -11395,11 +11395,13 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
+    scriptFunc->alias_candidate = true;
     script_callable payload;
     payload.kind = script_callable::kind_type::function;
     payload.fn = scriptFunc;
     script_value functionValue = script_value::make_function(
         script_function(script_callable_thunk{engine_, std::move(payload)}), engine_);
+    engine_->bump_definition_epoch();
 
     // Define the function in current environment
     environment_->define(decl->name_id, functionValue);
@@ -13585,6 +13587,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 if (param.type && param.type->base_type == script_value_type::jai_object_type &&
                     derefed.storage_type() == script_value_type::jai_object_type &&
                     derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
+                    // Read-only parameter elision: a proven parameter shares the argument's handle
+                    // (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+                    if (!param.ref_escaping && detail::parameter_alias_allows(derefed) && detail::readonly_parameter_alias(*engine_, function, i, !parallel_worker_)) {
+                        if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+                        call_stack_[frame_index].set_local(param.slot_index, script_value(derefed));
+                        continue;
+                    }
                     call_stack_[frame_index].set_local(param.slot_index, boxed_param(derefed.clone()));
                     continue;
                 }
@@ -13637,7 +13646,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 // Shallow copy - share ownership (reference semantics)
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(script_value(shared_probe)));
             } else {
-                // Deep copy - value semantics (C++-like default)
+                // Deep copy - value semantics (C++-like default); a proven read-only parameter
+                // keeps the converted value as is (an identity conversion shares the argument,
+                // a converting one is already a fresh value - neither needs the clone)
+                const bool heavy = shared_probe.is_object() || shared_probe.is_array() || shared_probe.is_map();
+                if (heavy && !param.ref_escaping && detail::parameter_alias_allows(shared_probe) && detail::readonly_parameter_alias(*engine_, function, i, !parallel_worker_)) {
+                    if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+                    call_stack_[frame_index].set_local(param.slot_index, script_value(shared_probe));
+                    continue;
+                }
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(converted_arg.clone()));
             }
         }

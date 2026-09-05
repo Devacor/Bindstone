@@ -329,6 +329,7 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--w") { opt.width = std::stoll(next_arg("--w")); }
 		else if (a == "--h") { opt.height = std::stoll(next_arg("--h")); }
 		else if (a == "--god") { opt.god = true; }
+		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
 		else if (a == "--pix") { opt.pix = next_arg("--pix"); }
 		else if (a == "--help" || a == "-h") { print_usage(adapter); return 0; }

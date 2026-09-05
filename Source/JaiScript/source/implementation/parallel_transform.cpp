@@ -138,6 +138,10 @@ namespace jai::detail {
 		bool fingerprint_use_vm = false;
 		const void* fingerprint_fn_body = nullptr;
 		std::vector<std::pair<uint64_t, const void*>> fingerprint_script_bodies;
+		// Read-only parameter proofs travel from the live function to its worker copy: the
+		// barrier (single-threaded) proves the source and restamps every copy per region entry,
+		// so a worker never proves (interning, global lookups) and never runs stale
+		std::vector<std::pair<std::shared_ptr<script_defined_function>, std::shared_ptr<script_defined_function>>> alias_stamps;
 		std::vector<std::pair<uint64_t, std::string>> host_functions;   // refreshed each reuse
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -452,7 +456,80 @@ namespace {
 		}
 		const char* prefix = "parallel_transform";
 
+		// Read-only parameter proof (prove_readonly_parameters): the root is a by-value parameter
+		// of a serial callee. The parallel rules already reject every enclosing write; on top,
+		// any identity-observing use of the root escapes it - a bare use (comparison, argument,
+		// return, alias, range source), a member/subscript chain whose static terminal is not a
+		// primitive or string (objects and arrays compare by identity), a user method or
+		// accessor on it, a compound assignment or ++/-- on it (user operators). Rebinding the
+		// parameter itself (`p = x`) is not an escape: it replaces the slot, never the referent.
+		bool proof_mode = false;
+		bool root_escaped = false;
+		type_info_ptr root_type;
+
 		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
+
+		static bool primitive_or_string(const type_info_ptr& t) {
+			if (!t) { return false; }
+			switch (t->base_type) {
+			case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+			case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+			case script_value_type::jai_string_type:
+				return true;
+			default:
+				return false;
+			}
+		}
+		// Static type of a member/subscript chain rooted at the proof root (null = unknown or
+		// a step that can run user code: a user accessor, a field no class declares)
+		type_info_ptr proof_chain_type(const expression* e) {
+			if (!e) { return nullptr; }
+			if (e->get_type() == node_type::identifier_expr) {
+				return is_element_symbol(static_cast<const identifier_expr*>(e)->symbol_id) ? root_type : nullptr;
+			}
+			if (e->get_type() == node_type::member_expr) {
+				auto* m = const_cast<member_expr*>(static_cast<const member_expr*>(e));
+				type_info_ptr base = proof_chain_type(m->object.get());
+				if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) { return nullptr; }
+				auto cls = eng.get_class_registry().find_script_class(std::string(base->type_name));
+				if (!cls) { return nullptr; }
+				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+				if (cls->user_accessor(m->member_id) != nullptr) { return nullptr; }
+				if (!cls->find_field_declaring_class(m->member_id)) { return nullptr; }
+				return cls->get_field_declared_type(m->member_id);
+			}
+			if (e->get_type() == node_type::binary_expr) {
+				auto* b = static_cast<const binary_expr*>(e);
+				if (b->op.type != token_type::left_bracket) { return nullptr; }
+				type_info_ptr base = proof_chain_type(b->left.get());
+				if (!base) { return nullptr; }
+				if (base->base_type == script_value_type::jai_array_type) { return base->element_type(); }
+				if (base->base_type == script_value_type::jai_map_type) { return base->value_type(); }
+				if (base->base_type == script_value_type::jai_string_type) { return base; }   // a char: no identity, stands in as its string type
+				return nullptr;
+			}
+			return nullptr;
+		}
+		// Proof mode: a chain rooted at the parameter, read as a VALUE. Index expressions walk
+		// under the normal rules; the terminal must be statically primitive or string
+		bool proof_chain_value(const expression_ptr& e) {
+			if (!walk_chain_indexes(e.get())) { return false; }
+			if (!primitive_or_string(proof_chain_type(e.get()))) { root_escaped = true; }
+			return true;
+		}
+		bool walk_chain_indexes(const expression* e) {
+			while (e) {
+				if (e->get_type() == node_type::member_expr) { e = static_cast<const member_expr*>(e)->object.get(); continue; }
+				if (e->get_type() == node_type::binary_expr) {
+					auto* b = static_cast<const binary_expr*>(e);
+					if (!walk_expr(b->right)) { return false; }
+					e = b->left.get();
+					continue;
+				}
+				break;
+			}
+			return true;
+		}
 
 		// Captured-read touch collection (the CHEAP half of the two-layer design: the
 		// walk only records which enclosing names the body touches and whether every
@@ -883,7 +960,7 @@ namespace {
 				return true;
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
-				if (is_element_symbol(n->symbol_id)) { note_element_whole(); }
+				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode) { root_escaped = true; } }
 				if (is_local(n->symbol_id)) { return true; }
 				if (self_field(n->symbol_id)) { return true; }   // element-rooted field read
 				if (method_class && method_class->defines_method(n->symbol_id)) {
@@ -904,25 +981,29 @@ namespace {
 						if (!is_local(root->symbol_id)) {
 							touch_capture(root, true);
 							return walk_expr(n->right);
-						}
 					}
+					}
+					if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
 				}
 				return walk_expr(n->left) && walk_expr(n->right);
 			}
 			case node_type::unary_expr: {
 				auto* n = static_cast<unary_expr*>(e.get());
 				if (n->op.type == token_type::plus_plus || n->op.type == token_type::minus_minus) {
+					if (proof_mode && chain_root_is_element(n->operand)) { root_escaped = true; }   // a user operator could run on the referent
 					return walk_target(n->operand, "increment/decrement");
 				}
 				return walk_expr(n->operand);
 			}
 			case node_type::assignment_expr: {
 				auto* n = static_cast<assignment_expr*>(e.get());
+				if (proof_mode && n->op.type != token_type::equal && chain_root_is_element(n->target)) { root_escaped = true; }
 				return walk_target(n->target, "assignment") && walk_expr(n->value);
 			}
 			case node_type::call_expr:
 				return walk_call(static_cast<call_expr*>(e.get()));
 			case node_type::member_expr:
+				if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
 				return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
 			case node_type::lambda_expr:
 				return fail(e.get(), "lambdas are not allowed in a parallel body (v0)");
@@ -975,7 +1056,7 @@ namespace {
 			switch (t->get_type()) {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
-				if (is_element_symbol(n->symbol_id)) { note_element_whole(); }   // replaced: the old element releases every handle
+				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
 				if (is_local(n->symbol_id)) { return true; }
 				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
@@ -987,6 +1068,7 @@ namespace {
 			case node_type::binary_expr: {
 				auto* n = static_cast<binary_expr*>(t.get());
 				if (n->op.type == token_type::left_bracket) {
+					if (proof_mode && chain_root_is_element(t)) { adm.element_mutated = true; }
 					return walk_target(n->left, what, aliasing) && walk_expr(n->right);
 				}
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
@@ -1048,7 +1130,16 @@ namespace {
 					// no element class defines are builtins and simply never match)
 					collect_element_method(m);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
-					if (!walk_expr(m->object)) {
+					if (proof_mode && chain_root_is_element(m->object)) {
+						// A read-only builtin on a receiver that is statically a container or string is a
+						// read; a receiver of unknown or class type could run a user method on the referent
+						if (!walk_chain_indexes(m->object.get())) { return false; }
+						type_info_ptr rt = proof_chain_type(m->object.get());
+						const bool container_or_string = rt && (rt->base_type == script_value_type::jai_array_type ||
+						                                        rt->base_type == script_value_type::jai_map_type ||
+						                                        rt->base_type == script_value_type::jai_string_type);
+						if (!container_or_string || !parallel_readonly_method(m->member)) { root_escaped = true; }
+					} else if (!walk_expr(m->object)) {
 						return false;
 					}
 				}
@@ -1121,6 +1212,19 @@ namespace {
 			return callee_ok;
 		}
 	};
+
+	bool prove_readonly_parameter(engine& eng, const std::shared_ptr<script_defined_function>& fn, size_t index) {
+		const parameter& p = fn->parameters()[index];
+		if (p.is_reference || p.ref_escaping) { return false; }
+		admission_builder builder(eng);
+		builder.proof_mode = true;
+		builder.prefix = "parameter proof";
+		if (p.symbol_id == UINT64_MAX) { p.symbol_id = builder.sym.intern(p.name); }
+		builder.element_symbol = p.symbol_id;
+		builder.root_type = p.type;
+		const bool walked = builder.admit_function(fn, UINT64_MAX, admission_builder::root_param::none, nullptr);
+		return walked && !builder.failed && !builder.adm.element_mutated && !builder.root_escaped;
+	}
 
 	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
 	                                   bool inplace_root = false) {
@@ -1206,6 +1310,16 @@ namespace {
 	// execution state (a prior call may have ended mid-chunk on an error), refresh the
 	// host-function copies (registration may have changed - reconstruction is cheaper
 	// than detecting it). Provisioned script-function copies stay - that is the point.
+	// Main thread, per region entry: prove (or re-validate) each admitted function's read-only
+	// parameters on the live function and copy the verdict onto the worker's private copy
+	void restamp_alias_proofs(engine& eng, parallel_worker_slot& slot) {
+		for (auto& [source, copy] : slot.alias_stamps) {
+			if (!source->parameters().empty()) { (void)readonly_parameter_alias(eng, *source, 0, /*may_prove*/ true); }
+			copy->alias_proof_epoch = source->alias_proof_epoch;
+			copy->alias_proof_mask = source->alias_proof_mask;
+		}
+	}
+
 	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
 		slice_worker_limits(eng, slot);
 		if (slot.vm) {
@@ -1625,6 +1739,8 @@ namespace {
 			auto copy = std::make_shared<script_defined_function>(
 				source_fn->name, std::move(params), source_fn->return_type,
 				source_fn->body, ctx->root_env, source_fn->local_count);
+			copy->alias_candidate = source_fn->alias_candidate;
+			if (copy->alias_candidate) { ctx->alias_stamps.emplace_back(source_fn, copy); }
 			if (ctx->vm) { ctx->vm->precompile_parallel_function(*copy); }
 			script_callable payload;
 			payload.kind = script_callable::kind_type::function;
@@ -2744,6 +2860,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		} else {
 			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
 		}
+		restamp_alias_proofs(eng, *slot);
 		slot->begin = bounds[k];
 		slot->end = bounds[k + 1];
 		slot->element_refs.clear();
@@ -3148,6 +3265,39 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 // threads: every message below is a static literal (checked_result never allocates) and
 // NOTHING here interns against the frozen symbolizer or copies a shared handle -
 // primitive elements mint plain values, anything heavier rides the silent deep clone.
+bool parameter_alias_allows(const script_value& derefed) {
+	switch (derefed.raw_storage_index()) {
+	case script_value::TYPEID_ARRAY:
+	case script_value::TYPEID_MAP:
+		return true;
+	case script_value::TYPEID_OBJECT: {
+		const auto& holder = derefed.unchecked_object_handle();
+		if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
+		const auto* inst = static_cast<const class_instance*>(holder->data.get());
+		const class_definition* cls = inst->get_class_definition();
+		return cls && cls->is_script_class() && !cls->nocopy();
+	}
+	default:
+		return false;
+	}
+}
+
+uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& fn) {
+	if (!fn.body) { return 0; }
+	// Non-owning view: the builder pins call targets for its own lifetime only
+	std::shared_ptr<script_defined_function> view(std::shared_ptr<void>{}, const_cast<script_defined_function*>(&fn));
+	uint32_t mask = 0;
+	const size_t n = std::min<size_t>(fn.parameters().size(), 32);
+	for (size_t i = 0; i < n; ++i) {
+		try {
+			if (prove_readonly_parameter(eng, view, i)) { mask |= (1u << i); }
+		} catch (...) {
+			// an unresolvable callee or a frozen symbolizer means no proof, never an error
+		}
+	}
+	return mask;
+}
+
 checked_result<script_value> parallel_borrow_subscript_read(const script_value& borrow,
                                                             const script_value& index_raw,
                                                             engine* eng,

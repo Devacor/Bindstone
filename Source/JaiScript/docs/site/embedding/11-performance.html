@@ -101,7 +101,9 @@ print(to_json(squares));</code></pre></div>
 <li><strong>Declare types.</strong> <code>int</code> and <code>auto</code> locals ride slot storage and the
 typed fast paths; <code>var</code> is the dynamic opt-out and costs accordingly.</li>
 <li><strong>Pass anything heavy by <code>&amp;</code>.</strong> Value semantics means a by-value
-parameter deep-copies; <code>&amp;</code> is the cheap-by-design idiom, and it makes mutation visible
+parameter deep-copies unless the callee provably only reads it (then the argument binds in place at
+reference speed, see <a href="../guide/03-value-semantics.html#what-each-strategy-costs">the elision</a>);
+<code>&amp;</code> is the cheap-by-design idiom, and it makes mutation visible
 in the signature. Decision guidance: <a href="../guide/03-value-semantics.html">Value Semantics</a>;
 the three-way measurements (value vs <code>&amp;</code> vs <code>shared_ptr</code>) are
 <a href="#value-strategy-costs">below</a>.</li>

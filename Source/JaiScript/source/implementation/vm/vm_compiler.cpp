@@ -2546,6 +2546,7 @@ void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& de
 	if (!decl->is_coroutine) {
 		proto.fn = std::make_shared<script_defined_function>(
 			decl->name, decl->parameters, decl->return_type, decl->body, nullptr, decl->local_count);
+		proto.fn->alias_candidate = true;
 	} else {
 		// Nested coroutine bodies reference enclosing-frame slot locals through the
 		// env chain (foreign slots never compile to slot loads), so op_func_decl

@@ -793,6 +793,19 @@ namespace jai {
         // per-class epochs cannot see containment.
         uint64_t class_definition_epoch() const;
         void bump_class_definition_epoch();
+        // Monotonic counter bumped whenever the set of definitions a call could resolve
+        // against changes (every top-level run, every function/class/global (re)definition,
+        // every host registration). Cross-function proofs cache against it.
+        uint64_t definition_epoch() const;
+        void bump_definition_epoch();
+        // Read-only by-value parameter binds that shared the argument instead of cloning it
+        // (main thread; a test observable for the elision)
+        uint64_t parameter_alias_binds() const;
+        void note_parameter_alias_bind();
+        // The elision's kill switch (default on): off binds every by-value parameter with the
+        // clone, observationally identical - the differential gates flip it
+        void parameter_alias(bool on);
+        bool parameter_alias() const;
 
         // Script-class SHAPE change (first definition, non-identical redefinition): the static
         // checker's surface moved, cached entries re-check (and re-stamp proofs) at their next

@@ -293,6 +293,14 @@ engine stays usable", not by `check_throws`.
   deep-copies through the store kernel (`shared_ptr` handles share, scalars/strings are copies
   already), so `f().push(4)` never grows the callee's storage; `-> T&` returns alias and the
   top-level `return` is unchanged. Kernel `detail/return_conv.hpp`, one site per backend.
+- **Read-only by-value parameters bind by handle** (`docs/parallel_design.md` §15): a by-value
+  class/array/map parameter whose callee provably never mutates, aliases, compares, returns or
+  passes it whole, reads only primitive/string terminals through it, and (with everything it
+  calls) writes nothing but its own locals, binds the argument itself instead of a clone -
+  unobservable by construction, `nocopy` still raises, methods/coroutines excluded in v1.
+  Proof = the parallel admission walk in `proof_mode` (`prove_readonly_parameters`), cached per
+  function against `engine::definition_epoch()`; kill switch `engine::parameter_alias(false)`,
+  gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the

@@ -1304,6 +1304,51 @@ public:
 
         // ------------------------------------------------------------ proof differential gate
 
+        test("parameter_alias_differential_gate", [this]() {
+            // Read-only by-value parameter elision: per generated program, each backend must
+            // produce identical segment results, printed output and liveness with
+            // engine::parameter_alias on and off (the alias is a proof-gated copy elision, never
+            // a semantic). Same protocol as proof_differential_gate.
+            constexpr uint64_t k_seed_count = 200;
+            constexpr double k_budget_seconds = 0.1;
+            int compared_programs = 0;
+            int divergences = 0;
+            uint64_t elided_binds = 0;
+            std::string first_report;
+            auto same = [](const fuzz::run_outcome& a, const fuzz::run_outcome& b) {
+                return a.segment_results == b.segment_results && a.printed == b.printed && a.alive == b.alive;
+            };
+            for (uint64_t seed = 0; seed < k_seed_count; ++seed) {
+                fuzz::program p = fuzz::generate_program(seed, 3);
+                fuzz::run_outcome runs[2][2];   // [backend][alias: 0 off, 1 on]
+                bool budget = false;
+                for (int be = 0; be < 2 && !budget; ++be) {
+                    for (int al = 0; al < 2 && !budget; ++al) {
+                        fuzz::run_config cfg;
+                        cfg.use_vm = be == 1;
+                        cfg.budget_seconds = k_budget_seconds;
+                        cfg.param_alias = al == 1;
+                        runs[be][al] = fuzz::run_program(p, cfg);
+                        budget = runs[be][al].budget_hit;
+                    }
+                }
+                if (budget) { continue; }
+                ++compared_programs;
+                elided_binds += runs[0][1].alias_binds + runs[1][1].alias_binds;
+                for (int be = 0; be < 2; ++be) {
+                    if (same(runs[be][0], runs[be][1])) { continue; }
+                    ++divergences;
+                    if (first_report.empty()) {
+                        first_report = "seed " + std::to_string(seed) + " on the " + (be ? "vm" : "interpreter") +
+                                       " differs between parameter_alias off and on:\n" + p.joined();
+                    }
+                }
+            }
+            check_gt(compared_programs, 100);
+            check_gt((int64_t)elided_binds, (int64_t)0, "the generated programs exercise the elision");
+            check_eq(0, divergences, first_report.empty() ? "no alias divergences" : first_report);
+        });
+
         test("proof_differential_gate", [this]() {
             // The byte-parallel contract (docs/static_checking.md "Proofs"): per generated
             // program, each backend must produce identical segment results, printed output,

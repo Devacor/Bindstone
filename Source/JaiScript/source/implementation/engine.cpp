@@ -1045,6 +1045,9 @@ struct engine::implementation {
     // Class-shape cache validity (engine::class_definition_epoch): starts at 1 so a
     // cache initialized to epoch 0 always misses its first query.
     uint64_t class_definition_epoch_ = 1;
+    uint64_t definition_epoch_ = 1;
+    uint64_t parameter_alias_binds_ = 0;
+    bool parameter_alias_ = true;
 
     // Empty result = caching inactive for this source (a .jaibite loaded as source
     // must never overwrite itself).
@@ -1259,6 +1262,7 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     // Update in global environment
     script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr);
     global_environment_->define(name, dispatcherValue);
+    if (engine_ptr) { engine_ptr->bump_definition_epoch(); }
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {}
@@ -1697,6 +1701,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarations,
                                     std::shared_ptr<void>& compiled_slot,
                                     const instance_variables* instanceVars) {
+    ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
     try {
         execution_backend* be = backend();
 
@@ -2040,6 +2045,7 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     impl->global_environment_->define(id, std::move(value));
+    ++impl->definition_epoch_;
     impl->refresh_operator_entry(name);
 
     // Track if this global should NOT be serialized (using string_view from symbolizer)
@@ -2101,6 +2107,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
         // First registration of a single untyped function: keep it a plain global. A set is built
         // only if/when a second function of this name is registered.
         impl->global_environment_->define(name, script_value::make_function(std::move(func), this));
+        ++impl->definition_epoch_;
         impl->functionArities[name] = arity;
     }
     impl->refresh_operator_entry(name);
@@ -2789,6 +2796,31 @@ uint64_t engine::class_definition_epoch() const {
 
 void engine::bump_class_definition_epoch() {
     ++impl->class_definition_epoch_;
+    ++impl->definition_epoch_;
+}
+
+uint64_t engine::definition_epoch() const {
+    return impl->definition_epoch_;
+}
+
+void engine::bump_definition_epoch() {
+    ++impl->definition_epoch_;
+}
+
+uint64_t engine::parameter_alias_binds() const {
+    return impl->parameter_alias_binds_;
+}
+
+void engine::note_parameter_alias_bind() {
+    ++impl->parameter_alias_binds_;
+}
+
+void engine::parameter_alias(bool on) {
+    impl->parameter_alias_ = on;
+}
+
+bool engine::parameter_alias() const {
+    return impl->parameter_alias_;
 }
 
 void engine::note_class_shape_change() {

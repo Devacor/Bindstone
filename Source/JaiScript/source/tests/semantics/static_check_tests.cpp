@@ -4,6 +4,7 @@
 // generator-corpus false-positive gate (false positives are the feature's death).
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
@@ -72,7 +73,7 @@ uint64_t shape_epoch(jai::engine& e, const std::string& cls) {
 
 // Program-closure fixtures: one temp directory per test, added as the engine's include path.
 std::filesystem::path closure_dir(const std::string& name) {
-    auto dir = std::filesystem::temp_directory_path() / ("jai_closure_" + name);
+    auto dir = jai::foundry::test_temp_directory() / ("jai_closure_" + name);
     std::filesystem::create_directories(dir);
     return dir;
 }

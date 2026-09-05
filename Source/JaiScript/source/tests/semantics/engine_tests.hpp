@@ -1,6 +1,7 @@
 #pragma once
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <filesystem>
 #include <fstream>
@@ -109,7 +110,7 @@ public:
         test("execute_file_stat_gate", [this]() {
             namespace fs = std::filesystem;
             auto eng = make_engine();
-            fs::path dir = fs::temp_directory_path() / "jai_engine_tests_file_gate";
+            fs::path dir = jai::foundry::test_temp_directory() / "jai_engine_tests_file_gate";
             fs::create_directories(dir);
             fs::path file = dir / "gate_probe.jai";
             {

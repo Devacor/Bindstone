@@ -5,6 +5,7 @@
 // engine call in here is the canonical shape from docs/site/embedding.
 
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
@@ -1516,7 +1517,7 @@ int run_selftest(const console_state& con) {
 	}
 
 	// temp workspace WITH SPACES — the drag-drop path shape
-	fs::path dir = fs::temp_directory_path() / "jaiscript selftest dir";
+	fs::path dir = jai::foundry::test_temp_directory() / "jaiscript selftest dir";
 	std::error_code ec;
 	fs::create_directories(dir, ec);
 	options opt;

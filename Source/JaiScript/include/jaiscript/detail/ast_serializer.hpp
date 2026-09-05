@@ -1240,27 +1240,30 @@ namespace jai::detail {
                     result = d;
                     break;
                 }
-                case node_type::destructuring_decl: {
-                    std::vector<std::pair<std::string_view, uint64_t>> names;
-                    uint64_t n = varint();
-                    check_count(n);
-                    names.reserve(size_t(n));
-                    for (uint64_t i = 0; i < n; ++i) {
-                        std::string_view nm = view();
-                        uint64_t id = symbol(UINT64_MAX);
-                        names.emplace_back(nm, id);
-                    }
-                    uint64_t ns = varint();
-                    check_count(ns);
-                    std::vector<size_t> slots;
-                    slots.reserve(size_t(ns));
-                    for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
-                    auto d = std::make_shared<destructuring_decl>(loc, expr_opt());
-                    d->names = std::move(names);
-                    d->slot_indices = std::move(slots);
-                    result = d;
-                    break;
-                }
+				case node_type::destructuring_decl: {
+					std::vector<std::pair<std::string_view, uint64_t>> names;
+					uint64_t n = varint();
+					check_count(n);
+					names.reserve(size_t(n));
+					for (uint64_t i = 0; i < n; ++i) {
+						std::string_view nm = view();
+						uint64_t id = symbol(UINT64_MAX);
+						names.emplace_back(nm, id);
+					}
+					uint64_t ns = varint();
+					check_count(ns);
+					if (ns != n) {
+						jaibite_fail("destructuring name/slot count mismatch");
+					}
+					std::vector<size_t> slots;
+					slots.reserve(size_t(ns));
+					for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
+					auto d = std::make_shared<destructuring_decl>(loc, expr_req());
+					d->names = std::move(names);
+					d->slot_indices = std::move(slots);
+					result = d;
+					break;
+				}
                 default:
                     jaibite_fail("corrupt node tag " + std::to_string(int(tag)));
             }

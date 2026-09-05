@@ -15,6 +15,18 @@ public:
     engine_tests() : suite("Core Engine") {}
     
     void forge_tests() override {
+		test("engine_has_stable_address", [this]() {
+			check_false(std::is_move_constructible_v<engine>);
+			check_false(std::is_move_assignable_v<engine>);
+		});
+		test("engine_owner_can_move", [this]() {
+			auto original = make_engine();
+			original->execute("int stable_x = 41; auto stable_f = [&]() { return stable_x + 1; };");
+			auto* address = original.get();
+			auto owner = std::move(original);
+			check(owner.get() == address);
+			check_eq(script_int{42}, owner->execute("stable_f();").as_int());
+		});
         test("engine_creation", [this]() {
             auto eng = make_engine();
             check(true, "Engine should be created successfully");

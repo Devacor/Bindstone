@@ -127,11 +127,12 @@ namespace jai {
             return shared_from_this();
         }
 
-        // Non-copyable, moveable
-        engine(const engine&) = delete;
-        engine& operator=(const engine&) = delete;
-        engine(engine&&) noexcept;
-        engine& operator=(engine&&) noexcept;
+		// Address-stable: values, bindings and backends retain this engine's address.
+		// Transfer ownership by moving shared_ptr<engine>, never the engine itself.
+		engine(const engine&) = delete;
+		engine& operator=(const engine&) = delete;
+		engine(engine&&) = delete;
+		engine& operator=(engine&&) = delete;
         
         
         // Primary API - execute methods

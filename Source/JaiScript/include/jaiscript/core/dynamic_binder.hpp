@@ -251,32 +251,14 @@ namespace dynamic_binder_validation {
 }
 
 namespace detail {
-    // extracts raw T* from a script_value — handles class_instance wrapper and cpp_bound
-    // (cpp_bound arises when a method returns T&; the next call uses it as 'this')
-    template<typename T>
-    T* extract_cpp_object_ptr(const script_value& val) {
-        if (val.is_cpp_bound()) {
-            T* ptr = val.get_cpp_bound_as<T>();
-            if (ptr) return ptr;
-            // If cpp_bound but wrong type, fall through to try class_instance path
-        }
-
-        // Raw C++ holders (owned deep copies, unregistered make_object fallback): data IS the object
-        if (auto holder = val.get_object_holder(); holder && !holder->is_class_instance_wrapper && holder->data) {
-            return static_cast<T*>(holder->data.get());
-        }
-
-        auto instance = val.as<std::shared_ptr<class_instance>>();
-        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-
-        // The cpp_object field could also be cpp_bound or a shared_ptr
-        if (cpp_obj_value.is_cpp_bound()) {
-            return cpp_obj_value.get_cpp_bound_as<T>();
-        }
-
-        auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-        return cpp_obj.get();
-    }
+	// Public C++ method adapter: the shared runtime helper returns checked_result.
+	template<typename T>
+	T* extract_cpp_object_ptr(const script_value& val, uint64_t target_id = UINT64_MAX) {
+		if (val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
+			return val.get_cpp_bound_as<T>();
+		}
+		return static_cast<T*>(native_cast_or_throw(checked_native_reference(val, typeid(T), target_id), val.get_engine()));
+	}
 } // namespace detail
 
 // ============================================================================
@@ -507,7 +489,7 @@ public:
     // Add method binding - member function pointer version
     template<typename R, typename... Args>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...)) {
-        auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -518,7 +500,7 @@ public:
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
 
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             // Call the method with unpacked arguments
             if (auto eng = engine_ptr) {
@@ -539,7 +521,7 @@ public:
     // Add const method binding
     template<typename R, typename... Args>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const) {
-        auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -550,7 +532,7 @@ public:
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
 
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             // Call the method with unpacked arguments
             if (engine_ptr) {
@@ -586,7 +568,7 @@ public:
             (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
              std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
         
-        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (has_self_param) {
                 // Lambda expects T& as first parameter, we need to extract it from args[0]
                 // args[0] is the class_instance, remaining args are the actual parameters
@@ -600,7 +582,7 @@ public:
                                      " arguments, got " + std::to_string(args.size() - 1));
                 }
 
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
                 // Call the lambda with the C++ object as first argument and remaining args
                 if (auto eng = engine_ptr) {
@@ -786,12 +768,12 @@ private:
         
         // Add a special method that handles property access
         // The interpreter's visitMemberExpr will need to check for these
-        class_def_->add_method("_get_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_get_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
 
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             if (auto eng = engine_ptr) {
                 // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
@@ -834,12 +816,12 @@ private:
 
         // Only create setter for copy-assignable types
         if constexpr (std::is_copy_assignable_v<P>) {
-            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
                 // Special case: if P is script_value, don't convert
                 if constexpr (std::is_same_v<P, script_value>) {
@@ -867,8 +849,8 @@ private:
         if constexpr (script_value::cpp_bound_encoding<P>::capable) {
             using encoding = script_value::cpp_bound_encoding<P>;
             class_def_->register_property_member(engine_.symbolize(name), class_definition::cpp_member_accessor{
-                [member](const script_value& receiver) -> void* {
-                    T* cpp_obj = detail::extract_cpp_object_ptr<T>(receiver);
+                [member, native_type_id = class_def_->get_type_id()](const script_value& receiver) -> void* {
+                    T* cpp_obj = detail::extract_cpp_object_ptr<T>(receiver, native_type_id);
                     return cpp_obj ? static_cast<void*>(&(cpp_obj->*member)) : nullptr;
                 },
                 encoding::size_and_sign, encoding::semantic_index});
@@ -930,12 +912,12 @@ public:
         serialization_metadata_.properties.push_back(prop_meta);
 
         // Add getter method
-        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter), engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
 
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             // Check if getter is a member function pointer
             if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
@@ -960,12 +942,12 @@ public:
             return *this;
         } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
             // Member function pointer setter
-            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
@@ -975,12 +957,12 @@ public:
             });
         } else {
             // Lambda setter
-            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
@@ -1090,6 +1072,8 @@ public:
             // views vanished whenever the derived registrar happened to run first.
             engine_.defer_base_link(std::type_index(typeid(Base)), class_def_);
         }
+
+		class_def_->template add_cpp_base_cast<T, Base>();
 
         // Record the serialization assignability edge (what property_owner does) so a
         // shared_ptr<Base> with $type Derived passes the polymorphic load type check.
@@ -1680,27 +1664,21 @@ public:
         engine_.get_serialization_registry().register_class(class_name_, serialization_metadata_);
         
         
-        // Register custom conversions for shared_ptr<T> to handle class_instance wrapping
-        if constexpr (!std::is_abstract_v<T>) {
+        // Handle conversions also work for abstract bases; no T is constructed here.
+        {
             engine_.add_custom_conversion<std::shared_ptr<T>>(
                 // From script_value to shared_ptr<T>
-                [class_name = class_name_](const script_value& v) -> std::shared_ptr<T> {
-                    if (v.is_object()) {
-                        // Check if this is a raw C++ object or a class_instance wrapper
-                        auto obj_holder = v.get_object_holder();
-                        if (obj_holder) {
-                            if (obj_holder->is_class_instance_wrapper) {
-                                // This is a class_instance wrapper - extract the class_instance then get the C++ object
-                                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                                return instance->get_cpp_object_as<T>();
-                            } else {
-                                // This is a raw C++ object - extract it directly
-                                return std::static_pointer_cast<T>(obj_holder->data);
-                            }
-                        }
-                    }
-                    throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
-                },
+				[class_name = class_name_, class_def = class_def_](const script_value& v) -> std::shared_ptr<T> {
+					if (v.is_null()) {
+						return nullptr;
+					}
+					auto holder = v.get_object_holder();
+					if (!holder) {
+						throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
+					}
+					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
+						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
+				},
                 // From shared_ptr<T> to script_value
                 [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
                     if (!obj) {
@@ -1751,51 +1729,13 @@ public:
             if (custom_conv && !custom_conv->template has_conversion<T>()) {
                 custom_conv->template register_conversion<T>(
                     // From script_value to T
-                    [](const script_value& v) -> T {
-                        // Direct access to avoid template recursion issues
-                        if (v.type() != script_value_type::jai_object_type) {
-                            throw runtime_error("Cannot convert non-object to " + std::string(typeid(T).name()));
-                        }
-
-                        // Get object holder using public method
-                        auto objHolder = v.get_object_holder();
-                        if (!objHolder) {
-                            throw runtime_error("Cannot convert: script_value is not an object type");
-                        }
-
-                        if (!objHolder->is_class_instance_wrapper) {
-                            throw runtime_error("Object is not a class_instance wrapper");
-                        }
-
-                        // Cast to class_instance
-                        auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-                        if (!instance) {
-                            throw runtime_error("Failed to cast to class_instance");
-                        }
-
-                        // Get the C++ object field directly - don't use has_field since it's an internal field
-                        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                        if (cpp_obj_value.is_null()) {
-                            throw runtime_error("C++ object field not found in class_instance");
-                        }
-
-                        // Extract the C++ object directly to avoid recursion
-                        if (cpp_obj_value.type() != script_value_type::jai_object_type) {
-                            throw runtime_error("C++ object field is not an object");
-                        }
-
-                        auto cpp_objHolder = cpp_obj_value.get_object_holder();
-                        if (!cpp_objHolder) {
-                            throw runtime_error("Field value is not an object type");
-                        }
-                        auto cpp_obj = std::static_pointer_cast<T>(cpp_objHolder->data);
-
-                        if (!cpp_obj) {
-                            throw runtime_error("Failed to cast C++ object to expected type");
-                        }
-
-                        return *cpp_obj;
-                    },
+					[class_def = class_def_](const script_value& v) -> T {
+						auto holder = v.get_object_holder();
+						if (!holder) {
+							throw runtime_error("Cannot convert non-object to " + class_def->get_name());
+						}
+						return *detail::extract_cpp_object_ptr<T>(v, class_def->get_type_id());
+					},
                     // From T to script_value
                     [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         // Create a class_instance using the class definition
@@ -1820,55 +1760,25 @@ public:
             }
         }
 
-        // Register shared_ptr<T> conversions for all non-abstract types (doesn't require copy)
-        if constexpr (!std::is_abstract_v<T>) {
+        // Shared ownership does not require T to be concrete or copyable.
+        {
             auto custom_conv = engine_.get_conversion_registry();
 
             // Register std::shared_ptr<T> conversion
             if (!custom_conv->template has_conversion<std::shared_ptr<T>>()) {
                 custom_conv->template register_conversion<std::shared_ptr<T>>(
                     // From script_value to std::shared_ptr<T>
-                    [class_name = class_name_](const script_value& v) -> std::shared_ptr<T> {
-                        // Direct extraction logic to avoid circular dependency
-                        if (v.type() != script_value_type::jai_object_type) {
-                            throw runtime_error("Cannot convert non-object to shared_ptr<" + class_name + ">");
-                        }
-                        
-                        // Get object holder using public method
-                        auto objHolder = v.get_object_holder();
-                        if (!objHolder) {
-                            throw runtime_error("Cannot convert: script_value is not an object type");
-                        }
-                        
-                        // Check if it's a raw C++ object (not wrapped in class_instance)
-                        if (!objHolder->is_class_instance_wrapper) {
-                            // Direct C++ object - just cast and return
-                            return std::static_pointer_cast<T>(objHolder->data);
-                        }
-                        
-                        // It's a class_instance wrapper - extract the C++ object
-                        auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-                        if (!instance) {
-                            throw runtime_error("Failed to cast to class_instance");
-                        }
-                        
-                        // Get the C++ object field
-                        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                        if (cpp_obj_value.is_null()) {
-                            throw runtime_error("C++ object field not found in class_instance");
-                        }
-                        
-                        // Extract the C++ object
-                        if (cpp_obj_value.type() != script_value_type::jai_object_type) {
-                            throw runtime_error("C++ object field is not an object");
-                        }
-                        
-                        auto cpp_objHolder = cpp_obj_value.get_object_holder();
-                        if (!cpp_objHolder) {
-                            throw runtime_error("Field value is not an object type");
-                        }
-                        return std::static_pointer_cast<T>(cpp_objHolder->data);
-                    },
+				[class_name = class_name_, class_def = class_def_](const script_value& v) -> std::shared_ptr<T> {
+					if (v.is_null()) {
+						return nullptr;
+					}
+					auto holder = v.get_object_holder();
+					if (!holder) {
+						throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
+					}
+					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
+						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
+				},
                     // From std::shared_ptr<T> to script_value
                     [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
                         if (!obj) {
@@ -1933,6 +1843,7 @@ private:
     // Helper to collect a single base class definition
     template<typename Base>
     void collect_base_definition(std::vector<std::shared_ptr<class_definition>>& parent_defs) {
+		class_def_->template add_cpp_base_cast<T, Base>();
         static_assert(std::is_base_of_v<Base, T>,
                       "Specified type is not a base class of this class");
         auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
@@ -1958,15 +1869,9 @@ private:
             if constexpr (std::is_copy_constructible_v<T> && std::is_default_constructible_v<T>) {
                 engine_.add_custom_conversion<T>(
                     // From script_value to T
-                    [class_name = class_name_](const script_value& v) -> T {
-                        if (v.is_object()) {
-                            auto instance = v.as<std::shared_ptr<class_instance>>();
-                            if (instance) {
-                                return *instance->get_cpp_object_as<T>();
-                            }
-                        }
-                        throw runtime_error("Cannot convert script_value to " + class_name);
-                    },
+					[class_def = class_def_](const script_value& v) -> T {
+						return *detail::extract_cpp_object_ptr<T>(v, class_def->get_type_id());
+					},
                     // From T to script_value (create a class_instance)
                     [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         auto instance = class_def->create_instance();

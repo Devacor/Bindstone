@@ -1321,9 +1321,6 @@ int engine::select_cpp_overload(const std::vector<script_value>& args,
     return bestIdx;
 }
 
-engine::engine(engine&&) noexcept = default;
-engine& engine::operator=(engine&&) noexcept = default;
-
 void engine::initialize_engine_reference() {
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(this);

@@ -12,6 +12,103 @@
 #include <algorithm>
 
 namespace jai {
+
+namespace detail {
+
+checked_result<void*> checked_native_pointer(engine* eng, uint64_t source_id, const std::type_info& target,
+	uint64_t target_id, void* pointer) {
+	if (!pointer) {
+		return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch),
+			"Cannot extract C++ receiver from null");
+	}
+	if (target_id != UINT64_MAX && source_id == target_id) {
+		return pointer;
+	}
+	if (eng) {
+		auto source = eng->get_class_definition(source_id);
+		if (source) {
+			if (auto* result = source->adjust_cpp_pointer(pointer, target)) {
+				return result;
+			}
+		}
+	}
+	return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch),
+		"Object type mismatch");
+}
+
+checked_result<void*> checked_native_reference(const script_value& value, const std::type_info& target, uint64_t target_id) {
+	const auto* holder = value.peek_object_holder();
+	if (!holder) {
+		return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
+	}
+	if (holder->is_class_instance_wrapper) {
+		const auto* instance = static_cast<const class_instance*>(holder->data.get());
+		if (!instance) {
+			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Cannot extract C++ receiver from null");
+		}
+		if (instance->script_layer_retired()) {
+			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch),
+				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+		}
+		auto* native = instance->find_field_value(instance->get_cpp_object_field_id());
+		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
+		if (!native_holder || native_holder->is_class_instance_wrapper) {
+			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
+		}
+		return checked_native_pointer(value.get_engine(), native_holder->type_id, target, target_id,
+			native_holder->data ? native_holder->data.get() : native_holder->bound_ptr);
+	}
+	return checked_native_pointer(value.get_engine(), holder->type_id, target, target_id,
+		holder->data ? holder->data.get() : holder->bound_ptr);
+}
+
+checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const script_value::object_holder& holder,
+	const std::type_info& target, uint64_t target_id) {
+	if (holder.is_class_instance_wrapper) {
+		const auto* instance = static_cast<const class_instance*>(holder.data.get());
+		if (!instance) {
+			return std::shared_ptr<void>{};
+		}
+		if (instance->script_layer_retired()) {
+			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
+				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+		}
+		auto* native = instance->find_field_value(instance->get_cpp_object_field_id());
+		if (!native) {
+			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
+				"Field '_cpp_object' not found and no default value available");
+		}
+		const auto* native_holder = native->peek_object_holder();
+		if (!native_holder || native_holder->is_class_instance_wrapper) {
+			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
+				"C++ object field not found in class_instance");
+		}
+		return checked_native_object(eng, *native_holder, target, target_id);
+	}
+	auto owner = holder.data;
+	if (!owner && holder.bound_ptr) {
+		owner = holder.weak_data.lock();
+		if (!owner) {
+			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
+				"Cannot extract shared_ptr from non-owning C++ reference");
+		}
+	}
+	if (!owner) {
+		return std::shared_ptr<void>{};
+	}
+	auto pointer = checked_native_pointer(eng, holder.type_id, target, target_id, owner.get());
+	if (!pointer) {
+		return pointer.error_value();
+	}
+	return std::shared_ptr<void>(std::move(owner), pointer.value());
+}
+
+[[noreturn]] void throw_native_cast_error(engine* eng, error_propagator error) {
+	throw runtime_error(eng ? format_error(error, *eng->get_symbolizer()) : std::string(error.static_msg));
+}
+
+} // namespace detail
+
 namespace conversions {
 
 void conversion_registry::register_builtin_conversion(script_value_type from, script_value_type to, int cost,

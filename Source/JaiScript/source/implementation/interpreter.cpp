@@ -2146,6 +2146,10 @@ void interpreter::init_builtin_methods() {
 // in order, then the working directory. The answer is the canonical spelling, which is the
 // key the unit caches and executes under.
 checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file) {
+    if (engine_ptr) {
+        auto allowed = engine_ptr->require_privilege(privilege::filesystem);
+        if (!allowed) { return allowed.error_value(); }
+    }
     namespace fs = std::filesystem;
     auto found = [](const fs::path& candidate, std::string& out) {
         std::error_code ec;

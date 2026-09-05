@@ -267,6 +267,9 @@ static int compute_param_match_cost(
 }
 
 struct engine::implementation {
+    // Engine-thread state. A C++ callback may change grants before returning to
+    // script; parallel regions keep them immutable until their workers join.
+    uint64_t privileges_ = static_cast<uint64_t>(privilege::filesystem);
     // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
     // Declared FIRST so it is destroyed LAST - every other member releasing reference
     // values on teardown returns its blocks to a live pool. The teardown orphans the
@@ -653,6 +656,7 @@ struct engine::implementation {
         // whenever a unit's (mtime, size) stamp moves or the program is failing.
         uint64_t closure_epoch = UINT64_MAX;
         bool closure_root = false;   // has literal top-level import/include paths
+        bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
@@ -728,7 +732,7 @@ struct engine::implementation {
                                                       std::filesystem::path& sibling, bool& siblingFresh) {
         sibling.clear();
         siblingFresh = false;
-        if (jaibite_cache_enabled && sourcePath != "<script>") {
+        if (jaibite_cache_enabled && sourcePath != "<script>" && self.is_enabled(privilege::filesystem)) {
             sibling = jaibite_sibling_path(sourcePath);
             siblingFresh = !sibling.empty() && jaibite_sibling_fresh(sibling, sourcePath);
         }
@@ -793,6 +797,10 @@ struct engine::implementation {
     bool closure_due(const script_cache_entry& entry) const {
         if (entry.closure_epoch != check_surface_epoch_) { return true; }
         if (!entry.closure_root) { return false; }
+        const bool filesystem_allowed = (privileges_ &
+            static_cast<uint64_t>(privilege::filesystem)) != 0;
+        if (entry.closure_filesystem != filesystem_allowed) { return true; }
+        if (!filesystem_allowed) { return false; }
         if (!entry.closure_listing.empty() || entry.check_result.has_errors()) { return true; }
         for (const auto& s : entry.closure_stamps) {
             uint64_t mtime = 0, size = 0;
@@ -850,6 +858,7 @@ struct engine::implementation {
                 entry.checked = false;
             }
             entry.closure_epoch = check_surface_epoch_;
+            entry.closure_filesystem = self.is_enabled(privilege::filesystem);
             check_entry(self, entry, true);
             for (const auto& unit : closure) {
                 check_entry(self, *unit.entry, true);
@@ -1127,6 +1136,7 @@ struct engine::implementation {
     // write is removed so a fresh-looking corrupt sibling can't linger; even if the
     // remove also fails, the loader's corrupt fallback covers it.
     void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, const script_cache_entry& entry, const std::string& sourcePath) noexcept {
+        if (!self.is_enabled(privilege::filesystem)) { return; }
         try {
             uint32_t flags = 0;
             if (static_check_mode_ != check_mode::off && entry.checked &&
@@ -1614,6 +1624,7 @@ void engine::initialize_engine_reference() {
     // Engine-core so a program answers the same on every host; the file IO that USES a path
     // (read_file, write_file, list_dir) stays the host's to grant. Defined after the impl so
     // the helpers above this constructor's TU position are visible: see location builtins below.
+    register_privilege_builtins();
     register_location_builtins();
 
     // extend(object, Class): a script class layer over a C++ object, or a re-derived script
@@ -1700,7 +1711,8 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // (sourcePath, content): the same text under two paths gets two ASTs, each
         // stamped with its own filename (breakpoints/traces stay distinct). The jaibite
         // sibling is real-file-path only ("<script>" is the raw-content sentinel; string
-        // executes never touch disk — engine.hpp doc). A parse failure surfaces as
+        // roots have no sibling; dependencies can still load files — engine.hpp doc).
+        // Disabling filesystem skips both sidecar probes and writes. A parse failure surfaces as
         // parse_error carrying the interned detail (file:line:col + message per error).
         std::filesystem::path sibling;
         bool siblingFresh = false;
@@ -1853,6 +1865,10 @@ std::vector<uint8_t> jaibite::save_bytes() const {
 }
 
 void jaibite::save(const std::string& path) const {
+    auto owner = engine_.lock();
+    if (!owner) { throw script_exception("jaibite: owning engine no longer exists"); }
+    auto allowed = owner->require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(owner->format_error(allowed)); }
     auto bytes = save_bytes();
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file.is_open()) {
@@ -1865,6 +1881,8 @@ void jaibite::save(const std::string& path) const {
 }
 
 jai::jaibite engine::jaibite_load(const std::string& path) {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(format_error(allowed)); }
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
         throw runtime_error("jaibite: failed to open file: " + path);
@@ -1987,6 +2005,8 @@ script_value engine::execute_file(const std::string& scriptPath) {
 }
 
 script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(format_error(allowed)); }
     impl->note_root_source(scriptPath);
     // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
     // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump, a
@@ -2097,7 +2117,8 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     }
 }
 
-void engine::add_variadic_function(const std::string& name, script_function func) {
+void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
+    func = guard_function(std::move(func), required);
     // Variadic function registration - handles any number of arguments
     // Register with SIZE_MAX to indicate it's a wildcard function
     constexpr size_t VARIADIC = SIZE_MAX;
@@ -2885,6 +2906,73 @@ double engine::execution_budget() const {
     return impl->execution_budget_seconds_;
 }
 
+void engine::enable(privilege flags) {
+    set_privileges(flags, true);
+}
+
+void engine::disable(privilege flags) {
+    set_privileges(flags, false);
+}
+
+void engine::set_privileges(privilege flags, bool enabled) {
+    if (!valid_privileges(flags)) { throw runtime_error("Invalid privilege flags"); }
+    if (impl->parallel_ && impl->parallel_->active_region) {
+        throw runtime_error("Cannot change privileges during a parallel region");
+    }
+    const auto bits = static_cast<uint64_t>(flags);
+    if (enabled) { impl->privileges_ |= bits; }
+    else { impl->privileges_ &= ~bits; }
+}
+
+bool engine::is_enabled(privilege flags) const noexcept {
+    const auto bits = static_cast<uint64_t>(flags);
+    return valid_privileges(flags) && (impl->privileges_ & bits) == bits;
+}
+
+checked_result<void> engine::require_privilege(privilege flags) const noexcept {
+    if (!valid_privileges(flags)) {
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), "Invalid privilege flags");
+    }
+    if (is_enabled(flags)) { return {}; }
+    return checked_result<void>(make_error_code(runtime_error_code::insufficient_privilege),
+        "Insufficient privilege: filesystem.");
+}
+
+script_function engine::guard_function(script_function function, privilege required) {
+    if (!valid_privileges(required)) { throw runtime_error("Invalid privilege flags"); }
+    if (required == privilege::none) { return function; }
+    return [this, function = std::move(function), required](const std::vector<script_value>& args) -> checked_result<script_value> {
+        auto allowed = require_privilege(required);
+        if (!allowed) { return allowed.error_value(); }
+        return function(args);
+    };
+}
+
+void engine::register_privilege_builtins() {
+    auto& jai_namespace = script_namespaces()[symbolize("jai")];
+    if (!jai_namespace) { jai_namespace = std::make_shared<script_namespace_data>(); }
+    jai_namespace->variables[symbolize("filesystem")] = script_value(static_cast<script_int>(privilege::filesystem), this);
+    auto& reflect_namespace = script_namespaces()[symbolize("reflect")];
+    if (!reflect_namespace) { reflect_namespace = std::make_shared<script_namespace_data>(); }
+    reflect_namespace->variables[symbolize("is_enabled")] = script_value::make_function(
+        [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "reflect::is_enabled expects at least 1 argument");
+            }
+            privilege required = privilege::none;
+            for (const auto& arg : args) {
+                const auto& value = arg.deref();
+                if (!value.is_int() || !valid_privileges(static_cast<privilege>(value.unchecked_as_int()))) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
+                        "reflect::is_enabled expects valid privilege flags");
+                }
+                required = required | static_cast<privilege>(value.unchecked_as_int());
+            }
+            return script_value(is_enabled(required), this);
+        }, this);
+}
+
 void engine::max_call_depth(backend_type type, size_t depth) {
     if (type != backend_type::interpreter && type != backend_type::vm) {
         throw runtime_error("max_call_depth requires a built-in backend type");
@@ -3129,10 +3217,14 @@ void engine::app_directory_resolvers(std::function<std::string(const std::string
 }
 
 std::string engine::app_data_dir(const std::string& app) const {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(std::string(allowed.static_message())); }
     return impl->app_data_resolver ? impl->app_data_resolver(app) : default_app_data_dir(app);
 }
 
 std::string engine::app_cache_dir(const std::string& app) const {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(std::string(allowed.static_message())); }
     return impl->app_cache_resolver ? impl->app_cache_resolver(app) : default_app_cache_dir(app);
 }
 
@@ -3142,52 +3234,65 @@ void engine::register_location_builtins() {
         if (root.empty() || root == "<script>") return {};
         std::error_code ec;
         return location_spelling(std::filesystem::absolute(root, ec));
-    });
+    }, privilege::filesystem);
     add_function("root_script_dir", [this]() -> std::string {
         std::string root = root_source_file();
         if (root.empty() || root == "<script>") return working_directory();
         std::error_code ec;
         return location_spelling(std::filesystem::absolute(root, ec).parent_path());
-    });
+    }, privilege::filesystem);
     add_function("current_script_path", [this]() -> std::string {
         std::string cur = current_source_file();
         if (cur.empty() || cur == "<script>") cur = root_source_file();
         if (cur.empty() || cur == "<script>") return {};
         std::error_code ec;
         return location_spelling(std::filesystem::absolute(cur, ec));
-    });
+    }, privilege::filesystem);
     add_function("current_script_dir", [this]() -> std::string {
         std::string cur = current_source_file();
         if (cur.empty() || cur == "<script>") cur = root_source_file();
         if (cur.empty() || cur == "<script>") return working_directory();
         std::error_code ec;
         return location_spelling(std::filesystem::absolute(cur, ec).parent_path());
-    });
+    }, privilege::filesystem);
     // resolve_path(name): the file import would load for `name` asked from the calling file,
     // "" when no rung of the ladder has it (the calling file's folder, the include paths in
     // order, the working directory; an absolute name stands or falls as given)
-    add_function("resolve_path", [this](const std::string& name) -> std::string {
-        auto r = resolve_include_path(name, this);
-        return r ? location_spelling(r.value()) : std::string();
-    });
-    add_function("executable_path", []() -> std::string { return location_spelling(executable_path()); });
+    add_function_with_arity_and_full_types("resolve_path", guard_function(
+        [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Function expects {0} arguments, got {1}", 1, args.size());
+            }
+            auto name = args[0].checked_as<std::string>();
+            if (!name) { return name.error_value(); }
+            auto result = resolve_include_path(name.value(), this);
+            if (!result) {
+                if (result.error() == make_error_code(runtime_error_code::file_not_found)) {
+                    return script_value(std::string(), this);
+                }
+                return result.error_value();
+            }
+            return script_value(location_spelling(result.value()), this);
+        }, privilege::filesystem), 1, {param_type_info(script_value_type::jai_string_type)});
+    add_function("executable_path", []() -> std::string { return location_spelling(executable_path()); }, privilege::filesystem);
     auto executable_dir = []() -> std::string {
         std::string exe = executable_path();
         return exe.empty() ? working_directory() : location_spelling(std::filesystem::path(exe).parent_path());
     };
-    add_function("executable_dir", executable_dir);
-    add_function("bin_dir", executable_dir);
-    add_function("working_dir", []() -> std::string { return working_directory(); });
+    add_function("executable_dir", executable_dir, privilege::filesystem);
+    add_function("bin_dir", executable_dir, privilege::filesystem);
+    add_function("working_dir", []() -> std::string { return working_directory(); }, privilege::filesystem);
     add_function("parent_dir", [](const std::string& path) -> std::string {
         std::filesystem::path p = std::filesystem::path(path).lexically_normal();
         if (p.filename().empty()) p = p.parent_path();
         return location_spelling(p.parent_path());
-    });
+    }, privilege::filesystem);
     add_function("file_name", [](const std::string& path) -> std::string {
         return std::filesystem::path(path).filename().generic_string();
-    });
-    add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); });
-    add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); });
+    }, privilege::filesystem);
+    add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); }, privilege::filesystem);
+    add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); }, privilege::filesystem);
 }
 
 std::string engine::format_stack_trace() const {
@@ -3329,6 +3434,8 @@ std::vector<std::string> engine::get_imported_files() const {
 }
 
 script_value engine::execute_import(const std::string& resolved_path) {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { throw runtime_error(format_error(allowed)); }
     // Check import behavior
     bool should_import = false;
     
@@ -3393,7 +3500,9 @@ script_value engine::execute_import(const std::string& resolved_path) {
         // file_timestamp check then re-imports, matching the old epoch-time fallback)
         implementation::import_record record;
         record.resolved_path = resolved_path;
-        implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
+        if (is_enabled(privilege::filesystem)) {
+            implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
+        }
         impl->import_cache[resolved_path] = record;
         
         return result;

@@ -65,6 +65,7 @@ namespace jai {
         // File I/O errors (81-90)
         file_not_found = 81,
         include_path_invalid = 82,
+        insufficient_privilege = 83,
 
         // Control flow errors (91-100)
         continue_outside_loop = 91,

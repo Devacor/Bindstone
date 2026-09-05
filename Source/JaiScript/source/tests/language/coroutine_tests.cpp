@@ -559,6 +559,33 @@ public:
             check_eq(expected, i_out, std::string("interp: ") + what);
             check_eq(expected, v_out, std::string("vm: ") + what);
         };
+        // Separate execute() calls on one engine (the REPL / host-driven shape): the setup's
+        // result is dropped, every step's result (or "ERROR: what") joins with '|'
+        auto both_executes = [](const std::string& setup, const std::vector<std::string>& steps) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { e->execute(setup); }
+                catch (const std::exception& ex) { out[idx] = std::string("SETUP ERROR: ") + ex.what(); }
+                for (const auto& step : steps) {
+                    if (!out[idx].empty()) { out[idx] += "|"; }
+                    try { out[idx] += e->execute(step).to_string(); }
+                    catch (const std::exception& ex) { out[idx] += std::string("ERROR: ") + ex.what(); }
+                }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto check_executes = [this, both_executes](const std::string& setup, const std::vector<std::string>& steps,
+                                                    const std::string& expected, const char* what) {
+            auto [i_out, v_out] = both_executes(setup, steps);
+            check_eq(expected, i_out, std::string("interp: ") + what);
+            check_eq(expected, v_out, std::string("vm: ") + what);
+        };
 
         test("method_coroutine_this_across_suspensions", [this, check_both]() {
             check_both(R"(
@@ -1457,6 +1484,16 @@ public:
             // store-back (side effects twice on the interpreter): pinned on both backends
             both_drained("string log = \"\";\nint side() { log += \"S\"; return 1; }\nvar arr = [1, 2];\narr[side()] += 5;\nvar m = {\"a\": [1, 2]};\nstring key() { log += \"Y\"; return \"a\"; }\nm[key()][side()] += 5;\nlog + \" \" + to_string(arr[1]) + \" \" + to_string(m[\"a\"][1])",
                 "SYS 7 7", "a compound store evaluates its subscript target exactly once");
+            // a yield inside a member-compound RECEIVER suspends once and the store lands on
+            // the resume (both backends used to yield twice; the interpreter also lost the store)
+            both_drained("class P { int v = 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v += 5; return p.v; }\nauto h = g(); drain(h)",
+                "1|5", "yield inside a member-compound receiver runs once");
+            both_drained("class P { int v = 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v++; return p.v; }\nauto h = g(); drain(h)",
+                "1|1", "yield inside a member-++ receiver runs once");
+            both_drained("class P { int v = 0; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var arr = [P(), P()]; arr[nz(yield 1)].v += 5; return arr[1].v; }\nauto h = g(); drain(h)",
+                "1|5", "yield inside the index of a member-compound receiver");
+            both_drained("class P { int v = 3; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v += nz(yield 2) * 4; return p.v; }\nauto h = g(); drain(h)",
+                "1|2|7", "yields in both the receiver and the rhs of a member compound");
         });
 
         test("yield_in_method_field_stores", [this, both_drained]() {
@@ -1520,6 +1557,184 @@ public:
                 auto r = e->execute("to_string(a) + \"|\" + to_string(h.resume()) + \"|\" + w.e + \"|\" + to_string(w.g().resume())");
                 check_eq(std::string("1|2|x|99"), r.to_string(), std::string(use_vm ? "vm" : "interp") + ": a reload between resumes finishes the old expression on the migrated instance");
             }
+        });
+
+        // ---- catch variable across suspension (Dev contract: the catch variable is an
+        // ordinary block-scoped local of the catch body - a frame slot - and survives
+        // suspension like any local; the exception pair + in-catch marker are parked per
+        // coroutine so the resumer's own try/catch between resumes never touches them).
+        // The vm used to lose 'e' after a yield (Undefined variable 'e'); both backends used
+        // to resolve a catch variable dynamically through a backend-global intercept. ----
+        test("catch_var_survives_yield_across_executes", [this, check_executes, both_drained]() {
+            check_executes("coroutine int g() { try { throw \"abc\"; } catch (e) { yield 2; return to_string(e).size(); } } auto c = g();",
+                           {"c.resume();", "c.resume();"}, "2|3", "size of e after the yield");
+            check_executes("coroutine var g() { try { throw \"abc\"; } catch (e) { yield 2; return e; } } auto c = g();",
+                           {"c.resume();", "c.resume();", "c.done();"}, "2|abc|true", "e itself after the yield");
+            both_drained("coroutine int g() { try { throw \"abc\"; } catch (e) { yield 2; return to_string(e).size(); } }\nauto h = g(); drain(h)",
+                         "2|3", "drained in one execute");
+            check_executes("coroutine var g() { try { throw 42; } catch (e) { yield 1; e = e + 1; yield e; return e * 2; } } auto c = g();",
+                           {"c.resume();", "c.resume();", "c.resume();"}, "1|43|86", "the catch variable is a mutable local across yields");
+            check_executes("coroutine var g() { try { throw \"c\"; } catch (e) { yield 1; var l = [=]() { return e + \"!\"; }; yield l(); var m = [&]() { e = e + \"?\"; }; m(); var n = [e]() { return e; }; return n(); } } auto c = g();",
+                           {"c.resume();", "c.resume();", "c.resume();"}, "1|c!|c?", "[=], [&] and [e] lambdas created after yields capture the catch variable");
+        });
+
+        test("two_yields_inside_catch", [this, check_executes, both_drained]() {
+            check_executes("coroutine var g() { try { throw \"abc\"; } catch (e) { yield 1; yield e; yield e + \"2\"; return e; } } auto c = g();",
+                           {"c.resume();", "c.resume();", "c.resume();", "c.resume();"}, "1|abc|abc2|abc", "e across three yields");
+            both_drained("coroutine var g() { try { throw \"abc\"; } catch (e) { yield 1; yield e; yield e + \"2\"; return e; } }\nauto h = g(); drain(h)",
+                         "1|abc|abc2|abc", "drained in one execute");
+        });
+
+        test("nested_try_catch_yields_both_levels", [this, check_executes, both_drained]() {
+            const std::string body =
+                "coroutine var g() {\n"
+                "    try { yield 1; try { yield 2; throw \"in\"; } catch (e1) { yield \"e1=\" + e1; throw \"out:\" + e1; } }\n"
+                "    catch (e2) { yield \"e2=\" + e2; yield \"again:\" + e2; }\n"
+                "    return \"done\";\n"
+                "}\n";
+            check_executes(body + "auto c = g();",
+                           {"c.resume();", "c.resume();", "c.resume();", "c.resume();", "c.resume();", "c.resume();"},
+                           "1|2|e1=in|e2=out:in|again:out:in|done", "one resume per execute");
+            both_drained(body + "auto h = g(); drain(h)", "1|2|e1=in|e2=out:in|again:out:in|done", "drained in one execute");
+            // the outer catch variable stays visible after the fiber resumes past a nested yield
+            check_executes("coroutine var g() { try { throw \"o\"; } catch (a) { try { yield a; throw a + \"i\"; } catch (b) { yield a + \"/\" + b; return b; } } } auto c = g();",
+                           {"c.resume();", "c.resume();", "c.resume();"}, "o|o/oi|oi", "outer and inner catch variables after yields at both levels");
+        });
+
+        test("throw_after_resume_inside_try_begun_before_yield", [this, check_executes]() {
+            // try_records_ park with the fiber: a throw after the resume still reaches the catch
+            // opened before the yield, with the resumer's own try/catch running in between
+            check_executes("coroutine var g() { try { yield 1; throw \"in\"; } catch (e) { yield \"c:\" + e; } return \"d\"; } auto c = g();",
+                           {"c.resume();", "try { throw \"r\"; } catch (re) { } c.resume();", "c.resume();"},
+                           "1|c:in|d", "throw after resume inside a try begun before the yield");
+            // bare rethrow after a yield inside the catch rethrows the caught value
+            check_executes("coroutine var g() { try { throw \"in\"; } catch (e) { yield \"c:\" + e; throw; } } auto c = g();",
+                           {"c.resume();", "try { throw \"r\"; } catch (re) { } var got = \"\"; try { c.resume(); } catch (err) { got = err; } got;"},
+                           "c:in|in", "bare throw; after a yield inside a catch");
+            // the resumer's catch variable is untouched by the fiber's throw
+            check_executes("coroutine var g() { try { throw \"in\"; } catch (e) { yield 1; throw; } } auto c = g(); c.resume();",
+                           {"var log = \"\"; try { throw \"r\"; } catch (re) { try { c.resume(); } catch (err) { log = err + \"/\" + re; } log = log + \"/\" + re; } log;"},
+                           "in/r/r", "the resumer's catch variable survives a throw out of the fiber");
+            // a coroutine body starts with no active exception: a bare throw; outside any catch
+            // in the body raises No exception to re-throw even when the resumer is inside a catch
+            check_executes("coroutine var g() { yield 1; throw; } auto c = g(); c.resume();",
+                           {"var got = \"\"; try { throw \"r\"; } catch (re) { try { c.resume(); } catch (err) { got = err; } } got;"},
+                           "No exception to re-throw", "bare throw; in a body with no catch active");
+        });
+
+        test("resumer_try_catch_between_resumes_keeps_fiber_catch_var", [this, check_both]() {
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { yield 1; yield e; return e + "!"; } }
+                auto c = g();
+                string log = to_string(c.resume());
+                try { throw "r"; } catch (err) { log = log + "/" + err; }
+                log = log + "/" + to_string(c.resume());
+                [[warn_mode]] try { var q = e; } catch (err) { log = log + "/" + err; }
+                log = log + "/" + to_string(c.resume());
+                log
+            )", "1/r/x/Undefined variable 'e'/x!", "resumer try/catch between resumes, distinct names");
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { yield 1; yield e; return e + "!"; } }
+                auto c = g();
+                string log = to_string(c.resume());
+                try { throw "r"; } catch (e) { log = log + "/" + e; }
+                log = log + "/" + to_string(c.resume());
+                try { throw "s"; } catch (e) { log = log + "/" + e + "/" + to_string(c.resume()) + "/" + e; }
+                log
+            )", "1/r/x/s/x!/s", "resumer catch with the SAME name, resumed from inside it");
+            // nested resumes nest LIFO: a coroutine drives another from inside its own catch
+            // while the host drives it from inside a third catch - every e reads its own
+            check_both(R"(
+                coroutine var inner() { try { throw "i"; } catch (e) { yield e; yield e + "2"; return e + "3"; } }
+                coroutine var outer() { try { throw "o"; } catch (e) { auto c = inner(); yield e + "/" + to_string(c.resume()); yield e + "/" + to_string(c.resume()); yield e + "/" + to_string(c.resume()); return e; } }
+                auto h = outer();
+                string log = "";
+                try { throw "r"; } catch (e) { log = to_string(h.resume()) + "|" + e; log = log + "|" + to_string(h.resume()) + "|" + e; }
+                log + "|" + to_string(h.resume()) + "|" + to_string(h.resume())
+            )", "o/i|r|o/i2|r|o/i3|o", "nested resumes, three catch variables named e");
+            // a throw escaping the inner fiber lands in the outer fiber's catch (inside ITS catch);
+            // the outer's e is untouched by the inner's exception
+            check_both(R"(
+                coroutine var inner() { try { throw "i"; } catch (e) { yield 1; throw; } }
+                coroutine var outer() { try { throw "o"; } catch (e) { auto c = inner(); c.resume(); string got = ""; try { c.resume(); } catch (x) { got = x; } yield got + "/" + e; return e; } }
+                auto h = outer();
+                to_string(h.resume()) + "|" + to_string(h.resume())
+            )", "i/o|o", "a bare throw; out of the inner fiber lands in the outer fiber's catch");
+        });
+
+        test("catch_var_in_range_for_driving_coroutine", [this, check_both]() {
+            // The resumer's e reads the resumer's exception before, during and after the loop.
+            // Both backends used to leak the fiber's catch var into the resumer here
+            // (x/x|x2/x|after:null) - that was the intercept, not the contract.
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { yield e; yield e + "2"; } }
+                string log = "";
+                try { throw "outer"; } catch (e) { log = "pre:" + e + "|"; for (auto v : g()) { log = log + v + "/" + e + "|"; } log = log + "after:" + e; }
+                log
+            )", "pre:outer|x/outer|x2/outer|after:outer", "same name, range-for driving");
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { yield e; yield e + "2"; } }
+                string log = "";
+                try { throw "outer"; } catch (oe) { for (auto v : g()) { log = log + v + "/" + oe + "|"; } log = log + "after:" + oe; }
+                log
+            )", "x/outer|x2/outer|after:outer", "distinct names, range-for driving");
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { yield e; yield e + "2"; return "end"; } }
+                string log = "";
+                try { throw "outer"; } catch (e) { auto c = g(); log = to_string(c.resume()) + "/" + e; log = log + "|" + to_string(c.resume()) + "/" + e; log = log + "|" + to_string(c.resume()) + "/" + e + "/" + to_string(c.done()); }
+                log
+            )", "x/outer|x2/outer|end/outer/true", "explicit resumes inside the resumer's catch, e read after completion");
+            check_both(R"(
+                coroutine var g() { try { throw "x"; } catch (e) { for (int i = 0; i < 2; i++) { yield e + to_string(i); } } }
+                string log = "";
+                try { throw "o"; } catch (e) { for (auto v : g()) { try { throw "n"; } catch (e) { log = log + e; } log = log + v + e + "|"; } }
+                log
+            )", "nx0o|nx1o|", "nested catch inside the driving loop shadows and restores");
+        });
+
+        // By-value completion values (`return x;` in a coroutine body) follow the function
+        // rule: an lvalue read copies, the body's own local moves; `yield x` is unchanged.
+        test("coroutine_completion_value_copies", [this, check_both]() {
+            check_both(R"(
+                array<int> cg = [1];
+                coroutine co() { yield 1; return cg; }
+                auto h = co();
+                h.resume();
+                var done = h.resume();
+                done.push(2);
+                class T { int v = 1; }
+                T obj = T();
+                coroutine cot() { yield obj; return obj; }
+                auto h2 = cot();
+                var y = h2.resume();
+                var d2 = h2.resume();
+                d2.v = 9;
+                coroutine col() { array<int> own = [1]; yield 0; own.push(2); return own; }
+                auto h3 = col();
+                h3.resume();
+                var d3 = h3.resume();
+                to_string(cg.size()) + "/" + to_string(done.size()) + "/" + to_string(obj.v) + "/" + to_string(d2.v) + "/" + to_string(d3.size())
+            )", "1/2/1/9/2", "completion values copy globals and move the body's own locals");
+        });
+
+        test("method_coroutine_catch_var_across_yields", [this, check_executes, both_drained]() {
+            check_executes("class K { string tag = \"T\"; coroutine var g() { try { throw \"m\"; } catch (e) { yield 1; yield tag + \":\" + e; yield this.tag + \"/\" + e; return e; } } } auto k = K(); auto c = k.g();",
+                           {"c.resume();", "c.resume();", "c.resume();", "c.resume();"}, "1|T:m|T/m|m", "method coroutine, bare and this. field beside e");
+            check_executes("class K { string tag = \"T\";\n"
+                           "  coroutine var g() { try { yield 1; try { yield 2; throw \"in\"; } catch (e1) { yield tag + \":e1=\" + e1; throw \"out:\" + e1; } }\n"
+                           "  catch (e2) { yield \"e2=\" + e2; yield \"again:\" + e2 + tag; } return \"done\"; } }\n"
+                           "auto k = K(); auto c = k.g();",
+                           {"c.resume();", "c.resume();", "c.resume();", "c.resume();", "c.resume();", "c.resume();"},
+                           "1|2|T:e1=in|e2=out:in|again:out:inT|done", "nested shape as a method");
+            check_executes("class K { static string tag = \"S\"; static coroutine var g() { try { throw \"m\"; } catch (e) { yield 1; yield tag + \":\" + e; return e; } } } auto c = K::g();",
+                           {"c.resume();", "c.resume();", "c.resume();"}, "1|S:m|m", "static method coroutine");
+            both_drained("class K { string tag = \"T\"; coroutine var g() { try { throw \"m\"; } catch (e) { yield 1; yield tag + \":\" + e; return e; } } }\nauto k = K(); auto h = k.g(); drain(h)",
+                         "1|T:m|m", "drained in one execute");
+            // a hot reload of K between resumes keeps the old fiber's e (precedent
+            // method_coroutine_hot_reload_matches_free_precedent)
+            check_executes("class K { string tag = \"T\"; coroutine var g() { try { throw \"m\"; } catch (e) { yield 1; yield e; return e + tag; } } } auto k = K(); auto c = k.g();",
+                           {"c.resume();", "class K { string tag = \"T\"; string extra = \"E\"; coroutine var g() { return 99; } } c.resume();", "c.resume();", "k.g().resume();"},
+                           "1|m|mT|99", "hot reload between resumes keeps the suspended catch variable");
         });
 
     }

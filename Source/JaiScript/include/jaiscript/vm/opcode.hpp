@@ -45,7 +45,9 @@ namespace jai::vm {
 
         op_call,            // a=argc, b=call site index; pops args+callee, pushes result
         op_return,          // a=has value (pops it), b=return mode: return_stmt::static_return_proof
-                            // or return_mode_converted (converted at an in-region return site)
+                            // or return_mode_converted (converted at an in-region return site),
+                            // c=detail::return_operand_* class of the operand (0 = nothing to
+                            // materialize: ref return, no value, or already done by op_return_convert)
         op_implicit_return, // pops value into the program result (deref'd)
 
         op_scope_push,      // push a child environment
@@ -63,7 +65,7 @@ namespace jai::vm {
         op_get_static,      // a=node index (member_expr with ::); pushes static member
         op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value
-        op_member_compound, // a=node index, c=compound kind; stack [current, rhs, object] (no object for a :: target) -> pushes result
+        op_member_compound, // a=node index, c=compound kind; stack [object, current, rhs] (no object for a :: target) -> pushes result
         op_call_method,     // a=argc, b=call site (member_node/receiver_symbol); stack [object, args...]
         op_new,             // a=node index (new_expr), b=argc; pops args, pushes instance
         op_class_decl,      // a=node index (class_decl); defines/redefines the class
@@ -71,7 +73,7 @@ namespace jai::vm {
         op_enum_decl,       // a=node index (enum_decl)
 
         op_throw,           // a=has value (pops it), b=node index for location; sets unwinding
-        op_try_push,        // a=handler instruction index, b=catch var symbol index
+        op_try_push,        // a=handler instruction index, b=catch var symbol index, c=catch var frame slot (k_invalid_u32 = scope env)
         op_try_pop,         // normal try-block completion
         op_catch_end,       // normal catch-block completion
         op_case_eq,         // pops case value + switch value copy, pushes bool(v == cv); compare failure = false
@@ -162,7 +164,9 @@ namespace jai::vm {
         op_return_convert,  // a=return_stmt::static_return_proof: in-region `return` (a try/catch is
                             // open) converts the stack top against the frame's declared return
                             // type HERE, inside this frame's try records; the op_return after the
-                            // region exits lands it as return_mode_converted
+                            // region exits lands it as return_mode_converted. b=detail::return_operand_*
+                            // class of the operand (materialized first: own slot moves, lvalue
+                            // reads copy), c=the identifier's own-frame slot (k_invalid_u32 = none)
         op_halt,
     };
 

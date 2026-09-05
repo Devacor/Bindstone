@@ -246,6 +246,22 @@ public:
             )");
         });
 
+        // The catch variable is a frame-slot local (function) / scope local (top level):
+        // the slot and symbol ride the bite, and the loaded tree reads it exactly like a
+        // fresh parse - shadowing, callee isolation, yields inside the catch included
+        test("roundtrip_catch_variable_slot", [check_roundtrip]() {
+            check_roundtrip(R"(
+                var e = "global";
+                int callee() { int e = 5; return e; }
+                string f() { string s = ""; try { throw "x"; } catch (e) { e += "!"; s = e + to_string(callee()); } return s + e; }
+                string log = "";
+                try { throw 2; } catch (e) { log = to_string(e) + "/"; }
+                coroutine var g() { try { throw "c"; } catch (e) { yield e; yield e + "2"; return e; } }
+                var h = g();
+                log + f() + "|" + to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + e;
+            )");
+        });
+
         test("roundtrip_uncaught_throw_error_text", [check_roundtrip]() {
             check_roundtrip(R"(
                 int helper(int n) { if (n > 2) { throw "kaboom at " + to_string(n); } return n; }
@@ -326,10 +342,11 @@ public:
                 bump();
                 caught + "|" + c2 + "|" + to_string(y);
             )");
-            // statement::check_mode_attr arrived with format version 11 (right after the 4-byte magic)
+            // statement::check_mode_attr arrived with format version 11, the try_stmt catch
+            // variable symbol + slot with 12 (right after the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)11, (int)bytes[4], "jaibite format version");
+            check_eq((int)12, (int)bytes[4], "jaibite format version");
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

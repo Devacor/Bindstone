@@ -92,6 +92,36 @@ public:
 			check_matches_serial_at(e, src, {1, 2, 8});
 		});
 
+		// A worker body that copies its element string and mutates the copy: the copy-on-write
+		// gate unshares on the worker (plain make_strong, no pool) and the element stays intact
+		test("string_copy_mutation_in_body_matches_serial", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push("item_" + to_string(i)); }
+				string f(string s) {
+					string up = s;
+					up.to_upper();
+					up += "!";
+					return s + "|" + up;
+				}
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout, a];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				auto r = e->execute(src);
+				const auto& triple = r.as_array();
+				check_eq((size_t)3, triple.size());
+				check_true(arrays_equal(triple[0], triple[1]));
+				check_eq(std::string("item_5|ITEM_5!"), triple[0].as_array()[5].as<std::string>());
+				check_eq(std::string("item_5"), triple[2].as_array()[5].as<std::string>());
+			}
+		});
+
 		test("float_math_whitelist_matches_serial", [this]() {
 			auto e = make_engine();
 			jai::stdlib::register_all(*e);
@@ -576,10 +606,13 @@ public:
 			check_true(r2.as<std::string>().find("may not take its element by reference") != std::string::npos);
 		});
 
-		test("rejects_object_elements", [this]() {
+		// Elements must be value-semantic: a class with an open (var) field is not a flat
+		// value class, and a shared_ptr element with a live alias would diverge from the
+		// serial loop (the barrier may not clone it apart) - both name the offending leaf
+		test("rejects_non_value_semantic_elements", [this]() {
 			auto e = make_engine();
 			auto r = e->execute(R"(
-				class P { int x = 1; }
+				class P { var x = 1; }
 				int f(var v) { return 1; }
 				var a = [];
 				a.push(P());
@@ -587,8 +620,31 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_transform: element 0") != std::string::npos);
-			check_true(msg.find("not value-semantic") != std::string::npos);
+			check_true(msg.find("parallel_transform: element 0: value is not value-semantic (object)") != std::string::npos, msg);
+
+			auto r2 = e->execute(R"(
+				class Q { int x = 1; }
+				int g(var v) { return 1; }
+				var q = new Q();
+				var b = [1];
+				b.push(q);
+				try { parallel_transform(b, g); } catch (e) { return e; }
+				return "no-error";
+			)");
+			auto msg2 = r2.as<std::string>();
+			check_true(msg2.find("parallel_transform: element 1: value is not value-semantic (shared_ptr)") != std::string::npos, msg2);
+
+			auto r3 = e->execute(R"(
+				class R { var x = 1; }
+				int h(var v) { return 1; }
+				array<R> c = [];
+				c.push(R());
+				c.push(R());
+				try { parallel_transform(c, h); } catch (e) { return e; }
+				return "no-error";
+			)");
+			auto msg3 = r3.as<std::string>();
+			check_true(msg3.find("parallel_transform: element 0: value is not value-semantic (object)") != std::string::npos, msg3);
 		});
 
 		test("rejects_nested_parallel_transform", [this]() {
@@ -602,14 +658,158 @@ public:
 			check_true(r.as<std::string>().find("host function 'parallel_transform' is not callable in a parallel body") != std::string::npos);
 		});
 
-		test("rejects_member_access", [this]() {
+		// Member chains root at the element (the worker's private by-value copy) or a local;
+		// a chain rooted at a captured name keeps the in-place form's rejection text
+		test("rejects_member_access_on_captured_name", [this]() {
 			auto e = make_engine();
 			auto r = e->execute(R"(
-				int f(var x) { return x.field; }
+				class P { int a = 1; }
+				var g = P();
+				int f(int x) { return g.a + x; }
 				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
 				return "no-error";
 			)");
-			check_true(r.as<std::string>().find("member access is not allowed in a parallel body") != std::string::npos);
+			check_true(r.as<std::string>().find("member access reaches captured state 'g' (captured reads are read-only, and objects cannot be captured)") != std::string::npos, r.as<std::string>());
+
+			auto r2 = e->execute(R"(
+				class P2 { int a = 1; }
+				var g2 = P2();
+				int f2(int x) { g2.a = x; return x; }
+				try { parallel_transform([1, 2, 3], f2); } catch (e) { return e; }
+				return "no-error";
+			)");
+			check_true(r2.as<std::string>().find("member store reaches captured state 'g2'") != std::string::npos, r2.as<std::string>());
+
+			auto r3 = e->execute(R"(
+				var m = {"k": 1};
+				int f3(int x) { return m.k + x; }
+				try { parallel_transform([1, 2, 3], f3); } catch (e) { return e; }
+				return "no-error";
+			)");
+			check_true(r3.as<std::string>().find("member access reaches captured state 'm'") != std::string::npos, r3.as<std::string>());
+		});
+
+		// === Element members (transformmembers): a body reads members of its own element ===
+
+		test("element_member_reads_field_nested_array_and_map", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
+				class Node {
+					int id = 0; Leaf leaf = Leaf(0); array<int> xs = []; map<string, int> counts = {};
+					Node() {}
+					Node(int n) { id = n; leaf = Leaf(n * 2); xs = [n, n + 1, n + 2]; counts["a"] = n * 3; }
+				}
+				array<Node> nodes = [];
+				for (int i = 0; i < 48; i++) { nodes.push(Node(i)); }
+				int side(Node n) { return n.xs[0]; }
+				int f(Node n) { return n.id + n.leaf.v + n.xs[1] + n.counts["a"] + n.leaf.tag.size() + side(n); }
+				var pout = parallel_transform(nodes, f);
+				var sout = [];
+				for (auto x : nodes) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+			check_eq((int64_t)(5 + 10 + 6 + 15 + 4 + 5), e->execute(src).as_array()[0].as_array()[5].as_int());
+
+			// The same shape through an untyped array (per-element walk instead of the declared proof)
+			const std::string hetero = R"(
+				class Leaf2 { int v = 0; string tag = "leaf"; Leaf2() {} Leaf2(int n) { v = n; } }
+				class Node2 { int id = 0; Leaf2 leaf = Leaf2(0); array<int> xs = []; Node2() {} Node2(int n) { id = n; leaf = Leaf2(n * 2); xs = [n, n + 1]; } }
+				var nodes = [];
+				for (int i = 0; i < 40; i++) { nodes.push(Node2(i)); }
+				int f(var n) { return n.id + n.leaf.v + n.xs[1] + n.leaf.tag.size(); }
+				var pout = parallel_transform(nodes, f);
+				var sout = [];
+				for (auto x : nodes) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, hetero, {1, 2, 8});
+		});
+
+		test("prewarm_classes_reached_through_typed_containers", [this]() {
+			// A worker's first member touch on a class it only reaches through a typed container
+			// (array<Leaf> field, array<Mid> -> array<Leaf>, map<string, array<Leaf>>) must find every
+			// shape interned at the barrier; a fresh engine per run keeps the first region cold
+			const std::string src = R"(
+				class Leaf { int v = 3; }
+				class Mid { array<Leaf> leaves = [Leaf(), Leaf()]; }
+				class Node {
+					Leaf leaf = Leaf(); array<int> xs = [1, 2]; array<Leaf> extras = [Leaf()];
+					array<Mid> mids = [Mid()]; map<string, array<Leaf>> groups = {"a": [Leaf()]};
+				}
+				array<Node> nodes = [];
+				for (int i = 0; i < 40; i++) { nodes.push(Node()); }
+				int f(Node n) { return n.leaf.v + n.xs[0] + n.extras[0].v * 10 + n.mids[0].leaves[1].v * 100 + n.groups["a"][0].v * 1000; }
+				var pout = parallel_transform(nodes, f);
+				var sout = [];
+				for (auto x : nodes) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				auto e = make_engine();
+				e->parallel_thread_count(workers);
+				auto r = e->execute(src);
+				const auto& pair = r.as_array();
+				check_true(arrays_equal(pair[0], pair[1]));
+				check_eq((int64_t)(3 + 1 + 30 + 300 + 3000), pair[0].as_array()[7].as_int());
+			}
+			// The trusted path skips the element proof: the prewarm must still reach the nested classes
+			auto e = make_engine();
+			e->allow_unsafe_parallel(true);
+			e->parallel_thread_count(4);
+			auto r = e->execute(src);
+			check_true(arrays_equal(r.as_array()[0], r.as_array()[1]));
+		});
+
+		test("vec3_transform_returns_x_times_y_and_keeps_node_typed", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				class Vec3 { float x = 0.0; float y = 0.0; float z = 0.0; Vec3() {} Vec3(float a) { x = a; y = a * 2.0; z = a * 3.0; } }
+				array<Vec3> vecs = [];
+				for (int i = 0; i < 64; i++) { vecs.push(Vec3(i)); }
+				float f(Vec3 v) { return v.x * v.y; }
+				var pout = parallel_transform(vecs, f);
+				var sout = [];
+				for (auto v : vecs) { sout.push(f(v)); }
+				return [pout, sout, vecs];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				auto r = e->execute(src);
+				const auto& triple = r.as_array();
+				check_eq((size_t)3, triple.size());
+				check_true(arrays_equal(triple[0], triple[1]));
+				check_near(7.0 * 14.0, triple[0].as_array()[7].as<double>(), 1e-9);
+				check_true(triple[2].unchecked_array_node()->is_typed(), "the copy carries the source's object kind");
+			}
+			auto vecs = e->execute("vecs");
+			check_true(vecs.unchecked_array_node()->is_typed(), "source keeps its object kind");
+			check_true(vecs.unchecked_array_node()->kind() == script_array::kind_t::obj, "kind obj");
+			check_eq((uint32_t)0, vecs.unchecked_array_node()->live_elem_refs);
+		});
+
+		test("store_into_parameter_copy_leaves_source_unchanged", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				class P { int a = 1; string s = "x"; P() {} P(int v) { a = v; } }
+				array<P> ps = [];
+				for (int i = 0; i < 40; i++) { ps.push(P(i)); }
+				int f(P p) { p.a = p.a * 10; p.s = "changed"; p.a++; return p.a; }
+				var pout = parallel_transform(ps, f);
+				var total = 0;
+				for (auto p : ps) { total += p.a; }
+				return [pout[3], total, ps[3].s, pout.size()];
+			)";
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				auto r = e->execute(src);
+				const auto& vals = r.as_array();
+				check_eq((int64_t)31, vals[0].as_int());
+				check_eq((int64_t)780, vals[1].as_int());
+				check_eq(std::string("x"), vals[2].as<std::string>());
+				check_eq((int64_t)40, vals[3].as_int());
+			}
 		});
 
 		test("rejects_impure_weight_fn", [this]() {
@@ -1110,6 +1310,35 @@ public:
 			check_true(msg.find("cannot be mutated in place") != std::string::npos);
 		});
 
+		// shared_ptr-tagged elements alias by script-visible design: a live alias makes the
+		// element non-exclusive (two chunks could hold one instance) and the barrier may not
+		// clone it apart; an unaliased handle is exactly the serial loop's in-place mutation
+		test("aliased_shared_ptr_elements_rejected_unaliased_mutate_in_place", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class Q { int x = 0; }
+				var q = new Q();
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(q); }
+				try { parallel_for (auto& el : a) { el.x = el.x + 1; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("parallel_for: element 0 cannot be mutated in place") != std::string::npos, msg);
+
+			auto r2 = e->execute(R"(
+				class Q2 { int x = 0; }
+				array<Q2> b = [];
+				for (var i = 0; i < 32; i++) { b.push(new Q2()); }
+				parallel_for (auto& el : b) { el.x = el.x + 5; }
+				var total = 0;
+				for (auto el : b) { total += el.x; }
+				return total;
+			)");
+			check_eq((int64_t)160, r2.as_int());
+		});
+
 		test("admitted_self_method_call", [this]() {
 			// parallel-method-admission ruling: a single-overload public method touching
 			// only element state is admitted in SAFE mode and dispatches via pinned
@@ -1240,6 +1469,404 @@ public:
 				return a[63];
 			)");
 			check_eq((int64_t)128, r.as_int());
+		});
+
+		// === Object-kind typed arrays ride their slots (nodemote): the declared class is the
+		// exclusivity proof, the node is never demoted ===
+
+		test("typed_object_array_stays_typed_after_region", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			e->parallel_thread_count(4);
+			e->execute(R"(
+				class K { int a = 1; K() {} K(int v) { a = v; } }
+				array<K> ks = [];
+				for (int i = 0; i < 64; i++) { ks.push(K(i)); }
+				parallel_for (auto& k : ks) { k.a = k.a * 10; }
+				parallel_for (auto k : ks) { k.a = 999; }
+			)");
+			auto ks = e->execute("ks");
+			check_true(ks.is_array());
+			const script_array* node = ks.unchecked_array_node();
+			check_true(node->is_typed(), "node keeps its object kind");
+			check_true(node->kind() == script_array::kind_t::obj, "kind obj");
+			check_eq((size_t)64, node->size());
+			check_false(ks.checked_as_array().has_value(), "the array<var> view stays unavailable (not demoted)");
+			auto r = e->execute(R"(
+				var out = [ks[0].a, ks[7].a, ks[63].a, type_of(ks) + "/" + type_of(ks[63])];
+				try { ks.push(5); out.push("accepted"); } catch (err) { out.push(err); }
+				try { ks[0] = "s"; out.push("accepted"); } catch (err) { out.push(err); }
+				ks.push(K(3));
+				out.push(ks.size());
+				return out;
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)0, vals[0].as_int());
+			check_eq((int64_t)70, vals[1].as_int());
+			check_eq((int64_t)630, vals[2].as_int());
+			check_eq(std::string("array/K"), vals[3].as<std::string>());
+			check_eq(std::string("Cannot push 'int' to array<K>"), vals[4].as<std::string>());
+			check_eq(std::string("Cannot assign 'string' to element of type 'K'"), vals[5].as<std::string>());
+			check_eq((int64_t)65, vals[6].as_int());
+		});
+
+		test("typed_object_by_value_and_by_ref_bindings", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				class K { int a = 1; int b = 0; K() {} K(int v) { a = v; } }
+				array<K> ks = [];
+				array<K> serial = [];
+				for (int i = 0; i < 300; i++) { ks.push(K(i)); serial.push(K(i)); }
+				parallel_for (auto k : ks) { k.a = 999; k.b = 999; }
+				parallel_for (auto& k : ks) { k.b = k.a * 2; k.a = k.a + 1; }
+				for (auto& k : serial) { k.b = k.a * 2; k.a = k.a + 1; }
+				var p = []; var q = [];
+				for (auto k : ks) { p.push(k.a); p.push(k.b); }
+				for (auto k : serial) { q.push(k.a); q.push(k.b); }
+				return [p, q];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("typed_object_by_value_copies_never_race", [this]() {
+			// Workers clone the element (by-value binding) and destroy the copy: instance
+			// registration on the shared class definition must serialize, both node kinds
+			for (const char* decl : {"array<K> ks = [];", "var ks = [];"}) {
+				auto e = make_engine();
+				e->parallel_thread_count(8);
+				auto r = e->execute(std::string(R"(
+					class K { int a = 1; string s = "x"; K() {} K(int v) { a = v; } }
+				)") + decl + R"(
+					for (int i = 0; i < 4000; i++) { ks.push(K(i)); }
+					int rounds = 0;
+					for (int r = 0; r < 5; r++) { parallel_for (auto k : ks) { k.a = 999; k.s = "y"; } rounds = rounds + 1; }
+					return [rounds, ks[0].a, ks[3999].a, ks[17].s];
+				)");
+				const auto& vals = r.as_array();
+				check_eq((int64_t)5, vals[0].as_int());
+				check_eq((int64_t)0, vals[1].as_int());
+				check_eq((int64_t)3999, vals[2].as_int());
+				check_eq(std::string("x"), vals[3].as<std::string>());
+			}
+		});
+
+		test("typed_object_nested_field_writes_land", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
+				class Inner { Leaf a = Leaf(0); Leaf b = Leaf(0); array<int> xs = []; string name = "inner"; Inner() {} Inner(int n) { a = Leaf(n); b = Leaf(n + 1); xs = [n, n + 1, n + 2]; } }
+				class Node { Inner first = Inner(0); array<Leaf> kids = []; map<string, int> counts = {}; Node() {} Node(int n) { first = Inner(n); kids = [Leaf(n), Leaf(n * 2)]; counts["a"] = n; } }
+				array<Node> nodes = [];
+				array<Node> serial = [];
+				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); serial.push(Node(i)); }
+				parallel_for (auto& n : nodes) {
+					n.first.a.v = n.first.a.v + 1;
+					n.first.xs[0] = n.first.xs[0] * 3;
+					n.kids[1].v = n.kids[1].v + 7;
+					n.counts["a"] = n.counts["a"] + 100;
+					n.first.b.v = n.first.a.v * 2;
+				}
+				for (auto& n : serial) {
+					n.first.a.v = n.first.a.v + 1;
+					n.first.xs[0] = n.first.xs[0] * 3;
+					n.kids[1].v = n.kids[1].v + 7;
+					n.counts["a"] = n.counts["a"] + 100;
+					n.first.b.v = n.first.a.v * 2;
+				}
+				var p = []; var q = [];
+				for (auto n : nodes) { p.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
+				for (auto n : serial) { q.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
+				return [p, q];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("typed_object_live_reference_pins_current_behavior", [this]() {
+			// A field reference minted THROUGH an element (auto& r = ks[3].a) counts as a live
+			// reference into the array: the fork takes the per-element walk, which detaches the
+			// pinned instance - the reference keeps the pre-region value, the element moves on.
+			// A direct element reference re-resolves through container+index: coherent.
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class K { int a = 1; K() {} K(int v) { a = v; } }
+				array<K> ks = [];
+				for (int i = 0; i < 64; i++) { ks.push(K(i)); }
+				auto& r = ks[3].a;
+				auto& el = ks[4];
+				parallel_for (auto& k : ks) { k.a = k.a + 1000; }
+				var out = [r, ks[3].a, el.a, ks[4].a];
+				r = -1;
+				out.push(ks[3].a);
+				return out;
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)3, vals[0].as_int(), "field ref detached from the element");
+			check_eq((int64_t)1003, vals[1].as_int());
+			check_eq((int64_t)1004, vals[2].as_int(), "element ref stays coherent");
+			check_eq((int64_t)1004, vals[3].as_int());
+			check_eq((int64_t)1003, vals[4].as_int(), "writes through the detached ref never reach the array");
+		});
+
+		test("typed_object_live_reference_then_released", [this]() {
+			// The reference dies with its scope: the next fork proves from the declared type again
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class K { int a = 1; K() {} K(int v) { a = v; } }
+				array<K> ks = [];
+				for (int i = 0; i < 64; i++) { ks.push(K(i)); }
+				void poke(int& x) { x = x + 5; }
+				poke(ks[2].a);
+				parallel_for (auto& k : ks) { k.a = k.a * 2; }
+				return [ks[2].a, ks[63].a];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)14, vals[0].as_int());
+			check_eq((int64_t)126, vals[1].as_int());
+			check_eq((uint32_t)0, e->execute("ks").unchecked_array_node()->live_elem_refs);
+		});
+
+		test("typed_object_subclasses_in_base_array", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			const std::string src = R"(
+				class B { int a = 1; B() {} B(int v) { a = v; } }
+				class D : B { int b = 2; string tag = "d"; D() {} D(int v) : super(v) { b = v * 2; } }
+				array<B> bs = [];
+				array<B> serial = [];
+				for (int i = 0; i < 90; i++) {
+					if (i % 3 == 0) { bs.push(D(i)); serial.push(D(i)); } else { bs.push(B(i)); serial.push(B(i)); }
+				}
+				parallel_for (auto& x : bs) { x.a = x.a + 10; }
+				for (auto& x : serial) { x.a = x.a + 10; }
+				var p = []; var q = [];
+				for (auto x : bs) { p.push(x.a); p.push(type_of(x)); }
+				for (auto x : serial) { q.push(x.a); q.push(type_of(x)); }
+				p.push(cast<D>(bs[3]).b); p.push(cast<D>(bs[3]).tag);
+				q.push(cast<D>(serial[3]).b); q.push(cast<D>(serial[3]).tag);
+				return [p, q];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("typed_object_empty_and_single_element", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class K { int a = 1; K() {} K(int v) { a = v; } }
+				array<K> none = [];
+				parallel_for (auto& k : none) { k.a = 5; }
+				array<K> one = [K(9)];
+				parallel_for (auto& k : one) { k.a = k.a + 1; }
+				parallel_for (auto k : one) { k.a = 77; }
+				return [none.size(), one.size(), one[0].a, type_of(one[0])];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)0, vals[0].as_int());
+			check_eq((int64_t)1, vals[1].as_int());
+			check_eq((int64_t)10, vals[2].as_int());
+			check_eq(std::string("K"), vals[3].as<std::string>());
+		});
+
+		test("typed_object_string_field_named_by_body_detaches", [this]() {
+			// Every instance's field initializer shares one literal node; a body that names the
+			// string field forces the per-element detach (the one fact a declared type cannot
+			// prove) - mutation stays per element, siblings and outsiders keep the literal
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class S { int i = 0; string s = "lit"; S() {} S(int v) { i = v; } }
+				array<S> ss = [];
+				for (int k = 0; k < 64; k++) { ss.push(S(k)); }
+				S outside = S(3);
+				parallel_for (auto& x : ss) { x.s = x.s + to_string(x.i); }
+				return [ss[0].s, ss[63].s, outside.s, ss[5].s];
+			)");
+			const auto& vals = r.as_array();
+			check_eq(std::string("lit0"), vals[0].as<std::string>());
+			check_eq(std::string("lit63"), vals[1].as<std::string>());
+			check_eq(std::string("lit"), vals[2].as<std::string>());
+			check_eq(std::string("lit5"), vals[3].as<std::string>());
+		});
+
+		test("typed_object_whole_read_of_nested_object_detaches_its_strings", [this]() {
+			// Copying a nested object by value copies every handle below it: the reach filter
+			// must open the whole subtree (a shared literal string would race otherwise)
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			e->parallel_thread_count(8);
+			auto r = e->execute(R"(
+				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
+				class Node { Leaf a = Leaf(0); Node() {} Node(int n) { a = Leaf(n); } }
+				array<Node> nodes = [];
+				for (int i = 0; i < 2000; i++) { nodes.push(Node(i)); }
+				for (int r = 0; r < 4; r++) {
+					parallel_for (auto& n : nodes) { auto l = n.a; l.tag = l.tag + "!"; n.a.v = l.v + 1; }
+				}
+				return [nodes[0].a.v, nodes[1999].a.v, nodes[7].a.tag];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)4, vals[0].as_int());
+			check_eq((int64_t)2003, vals[1].as_int());
+			check_eq(std::string("leaf"), vals[2].as<std::string>());
+		});
+
+		test("typed_object_admitted_method_call", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class Cell { int v = 0; Cell() {} Cell(int n) { v = n; } int doubled() { return v * 2; } }
+				array<Cell> a = [];
+				for (int i = 0; i < 32; i++) { a.push(Cell(i)); }
+				parallel_for (auto& c : a) { c.v = c.doubled(); }
+				return a[3].v * 1000 + a[31].v;
+			)");
+			check_eq((int64_t)6062, r.as_int());
+		});
+
+		test("typed_object_non_value_semantic_still_rejected", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Node { var payload = 0; }
+				array<Node> a = [];
+				for (int i = 0; i < 32; i++) { a.push(Node()); }
+				try { parallel_for (auto& x : a) { x.payload = 1; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("cannot be mutated in place") != std::string::npos);
+		});
+
+		test("prewarm_class_reached_through_typed_array_field", [this]() {
+			// n.extras[0].v: Leaf is reached only through an array<Leaf> field - its shapes (field
+			// symbols, the Leaf& twin) must be warm before the first worker touch. Fresh engine per
+			// worker count so the first region is cold; leaf/xs siblings pin the shapes that worked
+			const std::string src = R"(
+				class Leaf { int v = 0; }
+				class Node { Leaf leaf = Leaf(); array<int> xs = [0]; array<Leaf> extras = [Leaf(), Leaf()]; }
+				array<Node> nodes = [];
+				array<Node> serial = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); serial.push(Node()); }
+				parallel_for (auto& n : nodes) { n.extras[0].v = n.extras[0].v + 1; n.leaf.v = n.leaf.v + 2; n.xs[0] = n.xs[0] + 3; n.extras[1].v = n.extras[0].v * 5; }
+				for (auto& n : serial) { n.extras[0].v = n.extras[0].v + 1; n.leaf.v = n.leaf.v + 2; n.xs[0] = n.xs[0] + 3; n.extras[1].v = n.extras[0].v * 5; }
+				var p = []; var q = [];
+				for (auto n : nodes) { p.push([n.extras[0].v, n.extras[1].v, n.leaf.v, n.xs[0]]); }
+				for (auto n : serial) { q.push([n.extras[0].v, n.extras[1].v, n.leaf.v, n.xs[0]]); }
+				return [p, q];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				auto e = make_engine();
+				check_matches_serial_at(e, src, {workers});
+				auto r = e->execute(src);
+				const auto& row = r.as_array()[0].as_array()[5].as_array();
+				check_eq((int64_t)1, row[0].as_int());
+				check_eq((int64_t)5, row[1].as_int());
+			}
+		});
+
+		test("prewarm_two_container_levels", [this]() {
+			// array<Node> -> array<Mid> -> array<Leaf> -> field: every class below the element is
+			// reached through a typed container only
+			const std::string src = R"(
+				class Leaf { int v = 1; }
+				class Mid { array<Leaf> leaves = [Leaf(), Leaf(), Leaf()]; }
+				class Node { array<Mid> mids = [Mid(), Mid()]; }
+				array<Node> nodes = [];
+				array<Node> serial = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); serial.push(Node()); }
+				parallel_for (auto& n : nodes) { n.mids[1].leaves[2].v = n.mids[1].leaves[2].v + n.mids[0].leaves[0].v * 4; }
+				for (auto& n : serial) { n.mids[1].leaves[2].v = n.mids[1].leaves[2].v + n.mids[0].leaves[0].v * 4; }
+				var p = []; var q = [];
+				for (auto n : nodes) { p.push([n.mids[1].leaves[2].v, n.mids[0].leaves[0].v]); }
+				for (auto n : serial) { q.push([n.mids[1].leaves[2].v, n.mids[0].leaves[0].v]); }
+				return [p, q];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				auto e = make_engine();
+				check_matches_serial_at(e, src, {workers});
+				check_eq((int64_t)5, e->execute(src).as_array()[0].as_array()[9].as_array()[0].as_int());
+			}
+		});
+
+		test("prewarm_map_of_typed_arrays_field", [this]() {
+			// map<string, array<Leaf>>: the class sits below a map value type's element type
+			const std::string src = R"(
+				class Leaf { int v = 2; }
+				class Node { map<string, array<Leaf>> groups = {"a": [Leaf()], "b": [Leaf(), Leaf()]}; }
+				array<Node> nodes = [];
+				array<Node> serial = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); serial.push(Node()); }
+				parallel_for (auto& n : nodes) { n.groups["b"][1].v = n.groups["b"][1].v + n.groups["a"][0].v * 3; }
+				for (auto& n : serial) { n.groups["b"][1].v = n.groups["b"][1].v + n.groups["a"][0].v * 3; }
+				var p = []; var q = [];
+				for (auto n : nodes) { p.push([n.groups["b"][1].v, n.groups["a"][0].v]); }
+				for (auto n : serial) { q.push([n.groups["b"][1].v, n.groups["a"][0].v]); }
+				return [p, q];
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				auto e = make_engine();
+				check_matches_serial_at(e, src, {workers});
+				check_eq((int64_t)8, e->execute(src).as_array()[0].as_array()[3].as_array()[0].as_int());
+			}
+		});
+
+		test("prewarm_reaches_nested_classes_without_the_element_proof", [this]() {
+			// The trusted path (allow_unsafe_parallel) and an untyped source never scan the slot
+			// tags for element classes: the classes the body reaches must come from the seed
+			// shapes and the members the body names
+			const std::string typed = R"(
+				class Leaf { int v = 0; }
+				class Mid { array<Leaf> leaves = [Leaf()]; }
+				class Node { array<Leaf> extras = [Leaf()]; array<Mid> mids = [Mid()]; map<string, array<Leaf>> groups = {"a": [Leaf()]}; }
+				array<Node> nodes = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); }
+				parallel_for (auto& n : nodes) { n.extras[0].v = n.extras[0].v + 1; n.mids[0].leaves[0].v = n.mids[0].leaves[0].v + 2; n.groups["a"][0].v = n.groups["a"][0].v + 3; }
+				return [nodes[0].extras[0].v, nodes[63].mids[0].leaves[0].v, nodes[31].groups["a"][0].v];
+			)";
+			const std::string hetero = R"(
+				class Leaf { int v = 0; }
+				class Mid { array<Leaf> leaves = [Leaf()]; }
+				class Node { array<Leaf> extras = [Leaf()]; array<Mid> mids = [Mid()]; map<string, array<Leaf>> groups = {"a": [Leaf()]}; }
+				var nodes = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); }
+				parallel_for (auto& n : nodes) { n.extras[0].v = n.extras[0].v + 1; n.mids[0].leaves[0].v = n.mids[0].leaves[0].v + 2; n.groups["a"][0].v = n.groups["a"][0].v + 3; }
+				return [nodes[0].extras[0].v, nodes[63].mids[0].leaves[0].v, nodes[31].groups["a"][0].v];
+			)";
+			for (const std::string* src : {&typed, &hetero}) {
+				for (bool unsafe : {false, true}) {
+					auto e = make_engine();
+					e->allow_unsafe_parallel(unsafe);
+					e->parallel_thread_count(4);
+					auto r = e->execute(*src);
+					const auto& vals = r.as_array();
+					check_eq((int64_t)1, vals[0].as_int());
+					check_eq((int64_t)2, vals[1].as_int());
+					check_eq((int64_t)3, vals[2].as_int());
+				}
+			}
+		});
+
+		test("typed_object_determinism_across_worker_counts", [this]() {
+			std::string first;
+			for (size_t workers : {1, 2, 4, 8}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(e);
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					class P { float x = 0.0; float y = 0.0; P() {} P(int i) { x = 1.0 * i; y = 0.5 * i; } }
+					array<P> ps = [];
+					for (int i = 0; i < 300; i++) { ps.push(P(i)); }
+					parallel_for (auto& p : ps) { p.y = math::sqrt(p.x) * 3.7 + p.y; }
+					var out = [];
+					for (auto p : ps) { out.push(p.y); }
+					return to_json(out);
+				)");
+				if (first.empty()) { first = r.as<std::string>(); }
+				else { check_eq(first, r.as<std::string>()); }
+			}
 		});
 	}
 };

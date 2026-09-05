@@ -168,6 +168,24 @@ namespace stdlib {
     inline const skip_newline_t skip_newline{};
     inline const skip_flush_t skip_flush{};
 
+    // THE object row, shared by type_of and reflect::type_name (stdlib/reflection.hpp):
+    // the instance's own class first, then the value tag, then the bare kind - a value
+    // tagged with a base class still answers the class it actually holds.
+    inline std::string object_type_name(const script_value& d) {
+        try {
+            auto instance = d.as<std::shared_ptr<class_instance>>();
+            if (instance) {
+                if (auto def = instance->get_class_definition()) {
+                    return def->get_name();
+                }
+            }
+        } catch (...) {}
+        if (auto ti = d.get_type_info()) {
+            if (!ti->type_name.empty() && ti->type_name != "any") { return ti->type_name; }
+        }
+        return "object";
+    }
+
     inline void register_io_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
         dynamic_binder<skip_newline_t>(eng_ref, "skip_newline_t").build();
@@ -366,8 +384,10 @@ namespace stdlib {
                 case script_value_type::jai_array_type: return "array";
                 case script_value_type::jai_map_type: return "map";
                 case script_value_type::jai_function_type: return "function";
-                case script_value_type::jai_object_type: return "object";
-                case script_value_type::jai_shared_ptr_type: return "object";
+                // A typed null keeps the bare kind (its tag is a class, its value is not)
+                case script_value_type::jai_object_type:
+                case script_value_type::jai_shared_ptr_type:
+                    return val.is_object() ? object_type_name(val) : "object";
                 case script_value_type::jai_reference_type: return "reference";
                 case script_value_type::jai_weak_ptr_type: return "weak_ptr";
                 default: return "unknown";

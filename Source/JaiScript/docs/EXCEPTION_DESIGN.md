@@ -13,6 +13,29 @@
 >   (`detail/execution_limits.hpp`, the catch-skip in the interpreter's try handling).
 > - **Propagation mechanism.** The `is_unwinding_` flag sketch was superseded by
 >   `checked_result<void>` propagation through the visitors.
+> - **The catch variable is a block-scoped local of the catch body** (C++ `catch (e)`
+>   semantics; the `push_block_scope`/`add_variable` sketch below is what shipped, 2026-09-04).
+>   The parser allocates it a frame slot (`try_stmt::catch_var_id` / `catch_slot_index`, the
+>   range-for variable's pattern; `.jaibite` v12) and the handler entry binds the thrown
+>   value there (interpreter `visit_try_stmt`, vm `unwind_to_handler` through
+>   `op_try_push`'s `c` operand); a top-level catch binds it in a scope env that
+>   `op_catch_end` / the statement's exit pops. It resolves locals -> members -> globals
+>   like any local, shadows an outer name for the block only, is invisible to callees and
+>   after the block (`Undefined variable 'e'`), is captured by lambdas like any local, and
+>   survives suspension like any local (frame slots ride the fiber / saved frames). The old
+>   backend-global name intercept (`current_catch_var_id_` matched on every identifier load)
+>   is gone from the load paths; the field survives only as the "inside a catch" marker of
+>   the rethrow protocol (a nested `try` inside a catch keeps the caught exception live for
+>   `throw;`).
+> - **Coroutines park the exception trio.** `current_exception_` / `active_exception_value_`
+>   / the in-catch marker are fiber state (vm `vm_coroutine_state`, interpreter
+>   `interpreter_coroutine_state`): a resume installs the fiber's parked trio (a fresh
+>   coroutine starts with no active exception - a bare `throw;` outside any catch in the
+>   body raises `No exception to re-throw` even when the resumer sits inside a catch), a
+>   yield parks it, and the resumer's trio comes back on every exit except an escaping
+>   throw, whose exception pair stays live for the resumer's handler. So a resumer's own
+>   `try/catch` between resumes never touches the fiber's `e`, and a resumer's `catch (e)`
+>   driving a coroutine from a range-for keeps reading its own exception throughout.
 > - `finally` remains unimplemented (still-future, as designed).
 
 ## Overview

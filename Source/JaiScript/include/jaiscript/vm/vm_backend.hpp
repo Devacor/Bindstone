@@ -606,6 +606,10 @@ namespace jai::vm {
         bool is_unwinding_ = false;
         bool trace_captured_ = false;
         std::vector<stack_frame> captured_trace_;
+        // "Inside a catch block" marker of the rethrow protocol (the catch symbol, or the
+        // unnamed catch's "" symbol) - the catch VARIABLE itself is a frame slot / scope
+        // local bound at handler entry, never resolved through this. Parked per fiber
+        // with the exception pair (run_fiber).
         uint64_t current_catch_var_id_ = 0;
 
         // One record per active try/catch region, innermost last (dual error model:
@@ -614,6 +618,8 @@ namespace jai::vm {
             frame* owner = nullptr;
             size_t handler_ip = 0;
             uint64_t catch_var = 0;
+            uint32_t catch_slot = k_invalid_u32;   // frame slot of the catch variable (k_invalid_u32 = scope env)
+            bool catch_env_pushed = false;         // handler entry pushed the catch variable's scope env
             std::optional<script_exception> saved_exception;
             std::optional<script_value> saved_exception_value;
             uint64_t saved_catch_var_id = 0;
@@ -801,6 +807,23 @@ namespace jai::vm {
         // native-entry / fiber completion door; both run convert_return_at_site
         op_status exec_return_convert(frame& f, const vm_instruction& ins);
         op_status entry_return_finish(frame& f, script_value result, uint32_t mode);
+        // By-value return materialization (detail/return_conv.hpp), run by every return
+        // door BEFORE the typed conversion: the callee's own slot moves out, other lvalue
+        // reads and reference results copy, temporaries move. operand_class 0 = nothing
+        // to do (ref return, no value, or an in-region site already ran it); the
+        // top-level program's `return` is not a function return and is untouched.
+        // KEEP BYTE-PARALLEL with the interpreter's visit_return_stmt. Out-of-line + noinline:
+        // inlined into run_dispatch's op_return case (LTCG) the clone machinery fattens the
+        // whole loop's frame, paid on every loop entry (coroutine resumes); each door tests
+        // return_value_plain first so a plain result never calls.
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        void copy_reference_result(script_value& result);   // a reference result copies its target (cold)
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        void materialize_return(frame& f, script_value& result, uint32_t operand_class, uint32_t own_slot);
         void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
         // Interpreter parity: arg-eval throws convert at the frame MAKING the call
         bool ip_in_call_arg_zone(const frame& f) const;
@@ -905,6 +928,10 @@ namespace jai::vm {
 
         script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id);
         script_value* resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id);
+        // The cell an identifier RECEIVER of a string builtin mutates: exec_load's ladder as
+        // a pointer (:: door, slot, member scope, env). KEEP BYTE-PARALLEL with
+        // interpreter::string_receiver_cell.
+        script_value* string_receiver_cell(frame& f, const call_site& site, const identifier_expr* ident);
         // Env-path lookup memoized per instruction (cache_slot = 2*ip [+1 for fused right]).
         // Returns the same pointer environment::get_ref/get_value_ptr's storage prefix
         // would; nullptr = caller must run its original full lookup (fallback tails).
@@ -1340,7 +1367,7 @@ namespace jai::vm {
         op_status exec_cfor_prep(frame& f, const vm_instruction& ins);
         op_status exec_cfor_back(frame& f, const vm_instruction& ins);
         bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val);
-        // Resolves an identifier operand exactly like exec_load (catch var, frame slot,
+        // Resolves an identifier operand exactly like exec_load (frame slot,
         // type-ctor names, env, this-field/bound-method/static) without pushing;
         // values that must be materialized land in scratch. nullptr = failed, with the
         // error already parked in pending_error_ (the hottest resolver: a bare pointer

@@ -6,6 +6,7 @@
 #include <jaiscript/core/value.hpp>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <array>
 #include <string_view>
@@ -23,6 +24,20 @@ namespace jai {
     inline constexpr std::array<std::string_view, 4> k_shadowable_handle_method_names = {
         std::string_view{"reset"}, std::string_view{"use_count"},
         std::string_view{"unique"}, std::string_view{"cpp_ref_count"}
+    };
+
+    // The string builtins that write their receiver in place and return self for chaining
+    // (C++ `string& to_upper()`). ONE list feeds the registry's mutator set and index table;
+    // both backends bind the receiver LVALUE for exactly these names
+    // (detail/string_mutator_receiver.hpp) - a name missing here mutates a copy and the
+    // write is lost, a name wrongly here costs an observer a receiver resolve.
+    inline constexpr std::array<std::string_view, 17> k_string_mutator_method_names = {
+        std::string_view{"to_lower"}, std::string_view{"to_upper"}, std::string_view{"trim"},
+        std::string_view{"trim_left"}, std::string_view{"trim_right"}, std::string_view{"pad_left"},
+        std::string_view{"pad_right"}, std::string_view{"pad_center"}, std::string_view{"replace_first"},
+        std::string_view{"replace_last"}, std::string_view{"replace_all"}, std::string_view{"insert"},
+        std::string_view{"erase"}, std::string_view{"remove_prefix"}, std::string_view{"remove_suffix"},
+        std::string_view{"reverse"}, std::string_view{"repeat"}
     };
 
     // Backend-neutral invocation context for the builtin container/string/pointer methods
@@ -63,6 +78,9 @@ namespace jai {
         std::unordered_map<uint64_t, uint16_t> array_index;
         std::unordered_map<uint64_t, uint16_t> map_index;
         std::unordered_map<uint64_t, uint16_t> string_index;
+        // k_string_mutator_method_names by symbol id and by string_by_index position
+        std::unordered_set<uint64_t> string_mutator_ids;
+        std::vector<uint8_t> string_mutates_by_index;
     };
 
     // ONE implementation shared by every backend (defined in interpreter.cpp)

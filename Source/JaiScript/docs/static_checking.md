@@ -141,13 +141,41 @@ the chain, a `var`/`auto`-returning getter, a getter with parameters, a coroutin
 reference or untyped setter parameter, or a chain that reaches a REGISTERED ancestor carrying
 the accessor (a binder property, a class from an earlier execute: no declaration in view) all
 leave the member unknown - lenient, as before. A bare `x` inside the class keeps the field's
-declared type. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
+declared type. A binder property registered with a getter only (a `nullptr` setter, or a
+member pointer whose type is not copy-assignable) is READ-ONLY: `h.ro = 5`, `h.ro += 1`,
+`h.ro++`, a hybrid method's bare `ro = 5` / `ro++` and `this.ro = 5` are the error
+`cannot assign to read-only property 'ro'` (the runtime's `Cannot assign to 'ro': it is
+read-only`) - certain only when the property's class is closed (an engine `cpp_class` never
+`extend`ed) and nothing takes the store instead: a script `_set_ro` in the modeled chain, a
+same-named script field, a registered subclass owning a `_set_ro` (a writable
+re-registration, an override, a shadowing field) or a `var` receiver all stay lenient. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
 compound forms check the store against the static's declared type (the runtime enforces the same
 table on every spelling). Any unresolvable ancestor opens the class: silence.
 Builtin container/string/map methods, subscripts, enum values (existence IS checked:
 `Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
 (`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
 object receiver; a class method of the same name wins first.
+
+**Map keys** — the pair variable of a range-for over a statically known map (`map<K,V> m`,
+an `auto` map literal; a `var` map is dynamic) carries a read-only `first` - C++
+`pair<const K, V>` - by value and by reference alike (`auto& kv` aliases the value AND the key;
+the key is read-only). `kv.first` infers as the key type with a `const_key` marker, which a
+copy of the pair (`var p = kv`, `auto& p = kv`) and a ternary over keys keep, so two rules
+follow the marker rather than the spelling. Mutation is `cannot mutate 'kv.first': map keys
+are read-only`: a string mutator (`kv.first.to_upper()`, `insert`, `erase`, ... - the shared
+`k_string_mutator_method_names` list), a store or compound (`kv.first = v`, `kv.first += "hey"`,
+`kv.first++`). A mutable alias is `cannot alias 'kv.first': map keys are read-only (copy it
+instead: var k = kv.first)`: a reference declaration (`var& cheeky = kv.first`, `auto&`, `T&`),
+a shared_ptr declaration or store (`shared_ptr<var> cheeky = kv.first`, `shared_ptr<auto>`,
+`h = kv.first` into a shared_ptr-declared variable), `cast<T&>(kv.first)`,
+`cast<shared_ptr<T>>(kv.first)`, `kv.first` passed where every viable same-script overload
+binds the parameter as `T&` or `shared_ptr<T>`, and `return kv.first` from a `-> T&` or
+`-> shared_ptr<T>` function. A copy is always fine (`var okay = kv.first; okay.to_upper()`,
+`string s = kv.first`, `cast<string>(kv.first)`, a by-value parameter or return) and is the
+copy-on-write path at runtime: strings share their node until the first in-place write
+(`docs/invariants.md` 11), so what the checker cannot see (a `var` map) mutates a copy and the
+map is never touched. `m.keys()[i]` stays lenient (builtin results are untyped here); a pair
+that escapes whole into a container or a by-value parameter loses the marker.
 
 **Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
 `same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
@@ -328,6 +356,10 @@ mistake in any of these spots is a run-time error, never a load error:
 - Accessor-bearing members whose declaration is ambiguous ("Members": two getter/setter
   overloads in the chain, `var`/`auto`/coroutine/parameterized getters, reference or untyped
   setter parameters, an accessor on a registered-only ancestor).
+- Read-only binder properties on an open surface: an `extend`ed class, a registered subclass
+  owning a `_set_` for the name, a script class from an earlier execute as the receiver's
+  static class, a subclass in the SAME unit that overrides `_set_` while the receiver is typed
+  as the base (not yet registered when the unit is checked); the runtime raise stands.
 - Coroutines: yield and return types, and a call yields a handle (typed as unknown).
 - Mixed-branch ternaries, `this`/`super` as values, hot-reload redefinitions (receivers that
   carry the old shape are open), `extend`ed classes and everything passed to `extend(...)`.

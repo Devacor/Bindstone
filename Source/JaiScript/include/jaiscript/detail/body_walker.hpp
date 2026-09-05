@@ -152,6 +152,7 @@ namespace jai::detail {
 			case node_type::try_stmt: {
 				auto* tr = static_cast<try_stmt*>(s.get());
 				stmt(tr->try_block);
+				if (on_declared && tr->catch_var_id != UINT64_MAX) on_declared(tr->catch_var_id);
 				stmt(tr->catch_block);
 				return;
 			}

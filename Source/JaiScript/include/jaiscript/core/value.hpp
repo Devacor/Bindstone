@@ -258,6 +258,10 @@ namespace jai {
         // field node by id (never a cached address), so hot reload cannot dangle it.
         static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type);
+        // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
+        // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
+        // `root` can prove its elements reference-free without touching one (value.cpp).
+        static void pin_element_root(script_value& reference, const strong_ptr<script_array>& root);
         // Cell reference (Lua-upvalue box): the reference OWNS the boxed value. Escape-marked
         // variables hold one from declaration; ref binding/aliasing shares the handle, and the
         // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
@@ -658,14 +662,23 @@ namespace jai {
             return *storage_.get_if<TYPEID_OBJECT>();
         }
 
-        // Mutable accessor for in-place modification (avoids make_value() overhead)
-        // Bound strings return the LIVE C++ string (write-through)
-        inline script_string& unchecked_as_string_ref() noexcept {
+        // The in-place string WRITE gate (docs/invariants.md 11): string copies share one
+        // node (O(1) copies), so a write through a shared node would reach every holder.
+        // A node anyone else holds is replaced by a private copy first (copy-on-write) -
+        // the write lands in *this alone, which must therefore be the storage the script
+        // named (a variable cell, element, field, map value, holder scratch), never a
+        // transient copy. Bound strings return the LIVE C++ string (write-through).
+        inline script_string& unchecked_as_string_ref() {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 return *static_cast<script_string*>((*b)->ptr);
             }
-            return **storage_.get_if<TYPEID_STRING>();
+            auto& node = *storage_.get_if<TYPEID_STRING>();
+            if (!node.unique()) [[unlikely]] {
+                return unshare_string_node();
+            }
+            return *node;
         }
+        script_string& unshare_string_node();   // value.cpp: the fresh node, memory-cap charged deferred
 
         inline script_char unchecked_as_char() const noexcept {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
@@ -828,7 +841,7 @@ namespace jai {
                 // string bindings are only ever created over std::string/script_string - exact type
                 return *static_cast<script_string*>(box->ptr);
             }
-            return *val.storage_.get<strong_ptr<script_string>>();
+            return val.unchecked_as_string_ref();   // the copy-on-write gate: a host write stays in this value
         }
         
         // Generic extraction with type checking
@@ -1922,6 +1935,9 @@ namespace jai {
             // dangling).
             std::shared_ptr<class_instance> owner_instance;
             uint64_t field_id = UINT64_MAX;
+            // The array this reference was minted THROUGH (chain rooted at arr[i]; null when
+            // not): counted in its live_elem_refs like a direct element reference.
+            strong_ptr<script_array> elem_root;
 
             // CPP-MEMBER / PROPERTY modes (null for the four modes above; checked last on
             // every touch so those pay nothing). resolve_target() answers null for both:
@@ -2356,6 +2372,15 @@ namespace jai {
             if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
             return holder && holder->scratch_backed() ? holder.get() : nullptr;
+        }
+
+        // The boxed value of a CELL reference this handle alone holds (raw index REFERENCE
+        // only): a dying frame slot may move it out (detail/return_conv.hpp). Null for a
+        // cell anyone else shares and for every other holder mode.
+        script_value* unique_cell_payload() noexcept {
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            return holder && holder.unique() && holder->has_cell && !holder->container &&
+                   !holder->container_map && !holder->owner_instance && !holder->property ? holder->cell() : nullptr;
         }
         
         

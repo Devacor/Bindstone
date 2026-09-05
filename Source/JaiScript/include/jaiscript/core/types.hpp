@@ -45,6 +45,10 @@ namespace jai {
 
     class script_array {
     public:
+        // Live references pinned into this array's elements (make_element_reference /
+        // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic
+        // typed object array without walking the elements.
+        uint32_t live_elem_refs = 0;
         // b8/c8 share one byte buffer (bool and char payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)

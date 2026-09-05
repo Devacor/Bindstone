@@ -161,8 +161,9 @@ public:
         // shared_ptr paths (incl. the fixed composite intern), container elements,
         // conversion_registry, base upcasts, opaque tokens - ALL keyed correctly
         // (std::type_index or pointee-id keys); these pins keep them that way.
-        // type_of() reports "object" for registered instances BY DESIGN (3ca8c06b)
-        // and does not distinguish instantiations; registration_fingerprint does.
+        // type_of() reports the REGISTERED NAME for registered instances (it agrees with
+        // reflect::type_name), so two instantiations sharing one name are still
+        // indistinguishable through it; registration_fingerprint does distinguish them.
 
         test("audit_instantiations_register_and_dispatch_distinctly", [this]() {
             for (bool use_vm : {false, true}) {
@@ -264,8 +265,8 @@ public:
         });
 
         test("audit_registration_fingerprint_distinguishes_instantiations", [this]() {
-            // (h) type_of reports "object" for registered instances BY DESIGN and does
-            // not distinguish; the registration fingerprint DOES.
+            // (h) type_of reports the registered NAME, which both instantiations share, so
+            // it does not distinguish them; the registration fingerprint DOES.
             auto e_i = jai::engine::make();
             dynamic_binder<audit_pt<int>>(*e_i, "AuditP").constructor<>().method("kind", &audit_pt<int>::kind).build();
             auto e_f = jai::engine::make();
@@ -274,7 +275,7 @@ public:
             check_eq((int64_t)1, e_i->execute("AuditP().kind()").as_int());
             check_eq((int64_t)2, e_f->execute("AuditP().kind()").as_int());
             jai::stdlib::register_all(*e_i);
-            check_eq(std::string("object"), e_i->execute("type_of(AuditP())").as<std::string>());
+            check_eq(std::string("AuditP"), e_i->execute("type_of(AuditP())").as<std::string>());
             // and differently-shaped registrations fingerprint differently
             auto e_two = jai::engine::make();
             register_audit_points(*e_two);

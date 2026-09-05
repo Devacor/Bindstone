@@ -133,6 +133,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				if (ins.b < ch.symbols.size() && symbolizer) {
 					out << " catch='" << symbolizer->get_string(ch.symbols[ins.b]) << "'";
 				}
+				if (ins.c != k_invalid_u32) { out << " slot=" << ins.c; }
 				break;
 			case opcode::op_throw:
 				out << (ins.a ? " value" : " rethrow");

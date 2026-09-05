@@ -20,6 +20,13 @@ creation**:
   cell **outlives the frame** — escaping a `[&]` capture is legal and safe (no dangling,
   unlike C++).
 - Parameters capture exactly like locals (they are slots 0..N).
+- The source of a captured name is resolved in the runtime's lookup order - the
+  enclosing frame's locals and parameters, then the class's members (a `[&]` on a bare
+  field cell-shares the field), then the environment chain - so a same-named global
+  never wins over a local, a parameter or a field (`detail/capture_ladder.hpp`, one
+  kernel for both backends). An explicit `[x]` / `[&x]` names a variable only: a member
+  is not capturable by name (C++: ill-formed) and raises `Cannot capture undefined
+  variable 'x'` whether or not a global shares the name - use `[this]` or `[=]`/`[&]`.
 - Nested lambdas: an inner lambda referencing an *outer lambda's* param/local captures it
   by the same rules at inner-creation time (the outer frame is live while the inner lambda
   is being created).

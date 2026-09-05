@@ -17,7 +17,7 @@ there is no raw-pointer mode and no "is my target still alive?" question:
 | FIELD | `shared_ptr` to the owning instance + field id | `find_field_value(id)` (removed field errors; hot-reload safe) |
 | MAP-ENTRY | `strong_ptr` to the owning map + key in the inline storage | `find(key)` (erased entry errors) |
 | CPP-MEMBER | the receiver handle + the C++ object (`_cpp_object`, an extended object's weak handle locked, a raw holder's data or anchor) | the inline storage holds a `cpp_bound` box aimed at the C++ member itself: reads decode it live, writes are the box's typed memory store |
-| PROPERTY | the receiver handle + the property's field id | the getter, re-run into the inline scratch (`materialize_property`); assignment re-resolves and runs the setter (none ⇒ the silent no-op `obj.name = v` is) |
+| PROPERTY | the receiver handle + the property's field id | the getter, re-run into the inline scratch (`materialize_property`); assignment re-resolves and runs the setter - for a read-only property that setter IS the rejection, `Cannot assign to 'x': it is read-only`, exactly what `obj.name = v` raises |
 
 CPP-MEMBER / PROPERTY are the two shapes a `dynamic_binder` `.property()` binds to
 (`detail/ref_lvalue.hpp` `bind_cpp_property_ref`, one kernel for both backends). A
@@ -123,6 +123,29 @@ chained refs collapse) or, for the immediate-use assignment twins,
 `script_value*` obtained from a reference across anything that can touch the owner —
 push/erase/hot-reload between resolve and use is exactly what the modes exist to
 survive. New consumers use these three entry points, nothing else. In-place mutators
-(`++`/`--` on an identifier) that write the deref'd value must `commit_scratch()` when
-`scratch_ref_holder()` answers (typed elements and PROPERTY refs hand back a scratch);
-compound assignment routes those refs through `ref_compound_store_constrained`.
+(`++`/`--` on an identifier, the string mutators) that write the deref'd value must
+`commit_scratch()` when `scratch_ref_holder()` answers (typed elements and PROPERTY refs
+hand back a scratch); compound assignment routes those refs through
+`ref_compound_store_constrained`.
+
+## Strings are values behind shared nodes
+
+A string `script_value` holds one `strong_ptr<script_string>` node and every copy
+boundary shares it (O(1) copies; `clone()` / `clone_for_assignment` stay shallow for
+strings). Value semantics hold because every in-place string write - the 17 mutators
+(`to_upper`, `trim`, `replace_all`, ...), `+=` on a variable or bare field, a host
+`std::string&` - goes through ONE gate, `script_value::unchecked_as_string_ref()`: a node
+any other holder shares is replaced by a private copy first (copy-on-write, memory_cap
+charged deferred), so the write lands in the storage the script named and nowhere else.
+Mutators therefore bind their receiver LVALUE like a `string&` parameter
+(`detail/string_mutator_receiver.hpp`: an identifier's cell, a subscript read's reference,
+a field / C++ property through the ref-lvalue kernel, or the root of a mutator chain -
+`t.trim().to_upper()` keeps writing to `t`); a call result or computed property is a
+temporary and its mutation stays in the temporary. Map keys follow from this: `kv.first`
+(by value or by reference), `keys()`, `to_array()`, predicate arguments and the variable a
+key was inserted through all share the key's node - no per-iteration copy - and the first
+write through any of them detaches, so the key itself is never written; the static checker
+additionally rejects every mutation spelling on `kv.first` it can see (`cannot mutate
+'kv.first': map keys are read-only`, `docs/static_checking.md` Map keys). Bound
+(`cpp_bound`) strings are the live C++ member and keep write-through
+(`docs/invariants.md` 11).

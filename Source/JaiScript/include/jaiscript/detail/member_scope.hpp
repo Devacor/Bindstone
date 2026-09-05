@@ -70,7 +70,7 @@ struct member_probe_hit {
 // A hybrid's C++ property rung: sym is a dynamic_binder .property() of the chain's C++
 // base and NOT a script field of the chain (a same-named script field shadows it for
 // every spelling) - class_definition::slot_is_cpp_property. The _get_ / _set_ id, 0
-// otherwise (0 also for a setter-less property).
+// otherwise (a getter-only property's _set_ is the binder's read-only rejection).
 inline uint64_t cpp_property_getter_id(const class_instance* instance, uint64_t sym) {
     class_definition* class_def = instance->get_class_definition();
     if (!class_def) return 0;

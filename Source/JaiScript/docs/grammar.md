@@ -900,7 +900,8 @@ string healthLevel = health > 75 ? "healthy" :
     out of bounds for string of size {n}"; negative indices are out of bounds — `at(i)`
     keeps its negative-index normalization and returns a 1-char string). `s[i] = c` is a
     clear error ("Strings are read-only through subscript") — strings share storage under
-    copy, so subscript writes would need copy-on-write; possible future work. `char`
+    copy; a subscript write would go through the same copy-on-write gate the mutators and
+    `+=` use (`docs/invariants.md` 11); possible future work. `char`
     supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
     char-vs-int ordering is deliberately an error (no silent promotion).
 15. **Parallel Builtins (v0.5, no new syntax)**: `parallel_transform(arr, fn)` and

@@ -242,15 +242,29 @@ returns, a map type's layer owns the object and the returned pointer aliases the
    layer's handles report on use (D8).
 4. **32 bytes per `property_owner` object (D1/D2).** Every scene node/component grows by a
    `shared_ptr` + `weak_ptr`.
-5. **RULED follow-up, not in this increment — call-result binding.** Today a value-returning
-   function that returns an lvalue object (`C get() { return g; }`) hands out `g`'s handle, and
-   `var h = get()` adopts it (aliases). Dev's rule (2026-09-02): the copy belongs to the binding
-   site — `var p = f()` copies, `var& p = f()` shares — and the return path must stay free.
-   The fitting fix hands such returns back as the reference handle ref-returning functions
-   already produce (no clone at `return`; the existing decl rule copies for `var`, binds for
-   `var&`, chains write through). Scalars/strings and genuine temporaries keep flattening.
-   Gate: the value-semantics suites (`temporary_object_no_copy`,
-   `value_decl_from_ref_return_copies`) plus the example hashes.
+5. **By-value returns copy at the return site (landed 2026-09-04; C++ [stmt.return]).** A
+   by-value `return e;` yields a value that aliases nothing the callee could name: a temporary
+   (`return [1,2];`, `return make();`, `return a + b;`, `return T();`, `return this;`) is moved
+   out; an lvalue read of a global, an outer-scope/captured variable, a field (`return items;`,
+   `return this.items;`), an element or map entry (`return arr[0];`, `return m["k"];`), a boxed
+   (reference-shared) local, or a call that returns a reference (`return g();` for `T& g()`) is
+   deep-copied through the one store kernel exactly like `T tmp = e;` would copy it -
+   `shared_ptr<T>` handles share, coroutine handles share, scalars and strings are copies
+   already; the callee's OWN unboxed local or by-value parameter is moved out of its dying
+   frame slot (NRVO / implicit move: one object, one destructor, no copy - a cell a finished
+   ref-param bind left behind counts as own). A `-> T&` / `-> auto&` function keeps returning
+   the reference handle. Consequently `f().push(4)`, `f().x = 5` and `for (auto& v : f())`
+   touch the temporary, never the callee's storage; to share, spell it: `T& f()`,
+   `shared_ptr<T>`, or `var& r = ...` on a ref-returning function. Coroutine completion values
+   (`return x;` in a coroutine body) follow the same rule; `yield x` is unchanged. A
+   top-level (script-level) `return x;` is not a function return and is unchanged. Kernel:
+   `detail/return_conv.hpp` (`classify_return_operand`, `materialize_return_value`,
+   `return_own_slot_payload`), one site per backend (interpreter `visit_return_stmt`, vm
+   `materialize_return` at every return door). The earlier plan here - hand such returns back
+   as a reference handle and copy at `var p = f()` - was NOT taken: it would make `f().push(4)`
+   write through a by-value signature, and `var& p = f_value()` is already an error.
+   Gate: `Return Value Semantics` suite (both backends), `coroutine_completion_value_copies`,
+   `typed_return_lands_on_copy`, plus the example hashes.
 
 ## 7. Risk register
 

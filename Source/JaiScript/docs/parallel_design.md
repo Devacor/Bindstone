@@ -7,8 +7,9 @@ Status: DESIGN with the v0 slice SHIPPED — **`parallel_transform(arr, fn[, wei
 `source/tests/performance/parallel_transform_bench.cpp`) — and the v0.5 slice SHIPPED
 (2026-07-08): **captured reads** (§13) — a body may READ enclosing globals under the
 scalar/string/borrow/snapshot provisioning tiers; enclosing WRITES stay errors in every
-shape. The `parallel_for` keyword, `thread_storage` pads, and the binding annotations
-remain design-only. Dev rulings 2026-07-06 are final where marked RULED. All four §11
+shape — and **element members** (§14): a transform body reads and stores members of its
+own element, a value-class instance included. The `parallel_for` keyword, `thread_storage`
+pads, and the binding annotations remain design-only. Dev rulings 2026-07-06 are final where marked RULED. All four §11
 questions are RULED — the only remaining open sub-item is the Q1 weight-hint syntax
 spelling for the future KEYWORD form; the shipped BUILTIN needs no new syntax (the hint
 is simply the third argument).
@@ -401,9 +402,9 @@ unchanged and re-pinned over capture workloads.
 
 The proposal — auto-mark const-qualified host METHODS as read-safe callables inside
 parallel bodies via dynamic_binder's static knowledge of member-function constness — has
-no reachable surface in v0.5: parallel bodies cannot hold host objects at all (elements,
-captures, and results are value-semantic only; member access is rejected at admission),
-so there is no receiver a const method could be invoked on. The plumbing only becomes
+no reachable surface: parallel bodies cannot hold host objects at all (elements,
+captures, and results are value-semantic - script value classes, never bound host
+objects), so there is no receiver a const method could be invoked on. The plumbing only becomes
 meaningful with the §5 binding-annotation sweep / object tier, where `const T&`-receiver
 methods would slot in as automatic `read_world`/`self_only` candidates — the binder can
 detect constness via the member-function-pointer type at registration (cheap), but the
@@ -443,6 +444,47 @@ for (auto r : parallel_transform(jobs, f)) {
 This is now SECONDARY to capture: use captured reads for shared inputs, the pair idiom
 for per-chunk inputs/outputs; `thread_storage` pads (§1) remain the future answer for
 accumulation across iterations.
+
+## 14. SHIPPED: element members — a body reads (and stores) members of its own element
+
+A `parallel_transform` body may name members on chains rooted at its element parameter
+or any worker-private local: `fn(Node n) { return n.first.a.v + n.xs[1] + n.counts["k"]; }`.
+The parameter is the worker's private by-value copy, so a store into it (`n.x = 5`,
+`n.x++`) is legal and invisible to the source. Chains rooted at a captured name keep the
+admission rejection (`member access reaches captured state 'g' (captured reads are
+read-only, and objects cannot be captured)`); methods on the element stay behind the
+worker method wall in the transform (the barrier admits element methods for `parallel_for`
+only), and `this`/getters/setters are rejected as before. The admission walk is ONE walk
+for both forms (`walk_local_member_chain`); it records the members every element-rooted
+chain names (`element_reached_members` / `element_reached_whole` / `element_reach_all`)
+for both forms.
+
+Elements are proven exclusive by the ONE element proof (`prove_elements`), shared with
+`parallel_for`: all-primitive sources by construction; an object-kind source by declared
+type (`declared_class_exclusive` over the distinct slot tags, no instance read) when no
+live reference pins the array (`script_array::live_elem_refs == 0`); everything else by
+the per-element normalizing walk (`normalize_element_inplace`: shared strings detach in
+place, engine-internal aliases clone, a non-flat instance or a shared_ptr-tagged instance
+with a live alias rejects). Workers then read the source LIVE — a hetero vector through
+`raw_input`, an object-kind node through `typed_input` — and the by-value binding makes
+each private copy on the worker; the barrier detaches nothing per element. The transform
+reaches every element WHOLE (the clone touches every field, and a string copy is a shared
+node's count bump), so its proof takes an open reach; `parallel_for` narrows the walk to
+the members its body names. Rejections name the offending leaf exactly as before:
+`parallel_transform: element N: value is not value-semantic (object | shared_ptr |
+weak_ptr | function | bound host object | ...)`. Results still cannot be objects.
+
+The barrier's type pre-warm (`prewarm_region_types`) interns every shape a worker can mint
+before the symbolizer and type tables freeze: it walks the declared-type closure of every class
+an element can hold - the source's element type, the slot tags and instances the proof met, and
+every registered class declaring a member the body names (`element_reached_members`, the seed
+when a trusted or untyped source hands the barrier no class) - interning each type's `T&` twin
+and container components, each class's field ladder (declared types, accessor ids) and its
+registered subclasses, memoized per fork. A class reached only through a typed container
+(`n.extras[0].v` on an `array<Leaf>` field, `array<Node> -> array<Mid> -> array<Leaf>`,
+`map<string, array<Leaf>>`) therefore warms exactly like the element's own class; the
+deny-intern backstop (`type shape was not pre-warmed at the region barrier`) names a shape the
+walk missed.
 
 ## Appendix: possible future — background jobs on separate engines
 

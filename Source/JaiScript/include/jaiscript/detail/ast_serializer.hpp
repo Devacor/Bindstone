@@ -37,7 +37,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 11;   // 11: statement::check_mode_attr (10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 12;   // 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -413,6 +413,8 @@ namespace jai::detail {
                     auto* s = static_cast<const try_stmt*>(n);
                     node(s->try_block.get());
                     str(s->catch_var);
+                    symbol(s->catch_var_id, UINT64_MAX);
+                    slot(s->catch_slot_index);
                     node(s->catch_block.get());
                     break;
                 }
@@ -1061,8 +1063,13 @@ namespace jai::detail {
                 case node_type::try_stmt: {
                     auto try_blk = stmt_req();
                     std::string catch_var = str();
+                    uint64_t catch_id = symbol(UINT64_MAX);
+                    size_t catch_slot = slot_val();
                     auto catch_blk = stmt_req();
-                    result = std::make_shared<try_stmt>(loc, try_blk, catch_blk, catch_var);
+                    auto s = std::make_shared<try_stmt>(loc, try_blk, catch_blk, catch_var);
+                    s->catch_var_id = catch_id;
+                    s->catch_slot_index = catch_slot;
+                    result = s;
                     break;
                 }
                 case node_type::switch_stmt: {

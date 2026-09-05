@@ -627,6 +627,9 @@ namespace jai {
         // parser's ref_escape_marker pass (innermost function, coroutines excluded).
         bool binds_reference = false;
         mutable uint8_t static_return_proof = proof_none;
+        // Interpreter memo of detail::classify_return_operand (by-value return
+        // materialization); derived at first visit, never serialized
+        mutable uint8_t return_operand_class = 0;
 
         return_stmt(const source_location& loc, expression_ptr v = nullptr)
             : statement(loc, node_type::return_stmt), value(v) {}    };
@@ -646,6 +649,8 @@ namespace jai {
     public:
         statement_ptr try_block;
         std::string catch_var;  // Optional - variable name for exception message
+        uint64_t catch_var_id = UINT64_MAX;    // Interned catch variable (UINT64_MAX = unnamed catch)
+        size_t catch_slot_index = SIZE_MAX;    // Frame slot of the catch variable (SIZE_MAX = scope env)
         statement_ptr catch_block;
 
         try_stmt(const source_location& loc, statement_ptr try_blk, statement_ptr catch_blk, const std::string& var = "")

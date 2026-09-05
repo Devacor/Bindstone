@@ -8585,6 +8585,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 if (pf->loop_param.symbol_id != UINT64_MAX) {
                     lambda_declared.insert(pf->loop_param.symbol_id);
                 }
+                for (const auto& extra : pf->extra_params) {
+                    if (extra.symbol_id != UINT64_MAX) { lambda_declared.insert(extra.symbol_id); }
+                }
                 if (pf->container) collect_outer_slots_expr(pf->container.get());
                 break;
             }
@@ -10310,11 +10313,18 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stmt) {
-    // Container evaluates in the enclosing scope on this thread; the region kernel
-    // owns everything else (admission, element proof, capture provisioning, fork-join).
+    // The containers evaluate in the enclosing scope on this thread, left to right like the
+    // declarators; the region kernel owns everything else (admission, element proof, capture
+    // provisioning, fork-join).
+    std::vector<script_value> containers;
+    containers.reserve(stmt->arity());
     JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
-    script_value container = pop_value();
-    return detail::run_parallel_for(*engine_, stmt, container, environment_);
+    containers.push_back(pop_value());
+    for (const auto& extra : stmt->extra_containers) {
+        JAISCRIPT_TRY(dispatch_expr(extra.get()));
+        containers.push_back(pop_value());
+    }
+    return detail::run_parallel_for(*engine_, stmt, containers, environment_);
 }
 
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {

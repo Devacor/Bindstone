@@ -2851,10 +2851,35 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     token varName = advance();
     // auto& mutates the owned element in place (the loop's output channel);
     // plain auto gets a worker-local COPY - zero side effects, still legal (Dev ruling)
+    // Zip: `, decl` repeats declare further loop variables over further arrays (same length)
+    std::vector<parameter> extra_params;
+    while (match(token_type::comma)) {
+        bool extra_const = match(token_type::const_keyword);
+        JAISCRIPT_TRY_ASSIGN(type_info_ptr extra_type, parse_type());
+        const bool extra_ref = match(token_type::ampersand);
+        if (!check(token_type::identifier)) {
+            report_error("Expected loop variable name in parallel_for", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        token extraName = advance();
+        parameter extra(extra_type, std::string(extraName.lexeme), extra_ref, extra_const);
+        extra.symbol_id = get_symbol_id(extraName);
+        extra_params.push_back(std::move(extra));
+    }
     JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after parallel_for loop variable"));
 
-    // The container evaluates in the ENCLOSING scope on the calling thread
+    // The containers evaluate in the ENCLOSING scope on the calling thread
     JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
+    std::vector<expression_ptr> extra_containers;
+    while (match(token_type::comma)) {
+        JAISCRIPT_TRY_ASSIGN(expression_ptr extra_container, expression());
+        extra_containers.push_back(std::move(extra_container));
+    }
+    if (extra_containers.size() != extra_params.size()) {
+        report_error("parallel_for zip: one array per loop variable (" + std::to_string(1 + extra_params.size()) +
+                     " variables, " + std::to_string(1 + extra_containers.size()) + " arrays)", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parallel_for range"));
 
     parameter loop_param(element_type, std::string(varName.lexeme), is_reference, is_const);
@@ -2865,6 +2890,9 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     slot_lookup_boundary_ = function_scope_stack_.size() - 1;
     if (loop_param.symbol_id != UINT64_MAX) {
         loop_param.slot_index = allocate_slot(loop_param.symbol_id);
+    }
+    for (auto& extra : extra_params) {   // slots 1..m-1, before the body's locals
+        if (extra.symbol_id != UINT64_MAX) { extra.slot_index = allocate_slot(extra.symbol_id); }
     }
     auto restore_scope = [&]() {
         slot_lookup_boundary_ = saved_boundary;
@@ -2882,6 +2910,8 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     }
     auto node = std::make_shared<parallel_for_stmt>(forToken.location, std::move(loop_param),
                                                     std::move(container), body_result.value());
+    node->extra_params = std::move(extra_params);
+    node->extra_containers = std::move(extra_containers);
     node->local_count = restore_scope();
     return node;
 }

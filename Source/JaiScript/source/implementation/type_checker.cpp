@@ -2157,6 +2157,19 @@ private:
                 entry.column = f->location.column;
                 warn_shadow("parallel_for variable", f->loop_param.name, f->location);
                 scopes_.back().emplace(std::string_view(f->loop_param.name), std::move(entry));
+                for (const auto& extra : f->extra_params) {
+                    var_entry more;
+                    more.type = ctype_from_type_info(extra.type.get());
+                    more.dynamic = !extra.type || extra.type->base_type == script_value_type::jai_any_type || extra.is_reference;
+                    more.is_reference = extra.is_reference;
+                    more.declared = extra.type.get();
+                    more.display = extra.type ? extra.type->canonical_name() : "auto";
+                    more.line = f->location.line;
+                    more.column = f->location.column;
+                    warn_shadow("parallel_for variable", extra.name, f->location);
+                    scopes_.back().emplace(std::string_view(extra.name), std::move(more));
+                }
+                for (const auto& c : f->extra_containers) { infer(c.get()); }
                 walk_stmt(f->body.get());
                 scopes_.pop_back();
                 break;
@@ -2772,6 +2785,7 @@ void static_checker::collect_names(const statement* node) {
         case node_type::parallel_for_stmt: {
             auto* f = static_cast<const parallel_for_stmt*>(node);
             all_names_.insert(std::string_view(f->loop_param.name));
+            for (const auto& extra : f->extra_params) { all_names_.insert(std::string_view(extra.name)); }
             collect_names_expr(f->container.get());
             collect_names(f->body.get());
             break;

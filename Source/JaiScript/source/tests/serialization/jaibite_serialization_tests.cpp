@@ -262,6 +262,16 @@ public:
             )");
         });
 
+        test("roundtrip_parallel_for_zip", [check_roundtrip]() {
+            check_roundtrip(R"(
+                class V { float x = 0.0; float y = 0.0; V() {} V(float a) { x = a; y = a * 2; } }
+                array<V> vs = []; array<V> os = []; array<float> ss = [];
+                for (int i = 0; i < 50; i++) { vs.push(V(i)); os.push(V()); ss.push(0.0); }
+                parallel_for (auto& v, auto& o, auto& s : vs, os, ss) { o.x = v.x * v.y; o.y = v.y + 1.0; s = o.x + o.y; }
+                to_string(os[7].x) + "|" + to_string(os[7].y) + "|" + to_string(ss[49]) + "|" + to_string(os.size());
+            )");
+        });
+
         test("roundtrip_uncaught_throw_error_text", [check_roundtrip]() {
             check_roundtrip(R"(
                 int helper(int n) { if (n > 2) { throw "kaboom at " + to_string(n); } return n; }
@@ -346,7 +356,7 @@ public:
             // variable symbol + slot with 12 (right after the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)12, (int)bytes[4], "jaibite format version");
+            check_eq((int)13, (int)bytes[4], "jaibite format version");
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

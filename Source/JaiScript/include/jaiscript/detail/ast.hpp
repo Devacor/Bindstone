@@ -606,6 +606,12 @@ namespace jai {
     public:
         parameter loop_param;            // declarator: name/type; is_reference must be true (admission errors otherwise)
         expression_ptr container;
+        // The zip form `parallel_for (auto& x, auto& o : xs, outs)`: further loop variables (body
+        // slots 1..m-1, declared in this order) walking further arrays of the SAME length in
+        // lockstep - the emitter pattern's pre-allocated output written in place. Empty = plain.
+        std::vector<parameter> extra_params;
+        std::vector<expression_ptr> extra_containers;
+        size_t arity() const noexcept { return 1 + extra_params.size(); }
         statement_ptr body;              // block_stmt, parsed inside the body's own function scope
         size_t local_count = 0;          // body frame size (loop variable = slot 0)
         // The lazily-synthesized body function both backends share. Its body pointer

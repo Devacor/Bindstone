@@ -1678,6 +1678,68 @@ public:
 			check_eq(std::string("a"), v[5].as<std::string>());
 		});
 
+		test("zip_parallel_for_writes_preallocated_structs_in_place", [this]() {
+			// The emitter pattern: `parallel_for (auto& v, auto& o : vecs, outs)` walks the arrays in
+			// lockstep, thread n owning segment n of BOTH; the body writes the pre-allocated output
+			// struct's fields in place (no construction, no marshalling). Same values at 1/2/8
+			// workers and as the serial loop; by-value inputs, a float output array, three arrays.
+			// (Whole-struct assignment from a constructing call waits on constructor admission.)
+			const std::string src = R"(
+				class Vec3 { float x = 0.0; float y = 0.0; float z = 0.0; Vec3() {} Vec3(float a) { x = a; y = a * 2; z = a * 3; } }
+				array<Vec3> vecs = []; array<Vec3> outs = []; array<float> sums = []; array<Vec3> outs2 = [];
+				for (int i = 0; i < 1000; i++) { vecs.push(Vec3(i)); outs.push(Vec3()); sums.push(0.0); outs2.push(Vec3()); }
+				parallel_for (auto& v, auto& o : vecs, outs) { o.x = v.x * v.y; o.y = v.z; o.z = o.x + o.y; }
+				parallel_for (Vec3 v, auto& s, auto& o2 : vecs, sums, outs2) { s = v.x + v.y + v.z; o2.x = v.x * 10.0; o2.y = o2.x * 2.0; }
+				float acc = 0.0;
+				for (auto& o : outs) { acc = acc + o.z; }
+				return [outs[7].x, outs[7].y, outs[7].z, sums[7], outs2[7].x, outs2[999].y, acc, vecs[7].x];
+			)";
+			std::vector<double> serial;
+			for (size_t workers : {1, 2, 8}) {
+				auto e = make_engine();
+				e->parallel_thread_count(workers);
+				auto r = e->execute(src);
+				const auto& v = r.as_array();
+				check_near(98.0, v[0].as_float(), 1e-9);
+				check_near(21.0, v[1].as_float(), 1e-9);
+				check_near(119.0, v[2].as_float(), 1e-9);
+				check_near(42.0, v[3].as_float(), 1e-9);
+				check_near(70.0, v[4].as_float(), 1e-9);
+				check_near(999.0 * 10.0 * 2.0, v[5].as_float(), 1e-9);
+				check_near(7.0, v[7].as_float(), 1e-9);
+				if (serial.empty()) { serial.push_back(v[6].as_float()); } else { check_near(serial[0], v[6].as_float(), 1e-9); }
+			}
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Vec3 { float x = 0.0; float y = 0.0; float z = 0.0; Vec3() {} Vec3(float a) { x = a; y = a * 2; z = a * 3; } }
+				array<Vec3> vecs = []; array<Vec3> outs = [];
+				for (int i = 0; i < 1000; i++) { vecs.push(Vec3(i)); outs.push(Vec3()); }
+				for (int i = 0; i < 1000; i++) { outs[i].x = vecs[i].x * vecs[i].y; outs[i].y = vecs[i].z; outs[i].z = outs[i].x + outs[i].y; }
+				float acc = 0.0;
+				for (auto& o : outs) { acc = acc + o.z; }
+				return acc;
+			)");
+			check_near(serial[0], r.as_float(), 1e-9);
+		});
+
+		test("zip_parallel_for_rejects_mismatch_and_self", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				array<float> a = [1.0, 2.0, 3.0]; array<float> b = [1.0]; array<float> c = [0.0, 0.0, 0.0];
+				string e1 = ""; string e2 = ""; string e3 = "";
+				try { parallel_for (auto& x, auto& y : a, b) { y = x; } } catch (err) { e1 = err; }
+				try { parallel_for (auto& x, auto& y : a, a) { y = x; } } catch (err) { e2 = err; }
+				try { parallel_for (auto& x, auto& y : a, 5) { y = x; } } catch (err) { e3 = err; }
+				parallel_for (auto& x, auto& y : a, c) { y = x * 2.0; }
+				return [e1, e2, e3, c[2]];
+			)");
+			const auto& v = r.as_array();
+			check_eq(std::string("parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)"), v[0].as<std::string>());
+			check_eq(std::string("parallel_for: zipped array 2 is the range itself"), v[1].as<std::string>());
+			check_eq(std::string("parallel_for: zipped array 2 is not an array"), v[2].as<std::string>());
+			check_near(6.0, v[3].as_float(), 1e-9);
+		});
+
 		test("by_ref_cursor_reference_and_typed_view", [this]() {
 			// The by-ref loop variable is ONE holder re-pointed per iteration (frame-slot loops):
 			// a retained alias keeps its element (the loop mints a fresh holder instead), a slot

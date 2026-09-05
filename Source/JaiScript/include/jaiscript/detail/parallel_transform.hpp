@@ -269,7 +269,7 @@ namespace jai::detail {
     // proof) and pre-mints the element references single-threaded. capture_env is the
     // statement's enclosing environment: captured reads resolve through its chain.
     checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
-                                          const script_value& container,
+                                          std::vector<script_value>& containers,   // [0] = the range, then the zip's arrays
                                           const std::shared_ptr<environment>& capture_env);
 
     // Subscript READ through a parallel borrow - the tier-1 raw-read path. Called by

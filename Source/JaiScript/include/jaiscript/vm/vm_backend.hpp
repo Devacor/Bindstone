@@ -283,8 +283,8 @@ namespace jai::vm {
         bool parallel_worker_ = false;
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
-        script_value* parallel_cursor_ = nullptr;
-        void set_parallel_cursor(script_value* cursor) noexcept { parallel_cursor_ = cursor; }
+        std::vector<script_value>* parallel_cursors_ = nullptr;   // [0] = the range, then the zip's arrays
+        void set_parallel_cursors(std::vector<script_value>* cursors) noexcept { parallel_cursors_ = cursors; }
         // parallel_transform chunk loop: where op_parallel_emit lands a result (the fork's sink
         // runs the result checks and writes the worker's output slice)
         using parallel_emit_fn = checked_result<void> (*)(void* ctx, script_value&& value, size_t index);

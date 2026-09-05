@@ -874,6 +874,29 @@ script_string& script_value::unshare_string_node() {
 // and the region's REFCOUNT-SILENT deep clone: every element is read by const& and
 // rebuilt fresh - no transient shallow copy of a shared handle ever exists, so this
 // may traverse a borrowed (region-frozen) container from a worker thread.
+namespace {
+    // A worker-private copy of a typed array. Scalar kinds are one buffer copy; the str kind
+    // holds refcounted handles (assign_buffer would share them across threads, and the counts
+    // are not atomic), so it gets one fresh string per slot.
+    strong_ptr<script_array> detached_typed_array(const script_array& src, engine* eng) {
+        auto fresh = make_strong<script_array>(src.kind());
+        if (src.kind() == script_array::kind_t::str) {
+            size_t bytes = sizeof(script_array);
+            fresh->strs().reserve(src.size());
+            for (const auto& str : src.strs()) {
+                if (!str) { fresh->strs().push_back(make_strong<script_string>()); bytes += sizeof(script_string); continue; }
+                bytes += str->size() + sizeof(script_string);
+                fresh->strs().push_back(make_strong<script_string>(*str));
+            }
+            eng->execution_limits().memory_charge_deferred(bytes);
+        } else {
+            eng->execution_limits().memory_charge_deferred(sizeof(script_int) * (src.size() + 1));
+            fresh->assign_buffer(src);
+        }
+        return fresh;
+    }
+}
+
 script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types,
                                                   std::vector<const void*>* collected_nodes) const {
     if (!engine_) {
@@ -921,23 +944,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 break;
             }
             if (handle->is_typed()) {
-                auto fresh = make_strong<script_array>(handle->kind());
-                if (handle->kind() == script_array::kind_t::str) {
-                    // The str buffer holds refcounted handles (assign_buffer would share them
-                    // across threads, and the counts are not atomic): one fresh string per slot
-                    size_t bytes = sizeof(script_array);
-                    fresh->strs().reserve(handle->size());
-                    for (const auto& str : handle->strs()) {
-                        if (!str) { fresh->strs().push_back(make_strong<script_string>()); bytes += sizeof(script_string); continue; }
-                        bytes += str->size() + sizeof(script_string);
-                        fresh->strs().push_back(make_strong<script_string>(*str));
-                    }
-                    engine_->execution_limits().memory_charge_deferred(bytes);
-                } else {
-                    // scalar kinds are all-primitive by construction: detach = one buffer copy
-                    engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));
-                    fresh->assign_buffer(*handle);
-                }
+                auto fresh = detached_typed_array(*handle, engine_);
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
                 break;
@@ -978,6 +985,12 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             // traversal below reads it by const& only.
             const auto& tag = storage_.get<parallel_borrow_tag>();
             if (const auto* arr = parallel_borrow_array()) {
+                if (arr->is_typed()) {
+                    auto fresh = detached_typed_array(*arr, engine_);
+                    if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+                    result.storage_ = fresh;
+                    break;
+                }
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
                 auto fresh = make_strong<script_array>();
                 fresh->values().reserve(arr->size());

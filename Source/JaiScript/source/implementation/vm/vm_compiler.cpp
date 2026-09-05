@@ -2418,7 +2418,11 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 		walker.stmt(proto.body);
 	}
 
-	{
+	if (expr->outer_slot_plan_built) {
+		// Interpreter execution patches captured identifiers to env lookups; the
+		// persisted plan is then the only record of their enclosing-frame slots.
+		proto.outer_slot_plan = expr->outer_slot_plan;
+	} else {
 		std::unordered_set<uint64_t> seen;
 		body_walker walker;
 		walker.symbolizer = symbolizer_;
@@ -2547,6 +2551,9 @@ void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& de
 		proto.fn = std::make_shared<script_defined_function>(
 			decl->name, decl->parameters, decl->return_type, decl->body, nullptr, decl->local_count);
 		proto.fn->alias_candidate = true;
+	} else if (decl->outer_slot_plan_built) {
+		// Saved interpreter state has already replaced these identifiers' slots.
+		proto.outer_slot_plan = decl->outer_slot_plan;
 	} else {
 		// Nested coroutine bodies reference enclosing-frame slot locals through the
 		// env chain (foreign slots never compile to slot loads), so op_func_decl

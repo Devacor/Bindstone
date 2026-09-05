@@ -22,11 +22,15 @@
 //   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false)
+//   jaiscript_fuzz --jaibite-mutate --iterations 10000
+//                                         isolated loader-only byte mutants, BOTH backends
+//                                         (0 accepted, 24 clean rejection, 20 finding, 23 hang)
 //
 // Exit code: 0 = no new divergences, 1 = new divergences found, 20/21 = child verdicts.
 
 #include "fuzz_generator.hpp"
 #include "fuzz_harness.hpp"
+#include "fuzz_jaibite.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -38,6 +42,9 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 using namespace jai::fuzz;
 
@@ -58,6 +65,7 @@ namespace {
 		bool use_suppressions = true;
 		bool proofs = true;
 		bool param_alias = true;
+		bool jaibite_mutate = false;
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
 	};
@@ -79,12 +87,17 @@ namespace {
 			else if (a == "--timeout-ms") { const char* v = next("--timeout-ms"); if (!v) return false; opt.timeout_ms = std::stod(v); }
 			else if (a == "--child") { opt.child = true; }
 			else if (a == "--isolate") { opt.isolate = true; }
+			else if (a == "--jaibite-mutate") { opt.jaibite_mutate = true; opt.isolate = true; }
 			else if (a == "--dump") { const char* v = next("--dump"); if (!v) return false; opt.seed = std::stoull(v); opt.seed_given = true; opt.dump = true; }
 			else if (a == "--no-suppressions") { opt.use_suppressions = false; }
 			else if (a == "--no-proofs") { opt.proofs = false; }
 			else if (a == "--no-param-alias") { opt.param_alias = false; }
 			else if (a == "--run") { const char* v = next("--run"); if (!v) return false; opt.run_file = v; }
 			else { std::cerr << "unknown argument: " << a << "\n"; return false; }
+		}
+		if (opt.jaibite_mutate && (opt.dump || !opt.run_file.empty() || opt.minimize_flag)) {
+			std::cerr << "--jaibite-mutate cannot be combined with --dump, --run, or --minimize\n";
+			return false;
 		}
 		return true;
 	}
@@ -182,6 +195,38 @@ namespace {
 		return supp.empty() ? verdict::diverge_new : verdict::diverge_suppressed;
 	}
 
+	int run_mutation_seed(const options& opt, uint64_t seed) {
+		try {
+			const auto mutant = make_jaibite_mutant(seed, opt.max_depth, opt.proofs, opt.param_alias);
+			// Flushed before the first load: crash/hang output keeps the exact case.
+			std::cout << "[jaibite mutant " << seed << "] source-seed " << mutant.source_seed
+			          << " | " << mutant.operation << " at " << mutant.offset
+			          << " | bytes " << mutant.original.size() << " -> " << mutant.bytes.size() << "\n";
+			std::cout.flush();
+			const auto result = compare_jaibite_mutant(mutant, opt.proofs, opt.param_alias);
+			if (result.ok) return result.rejected ? 24 : 0;
+			std::cout << result.report;
+			if (!opt.corpus.empty()) {
+				std::filesystem::create_directories(opt.corpus);
+				const std::string stem = opt.corpus + "/jaibite_seed" + std::to_string(seed);
+				auto write_bytes = [&](const std::string& suffix, const std::vector<uint8_t>& bytes) {
+					std::ofstream file(stem + suffix, std::ios::binary);
+					file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				};
+				write_bytes(".original.jaibite", mutant.original);
+				write_bytes(".mutant.jaibite", mutant.bytes);
+				std::ofstream(stem + ".jai") << mutant.source;
+				std::ofstream(stem + ".report.txt") << result.report;
+			}
+		} catch (const std::exception& error) {
+			std::cout << "[jaibite mutant " << seed << "] harness failure: " << error.what() << "\n";
+		} catch (...) {
+			std::cout << "[jaibite mutant " << seed << "] non-standard harness failure\n";
+		}
+		std::cout.flush();
+		return 20;
+	}
+
 	int run_isolated(const options& opt, uint64_t seed) {
 		std::string cmd = "\"" + opt.exe_path + "\" --child --seed " + std::to_string(seed) +
 			" --max-depth " + std::to_string(opt.max_depth) +
@@ -191,6 +236,7 @@ namespace {
 		if (!opt.use_suppressions) cmd += " --no-suppressions";
 		if (!opt.proofs) cmd += " --no-proofs";
 		if (!opt.param_alias) cmd += " --no-param-alias";
+		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";
 #ifdef _WIN32
 		cmd = "\"" + cmd + "\""; // cmd.exe strips one layer of quotes
 		FILE* pipe = _popen(cmd.c_str(), "r");
@@ -205,8 +251,9 @@ namespace {
 		int code = _pclose(pipe);
 #else
 		int code = pclose(pipe);
+		if (code != -1) code = WIFEXITED(code) ? WEXITSTATUS(code) : -1;
 #endif
-		if (!out.empty() && code != 0) std::cout << out;
+		if (!out.empty() && code != 0 && !(opt.jaibite_mutate && code == 24)) std::cout << out;
 		return code;
 	}
 
@@ -260,6 +307,7 @@ int main(int argc, char** argv) {
 			std::fflush(stdout);
 			std::_Exit(23);
 		}).detach();
+		if (opt.jaibite_mutate) return run_mutation_seed(opt, opt.seed);
 		verdict v = run_seed(opt, opt.seed, false);
 		switch (v) {
 			case verdict::agree: return 0;
@@ -272,6 +320,40 @@ int main(int argc, char** argv) {
 
 	uint64_t begin = opt.seed_given ? opt.seed : opt.seed_start;
 	uint64_t end = opt.seed_given ? opt.seed + 1 : opt.seed_start + opt.iterations;
+
+	if (opt.jaibite_mutate) {
+		uint64_t accepted = 0, rejected = 0, findings = 0, crashes = 0, hangs = 0;
+		for (uint64_t seed = begin; seed < end; ++seed) {
+			if ((seed - begin) % 100 == 0) {
+				std::cout << "[jaibite progress] next mutant " << seed << " | accepted " << accepted
+				          << " | rejected " << rejected << " | findings " << findings
+				          << " | crashes " << crashes << " | hangs " << hangs << "\n";
+				std::cout.flush();
+			}
+			const int code = run_isolated(opt, seed);
+			switch (code) {
+				case 0: ++accepted; break;
+				case 24: ++rejected; break;
+				case 20: ++findings; break;
+				case 23: ++hangs; break;
+				default: ++crashes; break;
+			}
+			if (code != 0 && code != 24) {
+				std::cout << "[jaibite mutant " << seed << "] child exit " << code << "\n"
+				          << "reproduce: jaiscript_fuzz --jaibite-mutate --seed " << seed
+				          << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms
+				          << (opt.proofs ? "" : " --no-proofs")
+				          << (opt.param_alias ? "" : " --no-param-alias") << "\n";
+				std::cout.flush();
+			}
+		}
+		std::cout << "\n===== jaibite mutation summary (loader only; BOTH backends per mutant) =====\n"
+		          << "requested: " << (end - begin) << " | accepted: " << accepted
+		          << " | catchable identical rejections: " << rejected
+		          << " | findings: " << findings << " | crashes: " << crashes << " | hangs: " << hangs << "\n"
+		          << "valid-original byte-stable loads: " << 2 * (accepted + rejected) << "\n";
+		return (findings || crashes || hangs || accepted + rejected != end - begin) ? 1 : 0;
+	}
 
 	uint64_t agree = 0, new_div = 0, suppressed_div = 0, budget = 0, crashes = 0, hangs = 0, parse_valid = 0;
 	std::vector<uint64_t> new_div_seeds, crash_seeds, suppressed_seeds, hang_seeds;

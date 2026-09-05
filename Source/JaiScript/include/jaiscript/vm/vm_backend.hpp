@@ -1020,7 +1020,7 @@ namespace jai::vm {
         void stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
                                               const std::shared_ptr<script_class_definition>& class_def,
                                               bool skip_parent_recursion);
-        void evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+        checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,
                                          bool skip_parent_recursion = false);

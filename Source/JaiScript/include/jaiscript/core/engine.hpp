@@ -285,6 +285,15 @@ namespace jai {
         void execution_budget(double seconds);
         double execution_budget() const;
 
+        // Maximum active call depth for each built-in backend: interpreter 256,
+        // VM 10000 by default. Configure between executions; depth must be in
+        // [1, INT_MAX]. Each engine owns its settings, copied to parallel workers
+        // at region entry. Native-stack protection remains active independently;
+        // increasing this cap cannot make native recursion safe on a small stack.
+        // VM tail calls that reuse a frame do not consume additional depth.
+        void max_call_depth(backend_type backend, size_t depth);
+        size_t max_call_depth(backend_type backend) const;
+
         // The step-debugger controller for this engine (lazily created, engine-owned).
         // First call wires the active backend's statement hook. Arm a session with
         // debugger().set_enabled(true). See jaiscript/debug/controller.hpp.

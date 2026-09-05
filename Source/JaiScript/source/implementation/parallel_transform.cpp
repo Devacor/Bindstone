@@ -1308,6 +1308,8 @@ namespace {
 	// Re-slice the worker's memory allowance from the CURRENT outer accounting
 	void slice_worker_limits(engine& eng, parallel_worker_slot& slot) {
 		const auto& outer = eng.execution_limits();
+		slot.limits.interpreter_call_depth_limit = outer.interpreter_call_depth_limit;
+		slot.limits.vm_call_depth_limit = outer.vm_call_depth_limit;
 		slot.limits.terminal_error = false;
 		slot.limits.memory_used = 0;
 		slot.limits.memory_raises = 0;
@@ -1520,12 +1522,13 @@ namespace {
 
 	// An exact deep copy of a statement subtree (the serializer knows every node): fn's body is
 	// shared with its ordinary callers, so the graft below works on a copy
-	statement_ptr clone_statement(engine& eng, const statement_ptr& stmt) {
+	statement_ptr clone_statement(engine& eng, const statement_ptr& stmt, const script_defined_function& fn) {
 		std::vector<declaration_ptr> decls;
 		decls.push_back(std::make_shared<statement_decl>(stmt->location, stmt));
 		const std::vector<uint8_t> bytes = serialize_jaibite(decls, *eng.get_symbolizer(), 0);
 		uint64_t fingerprint = 0;
-		auto back = deserialize_jaibite(bytes.data(), bytes.size(), &eng, fingerprint);
+		const ast_frame_context context{fn.local_count, fn.parameters()};
+		auto back = deserialize_jaibite(bytes.data(), bytes.size(), &eng, fingerprint, nullptr, &context);
 		if (back.size() != 1 || back[0]->get_type() != node_type::statement_decl) {
 			throw runtime_error("parallel_transform: body clone failed (internal)");
 		}
@@ -1683,7 +1686,7 @@ namespace {
 		const return_conv conv = classify_return_conv(fn->return_type.get());
 		if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = fn->return_type; }
 		collect_return_proofs(body_view, rctx.return_proofs);
-		statement_ptr grafted = clone_statement(eng, body_view);
+		statement_ptr grafted = clone_statement(eng, body_view, *fn);
 		rewrite_transform_returns(grafted, 0, rctx);
 		auto* body_block = static_cast<block_stmt*>(decl->body.get());
 		for (auto& d : body_block->declarations) {

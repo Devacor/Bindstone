@@ -784,8 +784,8 @@ namespace jai {
         // Enclosing-frame slot locals a nested COROUTINE body references, as
         // (symbol_id, outer slot). Interpreter-owned: built on the first declaration
         // execution, which also patches those body identifiers' slot_index to SIZE_MAX
-        // (mirrors lambda_expr::outer_slot_plan); the vm derives its own compile-time
-        // plan and never reads these.
+        // (mirrors lambda_expr::outer_slot_plan); the vm copies a completed plan or
+        // derives its own at compile time when the interpreter has not built one.
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
 

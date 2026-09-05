@@ -19,16 +19,36 @@ path-separator assumptions, no Win32 calls, no MSVC pragmas).
   explicit case above it).
 - **`<intrin.h>` containment holds**: `integer_ops.hpp` is included by exactly five impl
   files (engine, interpreter, interpreter_dispatch, parser, vm_backend .cpp) and by no header.
-- **`native_stack_low()`** (`environment.cpp:8-36`): the ONLY `windows.h` include in the
-  library, `.cpp`-local, `WIN32_LEAN_AND_MEAN`+`NOMINMAX` guarded. Non-Windows builds compile
-  the `#else` branch and return `false` — safe, but it means the stack-headroom guard (which
-  converts an imminent native stack overflow into the catchable `max_recursion_depth` error)
-  is **Windows-only**; elsewhere the sole protection is `JAI_MAX_CALL_DEPTH`. A POSIX port
-  should add a `pthread_attr_getstack` branch (there is no pure-std way to read stack bounds).
+- **`native_stack_low()`** (`source/implementation/environment.cpp`): the `windows.h`
+  dependency stays `.cpp`-local, `WIN32_LEAN_AND_MEAN`+`NOMINMAX` guarded. The Windows
+  implementation queries the current thread's stack bounds and checks a 256 KiB headroom
+  margin. Guarded recursive execution paths raise the catchable `max_recursion_depth`
+  text, `Maximum recursion depth exceeded - possible infinite recursion`; `.jaibite`
+  reads and writes instead raise `jaibite: AST nesting too deep` or
+  `jaibite: type nesting too deep`. The reader/writer also retain their existing
+  1000-level traversal limit, independently of headroom. Non-Windows builds return
+  `false` and have **no native-stack headroom measurement**. Their numeric call-depth
+  and traversal limits still apply, but do not establish safety for every native
+  recursion path or host stack size. A POSIX implementation needs platform-specific
+  stack-bound discovery (there is no pure-std way to read stack bounds).
 - **`JAI_FORCEINLINE`** (`detail/interpreter.hpp:29-37`) and **`static_type_name.hpp`**
   (:17-23, `__FUNCSIG__` vs `__PRETTY_FUNCTION__`) both carry correct three-way splits.
   Unknown-compiler behavior: plain `inline`, and an empty type-name signature (degrades
   binder diagnostics, not correctness).
+
+Call-depth caps are engine-owned: interpreter 256 and VM 10000 by default.
+`eng->max_call_depth(jai::backend_type::interpreter, depth)` and the equivalent VM
+setter accept `[1, INT_MAX]` between executions; the one-argument overload reads
+the configured cap. Setters reject an executing engine or active parallel region,
+and parallel workers snapshot both settings at region entry. An explicitly supplied
+legacy `JAI_MAX_CALL_DEPTH` build macro seeds both defaults. Raising either cap does
+not disable Windows headroom checks. VM self tail calls that reuse a frame run in
+constant space without increasing call depth; the execution budget still applies.
+
+The parser's `MAX_PARSE_DEPTH = 250` is a weighted recursion counter, not an AST-depth
+bound or a complete native-stack guarantee. Parentheses consume extra weight but
+disappear from the AST, left-associative expressions grow AST depth iteratively,
+and recursive assignment and type parsing are not covered by that counter.
 
 ## 2. Layout / representation assumptions
 

@@ -9,6 +9,7 @@
 
 #include "fuzz/fuzz_generator.hpp"
 #include "fuzz/fuzz_harness.hpp"
+#include "fuzz/fuzz_jaibite.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -51,6 +52,27 @@ public:
 	}
 
 	void forge_tests() override {
+		test("jaibite_mutator_is_deterministic_and_never_a_noop", [this]() {
+			// Construction only: random malformed trees belong in isolated children,
+			// never in the suite process. Safe to run before the validator is fixed.
+			for (uint64_t seed = 0; seed < 16; ++seed) {
+				const auto first = fuzz::make_jaibite_mutant(seed, 3);
+				const auto again = fuzz::make_jaibite_mutant(seed, 3);
+				check_true(first.bytes != first.original, "each seed counts an actual byte mutation");
+				check_true(first.original == again.original, "valid original bytes are deterministic");
+				check_true(first.bytes == again.bytes, "mutant bytes are deterministic");
+				check_eq(first.source_seed, again.source_seed);
+				check_eq(first.offset, again.offset);
+				check_eq(first.operation, again.operation);
+				for (bool use_vm : { false, true }) {
+					const auto valid = fuzz::load_mutant_bytes(first.original, use_vm, true);
+					check_true(valid.accepted, valid.loader_error + valid.unexpected_error);
+					check_true(valid.stable_bytes, "valid generator bytes round-trip without rewriting");
+					check_true(valid.alive, "engine remains usable after valid load");
+				}
+			}
+		});
+
 		// Oracle self-test (review R8): unequal values of every representation must describe
 		// differently, including typed arrays (the old as_array() view raised on them and gave
 		// [1] and [2] the same error text), entries past the display cap, and deep nesting

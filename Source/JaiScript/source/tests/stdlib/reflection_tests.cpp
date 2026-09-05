@@ -23,6 +23,15 @@ public:
 };
 
 class reflection_tests : public suite {
+    std::string declaration_error(engine& eng, const std::string& source) {
+        try {
+            eng.execute(source);
+        } catch (const std::exception& error) {
+            return error.what();
+        }
+        return {};
+    }
+
     static std::shared_ptr<engine> make_reflective_engine() {
         auto eng = engine::make();
         stdlib::register_all(*eng);
@@ -46,6 +55,76 @@ public:
                 "namespace reflect is engine-owned");
             check_throws([&]() { eng->execute("namespace reflect::sub { function evil() { return 1; } }"); },
                 "flat sub-names are reserved with the prefix");
+        });
+
+        test("jai_namespace_rejects_script_declarations", [this]() {
+            for (auto mode : {check_mode::off, check_mode::strict}) {
+                for (const std::string name : {"jai", "jai::sub", "jai::sub::deep"}) {
+                    for (const std::string body : {"function f() { return 1; }", "var value = 1;", "class Value { int value = 1; }"}) {
+                        auto eng = engine::make();
+                        eng->static_checking(mode);
+                        const auto error = declaration_error(*eng, "namespace " + name + " { " + body + " }");
+                        check(!error.empty(), "script declarations into " + name + " must be rejected");
+                        check_eq(eng->execute("6 * 7").as_int(), script_int{42});
+                    }
+                }
+            }
+        });
+
+        test("reserved_namespace_error_text", [this]() {
+            for (auto mode : {check_mode::off, check_mode::strict}) {
+                for (const std::string name : {"reflect", "reflect::sub", "jai", "jai::sub"}) {
+                    auto eng = engine::make();
+                    eng->static_checking(mode);
+                    check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only): Type mismatch",
+                        declaration_error(*eng, "namespace " + name + " { var value = 1; }"));
+                }
+            }
+        });
+
+        test("reserved_namespace_preserves_host_values", [this]() {
+            for (const std::string name : {"jai", "jai::sub", "reflect", "reflect::sub"}) {
+                auto eng = engine::make();
+                auto& ns = eng->script_namespaces()[eng->symbolize(name)];
+                ns = std::make_shared<script_namespace_data>();
+                ns->variables[eng->symbolize("host_value")] = script_value(script_int{42}, eng.get());
+                int calls = 0;
+                eng->add_function("touch", [&calls]() -> script_int { ++calls; return 7; });
+                check_eq(eng->execute(name + "::host_value").as_int(), script_int{42});
+                const auto error = declaration_error(*eng,
+                    "namespace " + name + " { var host_value = touch(); }");
+                check(!error.empty(), "a script cannot reopen " + name);
+                check_eq(0, calls);
+                check_eq(eng->execute(name + "::host_value").as_int(), script_int{42});
+            }
+        });
+
+        test("reserved_namespace_saved_program_rejected", [this]() {
+            for (auto mode : {check_mode::off, check_mode::strict}) {
+                auto writer = engine::make();
+                writer->static_checking(mode);
+                auto bytes = writer->jaibite("namespace jai::saved { var value = 1; }").save_bytes();
+                auto reader = engine::make();
+                reader->static_checking(mode);
+                auto bite = reader->jaibite_load_bytes(bytes);
+                std::string error;
+                try {
+                    bite.execute();
+                } catch (const std::exception& caught) {
+                    error = caught.what();
+                }
+                check_eq(std::string("Namespace 'jai::saved' is reserved for the engine (C++-registered only): Type mismatch"),
+                    error);
+                check_eq(reader->execute("6 * 7").as_int(), script_int{42});
+            }
+        });
+
+        test("reserved_namespace_prefix_boundaries", [this]() {
+            for (const std::string name : {"jailed", "jai_script", "reflector", "reflective", "outer::jai"}) {
+                auto eng = engine::make();
+                check_eq(eng->execute("namespace " + name +
+                    " { function answer() { return 42; } } " + name + "::answer()").as_int(), script_int{42});
+            }
         });
 
         test("math_namespace_stays_open_by_contract", [this]() {

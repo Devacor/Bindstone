@@ -92,9 +92,10 @@ that bound nothing reflects nothing (the three-doors rule; see the binder chapte
 
 ## The three contracts
 
-1. **`reflect::` is a reserved namespace.** It is C++-registered truth; script code cannot
-   declare into it (declaration-time error, both backends). Contrast `math::`, which is
-   deliberately open to script extension — reflection answers must never be impersonatable.
+1. **`reflect::` and `jai::` are reserved namespaces.** Script code cannot declare into
+   either root or its subnames (declaration-time error, both backends); the host may
+   register their contents. `jai::` is reserved for engine capabilities. Contrast
+   `math::`, which remains deliberately open to script extension.
 2. **Deterministic order, always.** Fields come back in declaration order (base's fields first),
    methods sorted by (name, arity), classes sorted. Never hash order — reflection output is
    replay-safe by contract.

@@ -13,7 +13,8 @@ data that (almost entirely) already exists.
 
 **Naming (ruling, 2026-07-14):** everything lives in the **reserved `reflect::` namespace** —
 C++-registered only; script declarations into it error at declaration time on both backends
-(engine-held reserved-namespace set, today `{reflect}`). Contrast `math::`, which is
+(the shared predicate also reserves `jai` and both roots' qualified subnames;
+namespace contents remain engine-owned). Contrast `math::`, which is
 deliberately OPEN to script extension (intrinsics claim their names, user functions coexist;
 intrinsic wins a collision) — reflection is engine truth and must not be impersonatable.
 Sigils (`$`, `^`) were considered and rejected on grammar collisions (template-string

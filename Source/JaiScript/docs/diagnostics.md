@@ -152,6 +152,22 @@ This is a scalar/script-boundary change, not a redefinition of every host or
 container conversion. The public C++ `script_value::as_int()` accessor retains its
 existing saturating policy (NaN to zero).
 
+## Reserved engine namespaces (`type_mismatch`)
+
+`Namespace '{0}' is reserved for the engine (C++-registered only)`
+
+`{0}` names the rejected namespace. Script declarations cannot open `reflect`,
+`jai`, or their root-qualified subnames (`reflect::sub`, `jai::sub::deep`). The
+shared `core/script_namespace.hpp` predicate and checked error kernel are used by
+both backends, including execution of saved programs and with static checking off.
+Rejection happens before namespace members or their initializers run. Ordinary
+uncaught `what()` appends `: Type mismatch`. This replaces the old parenthetical
+`(reflect:: is C++-registered only)` with wording valid for both reserved roots.
+
+The host may register values/functions in these namespaces. Names that merely
+start with the same letters (`jailed`, `reflector`) and unrelated qualified names
+such as `outer::jai` are not reserved; `math` remains open to script extension.
+
 ## Call-depth limits (`max_recursion_depth`)
 
 `Maximum recursion depth exceeded - possible infinite recursion`

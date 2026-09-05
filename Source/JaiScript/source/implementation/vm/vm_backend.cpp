@@ -10634,11 +10634,9 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 		decl->name_id = symbolizer_->intern(decl->name);
 	}
 
-	// reflect:: is engine truth — script declarations into it are impersonation
+	// Engine-owned namespaces cannot be supplied or reopened by script.
 	if (is_reserved_namespace_name(decl->name)) {
-		return raise_(make_error_code(runtime_error_code::type_mismatch),
-			"Namespace '{0}' is reserved for the engine (reflect:: is C++-registered only)",
-			decl->name_id);
+		return raise_from(reserved_namespace_error(decl->name_id));
 	}
 
 	if (!engine_) {

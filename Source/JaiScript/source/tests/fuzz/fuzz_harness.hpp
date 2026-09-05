@@ -13,6 +13,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <cstdio>
 #include <vector>
 
 namespace jai::fuzz {
@@ -87,40 +88,82 @@ namespace jai::fuzz {
 		}
 	}
 
-	inline std::string describe_value(const script_value& v, int depth = 0) {
-		if (depth > 6) return "<max-depth>";
+	// The oracle's value description: the FULL value streams into a hash (every element of
+	// every array kind, every map entry, every nesting level), and the bounded text the
+	// report shows is a prefix of the same stream. A difference past the display cap or the
+	// depth cap still moves the hash, and a typed array describes element by element with its
+	// kind (the old as_array() view raised on typed nodes and turned [1] and [2] into the same
+	// error text - review R8). Description failures are part of the stream, never an equal.
+	struct value_stream {
+		std::string text;
+		uint64_t hash = 1469598103934665603ull;
+		size_t text_cap = 4096;
+		void put(std::string_view piece) {
+			for (unsigned char c : piece) { hash ^= c; hash *= 1099511628211ull; }
+			if (text.size() < text_cap) { text.append(piece.substr(0, text_cap - text.size())); }
+		}
+	};
+
+	inline const char* array_kind_tag(const script_array& node) {
+		if (!node.is_typed()) return "var";
+		switch (node.kind()) {
+			case script_array::kind_t::i64: return "int";
+			case script_array::kind_t::f64: return "float";
+			case script_array::kind_t::b8: return "bool";
+			case script_array::kind_t::c8: return "char";
+			case script_array::kind_t::str: return "string";
+			case script_array::kind_t::obj: return "object";
+			default: return "typed";
+		}
+	}
+
+	inline void stream_value(const script_value& v, value_stream& out, int depth) {
+		if (depth > 64) { out.put("<depth>"); return; }
 		try {
 			switch (v.type()) {
 				case script_value_type::jai_reference_type:
-					return "ref->" + describe_value(v.deref(), depth + 1);
+					out.put("ref->");
+					stream_value(v.deref(), out, depth + 1);
+					return;
 				case script_value_type::jai_array_type: {
-					const auto& arr = v.as_array();
-					std::string out = "array[";
-					size_t shown = arr.size() < 48 ? arr.size() : 48;
-					for (size_t i = 0; i < shown; ++i) {
-						if (i) out += ", ";
-						out += describe_value(arr[i], depth + 1);
-					}
-					if (shown < arr.size()) out += ", <+" + std::to_string(arr.size() - shown) + " more>";
-					return out + "]";
+					const script_array* node = v.deref().unchecked_array_node();
+					out.put("array<"); out.put(array_kind_tag(*node)); out.put(">[");
+					size_t i = 0;
+					node->for_each(v.get_engine(), [&](const script_value& elem) {
+						if (i++) out.put(", ");
+						stream_value(elem, out, depth + 1);
+					});
+					out.put("]");
+					return;
 				}
 				case script_value_type::jai_map_type: {
-					const auto& m = v.as_map();
-					std::string out = "map{";
+					const auto& m = v.deref().unchecked_as_map();
+					out.put("map{");
 					size_t i = 0;
 					for (const auto& kv : m) {
-						if (i++) out += ", ";
-						if (i > 48) { out += "<+more>"; break; }
-						out += describe_value(kv.first, depth + 1) + ": " + describe_value(kv.second, depth + 1);
+						if (i++) out.put(", ");
+						stream_value(kv.first, out, depth + 1);
+						out.put(": ");
+						stream_value(kv.second, out, depth + 1);
 					}
-					return out + "}";
+					out.put("}");
+					return;
 				}
 				default:
-					return std::string(type_tag(v)) + ":" + v.to_string();
+					out.put(type_tag(v)); out.put(":"); out.put(v.to_string());
+					return;
 			}
 		} catch (const std::exception& ex) {
-			return std::string("<describe-error: ") + ex.what() + ">";
+			out.put("<describe-error: "); out.put(ex.what()); out.put(">");
 		}
+	}
+
+	inline std::string describe_value(const script_value& v, int depth = 0) {
+		value_stream out;
+		stream_value(v, out, depth);
+		char tail[32];
+		std::snprintf(tail, sizeof(tail), " #%016llx", static_cast<unsigned long long>(out.hash));
+		return out.text + tail;
 	}
 
 	// ------------------------------------------------------------------

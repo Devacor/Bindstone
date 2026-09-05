@@ -57,7 +57,7 @@ public:
 		}
 	}
 }
-var WALL_WS = [];
+array<WallChunk> WALL_WS = [];
 var WS_MAPGEN = -1;
 
 function build_wall_ws(int ncols) -> void {
@@ -73,10 +73,10 @@ function build_wall_ws(int ncols) -> void {
 	}
 }
 var RESET = "";
-var QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
-var SEXTG = [];      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
+array<string> QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
+array<string> SEXTG = [];      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
 var HALFG = "";      // upper half block
-var AM_COLS = [];    // automap tile colors (built at boot)
+array<int> AM_COLS = [];    // automap tile colors (built at boot)
 var AM_FLOOR = 0;
 var AM_BLINK = 0;
 var AM_ITEM = 0;
@@ -85,7 +85,7 @@ var AM_SELF = 0;
 var AM_HEAD = 0;
 var HURT_RED = 0;
 var STRIPS = [];      // lazy 33-tall wall texture strips by (kind,side,shade,tx)
-var STRIP_SET = [];
+array<int> STRIP_SET = [];
 
 function init_render() -> void {
 	RESET = ESC + "[0m";
@@ -122,9 +122,9 @@ function init_render() -> void {
 
 // wall tone table: [kind 0..9][side 0..1][shade 0..15][tone 0..2] flattened;
 // tones: 0 base, 1 accent, 2 mortar/frame. Truecolor, 16 shades.
-var WALLT = [];
-var CEILP = [];     // per pixel-row ceiling color
-var FLOORP = [];    // per pixel-row floor color
+array<int> WALLT = [];
+array<int> CEILP = [];     // per pixel-row ceiling color
+array<int> FLOORP = [];    // per pixel-row floor color
 
 function push_wall_tones(var& base, var& accent) -> void {
 	for (int side = 0; side < 2; ++side) {

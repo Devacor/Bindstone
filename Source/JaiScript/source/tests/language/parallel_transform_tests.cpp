@@ -919,6 +919,94 @@ public:
 			check_eq((int64_t)489, v[9].as_int());
 		});
 
+		test("by_ref_loop_cursor_dies_with_its_loop", [this]() {
+			// A slotted by-reference range-for used to leave its last element cursor in the loop
+			// variable's slot until the frame returned; a parallel region over the same typed
+			// object array then saw a live reference and refused the last element. The cursor
+			// now dies with the loop on a normal exit, a break, and an unwind caught in the frame
+			auto e = make_engine();
+			e->parallel_thread_count(3);
+			auto r = e->execute(R"(
+				class C { int a = 0; array<int> xs = [1, 2]; C() {} }
+				array<C> cs = [];
+				for (int i = 0; i < 6; i++) { cs.push(new C()); }
+				function step(var& t) -> void { t.a = t.a + 1; }
+				function plain(int tick) -> int {
+					for (auto& t : cs) { t.a = tick; }
+					parallel_for (auto& t : cs) { step(t); }
+					return cs[5].a;
+				}
+				function broken(int tick) -> int {
+					for (auto& t : cs) { t.a = tick; if (t.a == tick) { break; } }
+					parallel_for (auto& t : cs) { step(t); }
+					return cs[0].a;
+				}
+				function thrown(int tick) -> int {
+					try { for (auto& t : cs) { t.a = tick; throw "stop"; } } catch (err) { }
+					parallel_for (auto& t : cs) { step(t); }
+					return cs[0].a;
+				}
+				return [plain(1), plain(2), broken(10), thrown(20)];
+			)");
+			const auto& v = r.as_array();
+			check_eq((int64_t)2, v[0].as_int());
+			check_eq((int64_t)3, v[1].as_int());
+			check_eq((int64_t)11, v[2].as_int());
+			check_eq((int64_t)21, v[3].as_int());
+		});
+
+		test("typed_string_capture_detaches_every_string", [this]() {
+			// A typed array<string> captured by a body is provisioned per worker through
+			// parallel_detached_copy. The str buffer holds refcounted handles, so the copy must
+			// own fresh strings (the buffer copy shared them across threads: GLOOM's palettes
+			// rendered short rows under workers once they were declared array<string>)
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			script_value table = e->execute(R"(
+				array<string> PAL = [];
+				PAL = [" "];
+				for (int i = 1; i < 40; i++) { PAL.push(`[38;2;${i};${i * 2};${i * 3}m`); }
+				return PAL;
+			)");
+			const script_array* src = table.deref().unchecked_array_node();
+			check_true(src->is_typed());
+			script_value copy = table.deref().parallel_detached_copy();
+			const script_array* dst = copy.unchecked_array_node();
+			check_true(dst->is_typed());
+			check_eq(src->size(), dst->size());
+			for (size_t i = 0; i < src->size(); ++i) {
+				check_true(src->strs()[i].get() != dst->strs()[i].get());
+				check_eq(*src->strs()[i], *dst->strs()[i]);
+			}
+			// and the GLOOM shape end to end: rows built from captured typed string tables
+			// match the serial rows on every worker's chunk
+			auto r = e->execute(R"(
+				array<string> GLYPH = [" ", "â", "â", "â", "â"];
+				array<int> PIXV = [];
+				for (int i = 0; i < 32 * 40; i++) { PIXV.push((i * 7 + i / 32) % 40); }
+				array<int> idx = [];
+				for (int i = 0; i < 40; i++) { idx.push(i); }
+				string row(int r) {
+					var parts = [];
+					int prev = -1;
+					for (int cx = 0; cx < 32; ++cx) {
+						int p = PIXV[r * 32 + cx];
+						if (p != prev) { parts.push(PAL[p]); prev = p; }
+						parts.push(GLYPH[(p + cx) % 5]);
+					}
+					parts.push("[0m");
+					return parts.join("");
+				}
+				int bad = 0;
+				for (int rep = 0; rep < 6; rep++) {
+					var par = parallel_transform(idx, row);
+					for (int i = 0; i < 40; i++) { if (par[i] != row(i)) { bad++; } }
+				}
+				return bad;
+			)");
+			check_eq((int64_t)0, r.as_int());
+		});
+
 		test("store_into_parameter_copy_leaves_source_unchanged", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

@@ -285,12 +285,6 @@ namespace jai::vm {
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
         std::vector<script_value>* parallel_cursors_ = nullptr;   // [0] = the range, then the zip's arrays
         void set_parallel_cursors(std::vector<script_value>* cursors) noexcept { parallel_cursors_ = cursors; }
-        // parallel_transform chunk loop: where op_parallel_emit lands a result (the fork's sink
-        // runs the result checks and writes the worker's output slice)
-        using parallel_emit_fn = checked_result<void> (*)(void* ctx, script_value&& value, size_t index);
-        void set_parallel_emit(parallel_emit_fn fn, void* ctx) noexcept { parallel_emit_ = fn; parallel_emit_ctx_ = ctx; }
-        parallel_emit_fn parallel_emit_ = nullptr;
-        void* parallel_emit_ctx_ = nullptr;
         // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
         // Worker-private env-lookup cache (workers may not touch the SHARED

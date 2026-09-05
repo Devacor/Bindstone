@@ -37,6 +37,8 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/vm/vm_backend.hpp>
@@ -80,8 +82,6 @@ namespace jai::detail {
 		// registered by the join, expired entries skipped)
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
-		std::vector<script_value>* transform_out = nullptr;   // parallel_transform: the pre-sized output (workers write disjoint indices)
-		std::string error_text;                                // owns a sink error's text for the region
 		// Live input vector (Dev ruling 2026-07-09 "safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
 		// scan) mint worker-local copies with zero refcount traffic, and elements the
@@ -1169,67 +1169,6 @@ namespace {
 
 	// ============================== WORKERS ==============================
 
-
-	// Worker-side value-semantic check for fn results (read-only const walk - no handle
-	// copies, so it never touches a refcount). Also detects results that reach into the
-	// worker's provisioned captures (snapshot nodes / a live borrow): the caller
-	// materializes those through the silent deep clone so nothing worker-owned or
-	// worker-count-dependent escapes the region.
-	bool result_value_semantic(const script_value& raw, const char** what,
-	                           const std::unordered_set<const void*>* worker_nodes = nullptr,
-	                           bool* aliases_worker_state = nullptr) {
-		const script_value& v = raw.is_reference() ? raw.deref() : raw;
-		switch (v.raw_storage_index()) {
-		case script_value::TYPEID_NULL:
-		case script_value::TYPEID_INT:
-		case script_value::TYPEID_FLOAT:
-		case script_value::TYPEID_CHAR:
-		case script_value::TYPEID_BOOL:
-			return true;
-		case script_value::TYPEID_STRING:
-			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_string())) {
-				*aliases_worker_state = true;
-			}
-			return true;
-		case script_value::TYPEID_CPP_BOUND:
-			// ONE cached semantic-index read (repeated is_* probes each re-deref)
-			if (v.bound_semantic_index() != script_value::TYPEID_NULL || v.is_null()) {
-				return true;   // bound primitive - decodes to a value-semantic read
-			}
-			*what = "bound host object";
-			return false;
-		case script_value::TYPEID_PARALLEL_BORROW:
-			// A borrow escaping into the result: legal shape, but it must materialize
-			if (aliases_worker_state) { *aliases_worker_state = true; }
-			return true;
-		case script_value::TYPEID_ARRAY: {
-			if (worker_nodes && aliases_worker_state && worker_nodes->count(v.unchecked_array_node())) {
-				*aliases_worker_state = true;
-			}
-			if (v.unchecked_array_node()->is_typed()) { return true; }   // raw int/float payloads
-			for (const auto& elem : v.unchecked_as_array()) {
-				if (!result_value_semantic(elem, what, worker_nodes, aliases_worker_state)) { return false; }
-			}
-			return true;
-		}
-		case script_value::TYPEID_MAP: {
-			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_map())) {
-				*aliases_worker_state = true;
-			}
-			for (const auto& [key, val] : v.unchecked_as_map()) {
-				if (!result_value_semantic(key, what, worker_nodes, aliases_worker_state) ||
-				    !result_value_semantic(val, what, worker_nodes, aliases_worker_state)) { return false; }
-			}
-			return true;
-		}
-		case script_value::TYPEID_OBJECT: *what = "object"; return false;
-		case script_value::TYPEID_FUNCTION: *what = "function"; return false;
-		case script_value::TYPEID_SHARED_PTR: *what = "shared_ptr"; return false;
-		case script_value::TYPEID_WEAK_PTR: *what = "weak_ptr"; return false;
-		default: *what = "unsupported type"; return false;
-		}
-	}
-
 	// Re-slice the worker's memory allowance from the CURRENT outer accounting
 	void slice_worker_limits(engine& eng, parallel_worker_slot& slot) {
 		const auto& outer = eng.execution_limits();
@@ -1311,11 +1250,12 @@ namespace {
 		return src;
 	}
 
-	// parallel_transform's chunk loop: fn per element in-loop (its by-value parameter binds the
-	// element in place when the admission proved it read-only, else copies as it always did),
-	// the result emitted into the output slice at the cursor's index
+	// parallel_transform's chunk loop = the zip `o = fn(x)`: fn per element in-loop (its by-value
+	// parameter binds the element in place when the admission proved it read-only, else copies as
+	// it always did), the call result a temporary that moves into the output slot through the
+	// second cursor - nothing else per element
 	constexpr const char* k_parallel_chunk_transform =
-		"function __jai_parallel_tchunk(var& __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_emit(__jai_parallel_fn(__c)); } }";
+		"function __jai_parallel_tchunk(var& __c0, var& __c1, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __c1 = __jai_parallel_fn(__c0); } }";
 
 	std::shared_ptr<function_decl> parse_chunk_skeleton(engine& eng, const char* source) {
 		const auto templates = eng.get_registered_template_types();
@@ -1333,7 +1273,9 @@ namespace {
 	// parameter j (its permanent name and symbol; the vm resolves frame locals by declared name)
 	struct chunk_names {
 		std::vector<std::pair<std::string_view, uint64_t>> params;   // (name, symbol) per loop variable
+		std::vector<size_t> param_slots;                             // empty: loop variable j sits in slot j
 		size_t n_slot = 0, k_slot = 0;
+		size_t slot_of(size_t j) const { return j < param_slots.size() ? param_slots[j] : j; }
 	};
 	void renumber_chunk_slot(expression_ptr& e, const chunk_names& names) {
 		if (!e) { return; }
@@ -1344,7 +1286,7 @@ namespace {
 			else if (id->name == "__k") { id->slot_index = names.k_slot; }
 			else if (id->name.size() > 3 && id->name.substr(0, 3) == "__c") {
 				const size_t j = static_cast<size_t>(std::stoul(std::string(id->name.substr(3))));
-				if (j < names.params.size()) { id->name = names.params[j].first; id->symbol_id = names.params[j].second; id->slot_index = j; }
+				if (j < names.params.size()) { id->name = names.params[j].first; id->symbol_id = names.params[j].second; id->slot_index = names.slot_of(j); }
 			}
 			return;
 		}
@@ -1430,25 +1372,199 @@ namespace {
 		return stmt->chunk_decl_cache;
 	}
 
-	// The emit sink (vm opcode and interpreter native): the fork's result contract - value
-	// semantics, no alias of worker-private snapshot nodes - then the disjoint output write
-	checked_result<void> transform_emit_sink(void* ctx, script_value&& value, size_t index) {
-		auto* slot = static_cast<parallel_worker_slot*>(ctx);
-		if (!slot->transform_out || index >= slot->transform_out->size()) {
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-				std::string_view("parallel_transform: emit outside the worker's output slice (internal)"));
+	// An exact deep copy of a statement subtree (the serializer knows every node): fn's body is
+	// shared with its ordinary callers, so the graft below works on a copy
+	statement_ptr clone_statement(engine& eng, const statement_ptr& stmt) {
+		std::vector<declaration_ptr> decls;
+		decls.push_back(std::make_shared<statement_decl>(stmt->location, stmt));
+		const std::vector<uint8_t> bytes = serialize_jaibite(decls, *eng.get_symbolizer(), 0);
+		uint64_t fingerprint = 0;
+		auto back = deserialize_jaibite(bytes.data(), bytes.size(), &eng, fingerprint);
+		if (back.size() != 1 || back[0]->get_type() != node_type::statement_decl) {
+			throw runtime_error("parallel_transform: body clone failed (internal)");
 		}
-		const char* what = nullptr;
-		bool aliases_worker_state = false;
-		if (!result_value_semantic(value, &what,
-		                           slot->provisioned_nodes.empty() ? nullptr : &slot->provisioned_nodes,
-		                           &aliases_worker_state)) {
-			slot->error_text = std::string("parallel_transform: fn returned a non-value-semantic result (") + what +
-			                   ") for element " + std::to_string(index);
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), std::string_view(slot->error_text));
+		return static_cast<statement_decl*>(back[0].get())->statement;
+	}
+
+	// Top-level `return e;` of the grafted fn body becomes `out = e; continue;` (`return;` just
+	// continues: the output slot keeps its null) - the continue reaches the loop's advance. fn's
+	// declared return type converts through cast<T>, the conversion the typed return applied.
+	struct transform_return_ctx {
+		engine* eng = nullptr;
+		std::string_view out_name;
+		uint64_t out_symbol = UINT64_MAX;
+		size_t out_slot = 0;
+		type_info_ptr cast_to;   // null: no conversion (auto / var / reference return)
+		// The checker's return proofs read off the ORIGINAL body in traversal order (the clone
+		// carries no runtime stamps; both trees have the same shape): a proven same-type
+		// return needs no cast, exactly as the typed return skipped its conversion
+		std::vector<uint8_t> return_proofs;
+		size_t next_return = 0;
+	};
+	void collect_return_proofs(const statement_ptr& slot, std::vector<uint8_t>& out) {
+		if (!slot) { return; }
+		switch (slot->get_type()) {
+		case node_type::return_stmt:
+			out.push_back(static_cast<const return_stmt*>(slot.get())->static_return_proof);
+			return;
+		case node_type::block_stmt:
+			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
+				if (d && d->get_type() == node_type::statement_decl) { collect_return_proofs(static_cast<statement_decl*>(d.get())->statement, out); }
+			}
+			return;
+		case node_type::if_stmt: {
+			auto* n = static_cast<if_stmt*>(slot.get());
+			collect_return_proofs(n->then_statement, out); collect_return_proofs(n->else_statement, out);
+			return;
 		}
-		(*slot->transform_out)[index] = aliases_worker_state ? value.parallel_detached_copy() : std::move(value);
-		return {};
+		case node_type::while_stmt: collect_return_proofs(static_cast<while_stmt*>(slot.get())->body, out); return;
+		case node_type::for_stmt: collect_return_proofs(static_cast<for_stmt*>(slot.get())->body, out); return;
+		case node_type::range_for_stmt: collect_return_proofs(static_cast<range_for_stmt*>(slot.get())->body, out); return;
+		case node_type::try_stmt: {
+			auto* n = static_cast<try_stmt*>(slot.get());
+			collect_return_proofs(n->try_block, out); collect_return_proofs(n->catch_block, out);
+			return;
+		}
+		case node_type::switch_stmt: {
+			auto* n = static_cast<switch_stmt*>(slot.get());
+			for (auto& c : n->cases) { for (auto& st : c->body) { collect_return_proofs(st, out); } }
+			if (n->default_case) { for (auto& st : n->default_case->body) { collect_return_proofs(st, out); } }
+			return;
+		}
+		default:
+			return;
+		}
+	}
+	void rewrite_transform_returns(statement_ptr& slot, size_t loop_depth, transform_return_ctx& ctx) {
+		if (!slot) { return; }
+		switch (slot->get_type()) {
+		case node_type::return_stmt: {
+			if (loop_depth != 0) { ++ctx.next_return; return; }   // never reached: nested returns select call mode
+			auto* r = static_cast<return_stmt*>(slot.get());
+			const uint8_t proof = ctx.next_return < ctx.return_proofs.size() ? ctx.return_proofs[ctx.next_return] : proof_none;
+			++ctx.next_return;
+			std::vector<declaration_ptr> decls;
+			if (r->value) {
+				auto target = std::make_shared<identifier_expr>(r->location, ctx.out_name, ctx.out_symbol);
+				target->slot_index = ctx.out_slot;
+				expression_ptr value = r->value;
+				if (ctx.cast_to && proof != proof_same_type) { value = std::make_shared<cast_expr>(r->location, ctx.cast_to, false, value); }
+				token eq(token_type::equal, std::string_view("="), r->location);
+				decls.push_back(std::make_shared<expression_decl>(r->location, std::make_shared<assignment_expr>(r->location, target, eq, value)));
+			}
+			decls.push_back(std::make_shared<statement_decl>(r->location, std::make_shared<continue_stmt>(r->location)));
+			slot = std::make_shared<block_stmt>(r->location, std::move(decls));
+			return;
+		}
+		case node_type::block_stmt:
+			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
+				if (d && d->get_type() == node_type::statement_decl) {
+					rewrite_transform_returns(static_cast<statement_decl*>(d.get())->statement, loop_depth, ctx);
+				}
+			}
+			return;
+		case node_type::if_stmt: {
+			auto* n = static_cast<if_stmt*>(slot.get());
+			rewrite_transform_returns(n->then_statement, loop_depth, ctx);
+			rewrite_transform_returns(n->else_statement, loop_depth, ctx);
+			return;
+		}
+		case node_type::while_stmt:
+			rewrite_transform_returns(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, ctx); return;
+		case node_type::for_stmt:
+			rewrite_transform_returns(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, ctx); return;
+		case node_type::range_for_stmt:
+			rewrite_transform_returns(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, ctx); return;
+		case node_type::try_stmt: {
+			auto* n = static_cast<try_stmt*>(slot.get());
+			rewrite_transform_returns(n->try_block, loop_depth, ctx);
+			rewrite_transform_returns(n->catch_block, loop_depth, ctx);
+			return;
+		}
+		case node_type::switch_stmt: {
+			auto* n = static_cast<switch_stmt*>(slot.get());
+			for (auto& c : n->cases) { for (auto& st : c->body) { rewrite_transform_returns(st, loop_depth, ctx); } }
+			if (n->default_case) { for (auto& st : n->default_case->body) { rewrite_transform_returns(st, loop_depth, ctx); } }
+			return;
+		}
+		default:
+			return;
+		}
+	}
+
+	// The transform's chunk wrapper for fn: fn's body grafted in - its parameter bound to the input
+	// cursor in place, its returns stored through the output cursor - when fn only reads its
+	// parameter (no store through it, no mutating method, no whole use: the copy it would have
+	// made is unobservable) and returns only from its top level; otherwise the call form, which
+	// copies for a mutating fn exactly as before. Built once per fn body.
+	constexpr const char* k_parallel_chunk_transform_inline =
+		"function __jai_parallel_tchunk(var& __c0, var& __c1, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_placeholder(); } }";
+
+	const std::shared_ptr<function_decl>& build_transform_wrapper(engine& eng, parallel_engine_state& state,
+	                                                              const std::shared_ptr<script_defined_function>& fn,
+	                                                              const parallel_admission& adm) {
+		auto found = state.transform_inline_wrappers.find(static_cast<const void*>(fn->body.get()));
+		if (found != state.transform_inline_wrappers.end()) { return found->second; }
+		body_control_scan scan;
+		statement_ptr body_view = fn->body;
+		scan_parallel_body_control(body_view, 0, 0, scan);
+		const bool reads_only = !adm.element_reach_all && !adm.element_mutated;
+		const bool inline_ok = reads_only && !scan.nested_return && !scan.bad_break && fn->parameters().size() == 1;
+		if (!inline_ok) {
+			if (!state.transform_chunk_wrapper) { state.transform_chunk_wrapper = parse_chunk_skeleton(eng, k_parallel_chunk_transform); }
+			return state.transform_inline_wrappers.emplace(static_cast<const void*>(fn->body.get()), state.transform_chunk_wrapper).first->second;
+		}
+		auto decl = parse_chunk_skeleton(eng, k_parallel_chunk_transform_inline);
+		const size_t n_locals = fn->local_count;   // fn's frame: parameter 0 + its locals
+		parameter in_param = fn->parameters()[0];
+		in_param.slot_index = 0;
+		in_param.is_reference = true;   // in place: the proof above makes the copy unobservable
+		if (in_param.symbol_id == UINT64_MAX) { in_param.symbol_id = eng.symbolize(in_param.name); }
+		chunk_names names;
+		names.params.emplace_back(eng.get_symbolizer()->get_string(in_param.symbol_id), in_param.symbol_id);
+		const uint64_t out_symbol = eng.symbolize("__c1");
+		names.params.emplace_back(eng.get_symbolizer()->get_string(out_symbol), out_symbol);
+		names.param_slots = { 0, n_locals };
+		names.n_slot = n_locals + 1; names.k_slot = n_locals + 2;
+		decl->parameters[0] = in_param;
+		decl->parameters[1].slot_index = n_locals;
+		decl->parameters[2].slot_index = names.n_slot;
+		transform_return_ctx rctx;
+		rctx.eng = &eng;
+		rctx.out_name = names.params[1].first;
+		rctx.out_symbol = out_symbol;
+		rctx.out_slot = n_locals;
+		const return_conv conv = classify_return_conv(fn->return_type.get());
+		if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = fn->return_type; }
+		collect_return_proofs(body_view, rctx.return_proofs);
+		statement_ptr grafted = clone_statement(eng, body_view);
+		rewrite_transform_returns(grafted, 0, rctx);
+		auto* body_block = static_cast<block_stmt*>(decl->body.get());
+		for (auto& d : body_block->declarations) {
+			if (d->get_type() != node_type::statement_decl) { continue; }
+			auto& st = static_cast<statement_decl*>(d.get())->statement;
+			if (!st || st->get_type() != node_type::for_stmt) { continue; }
+			auto* loop = static_cast<for_stmt*>(st.get());
+			if (loop->initializer && loop->initializer->get_type() == node_type::variable_decl) {
+				static_cast<variable_decl*>(loop->initializer.get())->slot_index = names.k_slot;
+			}
+			renumber_chunk_slot(loop->condition, names);
+			renumber_chunk_slot(loop->update, names);
+			auto* inner = static_cast<block_stmt*>(loop->body.get());
+			for (auto& bd : inner->declarations) {
+				if (bd->get_type() != node_type::expression_decl) { continue; }
+				auto* ed = static_cast<expression_decl*>(bd.get());
+				if (ed->expression && ed->expression->get_type() == node_type::call_expr) {
+					auto* call = static_cast<call_expr*>(ed->expression.get());
+					if (call->callee->get_type() == node_type::identifier_expr &&
+					    static_cast<identifier_expr*>(call->callee.get())->name == "__jai_parallel_placeholder") {
+						bd = std::make_shared<statement_decl>(bd->location, grafted);
+					}
+				}
+			}
+		}
+		decl->local_count = n_locals + 3;
+		return state.transform_inline_wrappers.emplace(static_cast<const void*>(fn->body.get()), std::move(decl)).first->second;
 	}
 
 	std::unique_ptr<parallel_worker_slot> provision_worker(engine& eng, const parallel_admission& adm,
@@ -1530,17 +1646,6 @@ namespace {
 			ctx->root_env->define(eng.symbolize(adm.inplace_root ? "__jai_parallel_body" : "__jai_parallel_fn"),
 				script_value::make_function(script_callable_thunk{ &eng, ctx->fn_payload }, &eng));
 			parallel_worker_slot* slot = ctx.get();   // slots live in the pool's unique_ptrs: stable
-			ctx->root_env->define(eng.symbolize("__jai_parallel_emit"),
-				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-					if (args.empty() || slot->cursors.empty()) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-							std::string_view("__jai_parallel_emit is only valid inside a parallel_transform chunk"));
-					}
-					script_value produced = args[0];
-					auto landed = transform_emit_sink(slot, std::move(produced), slot->cursors.front().element_cursor_index());
-					if (!landed) { return checked_result<script_value>(landed.error(), std::string_view(slot->error_text)); }
-					return script_value(std::monostate{}, eng_ptr);
-				}, &eng));
 			// The interpreter calls these natives; the vm compiles the names to opcodes
 			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1570,7 +1675,7 @@ namespace {
 	// (the by-value binding clones per value semantics - zero side effects). No
 	// output, results discarded. Every refcount touched is element-internal
 	// (normalization made elements exclusive) or worker-private: single-threaded.
-	void run_worker_inplace(parallel_worker_slot& ctx, engine& eng) {
+	void run_worker_chunk(parallel_worker_slot& ctx, engine& eng) {
 		if (ctx.end <= ctx.begin || ctx.element_refs.empty()) { return; }
 		// ONE script entry per chunk: the wrapper loops in-script, calling the body per element
 		// with the chunk's cursor reference and advancing it through the worker's intrinsic. The
@@ -1582,37 +1687,6 @@ namespace {
 		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
 		std::vector<script_value> call_args;
 		for (const auto& cursor : ctx.cursors) { call_args.push_back(cursor); }
-		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
-		try {
-			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
-			if (ctx.backend->is_unwinding()) {
-				ctx.error = parallel_worker_error{ failing(),
-					make_error_code(runtime_error_code::evaluation_failed),
-					ctx.backend->get_current_exception().what(),
-					ctx.limits.terminal_error };
-			} else if (!r) {
-				ctx.error = parallel_worker_error{ failing(), r.error(),
-					format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
-			}
-		} catch (const std::exception& e) {
-			ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
-				e.what(), ctx.limits.terminal_error };
-		}
-	}
-
-	// parallel_transform worker: ONE script entry per chunk (the wrapper loops in-script, calls fn
-	// per element with the chunk's cursor and emits each result through the sink). The failing
-	// element, when any, is the cursor's index.
-	void run_worker(parallel_worker_slot& ctx, std::vector<script_value>& out, engine& eng) {
-		(void)out;
-		if (ctx.end <= ctx.begin || ctx.element_refs.empty()) { return; }
-		ctx.cursors = std::move(ctx.element_refs);
-		ctx.element_refs.clear();
-		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); ctx.vm->set_parallel_emit(&transform_emit_sink, &ctx); }
-		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursors(nullptr); c.vm->set_parallel_emit(nullptr, nullptr); } } } cursor_guard{ ctx };
-		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
-		std::vector<script_value> call_args;
-		call_args.push_back(ctx.cursors.front());
 		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
 		try {
 			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
@@ -2354,82 +2428,74 @@ namespace {
 
 } // namespace
 
-checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
+// ============================== THE REGION (one fork for both forms) ==============================
+// parallel_for and parallel_transform run the SAME region: containers[0] is the range (the
+// transform's input), further containers are the zip's arrays (the transform's output is one),
+// every chunk gets one cursor per array, and each worker enters script once to run its chunk
+// loop. The plan carries the only differences: the prefix of every text, the environment
+// captured reads resolve through, which arrays the body may write (the transform never writes
+// its input, so borrowing it is legal and its typed primitive form is boxed once instead of
+// demoted in place), the chunk partition (the transform's weight hint), and whether element
+// methods are admitted (the in-place statement). parallel_transform therefore costs exactly what
+// the equivalent zip statement costs plus the output array it hands back.
+namespace {
+
+struct region_plan {
+	const char* prefix = "parallel_for";
+	std::vector<script_value>* containers = nullptr;                 // [0] = the range, then the zip's arrays
+	std::shared_ptr<script_defined_function> root_fn;                // the body function / fn (admission root, pool key)
+	const parallel_admission* adm = nullptr;
+	const std::shared_ptr<function_decl>* chunk_wrapper = nullptr;
+	std::shared_ptr<environment> capture_env;                        // null: the global environment
+	bool inplace = false;                                            // parallel_for: the range is written, element methods admitted
+	std::vector<size_t> bounds;                                      // empty: the flat partition
+	const parallel_admission* extra_seed_adm = nullptr;              // weight fn types (transform)
+	bool zip_arrays_fresh = false;                                   // the zip's arrays were allocated by the caller this call (the transform's output): exclusive by construction
+#ifdef JAISCRIPT_VM_PROFILE
+	parallel_engine_state::region_phase_prof* prof = nullptr;
+#endif
+};
+
+// The zip's arrays and the range: an array, the range's length, distinct from the range
+checked_result<void> run_region(engine& eng, region_plan& plan) {
 	parallel_engine_state& state = eng.parallel_state();
+	const std::string pfx = std::string(plan.prefix) + ": ";
+	auto raise = [&state](std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<void>(code, std::string_view(state.error_text));
+	};
+	auto usage = [&raise, &pfx](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), pfx + std::move(message));
+	};
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t0 = __rdtsc();
 #endif
-	auto raise = [&state](std::error_code code, std::string message) {
-		state.error_text = std::move(message);
-		return checked_result<script_value>(code, std::string_view(state.error_text));
-	};
-	auto usage = [&raise](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
-	};
+	std::vector<script_value>& containers = *plan.containers;
+	const parallel_admission* adm = plan.adm;
+	const script_value& array_value = containers.front().is_reference() ? containers.front().deref() : containers.front();
+	const script_array* source_node = array_value.unchecked_array_node();
 
-	if (state.region_running) {
-		return usage("parallel_transform: nested parallel regions are not supported (v0)");
-	}
-	if (args.size() < 2 || args.size() > 3) {
-		return usage("parallel_transform: expected (array, fn) or (array, fn, weight_fn)");
-	}
-	const script_value& array_value = args[0].is_reference() ? args[0].deref() : args[0];
-	if (!array_value.is_array()) {
-		return usage("parallel_transform: first argument must be an array");
-	}
-	const script_callable* fn_payload = payload_from_function_value(args[1]);
-	if (!fn_payload || fn_payload->kind != script_callable::kind_type::function || !fn_payload->fn || !fn_payload->fn->body) {
-		return usage("parallel_transform: fn must be a script-defined function");
-	}
-	const script_callable* weight_payload = nullptr;
-	if (args.size() == 3) {
-		weight_payload = payload_from_function_value(args[2]);
-		if (!weight_payload || weight_payload->kind != script_callable::kind_type::function ||
-		    !weight_payload->fn || !weight_payload->fn->body) {
-			return usage("parallel_transform: weight_fn must be a script-defined function");
-		}
-	}
-
-	struct running_guard {
-		parallel_engine_state& s;
-		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
-		~running_guard() { s.region_running = false; }
-	} guard(state);
-
-	// ADMISSION (contract A: violations error, never silent-serial)
-	const parallel_admission* adm = admit_cached(eng, state, fn_payload->fn);
-	if (!adm->admitted) {
-		return raise(adm->code, adm->message);
-	}
-	if (!state.transform_chunk_wrapper) { state.transform_chunk_wrapper = parse_chunk_skeleton(eng, k_parallel_chunk_transform); }
-	const std::shared_ptr<function_decl>& transform_wrapper = state.transform_chunk_wrapper;
-	const parallel_admission* weight_adm = nullptr;
-	if (weight_payload) {
-		weight_adm = admit_cached(eng, state, weight_payload->fn);
-		if (!weight_adm->admitted) {
-			return raise(weight_adm->code, weight_adm->message);
-		}
-		if (weight_payload->fn->parameters().size() != 1 || weight_payload->fn->parameters()[0].is_reference) {
-			return usage("parallel_transform: weight_fn must take exactly one parameter by value");
-		}
-	}
-
-	// CAPTURED READS: resolve every touched enclosing name against the LIVE global
-	// environment and classify how it provisions (parallel_capture_kind). The borrow
-	// tier NEVER shares a refcount with a worker: the source handle held here is the
-	// region anchor (counts stationary - the write wall stops every decrement, this
-	// anchor plus the global cell outlive the region) and workers only ever copy the
-	// raw borrow view. Everything else is copied INTO each worker at this barrier
-	// (single-threaded) - direct cross-thread reads of shared containers are never
-	// legal, even read-only ones: non-atomic strong_ptr counts make an element handle
-	// copy a data race.
+	// CAPTURED READS resolve through the statement's environment chain (its walk reaches the
+	// global env; slot-resident function locals are not env-visible and correctly error as
+	// undefined) or, for the builtin, the global env. A BORROW of an array the body WRITES
+	// would read racing content (borrow indexes any element, writes own chunks only) -
+	// contract A errors instead of silently demoting; snapshots of it stay legal.
 	std::vector<resolved_capture> captures;
 	state.last_captures.clear();
 	captures.reserve(adm->captures.size());
-	for (const auto& entry : adm->captures) {
-		auto global = eng.get_global_environment()->get(entry.name_id);
+	auto written_container = [&](const script_value& v) {
+		if (v.raw_storage_index() != script_value::TYPEID_ARRAY) { return false; }
+		for (size_t j = plan.inplace ? 0 : 1; j < containers.size(); ++j) {
+			const script_value& cj = containers[j].is_reference() ? containers[j].deref() : containers[j];
+			if (cj.is_array() && cj.unchecked_array_node() == v.unchecked_array_node()) { return true; }
+		}
+		return false;
+	};
+	auto classify_and_add = [&](const parallel_admission::capture_entry& entry) -> checked_result<void> {
+		auto global = plan.capture_env ? plan.capture_env->get(entry.name_id)
+		                               : eng.get_global_environment()->get(entry.name_id);
 		if (!global) {
-			return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
+			return usage("captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
 		}
 		resolved_capture cap;
 		cap.entry = &entry;
@@ -2443,13 +2509,10 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			cap.kind = parallel_capture_kind::scalar;
 			break;
 		case script_value::TYPEID_CPP_BOUND: {
-			// ONE cached semantic-index read, then compare (never repeated is_* probes)
 			const size_t sem = cap.source->bound_semantic_index();
 			if (sem == script_value::TYPEID_NULL && !cap.source->is_null()) {
-				return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not value-semantic (bound host object)");
+				return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (bound host object)");
 			}
-			// Decode ONCE at the barrier (clone detaches a bound primitive/string):
-			// every worker sees the same barrier-time value
 			cap.source = cap.source->clone();
 			cap.kind = sem == script_value::TYPEID_STRING
 				? parallel_capture_kind::string : parallel_capture_kind::scalar;
@@ -2459,116 +2522,194 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			cap.kind = parallel_capture_kind::string;
 			break;
 		case script_value::TYPEID_ARRAY:
-		case script_value::TYPEID_MAP:
-			// Typed containers prove all-primitive statically (no O(n) scan per region)
-			cap.kind = (entry.borrow_eligible &&
-			            (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source)))
-				? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
+		case script_value::TYPEID_MAP: {
+			const bool same_container = written_container(*cap.source);
+			const bool borrowable = entry.borrow_eligible && !same_container &&
+			                        (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source));
+			if (same_container && entry.borrow_eligible) {
+				return usage("captured name '" + std::string(entry.name) +
+				             "' is the container being mutated (reads through it would race the element writes)");
+			}
+			cap.kind = borrowable ? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
 			break;
+		}
 		case script_value::TYPEID_FUNCTION:
-			return usage("parallel_transform: captured name '" + std::string(entry.name) +
+			return usage("captured name '" + std::string(entry.name) +
 			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
 		default:
-			return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
+			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
 		}
 		state.last_captures.emplace_back(entry.name_id, cap.kind);
 		captures.push_back(std::move(cap));
+		return {};
+	};
+	for (const auto& entry : adm->captures) {
+		auto classified = classify_and_add(entry);
+		if (!classified) { return classified; }
 	}
 
-	// A typed input never changes form: a primitive/string kind is read through a boxed
-	// snapshot (typed_array_design.md stage 3 reads the raw buffer directly), an object
-	// kind lends its slots (typed_input) exactly as parallel_for does
-	script_array* input_node = const_cast<script_array*>(array_value.unchecked_array_node());
-	const bool typed_obj = input_node->is_typed() && input_node->kind() == script_array::kind_t::obj;
-	std::vector<script_value> typed_source;
-	if (input_node->is_typed() && !typed_obj) {
-		typed_source = input_node->materialize_values(&eng);
+	// THE RANGE. A primitive-kind typed range the body may write demotes IN PLACE at the
+	// barrier (STAGE-2a BRIDGE, typed_array_design.md - node identity preserved) so the
+	// hetero kernel below stays correct until stage 3's raw typed worker reads/writes land;
+	// one the body only reads (the transform's input) is boxed ONCE into a private node the
+	// cursor can address instead. An OBJECT-kind range keeps its slots: element references
+	// materialize the slot's handle per touch and the declared class carries the exclusivity
+	// proof (Dev ruling: the declared type of a typed array is a proven fact about every element).
+	const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
+	script_value boxed_range(std::monostate{}, &eng);
+	if (source_node->is_typed() && !typed_obj) {
+		if (plan.inplace) {
+			const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
+		} else {
+			boxed_range = script_value::make_array(nullptr, &eng);
+			boxed_range.unchecked_get_array_storage()->values() = const_cast<script_array*>(source_node)->materialize_values(&eng);
+		}
 	}
-	// Workers read the source through a chunk cursor: a primitive-typed input is boxed once
-	// into a private node the cursor can address (the same boxed copies as before); object
-	// and untyped inputs are addressed in place
-	script_value boxed_source(std::monostate{}, &eng);
-	if (input_node->is_typed() && !typed_obj) {
-		boxed_source = script_value::make_array(nullptr, &eng);
-		boxed_source.unchecked_get_array_storage()->values() = std::move(typed_source);
-	}
-	const std::vector<script_value>& source = boxed_source.is_array() ? boxed_source.unchecked_array_node()->values()
-	                                        : input_node->is_typed() ? typed_source   // object-kind node: addressed in place, no vector view
-	                                        : array_value.as_array();
-	const size_t n = input_node->size();
-	auto element_at = [&](size_t i) -> script_value { return typed_obj ? input_node->get(i, &eng) : source[i]; };
-	std::vector<script_value> out(n, script_value(std::monostate{}, &eng));
+	script_array& node = boxed_range.is_array() ? *boxed_range.unchecked_get_array_storage() : *const_cast<script_array*>(source_node);
+	auto& source = node.values();
+	const size_t n = node.size();
 
+	// ELEMENT PROOF + NORMALIZATION (prove_elements): every element must end this pass
+	// exclusively-mutable - shared strings detach in place, the declared class of an
+	// object-kind source proves it without one element read (the body's element reach
+	// narrows both). A body that binds its element in place (in-place statement, or a
+	// read-only by-value parameter) reaches only the members it names; a body that copies the
+	// element (a mutating by-value parameter clones every field) reaches it whole. The
+	// builtin's all-primitive input is exclusive by construction (typed proof, zero scans;
+	// untyped pay ONE content scan). engine::allow_unsafe_parallel skips the walk entirely.
+	const bool binds_in_place = plan.inplace || (!adm->element_reach_all && !adm->element_mutated);
+	const reach_filter reach = binds_in_place
+		? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
+		: reach_filter{};
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_norm0 = __rdtsc();
+#endif
+	std::vector<type_info*> value_types;
+	element_proof proof;
+	const bool skip_proof = !plan.inplace && (statically_all_primitive(array_value) || parallel_content_all_primitive(array_value));
+	if (!skip_proof) {
+		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types);
+		if (proof.failed != SIZE_MAX) {
+			if (!proof.what.empty()) {
+				return usage("element " + std::to_string(proof.failed) + ": " + proof.what);
+			}
+			if (plan.inplace) {
+				return usage("element " + std::to_string(proof.failed) +
+				             " cannot be mutated in place (only value-semantic shapes - primitives, strings,"
+				             " value containers, flat value-class instances - are provably exclusive;"
+				             " engine::allow_unsafe_parallel(true) overrides)");
+			}
+			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : source[proof.failed];
+			const char* what = non_value_semantic_what(failed_element);
+			return usage("element " + std::to_string(proof.failed) +
+			             ": value is not value-semantic (" + (what ? what : "object") + ")");
+		}
+	}
+	const std::vector<type_info*>& tags = proof.tags;
+	std::vector<const class_definition*>& element_classes = proof.element_classes;
+
+	// THE ZIP'S ARRAYS: arrays of the range's length, each proven exclusive like the range
+	// (whole reach: the body may write anything through their loop variables; a typed primitive
+	// kind demoted like the range, an object kind addressed in place)
+	std::vector<script_array*> zip_nodes;
+	std::vector<type_info*> zip_tags;
+	for (size_t j = 1; j < containers.size(); ++j) {
+		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+		if (!zv.is_array()) {
+			return usage("zipped array " + std::to_string(j + 1) + " is not an array");
+		}
+		script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
+		if (znode->size() != n) {
+			return usage("zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
+			             " elements, the range has " + std::to_string(n) + " (zipped arrays must have the same length)");
+		}
+		if (znode == source_node || znode == &node) {
+			return usage("zipped array " + std::to_string(j + 1) + " is the range itself");
+		}
+		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
+		if (!plan.zip_arrays_fresh) {
+			element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, plan.prefix);
+			if (zproof.failed != SIZE_MAX) {
+				return usage("zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
+				             (zproof.what.empty() ? std::string(" cannot be mutated in place") : ": " + zproof.what));
+			}
+			zip_tags.insert(zip_tags.end(), zproof.tags.begin(), zproof.tags.end());
+			for (const class_definition* cd : zproof.element_classes) {
+				if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+			}
+		}
+		zip_nodes.push_back(znode);
+	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_norm1 = __rdtsc();
+#endif
+	if (n == 0) {
+		return {};
+	}
+
+	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
+	// classes the proof found; their captures classify like the body's
+	admission_builder method_adm(eng);
+	method_adm.inplace_root = true;
+	method_adm.prefix = plan.prefix;
+	size_t method_capture_base = 0;
+	if (plan.inplace && !element_classes.empty()) {
+		method_adm.adm.element_method_calls = adm->element_method_calls;
+		for (const auto& entry : adm->captures) {
+			method_adm.capture_index.emplace(entry.name_id, method_adm.adm.captures.size());
+			method_adm.adm.captures.push_back(entry);
+		}
+		method_capture_base = method_adm.adm.captures.size();
+		if (!method_adm.admit_element_methods(element_classes)) {
+			state.error_text = method_adm.adm.message;
+			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
+		}
+		for (size_t ci = method_capture_base; ci < method_adm.adm.captures.size(); ++ci) {
+			auto classified = classify_and_add(method_adm.adm.captures[ci]);
+			if (!classified) { return classified; }
+		}
+	}
+
+	// THREAD COUNT: the override or min(hardware_concurrency - 1, 6), one context below
+	// k_parallel_small_n, then the measured-cost cap (parallel_design.md section 3)
 	size_t worker_count = eng.parallel_thread_count();
 	if (worker_count < 1) { worker_count = 1; }
-	if (worker_count > n) { worker_count = n ? n : 1; }
-	if (n < k_parallel_small_n) { worker_count = 1; }   // the ruled small-n knob: same
-	                                                    // semantics, one context, no fan-out
+	if (worker_count > n) { worker_count = n; }
+	if (n < k_parallel_small_n) { worker_count = 1; }
 	const std::chrono::nanoseconds budget =
 		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
 	const backend_type engine_backend = eng.get_backend_type();
 	if (engine_backend == backend_type::custom) {
-		return usage("parallel_transform: custom execution backends are not supported");
+		return usage("custom execution backends are not supported");
 	}
 	const bool use_vm = engine_backend == backend_type::vm;
-	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(fn_payload->fn->body.get()), use_vm);
+	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
 	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
-
-	// Optional weight hint: evaluated per element at the barrier, single-threaded, on the
-	// engine's own backend (ruled §11 Q1). Chunk boundaries equalize cumulative weight.
 	std::vector<size_t> bounds;
-	if (weight_payload && worker_count > 1) {
-		std::vector<double> weights(n, 0.0);
-		engine::external_call_guard call_guard(&eng);
-		std::vector<script_value> weight_args;
-		weight_args.emplace_back(std::monostate{}, &eng);
-		for (size_t i = 0; i < n; ++i) {
-			weight_args[0] = element_at(i);
-			auto r = eng.get_execution_backend()->execute_callable(*weight_payload, weight_args);
-			if (!r) {
-				return raise(r.error(), "parallel_transform: weight_fn failed for element " +
-					std::to_string(i) + ": " + format_error(r, *eng.get_symbolizer()));
-			}
-			double w;
-			const script_value& wv = r.value().is_reference() ? r.value().deref() : r.value();
-			if (wv.is_int()) { w = static_cast<double>(wv.unchecked_as_int()); }
-			else if (wv.is_float()) { w = wv.unchecked_as_float(); }
-			else {
-				return usage("parallel_transform: weight_fn must return a number (element " + std::to_string(i) + ")");
-			}
-			if (!std::isfinite(w) || w < 0.0) {
-				return usage("parallel_transform: weight_fn returned a negative or non-finite weight (element " +
-					std::to_string(i) + ")");
-			}
-			weights[i] = w;
-		}
-		bounds = partition_weighted(weights, worker_count);
+	if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
+		bounds = plan.bounds;                       // the caller's weighted partition
+		worker_count = bounds.size() - 1;
 	} else {
 		bounds = partition_flat(n, worker_count);
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	fprintf(stderr, "[region-profile] %s n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", plan.prefix, n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
+#endif
 	state.last_chunk_bounds = bounds;
-
-	// BARRIER: build the per-worker contexts, detach input slices, pre-warm type shapes.
-
-	// Acquire the first worker_count persistent slots: RESET matching ones (limits
-	// re-slice + budget re-arm + residual-state clear + host refresh), rebuild the rest.
-	std::vector<type_info*> value_types;
 	if (pool->worker_slots.size() < worker_count) {
 		pool->worker_slots.resize(worker_count);
 	}
 	std::vector<parallel_worker_slot*> contexts;
 	contexts.reserve(worker_count);
 
-	// Whatever way this call exits, no capture define survives it: a dormant slot must
-	// never hold a borrow's raw pointer (the viewed container may die with its global).
-	// Snapshot copies DO persist - in the slot's cache, worker-owned detached nodes
-	// only - and provisioned_nodes persists with them (rebuild-on-miss; stale extras
-	// from dead fresh nodes can only cause a spurious result-detach, content-neutral).
-	struct capture_define_guard {
+	// Join guard: no capture define, cursor or method pin survives this call - the holders
+	// pin the caller's arrays, and a dormant slot must never do that. Cached snapshot copies
+	// persist (worker-owned nodes only), and provisioned_nodes with them (rebuild-on-miss).
+	struct join_guard_t {
 		engine& eng;
 		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
 		size_t count;
-		~capture_define_guard() {
+		~join_guard_t() {
 			for (size_t k = 0; k < count && k < slots.size(); ++k) {
 				parallel_worker_slot* slot = slots[k].get();
 				if (!slot) { continue; }
@@ -2576,71 +2717,59 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 					slot->root_env->define(id, script_value(std::monostate{}, &eng));
 				}
 				slot->capture_name_ids.clear();
-				slot->raw_input = nullptr;   // points into this call's locals - never dormant
-				slot->typed_input = nullptr;
 				slot->element_refs.clear();
 				slot->cursors.clear();
-				slot->transform_out = nullptr;   // points at this call's output - never dormant
+				slot->backend->set_parallel_method_pins(nullptr);
+				slot->method_pins.entries.clear();
 			}
 		}
-	} capture_guard{ eng, pool->worker_slots, worker_count };
-	// One content proof per captured name per region (see provision_snapshot_capture)
+	} join_guard{ eng, pool->worker_slots, worker_count };
 	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
 
-	// ELEMENT PROOF (Dev ruling: safe AND free): all-primitive sources are exclusive by
-	// construction (typed proof, zero scans; untyped pay ONE content scan); everything else
-	// takes the fork's shared proof with the element reached WHOLE - the by-value parameter
-	// binding clones every field, so a shared string anywhere below an element detaches
-	// here. Workers then read the live source and the clone touches only element-exclusive
-	// counts: no per-element detach at the barrier. The array value is anchored by this
-	// call for the whole region and workers never touch its structure (the container itself
-	// is not visible to the body unless separately captured, where borrow/snapshot rules
-	// apply).
-	element_proof proof;
-	if (!statically_all_primitive(array_value) && !parallel_content_all_primitive(array_value)) {
-		proof = prove_elements(eng, array_value, *input_node, boxed_source.is_array() ? boxed_source.unchecked_get_array_storage()->values() : input_node->values(),
-		                       reach_filter{}, "parallel_transform", &value_types);
-		if (proof.failed != SIZE_MAX) {
-			if (!proof.what.empty()) {
-				return usage("parallel_transform: element " + std::to_string(proof.failed) + ": " + proof.what);
-			}
-			const char* what = non_value_semantic_what(element_at(proof.failed));
-			return usage("parallel_transform: element " + std::to_string(proof.failed) +
-			             ": value is not value-semantic (" + (what ? what : "object") + ")");
-		}
-	}
+	auto& range_handle = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage()
+	                                            : const_cast<script_value&>(array_value).unchecked_get_array_storage();
+	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
 	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
-	value_types.insert(value_types.end(), proof.tags.begin(), proof.tags.end());   // subclass slots carry their own tags
-
+	value_types.insert(value_types.end(), tags.begin(), tags.end());   // subclass slots carry their own tags
+	value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
+	for (size_t j = 1; j < containers.size(); ++j) {
+		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+		if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
+	}
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = pool->worker_slots[k];
-		if (slot && slot_matches(*slot, *adm, *fn_payload->fn, use_vm)) {
+		if (slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
 		} else {
-			slot = provision_worker(eng, *adm, budget, use_vm, &transform_wrapper);
+			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
 		}
 		slot->begin = bounds[k];
 		slot->end = bounds[k + 1];
-		slot->raw_input = typed_obj ? nullptr : &source;
-		slot->typed_input = typed_obj ? input_node : nullptr;
 		slot->element_refs.clear();
-		slot->transform_out = &out;
+		slot->raw_input = nullptr;
+		slot->typed_input = nullptr;
+		// ONE cursor reference per array per chunk, minted here (the array pin and the
+		// live_elem_refs count are main-thread facts) and re-pointed per element by the worker's
+		// chunk loop: a by-ref loop variable binds it, a by-value one copies through it exactly
+		// as it would the element (normalization made every element exclusive, so those copies
+		// touch no cross-thread counts). An admitted body cannot retain it past its iteration
+		// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
 		if (slot->end > slot->begin) {
-			auto& cursor_node = boxed_source.is_array() ? boxed_source.unchecked_get_array_storage()
-			                                             : const_cast<script_value&>(array_value).unchecked_get_array_storage();
-			slot->element_refs.push_back(script_value::make_element_reference(cursor_node, slot->begin, &eng, nullptr));
+			slot->element_refs.push_back(script_value::make_element_reference(range_handle, slot->begin, &eng, element_type));
+			for (size_t j = 0; j < zip_nodes.size(); ++j) {
+				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
+				auto& zhandle = zc.unchecked_get_array_storage();
+				type_info_ptr zet = zc.get_type_info().get() ? zc.get_type_info()->element_type() : type_info_ptr(nullptr);
+				slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
+			}
 		}
-		// Provision the captured reads into THIS worker's root env (single-threaded,
-		// charged to the enclosing execute): scalars copy, strings/snapshots detach OR
-		// reuse the slot's cross-region cache (content-proven against the live source),
-		// borrows mint the zero-copy view. Defines are per call and nulled at the join;
-		// cached snapshot copies persist in the slot (worker-owned nodes only).
+		// Provision the captured reads into THIS worker's root env (single-threaded, charged
+		// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
+		// cross-region cache (content-proven against the live source), borrows mint the
+		// zero-copy view. Defines are per call and nulled at the join.
 		slot->capture_name_ids.clear();
 		bool any_snapshot_miss = false;
 		std::vector<const void*> fresh_nodes;
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t prof_caps0 = __rdtsc();
-#endif
 		for (const auto& cap : captures) {
 			script_value provisioned(std::monostate{}, &eng);
 			try {
@@ -2655,7 +2784,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 					                           state.region_use_counter, snapshot_validated,
 					                           fresh_nodes, any_snapshot_miss
 #ifdef JAISCRIPT_VM_PROFILE
-					                           , state.prof_transform, cap.entry->name
+					                           , *plan.prof, cap.entry->name
 #endif
 					                           );
 					break;
@@ -2665,62 +2794,82 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 					break;
 				}
 			} catch (const std::exception& e) {
-				return usage("parallel_transform: captured name '" + std::string(cap.entry->name) + "': " + e.what());
+				return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
 			}
 			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
 			slot->capture_name_ids.push_back(cap.entry->name_id);
 		}
 		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
-#ifdef JAISCRIPT_VM_PROFILE
-		state.prof_transform.capture_cyc += __rdtsc() - prof_caps0;
-		state.prof_transform.capture_count += captures.size();
-#endif
+		// Method pins: each worker gets a dispatcher copy per admitted element method
+		slot->method_pins.entries.clear();
+		for (const auto& am : method_adm.admitted_methods) {
+			const script_value shared_method = am.cls->get_method(am.name_id, false);
+			const script_method_dispatch* src = shared_method.is_function()
+				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
+			if (!src) {
+				return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
+			}
+			script_method_dispatch wd;
+			wd.eng = src->eng;
+			wd.cls = src->cls;
+			wd.name_id = src->name_id;
+			wd.definition_env = src->definition_env;
+			detail::parallel_method_pin pin;
+			pin.method_value = script_value::make_function(std::move(wd), &eng);
+			pin.resolved = am.decl;
+			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
+			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
+		}
+		slot->backend->set_parallel_method_pins(slot->method_pins.entries.empty() ? nullptr : &slot->method_pins);
 		contexts.push_back(slot.get());
 	}
+
+	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze
 	prewarm_region_types(eng, [&] {
 		std::vector<type_info*> seed = adm->referenced_types;
-		if (weight_adm) { seed.insert(seed.end(), weight_adm->referenced_types.begin(), weight_adm->referenced_types.end()); }
+		if (plan.extra_seed_adm) { seed.insert(seed.end(), plan.extra_seed_adm->referenced_types.begin(), plan.extra_seed_adm->referenced_types.end()); }
 		seed.insert(seed.end(), value_types.begin(), value_types.end());
-		// Workers clone whole elements: every class an element can hold - the source's declared
-		// type, the slot tags and instances the proof met, the classes declaring a named member
 		seed.push_back(array_value.get_type_info().get());
-		for (const class_definition* cd : proof.element_classes) { seed.push_back(cd->get_type_info().get()); }
+		seed.push_back(element_type.get());
+		for (const class_definition* cd : element_classes) { seed.push_back(cd->get_type_info().get()); }
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
+		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
 		return seed;
 	}());
 
-	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread
-	// so the limits table can be built before fan-out), the calling thread runs chunk 0.
+	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
+	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
+	// is built once per engine at the engine's worker count (calibrated then).
 	parallel_region_table table;
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
 			state.pool = std::make_unique<jai::thread_pool>(
-				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));   // the engine's own worker set, pre-allocated once, not hardware_concurrency
+				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));
 			calibrate_pool_overhead(state);
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
 		}
 	}
-
-	eng.get_symbolizer()->set_frozen(true);
+	const bool freeze_symbols = !eng.allow_unsafe_parallel();
+	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
 	state.active_region = &table;
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
+	fprintf(stderr, "[region-profile] %s setup split: normalize %llu | provision+rest %llu cyc\n", plan.prefix, (unsigned long long)(prof_norm1 - prof_norm0), (unsigned long long)(prof_t1 - prof_norm1));
 #endif
 	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
 	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
-		std::vector<script_value>* out_ptr = &out;
 		engine* eng_ptr = &eng;
-		region_tasks.emplace_back(k - 1, [ctx, out_ptr, eng_ptr] {
+		region_tasks.emplace_back(k - 1, [ctx, eng_ptr] {
 #ifdef JAISCRIPT_VM_PROFILE
 			ctx->prof_start_tsc = __rdtsc();
 #endif
-			run_worker(*ctx, *out_ptr, *eng_ptr);
+			run_worker_chunk(*ctx, *eng_ptr);
 #ifdef JAISCRIPT_VM_PROFILE
 			ctx->prof_end_tsc = __rdtsc();
 #endif
@@ -2733,7 +2882,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	const uint64_t prof_t2 = __rdtsc();
 #endif
 	const auto main_chunk_t0 = std::chrono::steady_clock::now();
-	run_worker(*contexts[0], out, eng);
+	run_worker_chunk(*contexts[0], eng);
 	note_region_cost(*pool, main_chunk_t0, bounds[1] - bounds[0]);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t3 = __rdtsc();
@@ -2743,8 +2892,8 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t4 = __rdtsc();
-	{
-		auto& p = state.prof_transform;
+	if (plan.prof) {
+		auto& p = *plan.prof;
 		++p.regions;
 		p.setup_cyc += prof_t1 - prof_t0;
 		p.submit_cyc += prof_t2 - prof_t1;
@@ -2768,10 +2917,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		}
 		ctx->pending_instances.clear();
 	}
-	eng.get_symbolizer()->set_frozen(false);
+	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(false); }
 
-	// JOIN: roll worker accounting up into the enclosing execute, then the first error in
-	// ITERATION order wins (deterministic under static chunks).
+	// JOIN: memory roll-up, then ITERATION order picks the error a region reports
 	size_t rolled_up = 0;
 	for (const auto& ctx : contexts) {
 		rolled_up += ctx->limits.memory_used;
@@ -2791,32 +2939,145 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		}
 		std::error_code code = winner->code ? winner->code
 			: make_error_code(runtime_error_code::unsupported_operation);
-		return raise(code, winner->message.empty() ? std::string("parallel_transform: worker failed")
-		                                           : winner->message);
+		return raise(code, winner->message.empty() ? pfx + "worker failed" : winner->message);
 	}
-	script_value result = script_value::make_array(nullptr, &eng);
-	result.as_array() = std::move(out);
 #ifdef JAISCRIPT_VM_PROFILE
-	state.prof_transform.join_cyc += __rdtsc() - prof_t4;
+	if (plan.prof) { plan.prof->join_cyc += __rdtsc() - prof_t4; }
 #endif
-	return result;
+	return {};
 }
 
-// parallel_for (see parallel_transform.hpp): the in-place fork-join statement. Shares
-// the transform machinery wholesale - admission cache (in-place root mode), region
-// pools, worker slots, capture provisioning, the join rules - and differs at exactly
-// three points: captured reads resolve through the STATEMENT's environment chain (not
-// just globals), the barrier proves elements in-place-mutation-safe and pre-mints one
-// element reference per iteration (single-threaded; holders pin the live container),
-// and workers run the by-ref body over their chunk with no output array.
+} // namespace
+
+// parallel_transform(arr, fn[, weight_fn]) IS the zip `parallel_for (auto x, auto& o : arr, out)
+// { o = fn(x); }` with the output array allocated here: fn's by-value parameter binds the
+// element in place when the admission walk proved it read-only, the call result is a
+// temporary that moves into the output slot (the return-site rule guarantees it aliases
+// nothing fn could name), and nothing else runs per element.
+checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
+	parallel_engine_state& state = eng.parallel_state();
+	auto raise = [&state](std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<script_value>(code, std::string_view(state.error_text));
+	};
+	auto usage = [&raise](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
+	};
+	if (state.region_running) {
+		return usage("parallel_transform: nested parallel regions are not supported (v0)");
+	}
+	if (args.size() < 2 || args.size() > 3) {
+		return usage("parallel_transform: expected (array, fn) or (array, fn, weight_fn)");
+	}
+	const script_value& array_value = args[0].is_reference() ? args[0].deref() : args[0];
+	if (!array_value.is_array()) {
+		return usage("parallel_transform: first argument must be an array");
+	}
+	const script_callable* fn_payload = payload_from_function_value(args[1]);
+	if (!fn_payload || fn_payload->kind != script_callable::kind_type::function || !fn_payload->fn || !fn_payload->fn->body) {
+		return usage("parallel_transform: fn must be a script-defined function");
+	}
+	const script_callable* weight_payload = nullptr;
+	if (args.size() == 3) {
+		weight_payload = payload_from_function_value(args[2]);
+		if (!weight_payload || weight_payload->kind != script_callable::kind_type::function ||
+		    !weight_payload->fn || !weight_payload->fn->body) {
+			return usage("parallel_transform: weight_fn must be a script-defined function");
+		}
+	}
+	struct running_guard {
+		parallel_engine_state& s;
+		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
+		~running_guard() { s.region_running = false; }
+	} guard(state);
+
+	const parallel_admission* adm = admit_cached(eng, state, fn_payload->fn);
+	if (!adm->admitted) {
+		return raise(adm->code, adm->message);
+	}
+	const std::shared_ptr<function_decl>& transform_wrapper = build_transform_wrapper(eng, state, fn_payload->fn, *adm);
+	const parallel_admission* weight_adm = nullptr;
+	if (weight_payload) {
+		weight_adm = admit_cached(eng, state, weight_payload->fn);
+		if (!weight_adm->admitted) {
+			return raise(weight_adm->code, weight_adm->message);
+		}
+		if (weight_payload->fn->parameters().size() != 1 || weight_payload->fn->parameters()[0].is_reference) {
+			return usage("parallel_transform: weight_fn must take exactly one parameter by value");
+		}
+	}
+
+	const script_array* input_node = array_value.unchecked_array_node();
+	const size_t n = input_node->size();
+	// The output: the zip's second array, one null per element, handed back as the result
+	script_value out = script_value::make_array(nullptr, &eng);
+	out.unchecked_get_array_storage()->values().assign(n, script_value(std::monostate{}, &eng));
+
+	// Optional weight hint: evaluated per element at the barrier, single-threaded, on the
+	// engine's own backend (ruled section 11 Q1). Chunk boundaries equalize cumulative weight.
+	region_plan plan;
+	if (weight_payload && n >= k_parallel_small_n) {
+		size_t worker_count = eng.parallel_thread_count();
+		if (worker_count < 1) { worker_count = 1; }
+		if (worker_count > n) { worker_count = n; }
+		if (worker_count > 1) {
+			std::vector<double> weights(n, 0.0);
+			engine::external_call_guard call_guard(&eng);
+			std::vector<script_value> weight_args;
+			weight_args.emplace_back(std::monostate{}, &eng);
+			const bool typed_obj = input_node->is_typed() && input_node->kind() == script_array::kind_t::obj;
+			for (size_t i = 0; i < n; ++i) {
+				weight_args[0] = input_node->is_typed() ? input_node->get(i, &eng) : input_node->values()[i];
+				(void)typed_obj;
+				auto r = eng.get_execution_backend()->execute_callable(*weight_payload, weight_args);
+				if (!r) {
+					return raise(r.error(), "parallel_transform: weight_fn failed for element " +
+						std::to_string(i) + ": " + format_error(r, *eng.get_symbolizer()));
+				}
+				double w;
+				const script_value& wv = r.value().is_reference() ? r.value().deref() : r.value();
+				if (wv.is_int()) { w = static_cast<double>(wv.unchecked_as_int()); }
+				else if (wv.is_float()) { w = wv.unchecked_as_float(); }
+				else {
+					return usage("parallel_transform: weight_fn must return a number (element " + std::to_string(i) + ")");
+				}
+				if (!std::isfinite(w) || w < 0.0) {
+					return usage("parallel_transform: weight_fn must return a finite non-negative number (element " + std::to_string(i) + ")");
+				}
+				weights[i] = w;
+			}
+			plan.bounds = partition_weighted(weights, worker_count);
+		}
+	}
+
+	std::vector<script_value> containers;
+	containers.reserve(2);
+	containers.push_back(array_value);
+	containers.push_back(out);
+	plan.prefix = "parallel_transform";
+	plan.containers = &containers;
+	plan.root_fn = fn_payload->fn;
+	plan.adm = adm;
+	plan.chunk_wrapper = &transform_wrapper;
+	plan.inplace = false;
+	plan.zip_arrays_fresh = true;
+	plan.extra_seed_adm = weight_adm;
+#ifdef JAISCRIPT_VM_PROFILE
+	plan.prof = &state.prof_transform;
+#endif
+	auto ran = run_region(eng, plan);
+	if (!ran) {
+		return checked_result<script_value>(ran.error(), std::string_view(state.error_text));
+	}
+	return out;
+}
+
+// parallel_for (see parallel_transform.hpp): the in-place fork-join statement over one array
+// or the zip of several, the body run in place on every thread's segment.
 checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                       std::vector<script_value>& containers,
                                       const std::shared_ptr<environment>& capture_env) {
-	const script_value& container = containers.front();
 	parallel_engine_state& state = eng.parallel_state();
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t0 = __rdtsc();
-#endif
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
 		return checked_result<void>(code, std::string_view(state.error_text));
@@ -2824,17 +3085,17 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	auto usage = [&raise](std::string message) {
 		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
 	};
-
 	if (state.region_running) {
 		return usage("parallel_for: nested parallel regions are not supported (v0)");
 	}
-	const script_value& array_value = container.is_reference() ? container.deref() : container;
+	const script_value& array_value = containers.front().is_reference() ? containers.front().deref() : containers.front();
 	if (!array_value.is_array()) {
 		return usage("parallel_for: can only iterate an array (v1)");
 	}
 
-	// The shared body function (admission + pool key + per-worker provisioning source).
-	// Hot reload reparses into a fresh statement node, so this cache cannot go stale.
+	// The shared body function (admission + pool key + per-worker provisioning source). Hot
+	// reload reparses into a fresh statement node, so this cache cannot go stale. Built once
+	// per statement together with the body's control-flow mode.
 	if (!stmt->body_fn_cache) {
 		body_control_scan scan;
 		scan_parallel_body_control(stmt->body, 0, 0, scan);
@@ -2868,450 +3129,18 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	}
 	const std::shared_ptr<function_decl>& chunk_wrapper = build_chunk_wrapper(eng, stmt, *adm);
 
-	// CAPTURED READS resolve through the statement's enclosing environment chain (its
-	// walk reaches the global env; slot-resident function locals are not env-visible
-	// and correctly error as undefined). A BORROW of the very container being mutated
-	// would read racing content (borrow indexes any element, writes own chunks only) -
-	// contract A errors instead of silently demoting; snapshots of it stay legal
-	// (barrier-frozen copy, deterministic).
-	const script_array* source_node = array_value.unchecked_array_node();
-	std::vector<resolved_capture> captures;
-	state.last_captures.clear();
-	captures.reserve(adm->captures.size());
-	auto classify_and_add = [&](const parallel_admission::capture_entry& entry) -> checked_result<void> {
-		auto global = capture_env ? capture_env->get(entry.name_id)
-		                          : eng.get_global_environment()->get(entry.name_id);
-		if (!global) {
-			return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
-		}
-		resolved_capture cap;
-		cap.entry = &entry;
-		cap.source = global.value().deref();
-		switch (cap.source->raw_storage_index()) {
-		case script_value::TYPEID_NULL:
-		case script_value::TYPEID_INT:
-		case script_value::TYPEID_FLOAT:
-		case script_value::TYPEID_CHAR:
-		case script_value::TYPEID_BOOL:
-			cap.kind = parallel_capture_kind::scalar;
-			break;
-		case script_value::TYPEID_CPP_BOUND: {
-			const size_t sem = cap.source->bound_semantic_index();
-			if (sem == script_value::TYPEID_NULL && !cap.source->is_null()) {
-				return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not value-semantic (bound host object)");
-			}
-			cap.source = cap.source->clone();
-			cap.kind = sem == script_value::TYPEID_STRING
-				? parallel_capture_kind::string : parallel_capture_kind::scalar;
-			break;
-		}
-		case script_value::TYPEID_STRING:
-			cap.kind = parallel_capture_kind::string;
-			break;
-		case script_value::TYPEID_ARRAY:
-		case script_value::TYPEID_MAP: {
-			const bool same_container = cap.source->raw_storage_index() == script_value::TYPEID_ARRAY &&
-			                            cap.source->unchecked_array_node() == source_node;
-			const bool borrowable = entry.borrow_eligible && !same_container &&
-			                        (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source));
-			if (same_container && entry.borrow_eligible) {
-				return usage("parallel_for: captured name '" + std::string(entry.name) +
-				             "' is the container being mutated (reads through it would race the element writes)");
-			}
-			cap.kind = borrowable ? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
-			break;
-		}
-		case script_value::TYPEID_FUNCTION:
-			return usage("parallel_for: captured name '" + std::string(entry.name) +
-			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
-		default:
-			return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
-		}
-		state.last_captures.emplace_back(entry.name_id, cap.kind);
-		captures.push_back(std::move(cap));
-		return {};
-	};
-	for (const auto& entry : adm->captures) {
-		auto classified = classify_and_add(entry);
-		if (!classified) { return classified; }
-	}
-
-	// STAGE-2a BRIDGE (typed_array_design.md): a PRIMITIVE-kind source demotes IN PLACE at
-	// the barrier (main thread, node identity preserved) so the hetero kernel below stays
-	// correct until stage 3's raw typed worker reads/writes land. An OBJECT-kind source
-	// keeps its slots: element references materialize the slot's handle per touch and the
-	// declared class carries the exclusivity proof (Dev ruling: the declared type of a
-	// typed array is a proven fact about every element).
-	const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
-	if (source_node->is_typed() && !typed_obj) {
-		const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
-	}
-
-	// ELEMENT PROOF + NORMALIZATION (prove_elements): every element must end this pass
-	// exclusively-mutable - shared strings detach in place, the declared class of an
-	// object-kind source proves it without one element read (the body's element reach
-	// narrows both). engine::allow_unsafe_parallel skips the walk entirely (trusted scripts).
-	script_array& node = *const_cast<script_array*>(source_node);
-	auto& source = node.values();
-	const size_t n = node.size();
-	const reach_filter reach{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole };
+	region_plan plan;
+	plan.prefix = "parallel_for";
+	plan.containers = &containers;
+	plan.root_fn = body_fn;
+	plan.adm = adm;
+	plan.chunk_wrapper = &chunk_wrapper;
+	plan.capture_env = capture_env;
+	plan.inplace = true;
 #ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_norm0 = __rdtsc();
+	plan.prof = &state.prof_for;
 #endif
-	element_proof proof = prove_elements(eng, array_value, node, source, reach, "parallel_for");
-	if (proof.failed != SIZE_MAX) {
-		if (!proof.what.empty()) {
-			return usage("parallel_for: element " + std::to_string(proof.failed) + ": " + proof.what);
-		}
-		return usage("parallel_for: element " + std::to_string(proof.failed) +
-		             " cannot be mutated in place (only value-semantic shapes - primitives, strings,"
-		             " value containers, flat value-class instances - are provably exclusive;"
-		             " engine::allow_unsafe_parallel(true) overrides)");
-	}
-	const std::vector<type_info*>& tags = proof.tags;
-	std::vector<const class_definition*>& element_classes = proof.element_classes;
-	// The zip's further arrays: arrays of the same length, each proven exclusive like the range
-	// (whole reach: the body may write anything through their loop variables), typed primitive
-	// kinds demoted like the range, object kinds addressed in place
-	std::vector<script_array*> zip_nodes;
-	std::vector<type_info*> zip_tags;
-	for (size_t j = 1; j < containers.size(); ++j) {
-		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
-		if (!zv.is_array()) {
-			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " is not an array");
-		}
-		script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
-		if (znode->size() != n) {
-			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
-			             " elements, the range has " + std::to_string(n) + " (zipped arrays must have the same length)");
-		}
-		if (znode == &node) {
-			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " is the range itself");
-		}
-		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
-		element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, "parallel_for");
-		if (zproof.failed != SIZE_MAX) {
-			return usage("parallel_for: zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
-			             (zproof.what.empty() ? std::string(" cannot be mutated in place") : ": " + zproof.what));
-		}
-		zip_tags.insert(zip_tags.end(), zproof.tags.begin(), zproof.tags.end());
-		for (const class_definition* cd : zproof.element_classes) {
-			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
-		}
-		zip_nodes.push_back(znode);
-	}
-	if (n == 0) {
-		return {};
-	}
-
-	// Barrier method admission (parallel-method-admission ruling): the body's collected
-	// element-method names resolve against the LIVE element classes — per-call state, so
-	// it lives outside the body-keyed admission cache. Admitted (class, method) pairs
-	// provision per-worker pins below; captures found inside method bodies classify and
-	// provision exactly like body captures.
-	admission_builder method_adm(eng);
-	method_adm.inplace_root = true;
-	method_adm.prefix = "parallel_for";
-	size_t method_capture_base = 0;
-	if (!element_classes.empty()) {
-		method_adm.adm.element_method_calls = adm->element_method_calls;
-		for (const auto& entry : adm->captures) {
-			method_adm.capture_index.emplace(entry.name_id, method_adm.adm.captures.size());
-			method_adm.adm.captures.push_back(entry);
-		}
-		method_capture_base = method_adm.adm.captures.size();
-		if (!method_adm.admit_element_methods(element_classes)) {
-			state.error_text = method_adm.adm.message;
-			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
-		}
-		for (size_t ci = method_capture_base; ci < method_adm.adm.captures.size(); ++ci) {
-			auto classified = classify_and_add(method_adm.adm.captures[ci]);
-			if (!classified) { return classified; }
-		}
-	}
-
-	size_t worker_count = eng.parallel_thread_count();
-	if (worker_count < 1) { worker_count = 1; }
-	if (worker_count > n) { worker_count = n; }
-	if (n < k_parallel_small_n) { worker_count = 1; }
-	const std::chrono::nanoseconds budget =
-		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
-	const backend_type engine_backend = eng.get_backend_type();
-	if (engine_backend == backend_type::custom) {
-		return usage("parallel_for: custom execution backends are not supported");
-	}
-	const bool use_vm = engine_backend == backend_type::vm;
-	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(body_fn->body.get()), use_vm);
-	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
-	std::vector<size_t> bounds = partition_flat(n, worker_count);
-#ifdef JAISCRIPT_VM_PROFILE
-	fprintf(stderr, "[region-profile] parallel_for n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
-#endif
-	state.last_chunk_bounds = bounds;
-
-
-	std::vector<type_info*> value_types;
-	if (pool->worker_slots.size() < worker_count) {
-		pool->worker_slots.resize(worker_count);
-	}
-	std::vector<parallel_worker_slot*> contexts;
-	contexts.reserve(worker_count);
-
-	// Join guard: no capture define and no element reference survives this call - the
-	// holders pin the caller's array, and a dormant slot must never do that. Cached
-	// snapshot copies persist (worker-owned nodes only), and provisioned_nodes with
-	// them (rebuild-on-miss; see rebuild_provisioned_nodes).
-	struct inplace_join_guard {
-		engine& eng;
-		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
-		size_t count;
-		~inplace_join_guard() {
-			for (size_t k = 0; k < count && k < slots.size(); ++k) {
-				parallel_worker_slot* slot = slots[k].get();
-				if (!slot) { continue; }
-				for (uint64_t id : slot->capture_name_ids) {
-					slot->root_env->define(id, script_value(std::monostate{}, &eng));
-				}
-				slot->capture_name_ids.clear();
-				slot->element_refs.clear();
-				slot->cursors.clear();
-				slot->raw_input = nullptr;
-				slot->typed_input = nullptr;
-				slot->backend->set_parallel_method_pins(nullptr);
-				slot->method_pins.entries.clear();
-			}
-		}
-	} join_guard{ eng, pool->worker_slots, worker_count };
-	// One content proof per captured name per region (see provision_snapshot_capture)
-	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
-
-	// The container handle for element references: holders re-deref container+index on
-	// every access (reallocation-safe), and each mint here bumps the handle count once,
-	// single-threaded, released by the guard above.
-	const bool by_ref_element = stmt->loop_param.is_reference;
-	auto& array_handle = const_cast<script_value&>(array_value).unchecked_get_array_storage();
-	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
-	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
-	value_types.insert(value_types.end(), tags.begin(), tags.end());   // subclass slots carry their own tags
-	value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
-	for (size_t j = 1; j < containers.size(); ++j) {
-		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
-		if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
-	}
-
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_norm1 = __rdtsc();
-	fprintf(stderr, "[region-profile] norm nodes: null %llu int %llu float %llu str %llu arr %llu map %llu obj %llu | string detaches %llu\n", (unsigned long long)prof_norm_nodes_[0], (unsigned long long)prof_norm_nodes_[1], (unsigned long long)prof_norm_nodes_[2], (unsigned long long)prof_norm_nodes_[3], (unsigned long long)prof_norm_nodes_[6], (unsigned long long)prof_norm_nodes_[7], (unsigned long long)prof_norm_nodes_[8], (unsigned long long)prof_norm_detach_);
-	fprintf(stderr, "[region-profile] obj walk sections (total cyc): class-check %llu | alias-check %llu | field-loop %llu | clones %llu\n", (unsigned long long)prof_obj_sec_[0], (unsigned long long)prof_obj_sec_[1], (unsigned long long)prof_obj_sec_[2], (unsigned long long)prof_obj_sec_[3]);
-	for (auto& c : prof_norm_nodes_) { c = 0; } prof_norm_detach_ = 0; for (auto& c : prof_obj_sec_) { c = 0; }
-#endif
-	for (size_t k = 0; k < worker_count; ++k) {
-		auto& slot = pool->worker_slots[k];
-		if (slot && slot_matches(*slot, *adm, *body_fn, use_vm)) {
-			reset_worker_slot(eng, *slot, budget);
-		} else {
-			slot = provision_worker(eng, *adm, budget, use_vm, &chunk_wrapper);
-		}
-		slot->begin = bounds[k];
-		slot->end = bounds[k + 1];
-		slot->element_refs.clear();
-		slot->raw_input = nullptr;
-		slot->typed_input = nullptr;
-		// ONE cursor reference per chunk, minted here (the array pin and the live_elem_refs
-		// count are main-thread facts) and re-pointed per element by the worker's chunk loop:
-		// a by-ref body binds it, a by-value body copies through it exactly as it would the
-		// element (normalization made every element exclusive, so those copies touch no
-		// cross-thread counts). An admitted body cannot retain it past its iteration (no
-		// lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
-		(void)by_ref_element; (void)typed_obj;
-		if (slot->end > slot->begin) {
-			slot->element_refs.push_back(script_value::make_element_reference(array_handle, slot->begin, &eng, element_type));
-			for (size_t j = 0; j < zip_nodes.size(); ++j) {
-				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
-				auto& zhandle = zc.unchecked_get_array_storage();
-				type_info_ptr zet = zc.get_type_info().get() ? zc.get_type_info()->element_type() : type_info_ptr(nullptr);
-				slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
-			}
-		}
-		slot->capture_name_ids.clear();
-		bool any_snapshot_miss = false;
-		std::vector<const void*> fresh_nodes;
-		for (const auto& cap : captures) {
-			script_value provisioned(std::monostate{}, &eng);
-			try {
-				switch (cap.kind) {
-				case parallel_capture_kind::scalar:
-					provisioned = *cap.source;
-					break;
-				case parallel_capture_kind::string:
-				case parallel_capture_kind::snapshot:
-					provision_snapshot_capture(*slot, cap.entry->name_id, *cap.source, eng,
-					                           value_types, provisioned,
-					                           state.region_use_counter, snapshot_validated,
-					                           fresh_nodes, any_snapshot_miss
-#ifdef JAISCRIPT_VM_PROFILE
-					                           , state.prof_for, cap.entry->name
-#endif
-					                           );
-					break;
-				case parallel_capture_kind::borrow:
-					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = script_value::make_parallel_borrow(*cap.source, &eng);
-					break;
-				}
-			} catch (const std::exception& e) {
-				return usage("parallel_for: captured name '" + std::string(cap.entry->name) + "': " + e.what());
-			}
-			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
-			slot->capture_name_ids.push_back(cap.entry->name_id);
-		}
-		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
-		// Admitted-method pins: a FRESH dispatcher value minted per worker (new control
-		// block — the pin's runtime copies never touch a shared count), overload
-		// pre-resolved, body chunk precompiled on this worker's own backend. All
-		// single-threaded, charged to the barrier.
-		slot->method_pins.entries.clear();
-		for (const auto& am : method_adm.admitted_methods) {
-			const script_value shared_method = am.cls->get_method(am.name_id, false);
-			const script_method_dispatch* src = shared_method.is_function()
-				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
-			if (!src) {
-				return usage("parallel_for: method '" + std::string(am.name) + "' has no script dispatcher (internal)");
-			}
-			script_method_dispatch wd;
-			wd.eng = src->eng;
-			wd.cls = src->cls;
-			wd.name_id = src->name_id;
-			wd.definition_env = src->definition_env;
-			detail::parallel_method_pin pin;
-			pin.method_value = script_value::make_function(std::move(wd), &eng);
-			pin.resolved = am.decl;
-			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
-			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
-		}
-		slot->backend->set_parallel_method_pins(slot->method_pins.entries.empty() ? nullptr : &slot->method_pins);
-		contexts.push_back(slot.get());
-	}
-	prewarm_region_types(eng, [&] {
-		std::vector<type_info*> seed = adm->referenced_types;
-		seed.insert(seed.end(), value_types.begin(), value_types.end());
-		seed.push_back(array_value.get_type_info().get());
-		seed.push_back(element_type.get());
-		for (const class_definition* cd : element_classes) { seed.push_back(cd->get_type_info().get()); }
-		seed_classes_by_member(eng, adm->element_reached_members, seed);
-		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
-		return seed;
-	}());
-
-	parallel_region_table table;
-	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
-	if (worker_count > 1) {
-		const size_t pool_workers_needed = worker_count - 1;
-		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
-			state.pool = std::make_unique<jai::thread_pool>(
-				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));   // the engine's own worker set, pre-allocated once, not hardware_concurrency
-			calibrate_pool_overhead(state);
-		}
-		for (size_t k = 1; k < worker_count; ++k) {
-			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
-		}
-	}
-
-	// Safe mode freezes the symbolizer (worker interns are bugs, caught loudly).
-	// Trusted mode leaves it live: script-class method dispatch legitimately warms
-	// getter/setter ids mid-region - the user vouched for the concurrency.
-	const bool freeze_symbols = !eng.allow_unsafe_parallel();
-	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
-	state.active_region = &table;
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t1 = __rdtsc();
-	fprintf(stderr, "[region-profile] parallel_for setup split: normalize %llu | provision+rest %llu cyc\n", (unsigned long long)(prof_norm1 - prof_norm0), (unsigned long long)(prof_t1 - prof_norm1));
-#endif
-	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
-	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
-	for (size_t k = 1; k < worker_count; ++k) {
-		parallel_worker_slot* ctx = contexts[k];
-		engine* eng_ptr = &eng;
-		region_tasks.emplace_back(k - 1, [ctx, eng_ptr] {
-#ifdef JAISCRIPT_VM_PROFILE
-			ctx->prof_start_tsc = __rdtsc();
-#endif
-			run_worker_inplace(*ctx, *eng_ptr);
-#ifdef JAISCRIPT_VM_PROFILE
-			ctx->prof_end_tsc = __rdtsc();
-#endif
-		});
-	}
-	if (!region_tasks.empty()) {
-		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size());
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t2 = __rdtsc();
-#endif
-	const auto main_chunk_t0 = std::chrono::steady_clock::now();
-	run_worker_inplace(*contexts[0], eng);
-	note_region_cost(*pool, main_chunk_t0, bounds[1] - bounds[0]);
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t3 = __rdtsc();
-#endif
-	if (worker_count > 1) {
-		state.pool->wait_idle();
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t4 = __rdtsc();
-	{
-		auto& p = state.prof_for;
-		++p.regions;
-		p.setup_cyc += prof_t1 - prof_t0;
-		p.submit_cyc += prof_t2 - prof_t1;
-		p.main_chunk_cyc += prof_t3 - prof_t2;
-		p.wait_cyc += prof_t4 - prof_t3;
-		for (size_t k = 1; k < worker_count; ++k) {
-			const parallel_worker_slot* ctx = contexts[k];
-			if (!ctx->prof_start_tsc) continue;
-			p.wake_lat_sum += ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0;
-			p.wake_lat_max = std::max(p.wake_lat_max,
-				ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0);
-			p.worker_span_sum += ctx->prof_end_tsc - ctx->prof_start_tsc;
-			++p.wake_samples;
-		}
-	}
-#endif
-	state.active_region = nullptr;
-	for (auto* ctx : contexts) {   // worker-created instances join the class registries now, unlocked
-		for (auto& weak : ctx->pending_instances) {
-			if (auto live = weak.lock()) { live->get_class_definition()->register_instance_after_region(weak); }
-		}
-		ctx->pending_instances.clear();
-	}
-	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(false); }
-
-	size_t rolled_up = 0;
-	for (const auto& ctx : contexts) {
-		rolled_up += ctx->limits.memory_used;
-	}
-	if (rolled_up) {
-		eng.execution_limits().memory_charge_deferred(rolled_up);
-	}
-	const parallel_worker_error* winner = nullptr;
-	for (const auto& ctx : contexts) {
-		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
-			winner = &*ctx->error;
-		}
-	}
-	if (winner) {
-		if (winner->terminal) {
-			eng.execution_limits().terminal_error = true;
-		}
-		std::error_code code = winner->code ? winner->code
-			: make_error_code(runtime_error_code::unsupported_operation);
-		return raise(code, winner->message.empty() ? std::string("parallel_for: worker failed")
-		                                           : winner->message);
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	state.prof_for.join_cyc += __rdtsc() - prof_t4;
-#endif
-	return {};
+	return run_region(eng, plan);
 }
 
 // Tier-1 raw read through a region borrow (see parallel_transform.hpp). Runs on worker

@@ -170,8 +170,6 @@ namespace jai::vm {
         op_parallel_advance,   // parallel_for chunk loop: pops the counter, advances the worker's
                                // element cursor to the next slot, pushes counter + 1
         op_parallel_element,   // pushes the worker's element cursor (a by-value body copies through it)
-        op_parallel_emit,      // parallel_transform chunk loop: pops fn's result, stores it at the cursor's
-                               // index of the worker's output slice (the fork's result checks apply), pushes null
         op_halt,
     };
 
@@ -331,7 +329,6 @@ namespace jai::vm {
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";
-            case opcode::op_parallel_emit: return "PARALLEL_EMIT";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

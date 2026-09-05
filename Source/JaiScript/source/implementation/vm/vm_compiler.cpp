@@ -2206,11 +2206,6 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			emit(opcode::op_parallel_element, which);
 			return;
 		}
-		if (ident->name == "__jai_parallel_emit" && expr->arguments.size() == 1) {
-			compile_expression(expr->arguments[0]);
-			emit(opcode::op_parallel_emit);
-			return;
-		}
 	}
 	if (expr->callee->get_type() == node_type::member_expr) {
 		auto member = std::static_pointer_cast<member_expr>(expr->callee);

@@ -35,7 +35,7 @@ DEFAULT_RUNNER = REPO / "out" / "build" / "x64-Release BENCHMARKS" / "bin" / "ja
 
 INTRO_SUPPORT_RE = re.compile(r"^\s*(?:with|and|plus|then)\s+`([A-Za-z0-9_./-]+\.jai)`\s*:?\s*$", re.I)
 INTRO_SUPPORT_RE2 = re.compile(r"`([A-Za-z0-9_./-]+\.jai)`\s*:\s*$")
-LABEL_FILE_RE = re.compile(r"jaiscript\s*[—–-]+\s*([A-Za-z0-9_./-]+\.jai)\s*$")
+LABEL_FILE_RE = re.compile(r"jaiscript\s*[—–·-]+\s*([A-Za-z0-9_./-]+\.jai)\s*$")
 HOST_LABEL_RE = re.compile(r"host|sketch|cap above|registration|needs the", re.I)
 REF_RE = re.compile(r'\b(?:import|include)\s*\(?\s*"([^"]+)"')
 

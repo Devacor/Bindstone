@@ -22,7 +22,7 @@ var BOOT_FREEDOOM2_SHA = "a8772e088847032510d97ba2312406a6998f21cbab44d4ff10696f
 var BOOT_SHAREWARE_URL = "https://raw.githubusercontent.com/Doom-Utils/shareware-collection/6591a922701e5769b32278e9c555b1bf93f5714c/Doom%201.9/doom1.wad";
 var BOOT_SHAREWARE_SHA = "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771";
 var BOOT_SHAREWARE_SIZE = 4196020;
-var BOOT_ZIP = "../wads/.download/freedoom-0.13.0.zip";
+function boot_zip() -> string { return wad_dir() + ".download/freedoom-" + BOOT_FREEDOOM_VERSION + ".zip"; }
 
 var BOOT_LINES = [];          // status lines already settled (the screen's history)
 var BOOT_ACTIVE = "";         // the line in progress
@@ -34,9 +34,9 @@ function boot_wad_ok(string path, string sha) -> bool {
 	return file_exists(path) && sha256_file(path) == sha;
 }
 function boot_have_freedoom() -> bool {
-	return boot_wad_ok("../wads/freedoom1.wad", BOOT_FREEDOOM1_SHA) && boot_wad_ok("../wads/freedoom2.wad", BOOT_FREEDOOM2_SHA);
+	return boot_wad_ok(wad_path("freedoom1"), BOOT_FREEDOOM1_SHA) && boot_wad_ok(wad_path("freedoom2"), BOOT_FREEDOOM2_SHA);
 }
-function boot_have_shareware() -> bool { return boot_wad_ok("../wads/doom1.wad", BOOT_SHAREWARE_SHA); }
+function boot_have_shareware() -> bool { return boot_wad_ok(wad_path("doom1"), BOOT_SHAREWARE_SHA); }
 function boot_needed(string wanted) -> bool { return !file_exists(wanted); }
 
 // ------------------------------------------------------------------ screen ---
@@ -136,22 +136,22 @@ function boot_verify(string label, string path, string sha) -> bool {
 
 function boot_freedoom() -> bool {
 	if (boot_have_freedoom()) { boot_settle("ok      Freedoom " + BOOT_FREEDOOM_VERSION + " already present and verified"); return true; }
-	if (!(file_exists(BOOT_ZIP) && sha256_file(BOOT_ZIP) == BOOT_FREEDOOM_ZIP_SHA)) {
-		if (!boot_fetch("Freedoom " + BOOT_FREEDOOM_VERSION + " (freedoom.github.io, BSD 3-Clause)", BOOT_FREEDOOM_URL, BOOT_ZIP)) { return false; }
-		if (!boot_verify("freedoom-" + BOOT_FREEDOOM_VERSION + ".zip", BOOT_ZIP, BOOT_FREEDOOM_ZIP_SHA)) { return false; }
+	if (!(file_exists(boot_zip()) && sha256_file(boot_zip()) == BOOT_FREEDOOM_ZIP_SHA)) {
+		if (!boot_fetch("Freedoom " + BOOT_FREEDOOM_VERSION + " (freedoom.github.io, BSD 3-Clause)", BOOT_FREEDOOM_URL, boot_zip())) { return false; }
+		if (!boot_verify("freedoom-" + BOOT_FREEDOOM_VERSION + ".zip", boot_zip(), BOOT_FREEDOOM_ZIP_SHA)) { return false; }
 	}
 	var pairs = [["freedoom1.wad", BOOT_FREEDOOM1_SHA], ["freedoom2.wad", BOOT_FREEDOOM2_SHA]];
 	for (auto p : pairs) {
 		string name = p[0];
 		BOOT_ACTIVE = "unpacking " + name;
 		boot_draw();
-		if (!zip_extract(BOOT_ZIP, "freedoom-" + BOOT_FREEDOOM_VERSION + "/" + name, "../wads/" + name)) {
+		if (!zip_extract(boot_zip(), "freedoom-" + BOOT_FREEDOOM_VERSION + "/" + name, wad_dir() + name)) {
 			boot_settle("FAILED  could not unpack " + name);
 			return false;
 		}
-		if (!boot_verify(name, "../wads/" + name, p[1])) { return false; }
+		if (!boot_verify(name, wad_dir() + name, p[1])) { return false; }
 	}
-	delete_file(BOOT_ZIP);
+	delete_file(boot_zip());
 	return true;
 }
 
@@ -167,17 +167,17 @@ function boot_shareware(bool want) -> bool {
 		if (BOOT_ABORT) { return false; }
 		if (answer == "n") { boot_settle("--      DOOM shareware episode skipped"); return true; }
 	}
-	string tmp = "../wads/.download/doom1.wad";
+	string tmp = wad_dir() + ".download/doom1.wad";
 	if (!boot_fetch("DOOM shareware 1.9 (github.com/Doom-Utils/shareware-collection)", BOOT_SHAREWARE_URL, tmp)) { return false; }
 	if (!boot_verify("doom1.wad", tmp, BOOT_SHAREWARE_SHA)) { return false; }
 	string bytes = read_file(tmp);
-	if (bytes.size() != BOOT_SHAREWARE_SIZE || !write_file("../wads/doom1.wad", bytes)) { boot_settle("FAILED  could not place doom1.wad"); return false; }
+	if (bytes.size() != BOOT_SHAREWARE_SIZE || !write_file(wad_dir() + "doom1.wad", bytes)) { boot_settle("FAILED  could not place doom1.wad"); return false; }
 	delete_file(tmp);
 	return true;
 }
 
 // ------------------------------------------------------------------- audio ---
-// Every DS* lump to .wav and D_* lump to .mid under ../cache/<wad>/ - the files sound.jai and
+// Every DS* lump to .wav and D_* lump to .mid under the data folder's cache/<wad>/ - the files sound.jai and
 // mus.jai would otherwise mint lazily on first play. Returns the count written.
 function audio_extract_wad(string path) -> int {
 	if (!wad_load(path)) { return -1; }
@@ -199,7 +199,7 @@ function audio_extract_wad(string path) -> int {
 function boot_audio(bool want) -> void {
 	if (!want) { boot_settle("--      audio cache skipped (lumps decode lazily on first play)"); return; }
 	for (auto w : ["doom1", "freedoom1", "freedoom2"]) {
-		string path = "../wads/" + w + ".wad";
+		string path = wad_path(w);
 		if (!file_exists(path)) { continue; }
 		BOOT_ACTIVE = "decoding sounds and music from " + w + ".wad";
 		BOOT_FRACTION = 0.0;
@@ -226,7 +226,7 @@ function boot_write_sources(bool shareware) -> void {
 		text += "  sha256:  " + BOOT_SHAREWARE_SHA + "  (" + to_string(BOOT_SHAREWARE_SIZE) + " bytes)\n\n";
 	}
 	text += "cache/<wad>/*.wav and *.mid are decoded from the lumps of the WAD named by the folder\nand carry that WAD's license.\n";
-	write_file("../wads/SOURCES.txt", text);
+	write_file(wad_dir() + "SOURCES.txt", text);
 }
 
 // The whole sweep. interactive: terminal loading screen with the shareware question;

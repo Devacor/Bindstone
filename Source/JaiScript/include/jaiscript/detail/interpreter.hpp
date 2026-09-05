@@ -389,6 +389,7 @@ namespace jai {
 
         const std::vector<stack_trace_entry>& last_stack_trace() const { return captured_trace_; }
         std::string format_stack_trace() const;
+        std::string current_source_file() const;
 
         // Resume a suspended (or start a created) coroutine on this interpreter.
         // Reached via execution_backend::resume_coroutine; the handle's opaque

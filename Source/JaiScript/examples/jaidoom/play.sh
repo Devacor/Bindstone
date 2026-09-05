@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# JaiDOOM launcher (Linux, macOS, Git Bash). Runs from scripts/ so the game's relative WAD
-# path (../wads/) resolves; uses a jaiscript next to this file, then one on PATH, then the
-# repository's Release or Debug build. Arguments pass through: ./play.sh -- freedoom2 MAP01
+# JaiDOOM launcher (Linux, macOS, Git Bash): uses a jaiscript next to this file, then one on
+# PATH, then the repository's Release or Debug build (the game finds wads/ from its own
+# location, so the working directory does not matter). Arguments pass through: ./play.sh -- freedoom2 MAP01
 cd "$(dirname "$0")/scripts" || exit 1
 for cand in "${JAI_RUNNER:-}" ../jaiscript ../jaiscript.exe "$(command -v jaiscript 2>/dev/null)" \
             "../../../out/build/x64-Release BENCHMARKS/bin/jaiscript.exe" "../../../out/build/x64-Release BENCHMARKS/bin/jaiscript" \

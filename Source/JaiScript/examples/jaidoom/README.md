@@ -43,10 +43,10 @@ or ends the run when nothing follows.
 ## Command line
 
 ```
-jaiscript jaidoom.jai                            # from scripts/; play.bat does this
+jaiscript jaidoom.jai                            # play.bat does this; dropping jaidoom.jai onto jaiscript.exe works too
 jaiscript jaidoom.jai -- freedoom2 MAP01         # another IWAD and map (MAPxx names work)
-jaiscript jaidoom.jai -- ../wads/doom2.wad MAP07 # your own registered WAD
-jaiscript jaidoom.jai -- ../wads/doom2.wad mypack.wad  # a map pack merged over it
+jaiscript jaidoom.jai -- doom2 MAP07             # your own registered WAD from wads/ (a path works as well)
+jaiscript jaidoom.jai -- doom2 mypack.wad        # a map pack merged over it
 jaiscript jaidoom.jai -- record demo.json        # demos: record, then
 jaiscript jaidoom.jai -- playdemo demo.json
 jaiscript jaidoom.jai -- host [port] [coop]      # netplay: host (deathmatch or co-op)

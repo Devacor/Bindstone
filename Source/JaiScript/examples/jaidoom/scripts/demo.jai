@@ -67,6 +67,7 @@ function demo_feed() -> bool {
 }
 
 function demo_write(string path) -> bool {
+	path = data_path(path);
 	var d = {"seed": DEMO_SEED, "mapname": DEMO_MAP, "skill": DEMO_SKILL,
 		"nightmare": DEMO_NM, "tics": DEMO_TICS};
 	write_file(path, to_json(d));
@@ -74,6 +75,7 @@ function demo_write(string path) -> bool {
 }
 
 function demo_load(string path) -> bool {
+	path = data_path(path);
 	if (!file_exists(path)) { return false; }
 	var txt = read_file(path);
 	if (txt.size() < 2) { return false; }

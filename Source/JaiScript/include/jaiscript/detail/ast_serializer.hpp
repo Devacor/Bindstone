@@ -37,11 +37,15 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 13;   // 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 14;   // 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
     inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
+    // Locations naming the unit's own file serialize as this marker and read back as the
+    // path the jaibite is loaded under, so a moved folder still names its files
+    // (stack traces, breakpoints, engine::current_source_file).
+    inline constexpr std::string_view k_jaibite_own_file = "";
     inline constexpr int k_jaibite_max_depth = 1000;
 
     [[noreturn]] inline void jaibite_fail(const std::string& why) {
@@ -54,8 +58,8 @@ namespace jai::detail {
     public:
         // include_locations = false produces a POSITION-INSENSITIVE encoding (structural
         // identity keys, e.g. hot-reload redefinition equality) — never deserialized.
-        explicit ast_writer(const string_symbolizer& symbols, bool include_locations = true)
-            : symbols_(symbols), include_locations_(include_locations) {}
+        explicit ast_writer(const string_symbolizer& symbols, bool include_locations = true, std::string own_path = {})
+            : symbols_(symbols), include_locations_(include_locations), own_path_(std::move(own_path)) {}
 
         // Structural key for one subtree: string table + node encoding, a deterministic
         // pure function of AST structure (symbol ids persist as first-seen table indices,
@@ -138,7 +142,7 @@ namespace jai::detail {
             if (!include_locations_) {
                 return;
             }
-            str(loc.filename);
+            str(!own_path_.empty() && loc.filename == own_path_ ? k_jaibite_own_file : std::string_view(loc.filename));
             varint(loc.line);
             varint(loc.column);
         }
@@ -561,6 +565,7 @@ namespace jai::detail {
 
         const string_symbolizer& symbols_;
         bool include_locations_ = true;
+        std::string own_path_;
         std::vector<uint8_t> body_;
         std::vector<std::string> table_;
         std::unordered_map<std::string, uint64_t> table_lookup_;
@@ -571,8 +576,8 @@ namespace jai::detail {
 
     class ast_reader {
     public:
-        ast_reader(const uint8_t* data, size_t size, engine* eng)
-            : data_(data), size_(size), eng_(eng), symbols_(eng->get_symbolizer()) {}
+        ast_reader(const uint8_t* data, size_t size, engine* eng, std::string own_path = {})
+            : data_(data), size_(size), eng_(eng), symbols_(eng->get_symbolizer()), own_path_(std::move(own_path)) {}
 
         std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr) {
             if (size_ < 20) jaibite_fail("truncated header");
@@ -671,7 +676,8 @@ namespace jai::detail {
 
         source_location location() {
             source_location loc;
-            loc.filename = str();
+            const std::string& name = str();
+            loc.filename = name == k_jaibite_own_file ? own_path_ : name;
             loc.line = size_t(varint());
             loc.column = size_t(varint());
             return loc;
@@ -1289,18 +1295,21 @@ namespace jai::detail {
         std::vector<std::string> table_;
         std::vector<std::pair<uint64_t, std::string_view>> interned_;  // lazy per-table-entry target ids
         int depth_ = 0;
+        std::string own_path_;
     };
 
+    // own_path: the unit's source path as its nodes are stamped; pass the same spelling to
+    // deserialize_jaibite (the path the bite is loaded under) and the file may move.
     inline std::vector<uint8_t> serialize_jaibite(const std::vector<declaration_ptr>& decls,
                                                   const string_symbolizer& symbols, uint64_t fingerprint,
-                                                  uint32_t flags = 0) {
-        return ast_writer(symbols).serialize(decls, fingerprint, flags);
+                                                  uint32_t flags = 0, std::string own_path = {}) {
+        return ast_writer(symbols, /*include_locations=*/true, std::move(own_path)).serialize(decls, fingerprint, flags);
     }
 
     inline std::vector<declaration_ptr> deserialize_jaibite(const uint8_t* data, size_t size,
                                                             engine* eng, uint64_t& fingerprint_out,
-                                                            uint32_t* flags_out = nullptr) {
-        return ast_reader(data, size, eng).deserialize(fingerprint_out, flags_out);
+                                                            uint32_t* flags_out = nullptr, std::string own_path = {}) {
+        return ast_reader(data, size, eng, std::move(own_path)).deserialize(fingerprint_out, flags_out);
     }
 
     // Position-insensitive structural identity key for one AST subtree (hot-reload

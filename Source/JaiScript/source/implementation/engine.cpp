@@ -1043,6 +1043,12 @@ struct engine::implementation {
     bool jaibite_cache_enabled = true;
     size_t jaibite_cache_write_failures_ = 0;
 
+    std::string root_source_file_;   // engine::root_source_file
+    void note_root_source(const std::string& path) {
+        if (path.empty() || path == "<script>") return;
+        if (!backend || !backend->is_executing()) root_source_file_ = path;
+    }
+
     // Class-shape cache validity (engine::class_definition_epoch): starts at 1 so a
     // cache initialized to epoch 0 always misses its first query.
     uint64_t class_definition_epoch_ = 1;
@@ -1084,7 +1090,7 @@ struct engine::implementation {
             std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             uint64_t savedFingerprint = 0;
             uint32_t flags = 0;
-            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags);
+            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, sourcePath);
             if (savedFingerprint != self.registration_fingerprint()) {
                 return nullptr;   // registration surface moved: stale, reparse + rewrite
             }
@@ -1109,7 +1115,7 @@ struct engine::implementation {
     // error — read-only asset dirs, shipped games) and counted for diagnostics. A partial
     // write is removed so a fresh-looking corrupt sibling can't linger; even if the
     // remove also fails, the loader's corrupt fallback covers it.
-    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, const script_cache_entry& entry) noexcept {
+    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, const script_cache_entry& entry, const std::string& sourcePath) noexcept {
         try {
             uint32_t flags = 0;
             if (static_check_mode_ != check_mode::off && entry.checked &&
@@ -1117,7 +1123,7 @@ struct engine::implementation {
                 flags |= detail::k_jaibite_flag_checked_clean;
             }
             auto bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_,
-                                                   self.registration_fingerprint(), flags);
+                                                   self.registration_fingerprint(), flags, sourcePath);
             std::ofstream file(sibling, std::ios::binary | std::ios::trunc);
             if (!file.is_open()) {
                 ++jaibite_cache_write_failures_;
@@ -1666,6 +1672,7 @@ script_value engine::execute(script_source source) {
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath) {
     impl->has_executed_ = true;
+    impl->note_root_source(sourcePath);
     try {
         // Prepare backend for new execution
         backend()->prepare_for_execution();
@@ -1699,7 +1706,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
         if (!sibling.empty() && !siblingFresh) {
-            impl->write_jaibite_sibling(*this, sibling, *cached);
+            impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
         }
 
         return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars);
@@ -1845,13 +1852,13 @@ jai::jaibite engine::jaibite_load(const std::string& path) {
         throw runtime_error("jaibite: failed to open file: " + path);
     }
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    return jaibite_load_bytes(bytes.data(), bytes.size());
+    return jaibite_load_bytes(bytes.data(), bytes.size(), path);
 }
 
-jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size) {
+jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const std::string& own_path) {
     uint64_t saved_fingerprint = 0;
     uint32_t flags = 0;
-    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags);
+    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, own_path);
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
     detail::run_ast_marking_passes(declarations, get_symbolizer());
@@ -1962,6 +1969,7 @@ script_value engine::execute_file(const std::string& scriptPath) {
 }
 
 script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
+    impl->note_root_source(scriptPath);
     // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
     // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump, a
     // different path spelling (attribution stays byte-identical to the read path), or a
@@ -2987,6 +2995,12 @@ script_value engine::make_parallel_host_function_copy(const std::string& name) {
 std::vector<engine::stack_frame> engine::last_stack_trace() const {
     return impl->backend ? impl->backend->last_stack_trace() : std::vector<stack_frame>{};
 }
+
+std::string engine::current_source_file() const {
+    return impl->backend ? impl->backend->current_source_file() : std::string();
+}
+
+std::string engine::root_source_file() const { return impl->root_source_file_; }
 
 std::string engine::format_stack_trace() const {
     return impl->backend ? impl->backend->format_stack_trace() : std::string();

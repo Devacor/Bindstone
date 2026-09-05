@@ -187,7 +187,7 @@ namespace jai {
         // mismatch / corrupt data. Check bite.registration_mismatch() for an advisory
         // registered-class/function fingerprint difference.
         jai::jaibite jaibite_load(const std::string& path);
-        jai::jaibite jaibite_load_bytes(const uint8_t* data, size_t size);
+        jai::jaibite jaibite_load_bytes(const uint8_t* data, size_t size, const std::string& own_path = {});   // own_path: the file the bytes came from (engine-written siblings mark their own file)
         jai::jaibite jaibite_load_bytes(const std::vector<uint8_t>& bytes) {
             return jaibite_load_bytes(bytes.data(), bytes.size());
         }
@@ -360,6 +360,15 @@ namespace jai {
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
         std::string format_stack_trace() const;
+
+        // The file whose code is executing right now: the innermost frame's statement, as the
+        // parser stamped it (the resolved path an include/import loaded, the path execute_file was
+        // given, "<script>" for raw content). Empty when nothing is executing.
+        std::string current_source_file() const;
+        // The file the outermost execute_file/execute_file_source is running, kept after it returns
+        // (a host calling script functions later still gets the program's root). Empty before the
+        // first file execute; a nested execute from inside a running script does not replace it.
+        std::string root_source_file() const;
 
         // Object creation through registered class system
         template<typename T, typename... Args>

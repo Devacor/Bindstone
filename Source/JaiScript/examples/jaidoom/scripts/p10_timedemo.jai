@@ -38,8 +38,7 @@ function td_player_reset() -> void {
 }
 
 function main() -> int {
-	var wadpath = "../wads/doom1.wad";
-	if (!file_exists(wadpath)) { wadpath = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/doom1.wad"; }
+	var wadpath = wad_path("doom1");
 	var tape = "";
 	int bw = 120;
 	int bh = 78;
@@ -57,7 +56,7 @@ function main() -> int {
 			}
 		}
 	}
-	if (tape == "") { tape = file_exists("../demo.json") ? "../demo.json" : "demo.json"; }
+	if (tape == "") { tape = data_path("demo.json"); }
 	if (!wad_load(wadpath)) { print("wad_load failed"); return 1; }
 	if (!demo_load(tape)) { print(`no demo at ${tape}`); return 1; }
 	vid_init(bw, bh);

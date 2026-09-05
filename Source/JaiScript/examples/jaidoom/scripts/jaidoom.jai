@@ -14,7 +14,7 @@
 //   cheats (type them): iddqd idkfa idfa idclip idclev## (E#M#)
 //                       idbehold + s/i/r/a/l, iddt (map reveal cycle)
 //
-// First run: with no WAD in ../wads/ the game fetches Freedoom and (if you say yes) the DOOM
+// First run: with no WAD in wads/ the game fetches Freedoom and (if you say yes) the DOOM
 //            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //
@@ -217,7 +217,7 @@ function menu_build() -> void {
 	MENU_ITEMS.push("MULTIPLAYER");
 	MENU_ITEMS.push("DEMOS");
 	if (MID_GAME) { MENU_ITEMS.push("SAVE GAME"); }
-	if (file_exists(SAVE_PATH)) { MENU_ITEMS.push("LOAD GAME"); }
+	if (file_exists(data_path(SAVE_PATH))) { MENU_ITEMS.push("LOAD GAME"); }
 	MENU_ITEMS.push("QUIT");
 }
 
@@ -264,7 +264,7 @@ var DEMO_LAST_NAME = "demo.json";   // record target + play prefill: zero-typing
 var DEMO_MENU_ARMED = false;  // skill-pick esc disarms a DEMOS-armed tape
 
 function cfg_save() -> void {
-	write_file(NET_CFG, to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME}));
+	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME}));
 }
 
 function addr_save() -> void {
@@ -273,8 +273,8 @@ function addr_save() -> void {
 }
 
 function addr_load() -> void {
-	if (!file_exists(NET_CFG)) { return; }
-	var cfg = from_json(read_file(NET_CFG));
+	if (!file_exists(data_path(NET_CFG))) { return; }
+	var cfg = from_json(read_file(data_path(NET_CFG)));
 	if (cfg == null) { return; }
 	if (cfg.has("addr")) { NP_LAST_ADDR = "" + cfg["addr"]; }
 	if (cfg.has("demo")) { DEMO_LAST_NAME = "" + cfg["demo"]; }
@@ -320,7 +320,7 @@ function demo_name_key(string k) -> bool {
 		return false;
 	}
 	if (k == "enter") {
-		if (!file_exists(DEMO_NAME_EDIT)) { set_msg(`no demo ${DEMO_NAME_EDIT}`); return false; }
+		if (!file_exists(data_path(DEMO_NAME_EDIT))) { set_msg(`no demo ${DEMO_NAME_EDIT}`); return false; }
 		if (!demo_load(DEMO_NAME_EDIT)) { set_msg("not a demo file"); return false; }
 		DEMO_LAST_NAME = DEMO_NAME_EDIT;
 		cfg_save();
@@ -822,7 +822,7 @@ function selftest() -> int {
 // game -> intermission -> next map -> episode end -> title, every screen drawn
 function flowtest() -> int {
 	int fails = 0;
-	int mload = file_exists(SAVE_PATH) ? 1 : 0;      // a real save adds LOAD GAME
+	int mload = file_exists(data_path(SAVE_PATH)) ? 1 : 0;      // a real save adds LOAD GAME
 	GSTATE = 0;
 	title_draw();
 	menu_open();                                     // the any-key-at-title path
@@ -903,7 +903,7 @@ function flowtest() -> int {
 	addr_save();
 	NP_LAST_ADDR = "";
 	addr_load();
-	delete_file(NET_CFG);
+	delete_file(data_path(NET_CFG));
 	if (NP_LAST_ADDR != "192.168.7.3:28777") { fails = fails + 1; print(`FAIL net config round-trip (${NP_LAST_ADDR})`); }
 	lobby_draw("WAITING FOR PLAYER", "CO-OP ON E1M1", "ESC CANCELS");
 
@@ -946,7 +946,7 @@ function flowtest() -> int {
 	addr_save();
 	DEMO_LAST_NAME = "";
 	addr_load();
-	delete_file(NET_CFG);
+	delete_file(data_path(NET_CFG));
 	if (DEMO_LAST_NAME != "mytape.json") { fails = fails + 1; print(`FAIL demo name round-trip (${DEMO_LAST_NAME})`); }
 	// menu-armed record -> tape writes at level exit -> menu replay matches the hash
 	DEMO_LAST_NAME = "jaidoom_menudemo.json";
@@ -966,7 +966,7 @@ function flowtest() -> int {
 	int mh1 = demo_state_hash();
 	int mfed = DEMO_TICS.size() / 6;
 	wi_start();                                      // level exit: the tape writes + disarms
-	if (DEMO_REC || DEMO_ARM != "" || !file_exists("jaidoom_menudemo.json")) { fails = fails + 1; print("FAIL tape write at exit"); }
+	if (DEMO_REC || DEMO_ARM != "" || !file_exists(data_path("jaidoom_menudemo.json"))) { fails = fails + 1; print("FAIL tape write at exit"); }
 	player_reset();                                  // scramble, then replay from the menu
 	game_start_map("E1M3");
 	for (int ms0 = 0; ms0 < 8; ++ms0) { CMD_FWD = 50.0; game_tic(); }
@@ -988,7 +988,7 @@ function flowtest() -> int {
 	else { print(`menu demo round-trip pinned: ${mfed} tics replay to hash ${mh1}`); }
 	demo_stop();                                     // the esc path
 	if (DEMO_PLAY || GSTATE != 0 || MID_GAME) { fails = fails + 1; print("FAIL demo esc stop"); }
-	delete_file("jaidoom_menudemo.json");
+	delete_file(data_path("jaidoom_menudemo.json"));
 	DEMO_LAST_NAME = "demo.json";
 
 	// ---- cheats: the classic typed sequences through the rolling buffer ----
@@ -1085,7 +1085,7 @@ function flowtest() -> int {
 	game_start_map("E1M4");
 	for (int st3 = 0; st3 < 10; ++st3) { game_tic(); }
 	if (!game_load("jaidoom_savetest.json")) { fails = fails + 1; print("FAIL load"); }
-	delete_file("jaidoom_savetest.json");
+	delete_file(data_path("jaidoom_savetest.json"));
 	if (GAME_MAP != "E1M1" || GAME_TIC != stic) { fails = fails + 1; print("FAIL map/tic restore"); }
 	if (P_X != sx || P_Y != sy || P_ANG != sang) { fails = fails + 1; print("FAIL player position exact restore"); }
 	if (P_HP != 61 || P_ARMOR != 33 || AMMO_SHELLS != 7 || !HAVE_SHOTGUN || P_KEYS != 3 || CUR_WEAPON != 3) {
@@ -1158,7 +1158,7 @@ function flowtest() -> int {
 	for (int dx0 = 0; dx0 < 10; ++dx0) { CMD_FWD = 50.0; game_tic(); }
 	CMD_FWD = 0.0; CMD_SIDE = 0.0; CMD_TURN = 0.0; CMD_USE = false; CMD_FIRE = false;
 	if (!demo_load("jaidoom_demotest.json")) { fails = fails + 1; print("FAIL demo load"); }
-	delete_file("jaidoom_demotest.json");
+	delete_file(data_path("jaidoom_demotest.json"));
 	SKILL_BIT = DEMO_SKILL;
 	NIGHTMARE = DEMO_NM;
 	FAST_MONSTERS = DEMO_NM;
@@ -1204,7 +1204,7 @@ function flowtest() -> int {
 }
 
 function main() -> int {
-	var path = "../wads/doom1.wad";
+	var path = "doom1";
 	var mapname = "";
 	bool test = false;
 	bool flow = false;
@@ -1220,7 +1220,7 @@ function main() -> int {
 		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
 		else if (ARGS[i] == "--no-audio") { want_audio = false; }
 		else if (ARGS[i] == "flowtest") { flow = true; }
-		else if (ARGS[i] == "freedoom2") { path = "../wads/freedoom2.wad"; }
+		else if (ARGS[i] == "freedoom2") { path = "freedoom2"; }
 		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }
 		else if (ARGS[i] == "playdemo" && i + 1 < ARGS.size()) { demopath = ARGS[i + 1]; i = i + 1; }
 		else if (ARGS[i] == "host") {
@@ -1237,9 +1237,7 @@ function main() -> int {
 		else if (ARGS[i].ends_with(".wad")) { if (path_given) { extra_wads.push(ARGS[i]); } else { path = ARGS[i]; path_given = true; } }
 		else if (ARGS[i].starts_with("E") || ARGS[i].starts_with("MAP")) { mapname = ARGS[i]; }
 	}
-	if (!file_exists(path) && file_exists("wads/" + path.substr(path.find_last_of("/") + 1))) {
-		path = "wads/" + path.substr(path.find_last_of("/") + 1);   // launched from the example folder rather than scripts/
-	}
+	path = wad_path(path);
 	if (bootstrap) { return boot_run(false, want_shareware, want_audio) ? 0 : 1; }   // headless: play.bat/bootstrap.sh, CI
 	if (!file_exists(path) && !test && !flow) {                                    // first run: the game fetches its own data
 		if (!boot_run(true, want_shareware, want_audio)) { return 1; }
@@ -1248,7 +1246,7 @@ function main() -> int {
 	if (!file_exists(path)) { print(`no WAD at ${path}: run jaidoom.jai -- bootstrap first`); return 1; }
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 	for (auto extra : extra_wads) {
-		string ep = file_exists(extra) ? extra : (file_exists("../wads/" + extra) ? "../wads/" + extra : extra);
+		string ep = wad_path(extra);
 		if (!wad_add(ep)) { print(`cannot merge ${extra}`); return 1; }
 	}
 	if (mapname == "" && !extra_wads.empty()) { var first = map_list(); if (first.size() > 0) { mapname = first[0]; } }   // a map pack starts on its first map

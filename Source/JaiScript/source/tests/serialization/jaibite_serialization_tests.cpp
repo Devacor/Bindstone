@@ -354,10 +354,11 @@ public:
                 caught + "|" + c2 + "|" + to_string(y);
             )");
             // statement::check_mode_attr arrived with format version 11, the try_stmt catch
-            // variable symbol + slot with 12 (right after the 4-byte magic)
+            // variable symbol + slot with 12, the own-file location marker with 14 (right after
+            // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)13, (int)bytes[4], "jaibite format version");
+            check_eq((int)14, (int)bytes[4], "jaibite format version");
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

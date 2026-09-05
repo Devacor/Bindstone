@@ -42,8 +42,7 @@ function region_sig(int x0, int y0, int x1, int y1) -> int {
 }
 
 function main() -> int {
-	var path = "../wads/doom1.wad";
-	if (!file_exists(path)) { path = "D:/git/Bindstone/Source/JaiScript/examples/jaidoom/wads/doom1.wad"; }
+	var path = wad_path("doom1");
 	if (!wad_load(path)) { print("wad_load failed"); return 1; }
 
 	// ---- required graphics lumps ----

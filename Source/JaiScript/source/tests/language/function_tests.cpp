@@ -428,6 +428,112 @@ public:
             check_eq(eng->execute("auto& same = deep; same.checks = 4; deep.checks == 4;").as<bool>(), true, "references still bind");
         });
 
+        // Read-only by-value parameter elision: a by-value parameter the callee provably never
+        // mutates, aliases, compares or uses whole binds the argument by handle instead of a
+        // clone. engine::parameter_alias_binds() counts the binds; the semantics are the
+        // clone's either way (every row below runs on both backends).
+        test("readonly_parameter_alias_proven_shapes", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Vec3 { float x = 0.0; float y = 0.0; float z = 0.0; string tag = "v"; array<int> ids = [1, 2, 3]; Vec3() {} Vec3(float a) { x = a; y = a * 2; z = a * 3; } }
+                float xy(Vec3 v) { return v.x * v.y; }                       // member reads of primitives
+                int idsum(Vec3 v) { int s = 0; for (int i = 0; i < v.ids.size(); i++) { s += v.ids[i]; } return s + v.tag.size(); }   // subscript + read-only builtins
+                int total(array<int> xs) { int s = 0; for (int i = 0; i < xs.size(); i++) { s += xs[i]; } return s; }
+                int lookup(map<string, int> m, string k) { return m.has(k) ? m[k] : -1; }
+                float rebound(Vec3 v, Vec3 w) { float a = v.x; v = w; return a + v.x; }   // rebinding the slot, never the referent (w escapes: it is stored)
+                Vec3 p = Vec3(2.0);
+                array<int> nums = [4, 5, 6];
+                map<string, int> table = {"a": 1, "b": 2};
+                float acc = 0.0;
+                for (int i = 0; i < 50; i++) { acc += xy(p) + idsum(p) + total(nums) + lookup(table, "b") + rebound(p, p); }
+                return [acc, p.x, p.ids.size(), nums.size(), table.size()];
+            )");
+            const auto& v = r.as_array();
+            check_near(50.0 * (8.0 + 7 + 15 + 2 + 4.0), v[0].as<double>(), 1e-9);
+            check_near(2.0, v[1].as<double>(), 1e-12);
+            check_eq((int64_t)3, v[2].as_int());
+            check_eq((int64_t)250, (int64_t)eng->parameter_alias_binds());   // five proven binds per iteration
+        });
+
+        test("readonly_parameter_alias_refused_shapes_keep_the_copy", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class C { int b = 0; C() {} }
+                class P { int a = 1; array<int> xs = [1]; C child = C(); P() {} }
+                P g = P();
+                int mutates(P p) { p.a = p.a + 10; return p.a; }
+                int pushes(P p) { p.xs.push(7); return p.xs.size(); }
+                int compares(P p) { return p == g ? 1 : 0; }
+                int child_compares(P p) { return p.child == g.child ? 1 : 0; }   // heavy terminal: identity-observable
+                P returns(P p) { return p; }
+                void by_ref(P& r) { r.a = 99; }
+                int passes_by_ref(P p) { by_ref(p); return p.a; }
+                int aliases(P p) { var& r = p; r.a = 55; return r.a; }
+                int writes_global(P p) { g.a = 77; return p.a; }
+                int subscripts_store(P p) { p.xs[0] = 42; return p.xs[0]; }
+                int compound(P p) { p.a += 1; return p.a; }
+                int whole_arg(P p) { return mutates(p); }
+                P x = P();
+                int r1 = mutates(x); int r2 = pushes(x); int r3 = compares(g); int r4 = child_compares(g);
+                P y = returns(x); y.a = 1234;
+                int r5 = passes_by_ref(x); int r6 = aliases(x); int r7 = writes_global(g); int r8 = subscripts_store(x);
+                int r9 = compound(x); int r10 = whole_arg(x);
+                return [r1, r2, r3, r4, x.a, x.xs.size(), r5, r6, g.a, r8, x.xs[0], r9, r10, x.a];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)11, v[0].as_int());
+            check_eq((int64_t)2, v[1].as_int());
+            check_eq((int64_t)0, v[2].as_int());     // a copy is never the global
+            check_eq((int64_t)0, v[3].as_int());
+            check_eq((int64_t)1, v[4].as_int());     // x untouched by every callee
+            check_eq((int64_t)1, v[5].as_int());
+            check_eq((int64_t)99, v[6].as_int());
+            check_eq((int64_t)55, v[7].as_int());
+            check_eq((int64_t)77, v[8].as_int());
+            check_eq((int64_t)42, v[9].as_int());
+            check_eq((int64_t)1, v[10].as_int());
+            check_eq((int64_t)2, v[11].as_int());
+            check_eq((int64_t)11, v[12].as_int());
+            check_eq((int64_t)1, v[13].as_int());
+            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds());
+        });
+
+        test("readonly_parameter_alias_revoked_by_redefinition", [this]() {
+            // The proof is transitive (a callee that writes enclosing state revokes it) and
+            // cached against the definition epoch: redefining the helper re-proves on the next call
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                class P { int a = 1; P() {} }
+                P g = P();
+                int helper() { return 1; }
+                int reads(P p) { int h = helper(); return p.a + h; }
+            )");
+            check_eq((int64_t)2, eng->execute("reads(g);").as_int());
+            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds());
+            eng->execute("int helper() { g.a = 50; return 1; }");
+            // copy semantics: the helper's write lands on g, the parameter still holds the pre-call value
+            check_eq((int64_t)2, eng->execute("g.a = 1; reads(g);").as_int());
+            check_eq((int64_t)50, eng->execute("g.a;").as_int());
+            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds());
+        });
+
+        test("readonly_parameter_alias_skips_nocopy_and_host_objects", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                nocopy class Ledger { int total = 1; }
+                int peek(Ledger l) { return l.total; }
+                auto ledger = Ledger();
+            )");
+            std::string message;
+            try { eng->execute("peek(ledger);"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Ledger'") != std::string::npos, "a nocopy by-value pass still raises: " + message);
+            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds());
+        });
+
         test("destructuring_basic", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

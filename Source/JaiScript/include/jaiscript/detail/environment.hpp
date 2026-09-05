@@ -514,6 +514,16 @@ namespace jai {
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;
 
+        // Read-only by-value parameter elision (docs/parallel_design.md, parameter aliasing):
+        // bit i set = the body provably never mutates, aliases, compares or otherwise uses
+        // parameter i whole, and is itself pure with respect to enclosing state, so binding
+        // the argument by handle instead of cloning it is unobservable. Proven lazily on the
+        // first call (main thread only) against engine::definition_epoch(); only plain
+        // functions are candidates (methods and coroutines bind through other paths).
+        bool alias_candidate = false;
+        mutable uint64_t alias_proof_epoch = 0;
+        mutable uint32_t alias_proof_mask = 0;
+
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
 
         script_defined_function(std::string_view n, std::vector<parameter> params,

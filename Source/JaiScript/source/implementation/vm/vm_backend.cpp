@@ -7545,7 +7545,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc));
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7589,7 +7589,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
 		                        environment_, site, &rec.f, rec.f.code,
-		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc));
+		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc), &function);
 	} catch (...) {
 		frames_.pop_back();
 		throw;
@@ -8009,6 +8009,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
 	environment_->define(proto.decl->name_id, functionValue);
+	engine_->bump_definition_epoch();
 	return {};
 }
 
@@ -13132,7 +13133,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc));
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -14118,7 +14119,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  frame& callee, chunk& body_chunk,
                                                  const std::shared_ptr<environment>& caller_env,
                                                  const call_site* site, frame* caller_frame,
-                                                 chunk* caller_code, const uint8_t* arg_proofs) {
+                                                 chunk* caller_code, const uint8_t* arg_proofs,
+                                                 const script_defined_function* alias_fn) {
 	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
 	// primitive argument is ALREADY its own slot - the bind copy is elided outright
@@ -14392,6 +14394,13 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
 				    derefed.storage_type() == script_value_type::jai_object_type &&
 				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
+					// Read-only parameter elision: a proven parameter shares the argument's handle
+					// (KEEP BYTE-PARALLEL with interpreter::call_function)
+					if (alias_fn && !param.ref_escaping && detail::parameter_alias_allows(derefed) && detail::readonly_parameter_alias(*engine_, *alias_fn, i, !parallel_worker_)) {
+						if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+						frame_slot_set(callee, param.slot_index, script_value(derefed));
+						continue;
+					}
 					frame_slot_set(callee, param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
@@ -14434,6 +14443,12 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			if (should_share) {
 				frame_slot_set(callee, param.slot_index, boxed_param(script_value(shared_probe)));
 			} else {
+				const bool heavy = shared_probe.is_object() || shared_probe.is_array() || shared_probe.is_map();
+				if (heavy && alias_fn && !param.ref_escaping && detail::parameter_alias_allows(shared_probe) && detail::readonly_parameter_alias(*engine_, *alias_fn, i, !parallel_worker_)) {
+					if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+					frame_slot_set(callee, param.slot_index, script_value(shared_probe));
+					continue;
+				}
 				frame_slot_set(callee, param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}
@@ -14539,7 +14554,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
 	                                   previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()));
+	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

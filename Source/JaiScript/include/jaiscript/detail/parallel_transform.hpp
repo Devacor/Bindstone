@@ -288,6 +288,32 @@ namespace jai::detail {
                                                                 engine* eng,
                                                                 bool lvalue_write);
 
+    // Read-only by-value parameter elision. Bit i of the result: the body of `fn` (and every
+    // script function it calls) would be admitted in a parallel body - so it writes nothing
+    // but its own locals - AND parameter i is only ever read through member chains and
+    // subscripts whose static terminal is a primitive or a string, or as the receiver of a
+    // read-only builtin method. Such a parameter can bind the argument by handle: no store
+    // can reach the caller's value through it and no identity-observing use (comparison,
+    // whole-value pass, alias, return) exists. Main thread only (interns, resolves globals).
+    uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& fn);
+    // The argument side of the elision: a script class instance that is not nocopy (a nocopy
+    // by-value pass must keep raising whatever the callee does), an array or a map. Host
+    // objects keep the clone.
+    bool parameter_alias_allows(const script_value& derefed);
+
+    // The cached verdict for parameter i (recomputed when the definition epoch moved; a
+    // parallel worker may only consume a verdict the main thread already stamped).
+    inline bool readonly_parameter_alias(engine& eng, const script_defined_function& fn, size_t i, bool may_prove) {
+        if (!fn.alias_candidate || i >= 32 || !eng.parameter_alias()) { return false; }
+        const uint64_t epoch = eng.definition_epoch();
+        if (fn.alias_proof_epoch != epoch) {
+            if (!may_prove) { return false; }
+            fn.alias_proof_mask = prove_readonly_parameters(eng, fn);
+            fn.alias_proof_epoch = epoch;
+        }
+        return ((fn.alias_proof_mask >> i) & 1u) != 0;
+    }
+
 } // namespace jai::detail
 
 #endif // __JAISCRIPT_DETAIL_PARALLEL_TRANSFORM_HPP__

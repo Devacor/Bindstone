@@ -579,6 +579,43 @@ registered subclasses, memoized per fork. A class reached only through a typed c
 deny-intern backstop (`type shape was not pre-warmed at the region barrier`) names a shape the
 walk missed.
 
+## 15. SHIPPED: read-only by-value parameters bind by handle (the admission walk as a purity proof)
+
+A by-value class/array/map parameter costs a deep clone per call; `xy(Vec3 v)` inside a zip
+body ran 7 ms per 40k against 2.5 by reference. The clone exists to make the callee's copy
+unobservable to the caller and vice versa - so when nothing can observe it, it goes (Dev: a
+copy we can prove away goes). The proof reuses the admission builder in `proof_mode`
+(`prove_readonly_parameters`, cached per `script_defined_function` against
+`engine::definition_epoch()`, which moves on every top-level run, function/class/global
+definition and host registration):
+
+- the callee and every script function it calls would be admitted in a parallel body, so
+  the call graph writes nothing but its own locals (no enclosing store, no by-ref hand-off of
+  enclosing state, no host call outside the pure whitelist, no lambda, no `new`, no `yield`);
+- the parameter is the walk's element root, and beyond `element_mutated` (a store through
+  it, a mutating builtin on it, a subscript store into it) every identity-observing use
+  escapes it: a bare use (comparison, argument, return, range source, `[&]`), an alias
+  (`var& r = p`), a compound assignment or `++`/`--` on it (user operators), a user method or
+  accessor on it, and a member/subscript chain whose static terminal is not a primitive or a
+  string - objects and arrays compare by identity, so `p.child == g.child` would tell an
+  alias from a copy. Read-only builtins on a receiver that is statically a container or
+  string (`p.ids.size()`) are reads; rebinding the parameter itself (`p = x`) is not an
+  escape (it replaces the slot, never the referent).
+
+A proven parameter binds the argument by handle (`script_value(derefed)` instead of
+`.clone()`) on both backends, in the exact-class fast branch and after the conversion
+table alike - an identity conversion shares, a converting one is already a fresh value.
+The argument side gates it too: script class instances that are not `nocopy` (a nocopy
+by-value pass keeps raising whatever the callee does), arrays and maps; host objects keep
+the clone. Only plain functions are candidates in v1 (methods and coroutines bind through
+other paths); parallel workers never prove (interning, global lookups) - the barrier proves
+the live function and restamps every worker copy per region entry. Kill switch
+`engine::parameter_alias(false)`; gates `parameter_alias_differential_gate` (generator
+programs with by-value class parameters, on vs off, both backends) and
+`jaiscript_fuzz --no-param-alias`. Measured (vm): a serial `xy(Vec3)` call 430 -> 113 ns,
+a struct with an array field 830 -> 476, the zip by-value helper 7.1 -> 2.5 ms per 40k
+(level with by-reference); GLOOM neutral (its helpers already take `var&`).
+
 ## Appendix: possible future — background jobs on separate engines
 
 NOT the `parallel_for` substrate (RULED). Kept as a sketch for long-running background work

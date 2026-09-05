@@ -21,6 +21,7 @@ struct host_options {
 	bool smoke = false;
 	int64_t ticks = 2000;            // smoke tick budget
 	int64_t workers = -1;            // parallel width; -1 = engine default, 0 = serial (ports: always serial)
+	bool param_alias = true;         // jai: engine::parameter_alias (--no-param-alias for an A/B on one binary)
 	int64_t width = 0;               // 0 = autodetect
 	int64_t height = 0;
 	double target_fps = 30.0;

@@ -35,6 +35,8 @@
 #include <jaiscript/detail/interpreter_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/vm/vm_backend.hpp>
@@ -71,6 +73,10 @@ namespace jai::detail {
 		vm::vm_backend* vm = nullptr;                     // set when the engine backend is the vm
 		interpreter_backend* interp = nullptr;            // set otherwise
 		script_callable fn_payload;
+		// parallel_for: the per-worker chunk-loop wrapper (k_parallel_chunk_source bound to this
+		// worker's root_env) and the cursor holder its advance intrinsic re-points
+		script_callable chunk_payload;
+		std::optional<script_value> cursor;
 		// Live input vector (Dev ruling 2026-07-09 "safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
 		// scan) mint worker-local copies with zero refcount traffic, and elements the
@@ -183,58 +189,105 @@ namespace {
 	// estimate: every thread, even split (the baseline).
 	constexpr double k_parallel_chunk_overhead_ratio = 3.0;
 	constexpr double k_parallel_min_overhead_ns = 2000.0;   // floor for a noisy first sample
-	// A parallel_for body runs once per element as a function: a top-level `continue` means the
-	// next element on both backends (rewritten to a bare return once, at body creation), a
-	// loop-level `break` has no deterministic meaning (iterations are independent) and is
-	// rejected here; inside a nested loop or switch both keep their C++ meaning. Returns the
-	// offending statement of a rejected break, null when the body is fine.
-	const statement* parallel_body_control_rewrite(statement_ptr& slot, size_t loop_depth, size_t switch_depth) {
-		if (!slot) { return nullptr; }
+	// Body control flow. Inline mode (the body grafted into the worker's counter loop): a
+	// top-level `continue` reaches the loop's advance on its own and a top-level `return`
+	// (any value) becomes `continue` - both mean the next element; a `return` inside a NESTED
+	// loop cannot mean that in a grafted body, so such a body takes call mode instead (one
+	// call per element, where a top-level `continue` becomes a bare `return`). A loop-level
+	// `break` has no deterministic meaning (iterations are independent) and is rejected in
+	// both modes; inside a nested loop or switch break/continue keep their C++ meaning.
+	struct body_control_scan {
+		const statement* bad_break = nullptr;
+		bool nested_return = false;
+	};
+	void scan_parallel_body_control(const statement_ptr& slot, size_t loop_depth, size_t switch_depth, body_control_scan& out) {
+		if (!slot || out.bad_break) { return; }
 		switch (slot->get_type()) {
-		case node_type::continue_stmt:
-			if (loop_depth == 0) { slot = std::make_shared<return_stmt>(slot->location); }
-			return nullptr;
+		case node_type::return_stmt:
+			if (loop_depth > 0) { out.nested_return = true; }
+			return;
 		case node_type::break_stmt:
-			return loop_depth == 0 && switch_depth == 0 ? slot.get() : nullptr;
+			if (loop_depth == 0 && switch_depth == 0) { out.bad_break = slot.get(); }
+			return;
 		case node_type::block_stmt:
 			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
 				if (d && d->get_type() == node_type::statement_decl) {
-					if (auto* bad = parallel_body_control_rewrite(static_cast<statement_decl*>(d.get())->statement, loop_depth, switch_depth)) { return bad; }
+					scan_parallel_body_control(static_cast<statement_decl*>(d.get())->statement, loop_depth, switch_depth, out);
 				}
 			}
-			return nullptr;
+			return;
 		case node_type::if_stmt: {
 			auto* n = static_cast<if_stmt*>(slot.get());
-			if (auto* bad = parallel_body_control_rewrite(n->then_statement, loop_depth, switch_depth)) { return bad; }
-			return parallel_body_control_rewrite(n->else_statement, loop_depth, switch_depth);
+			scan_parallel_body_control(n->then_statement, loop_depth, switch_depth, out);
+			scan_parallel_body_control(n->else_statement, loop_depth, switch_depth, out);
+			return;
 		}
 		case node_type::while_stmt:
-			return parallel_body_control_rewrite(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+			scan_parallel_body_control(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
 		case node_type::for_stmt:
-			return parallel_body_control_rewrite(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+			scan_parallel_body_control(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
 		case node_type::range_for_stmt:
-			return parallel_body_control_rewrite(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth);
+			scan_parallel_body_control(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
 		case node_type::try_stmt: {
 			auto* n = static_cast<try_stmt*>(slot.get());
-			if (auto* bad = parallel_body_control_rewrite(n->try_block, loop_depth, switch_depth)) { return bad; }
-			return parallel_body_control_rewrite(n->catch_block, loop_depth, switch_depth);
+			scan_parallel_body_control(n->try_block, loop_depth, switch_depth, out);
+			scan_parallel_body_control(n->catch_block, loop_depth, switch_depth, out);
+			return;
 		}
 		case node_type::switch_stmt: {
 			auto* n = static_cast<switch_stmt*>(slot.get());
-			for (auto& c : n->cases) {
-				for (auto& st : c->body) {
-					if (auto* bad = parallel_body_control_rewrite(st, loop_depth, switch_depth + 1)) { return bad; }
-				}
-			}
-			if (n->default_case) {
-				for (auto& st : n->default_case->body) {
-					if (auto* bad = parallel_body_control_rewrite(st, loop_depth, switch_depth + 1)) { return bad; }
-				}
-			}
-			return nullptr;
+			for (auto& c : n->cases) { for (auto& st : c->body) { scan_parallel_body_control(st, loop_depth, switch_depth + 1, out); } }
+			if (n->default_case) { for (auto& st : n->default_case->body) { scan_parallel_body_control(st, loop_depth, switch_depth + 1, out); } }
+			return;
 		}
 		default:
-			return nullptr;
+			return;
+		}
+	}
+	// Top-level control rewrite (loop depth 0 only; nested loops keep theirs): inline mode
+	// turns `return` into `continue`, call mode turns `continue` into a bare `return`.
+	void rewrite_parallel_body_control(statement_ptr& slot, size_t loop_depth, bool inline_mode) {
+		if (!slot) { return; }
+		switch (slot->get_type()) {
+		case node_type::return_stmt:
+			if (inline_mode && loop_depth == 0) { slot = std::make_shared<continue_stmt>(slot->location); }
+			return;
+		case node_type::continue_stmt:
+			if (!inline_mode && loop_depth == 0) { slot = std::make_shared<return_stmt>(slot->location); }
+			return;
+		case node_type::block_stmt:
+			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
+				if (d && d->get_type() == node_type::statement_decl) {
+					rewrite_parallel_body_control(static_cast<statement_decl*>(d.get())->statement, loop_depth, inline_mode);
+				}
+			}
+			return;
+		case node_type::if_stmt: {
+			auto* n = static_cast<if_stmt*>(slot.get());
+			rewrite_parallel_body_control(n->then_statement, loop_depth, inline_mode);
+			rewrite_parallel_body_control(n->else_statement, loop_depth, inline_mode);
+			return;
+		}
+		case node_type::while_stmt:
+			rewrite_parallel_body_control(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, inline_mode); return;
+		case node_type::for_stmt:
+			rewrite_parallel_body_control(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, inline_mode); return;
+		case node_type::range_for_stmt:
+			rewrite_parallel_body_control(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, inline_mode); return;
+		case node_type::try_stmt: {
+			auto* n = static_cast<try_stmt*>(slot.get());
+			rewrite_parallel_body_control(n->try_block, loop_depth, inline_mode);
+			rewrite_parallel_body_control(n->catch_block, loop_depth, inline_mode);
+			return;
+		}
+		case node_type::switch_stmt: {
+			auto* n = static_cast<switch_stmt*>(slot.get());
+			for (auto& c : n->cases) { for (auto& st : c->body) { rewrite_parallel_body_control(st, loop_depth, inline_mode); } }
+			if (n->default_case) { for (auto& st : n->default_case->body) { rewrite_parallel_body_control(st, loop_depth, inline_mode); } }
+			return;
+		}
+		default:
+			return;
 		}
 	}
 
@@ -1048,6 +1101,7 @@ namespace {
 		admission_builder builder(eng);
 		if (inplace_root) {
 			builder.inplace_root = true;
+			builder.adm.inplace_root = true;
 			builder.prefix = "parallel_for";
 		}
 		if (builder.admit_function(fn, UINT64_MAX,
@@ -1199,9 +1253,125 @@ namespace {
 		slot.error.reset();
 	}
 
+	// The chunk loop a worker runs in-script: one host entry per region, zero calls per element
+	// in inline mode. __c is the loop variable (slot 0 = the body's own parameter slot; the
+	// by-ref form binds the chunk's cursor reference once and follows it, the by-value form
+	// copies the cursor's element into __c per iteration), __n the chunk length, __k the
+	// counter; __jai_parallel_advance re-points the cursor and yields __k + 1 (an opcode on the
+	// vm, a native on the interpreter), so a `continue` in the body reaches it through the
+	// for-update. The placeholder call is replaced by the body block; __n/__k are renumbered
+	// past the body's frame slots.
+	constexpr const char* k_parallel_chunk_inline_ref =
+		"function __jai_parallel_chunk(var& __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_placeholder(); } }";
+	constexpr const char* k_parallel_chunk_inline_val =
+		"function __jai_parallel_chunk(var __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __c = __jai_parallel_element(); __jai_parallel_placeholder(); } }";
+	// Call mode (a `return` inside a nested loop must still mean the next element): the body
+	// runs as a function per element, bound to the cursor like the element itself
+	constexpr const char* k_parallel_chunk_call =
+		"function __jai_parallel_chunk(var& __c, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __jai_parallel_body(__c); } }";
+
+	std::shared_ptr<function_decl> parse_chunk_skeleton(engine& eng, const char* source) {
+		const auto templates = eng.get_registered_template_types();
+		lexer lex(source, eng.get_symbolizer(), templates);
+		auto tokens = lex.tokenize();
+		parser parse(tokens, eng.get_symbolizer(), &eng, templates, "<parallel_for>");
+		auto decls = parse.parse();
+		if (!decls || decls.value().empty() || decls.value().front()->get_type() != node_type::function_decl) {
+			throw runtime_error("parallel_for: chunk wrapper failed to parse (internal)");
+		}
+		return std::static_pointer_cast<function_decl>(decls.value().front());
+	}
+
+	// Renumber the skeleton's own slots (__n, __k) past the body's frame (by name: the parser's
+	// numbering is not assumed) through the for header's expressions
+	// c_name/c_sym: the loop variable's permanent (symbolizer-backed) name and symbol; the
+	// skeleton's `__c` becomes it (the vm resolves frame locals by declared name)
+	void renumber_chunk_slot(expression_ptr& e, size_t n_slot, size_t k_slot, std::string_view c_name = {}, uint64_t c_sym = UINT64_MAX) {
+		if (!e) { return; }
+		switch (e->get_type()) {
+		case node_type::identifier_expr: {
+			auto* id = static_cast<identifier_expr*>(e.get());
+			if (id->name == "__n") { id->slot_index = n_slot; }
+			else if (id->name == "__k") { id->slot_index = k_slot; }
+			else if (id->name == "__c" && c_sym != UINT64_MAX) { id->name = c_name; id->symbol_id = c_sym; id->slot_index = 0; }
+			return;
+		}
+		case node_type::binary_expr: {
+			auto* b = static_cast<binary_expr*>(e.get());
+			renumber_chunk_slot(b->left, n_slot, k_slot, c_name, c_sym); renumber_chunk_slot(b->right, n_slot, k_slot, c_name, c_sym);
+			return;
+		}
+		case node_type::assignment_expr: {
+			auto* a = static_cast<assignment_expr*>(e.get());
+			renumber_chunk_slot(a->target, n_slot, k_slot, c_name, c_sym); renumber_chunk_slot(a->value, n_slot, k_slot, c_name, c_sym);
+			return;
+		}
+		case node_type::call_expr: {
+			auto* c = static_cast<call_expr*>(e.get());
+			for (auto& arg : c->arguments) { renumber_chunk_slot(arg, n_slot, k_slot, c_name, c_sym); }
+			return;
+		}
+		default:
+			return;
+		}
+	}
+
+	// Builds (once per statement) the chunk wrapper: skeleton by mode, the loop parameter
+	// itself as parameter 0 (the body's slot 0), __n/__k past the body's frame, the body block
+	// grafted in place of the placeholder (inline modes).
+	const std::shared_ptr<function_decl>& build_chunk_wrapper(engine& eng, parallel_for_stmt* stmt) {
+		if (stmt->chunk_decl_cache) { return stmt->chunk_decl_cache; }
+		const bool inline_mode = stmt->chunk_mode == 1;
+		const char* source = !inline_mode ? k_parallel_chunk_call
+		                   : stmt->loop_param.is_reference ? k_parallel_chunk_inline_ref : k_parallel_chunk_inline_val;
+		auto decl = parse_chunk_skeleton(eng, source);
+		if (inline_mode) {
+			const size_t n_slot = stmt->local_count, k_slot = stmt->local_count + 1;
+			parameter loop_param = stmt->loop_param;
+			loop_param.slot_index = 0;
+			if (loop_param.symbol_id == UINT64_MAX) { loop_param.symbol_id = eng.symbolize(loop_param.name); }
+			const uint64_t c_sym = loop_param.symbol_id;
+			const std::string_view c_name = eng.get_symbolizer()->get_string(c_sym);
+			decl->parameters[0] = loop_param;
+			decl->parameters[1].slot_index = n_slot;
+			auto* body_block = static_cast<block_stmt*>(decl->body.get());
+			for (auto& d : body_block->declarations) {
+				if (d->get_type() != node_type::statement_decl) { continue; }
+				auto& st = static_cast<statement_decl*>(d.get())->statement;
+				if (!st || st->get_type() != node_type::for_stmt) { continue; }
+				auto* loop = static_cast<for_stmt*>(st.get());
+				if (loop->initializer && loop->initializer->get_type() == node_type::variable_decl) {
+					static_cast<variable_decl*>(loop->initializer.get())->slot_index = k_slot;
+				}
+				renumber_chunk_slot(loop->condition, n_slot, k_slot, c_name, c_sym);
+				renumber_chunk_slot(loop->update, n_slot, k_slot, c_name, c_sym);
+				auto* inner = static_cast<block_stmt*>(loop->body.get());
+				for (auto& bd : inner->declarations) {
+					if (bd->get_type() != node_type::expression_decl) { continue; }
+					auto* ed = static_cast<expression_decl*>(bd.get());
+					if (ed->expression && ed->expression->get_type() == node_type::assignment_expr) {
+						renumber_chunk_slot(ed->expression, n_slot, k_slot, c_name, c_sym);   // `__c = __jai_parallel_element()` -> the loop variable
+						continue;
+					}
+					if (ed->expression && ed->expression->get_type() == node_type::call_expr) {
+						auto* call = static_cast<call_expr*>(ed->expression.get());
+						if (call->callee->get_type() == node_type::identifier_expr &&
+						    static_cast<identifier_expr*>(call->callee.get())->name == "__jai_parallel_placeholder") {
+							bd = std::make_shared<statement_decl>(bd->location, stmt->body);
+						}
+					}
+				}
+			}
+			decl->local_count = stmt->local_count + 2;
+		}
+		stmt->chunk_decl_cache = std::move(decl);
+		return stmt->chunk_decl_cache;
+	}
+
 	std::unique_ptr<parallel_worker_slot> provision_worker(engine& eng, const parallel_admission& adm,
 	                                                 std::chrono::nanoseconds budget,
-	                                                 bool use_vm) {
+	                                                 bool use_vm,
+	                                                 const std::shared_ptr<function_decl>* chunk_wrapper = nullptr) {
 		auto ctx = std::make_unique<parallel_worker_slot>();
 		ctx->env_epoch_sink = std::make_unique<string_symbolizer>();
 		ctx->root_env = std::make_shared<environment>(ctx->env_epoch_sink.get());
@@ -1267,6 +1437,30 @@ namespace {
 		for (const auto& [name_id, name] : adm.host_functions) {
 			ctx->root_env->define(name_id, eng.make_parallel_host_function_copy(name));
 		}
+		if (adm.inplace_root && chunk_wrapper && *chunk_wrapper) {
+			const std::shared_ptr<function_decl>& wrapper = *chunk_wrapper;
+			ctx->root_env->define(eng.symbolize("__jai_parallel_body"),
+				script_value::make_function(script_callable_thunk{ &eng, ctx->fn_payload }, &eng));
+			parallel_worker_slot* slot = ctx.get();   // slots live in the pool's unique_ptrs: stable
+			// The interpreter calls these natives; the vm compiles the names to opcodes
+			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
+				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+					if (slot->cursor) { slot->cursor->element_cursor_advance(); }
+					const script_int k = args.empty() ? 0 : args[0].deref().as_int();
+					return script_value(k + 1, eng_ptr);
+				}, &eng));
+			ctx->root_env->define(eng.symbolize("__jai_parallel_element"),
+				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>&) -> checked_result<script_value> {
+					if (!slot->cursor) { return script_value(std::monostate{}, eng_ptr); }
+					return *slot->cursor;
+				}, &eng));
+			auto chunk_fn = std::make_shared<script_defined_function>(
+				wrapper->name, std::vector<parameter>(wrapper->parameters), wrapper->return_type,
+				wrapper->body, ctx->root_env, wrapper->local_count);
+			if (ctx->vm) { ctx->vm->precompile_parallel_function(*chunk_fn); }
+			ctx->chunk_payload.kind = script_callable::kind_type::function;
+			ctx->chunk_payload.fn = chunk_fn;
+		}
 		return ctx;
 	}
 
@@ -1277,41 +1471,30 @@ namespace {
 	// output, results discarded. Every refcount touched is element-internal
 	// (normalization made elements exclusive) or worker-private: single-threaded.
 	void run_worker_inplace(parallel_worker_slot& ctx, engine& eng) {
+		if (ctx.end <= ctx.begin || ctx.element_refs.empty()) { return; }
+		// ONE script entry per chunk: the wrapper loops in-script, calling the body per element
+		// with the chunk's cursor reference and advancing it through the worker's intrinsic. The
+		// failing element, when any, is the cursor's index (the advance runs after a body call).
+		ctx.cursor.emplace(std::move(ctx.element_refs[0]));
+		if (ctx.vm) { ctx.vm->set_parallel_cursor(&*ctx.cursor); }
+		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursor(nullptr); } } } cursor_guard{ ctx };
+		auto failing = [&ctx]() { const size_t i = ctx.cursor->element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
 		std::vector<script_value> call_args;
-		call_args.emplace_back(std::monostate{}, &eng);
-		const bool by_ref = !ctx.raw_input && !ctx.typed_input;
-		if (by_ref && !ctx.element_refs.empty()) { call_args[0] = std::move(ctx.element_refs[0]); }
-		size_t i = ctx.begin;
+		call_args.push_back(*ctx.cursor);
+		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
 		try {
-			for (; i < ctx.end; ++i) {
-				if (by_ref) {
-					auto* cursor = call_args[0].element_cursor_holder();
-					if (!cursor) {
-						ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::unsupported_operation),
-							"parallel_for: the element reference escaped its iteration (internal) - please report this body shape",
-							ctx.limits.terminal_error };
-						return;
-					}
-					cursor->container_index = i;
-				} else {
-					call_args[0] = ctx.raw_input ? (*ctx.raw_input)[i] : ctx.typed_input->get(i, &eng);
-				}
-				auto r = ctx.backend->execute_callable(ctx.fn_payload, call_args);
-				if (ctx.backend->is_unwinding()) {
-					ctx.error = parallel_worker_error{ i,
-						make_error_code(runtime_error_code::evaluation_failed),
-						ctx.backend->get_current_exception().what(),
-						ctx.limits.terminal_error };
-					return;
-				}
-				if (!r) {
-					ctx.error = parallel_worker_error{ i, r.error(),
-						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
-					return;
-				}
+			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
+			if (ctx.backend->is_unwinding()) {
+				ctx.error = parallel_worker_error{ failing(),
+					make_error_code(runtime_error_code::evaluation_failed),
+					ctx.backend->get_current_exception().what(),
+					ctx.limits.terminal_error };
+			} else if (!r) {
+				ctx.error = parallel_worker_error{ failing(), r.error(),
+					format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
 			}
 		} catch (const std::exception& e) {
-			ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::cpp_exception),
+			ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
 				e.what(), ctx.limits.terminal_error };
 		}
 	}
@@ -2541,10 +2724,14 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// The shared body function (admission + pool key + per-worker provisioning source).
 	// Hot reload reparses into a fresh statement node, so this cache cannot go stale.
 	if (!stmt->body_fn_cache) {
-		if (const statement* bad = parallel_body_control_rewrite(stmt->body, 0, 0)) {
+		body_control_scan scan;
+		scan_parallel_body_control(stmt->body, 0, 0, scan);
+		if (scan.bad_break) {
 			return usage("parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element) at " +
-			             std::to_string(bad->location.line) + ":" + std::to_string(bad->location.column));
+			             std::to_string(scan.bad_break->location.line) + ":" + std::to_string(scan.bad_break->location.column));
 		}
+		stmt->chunk_mode = scan.nested_return ? 2 : 1;
+		rewrite_parallel_body_control(stmt->body, 0, stmt->chunk_mode == 1);
 		auto body_block = std::dynamic_pointer_cast<block_stmt>(stmt->body);
 		if (!body_block) {
 			return usage("parallel_for: body is not a block (internal)");
@@ -2565,6 +2752,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	if (!adm->admitted) {
 		return raise(adm->code, adm->message);
 	}
+	const std::shared_ptr<function_decl>& chunk_wrapper = build_chunk_wrapper(eng, stmt);
 
 	// CAPTURED READS resolve through the statement's enclosing environment chain (its
 	// walk reaches the global env; slot-resident function locals are not env-visible
@@ -2742,6 +2930,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 				}
 				slot->capture_name_ids.clear();
 				slot->element_refs.clear();
+				slot->cursor.reset();
 				slot->raw_input = nullptr;
 				slot->typed_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
@@ -2772,28 +2961,22 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		if (slot && slot_matches(*slot, *adm, *body_fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
 		} else {
-			slot = provision_worker(eng, *adm, budget, use_vm);
+			slot = provision_worker(eng, *adm, budget, use_vm, &chunk_wrapper);
 		}
 		slot->begin = bounds[k];
 		slot->end = bounds[k + 1];
 		slot->element_refs.clear();
 		slot->raw_input = nullptr;
 		slot->typed_input = nullptr;
-		if (by_ref_element) {
-			// ONE cursor reference per chunk, minted here (the array pin and the live_elem_refs
-			// count are main-thread facts) and re-pointed per iteration on the worker: an
-			// admitted body cannot retain it past its iteration (no lambdas, no 'new', stores
-			// deref, captured state is read-only, the result is discarded)
-			if (slot->end > slot->begin) {
-				slot->element_refs.push_back(script_value::make_element_reference(array_handle, slot->begin, &eng, element_type));
-			}
-		} else if (typed_obj) {
-			slot->typed_input = source_node;   // slots box per iteration: the same handle a vector element holds
-		} else {
-			// Plain-auto element: workers read the live vector directly; the by-value
-			// binding clones (value semantics), and normalization made every element
-			// exclusive, so those clones touch no cross-thread counts
-			slot->raw_input = &source;
+		// ONE cursor reference per chunk, minted here (the array pin and the live_elem_refs
+		// count are main-thread facts) and re-pointed per element by the worker's chunk loop:
+		// a by-ref body binds it, a by-value body copies through it exactly as it would the
+		// element (normalization made every element exclusive, so those copies touch no
+		// cross-thread counts). An admitted body cannot retain it past its iteration (no
+		// lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
+		(void)by_ref_element; (void)typed_obj;
+		if (slot->end > slot->begin) {
+			slot->element_refs.push_back(script_value::make_element_reference(array_handle, slot->begin, &eng, element_type));
 		}
 		slot->capture_name_ids.clear();
 		bool any_snapshot_miss = false;

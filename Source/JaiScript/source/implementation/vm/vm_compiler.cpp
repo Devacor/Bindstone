@@ -2189,6 +2189,17 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			emit(opcode::op_from_this, ident->name == "weak_from_this" ? 1u : 0u, add_symbol(ident->symbol_id));
 			return;
 		}
+		// parallel_for chunk-loop intrinsics (detail/parallel_transform.cpp k_parallel_chunk_*):
+		// reserved names, one opcode each instead of a native call per element
+		if (ident->name == "__jai_parallel_advance" && expr->arguments.size() == 1) {
+			compile_expression(expr->arguments[0]);
+			emit(opcode::op_parallel_advance);
+			return;
+		}
+		if (ident->name == "__jai_parallel_element" && expr->arguments.empty()) {
+			emit(opcode::op_parallel_element);
+			return;
+		}
 	}
 	if (expr->callee->get_type() == node_type::member_expr) {
 		auto member = std::static_pointer_cast<member_expr>(expr->callee);

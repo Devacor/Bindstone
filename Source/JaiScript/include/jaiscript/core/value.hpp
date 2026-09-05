@@ -2396,6 +2396,23 @@ namespace jai {
                    !holder->owner_instance && !holder->property ? holder.get() : nullptr;
         }
 
+        // The parallel_for chunk cursor: an ELEMENT-mode reference the worker's chunk loop
+        // shares with the body call, re-pointed at the next slot after each element. Unlike
+        // element_cursor_holder this ignores sharing - the wrapper and the body hold copies
+        // by design; an admitted body cannot retain one past its iteration.
+        bool element_cursor_advance() noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return false; }
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            if (!holder || !holder->container || holder->has_map_key) { return false; }
+            ++holder->container_index;
+            return true;
+        }
+        size_t element_cursor_index() const noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return SIZE_MAX; }
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            return holder && holder->container ? holder->container_index : SIZE_MAX;
+        }
+
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {

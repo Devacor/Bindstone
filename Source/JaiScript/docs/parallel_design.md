@@ -133,12 +133,27 @@ index when nothing else shares it, else a fresh mint) - top-level loops keep the
 mint so destructor timing stays byte-parallel. On a typed object or string array the holder's
 boxed view is refreshed only when the slot's handle changed (`script_array::view_current`).
 
-**Body control flow.** The body runs once per element as a function: a top-level `continue`
-means the next element on both backends (rewritten to a bare `return` once, at body-function
-creation), `return` does the same, and a loop-level `break` is rejected at admission
-(`parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use
-'continue' for the next element) at line:col`); inside a nested loop or switch both keep their
-C++ meaning.
+**The worker runs its chunk in-script.** A worker enters script ONCE per region: the
+statement's chunk wrapper (`build_chunk_wrapper`, built once per statement from a parsed
+skeleton) is a counter loop with the body block grafted in as the loop body -
+`for (__k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { <body> }` - so there are
+zero calls per element: the loop variable is the wrapper's own parameter 0 (the body's slot,
+same name), `__n`/`__k` are renumbered past the body's frame, and the advance is one vm
+opcode (`op_parallel_advance`; a native on the interpreter) that re-points the chunk's
+cursor. A by-reference loop variable binds the cursor once and follows it; a by-value one
+copies through it per iteration (`__c = __jai_parallel_element()`). A body that returns from
+inside a NESTED loop keeps its meaning through call mode (`__jai_parallel_body(__c)` per
+element, the previous shape). Floor benchmark after (vm, us per region, parallel vs serial):
+N=32 14 vs 7.8, N=256 45 vs 60, N=2048 160 vs 495; an inline field-update body at N=2048
+runs 115 vs 427.
+
+**Body control flow.** The body is the chunk loop's body: a top-level `continue` reaches
+the loop's advance on its own and a top-level `return` (any value) is rewritten to `continue`
+once, at body-function creation - both mean the next element on both backends; a loop-level
+`break` is rejected at admission (`parallel_for: 'break' is not allowed in a parallel body
+(iterations are independent; use 'continue' for the next element) at line:col`); inside a
+nested loop or switch break/continue keep their C++ meaning, and a `return` inside a nested
+loop selects call mode for that body.
 
 ## 4. Read safety under non-atomic refcounts
 

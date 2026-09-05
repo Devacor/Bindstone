@@ -12461,6 +12461,25 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (!stack_.empty()) { stack_.pop_back(); }
 				break;
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
+			case opcode::op_parallel_advance: {
+				if (!parallel_cursor_ || stack_.empty()) {
+					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+						std::string_view("__jai_parallel_advance is only valid inside a parallel_for chunk")));
+					break;
+				}
+				parallel_cursor_->element_cursor_advance();
+				script_value& counter = stack_.back();
+				counter = script_value(counter.deref().as_int() + 1, engine_);
+				break;
+			}
+			case opcode::op_parallel_element:
+				if (!parallel_cursor_) {
+					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+						std::string_view("__jai_parallel_element is only valid inside a parallel_for chunk")));
+					break;
+				}
+				stack_.push_back(*parallel_cursor_);
+				break;
 
 			case opcode::op_to_bool: {
 				script_value v = std::move(stack_.back());

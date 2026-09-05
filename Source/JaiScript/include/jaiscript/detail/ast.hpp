@@ -612,6 +612,11 @@ namespace jai {
         // keys admission + the region slot pools; hot reload reparses the file and
         // mints a fresh node, so the cache can never go stale.
         mutable std::shared_ptr<script_defined_function> body_fn_cache;
+        // The worker's chunk loop for this statement (parallel_transform.cpp build_chunk_wrapper):
+        // the body grafted into a counter loop (mode 1), or a call per element when the body
+        // returns from inside a nested loop (mode 2). 0 = not built yet.
+        mutable std::shared_ptr<class function_decl> chunk_decl_cache;
+        mutable uint8_t chunk_mode = 0;
 
         parallel_for_stmt(const source_location& loc, parameter p, expression_ptr cont, statement_ptr b)
             : statement(loc, node_type::parallel_for_stmt), loop_param(std::move(p)),

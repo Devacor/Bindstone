@@ -281,6 +281,10 @@ namespace jai::vm {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
+        // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
+        script_value* parallel_cursor_ = nullptr;
+        void set_parallel_cursor(script_value* cursor) noexcept { parallel_cursor_ = cursor; }
         // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
         // Worker-private env-lookup cache (workers may not touch the SHARED

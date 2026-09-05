@@ -73,6 +73,7 @@ namespace jai::detail {
     // swaps function values; body-pointer equality is the staleness check).
     struct parallel_admission {
         bool admitted = false;
+        bool inplace_root = false;   // parallel_for body (element bound in place) vs a transform fn
         std::error_code code{};
         std::string message;   // full "parallel_transform: ..." text (owned)
 

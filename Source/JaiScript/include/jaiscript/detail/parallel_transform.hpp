@@ -15,6 +15,7 @@
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/fault_injection.hpp>
 #include <jaiscript/detail/thread_pool.hpp>
 #include <map>
 #include <memory>
@@ -179,6 +180,8 @@ namespace jai::detail {
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
         std::mutex instance_registry_mutex;                // class_definition instance registry, region-time only
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
+        bool pending_registration_retry = false;           // exceptional join: drain before cache mutation or class reload
+        fault_injection faults;                            // host/test checkpoints; disabled by default
         bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         std::unordered_map<const void*, parallel_admission> admission_cache;
@@ -258,6 +261,9 @@ namespace jai::detail {
         parallel_engine_state();
         ~parallel_engine_state();   // out of line: worker_slot is incomplete here
     };
+
+    // Main-thread exceptional-join recovery, shared by region entry and class reload.
+    void recover_pending_registrations(parallel_engine_state& state);
 
     // The builtin bodies (registered by the engine constructor).
     checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args);

@@ -68,6 +68,12 @@ namespace jai::detail {
 	// afterwards; rebuilt only when the fingerprint stops matching. Owned by
 	// parallel_engine_state::worker_slots (engine lifetime).
 	struct parallel_worker_slot {
+		~parallel_worker_slot() {
+			// Private callables close over this environment. Break that cycle before
+			// the backend and its epoch sink die, including partially built slots.
+			if (root_env) { root_env->clear_values(); }
+		}
+
 		std::unique_ptr<string_symbolizer> env_epoch_sink;
 		std::shared_ptr<environment> root_env;
 		execution_limits limits;
@@ -82,6 +88,7 @@ namespace jai::detail {
 		// registered by the join, expired entries skipped)
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
+		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector (Dev ruling 2026-07-09 "safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
 		// scan) mint worker-local copies with zero refcount traffic, and elements the
@@ -189,6 +196,27 @@ namespace jai::detail {
 #endif
 
 namespace {
+
+	// One drain for the normal join and exceptional-exit retry. Erasing only the
+	// consumed prefix prevents duplicate registration while preserving live objects
+	// that escaped through in-place stores. weak_ptr movement/erase does not allocate.
+	void drain_pending_instances(parallel_engine_state& state, parallel_worker_slot& slot) {
+		auto& pending = slot.pending_instances;
+		size_t consumed = 0;
+		try {
+			for (; consumed < pending.size(); ++consumed) {
+				auto& weak = pending[consumed];
+				if (auto live = weak.lock()) {
+					state.faults.checkpoint("region.instance_register");
+					live->get_class_definition()->register_instance_after_region(weak, &state.faults);
+				}
+			}
+		} catch (...) {
+			if (consumed) { pending.erase(pending.begin(), pending.begin() + consumed); }
+			throw;
+		}
+		pending.clear();
+	}
 
 	constexpr size_t k_parallel_small_n = 16;   // below this, one context on the calling thread
 	// A pool worker earns its keep when its chunk is worth k_parallel_chunk_overhead_ratio times
@@ -354,12 +382,16 @@ namespace {
 		const size_t workers = state.pool->worker_count();
 		if (!workers) { return; }
 		std::vector<std::pair<size_t, jai::thread_pool::task_type>> tasks;
+		state.faults.checkpoint("calibration.task_storage");
 		tasks.reserve(workers);
-		for (size_t k = 0; k < workers; ++k) { tasks.emplace_back(k, [] {}); }
+		for (size_t k = 0; k < workers; ++k) {
+			state.faults.checkpoint("calibration.task_build", k);
+			tasks.emplace_back(k, [] {});
+		}
 		double best = 0.0;
 		for (int round = 0; round < 3; ++round) {
 			const auto t0 = std::chrono::steady_clock::now();
-			state.pool->submit_pinned_batch(tasks.data(), tasks.size());
+			state.pool->submit_pinned_batch(tasks.data(), tasks.size(), &state.faults);
 			state.pool->wait_idle();
 			const double ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
 			const double per_worker = ns / static_cast<double>(workers);
@@ -1801,11 +1833,8 @@ namespace {
 		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); }
 		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursors(nullptr); } } } cursor_guard{ ctx };
 		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
-		std::vector<script_value> call_args;
-		for (const auto& cursor : ctx.cursors) { call_args.push_back(cursor); }
-		call_args.emplace_back(static_cast<script_int>(ctx.end - ctx.begin), &eng);
 		try {
-			auto r = ctx.backend->execute_callable(ctx.chunk_payload, call_args);
+			auto r = ctx.backend->execute_callable(ctx.chunk_payload, ctx.call_args);
 			if (ctx.backend->is_unwinding()) {
 				ctx.error = parallel_worker_error{ failing(),
 					make_error_code(runtime_error_code::evaluation_failed),
@@ -2546,6 +2575,18 @@ namespace {
 } // namespace
 
 // ============================== THE REGION (one fork for both forms) ==============================
+void recover_pending_registrations(parallel_engine_state& state) {
+	if (!state.pending_registration_retry || state.active_region) { return; }
+	// Recover every retained pool before eviction, slot replacement or a class
+	// reload could discard pending copies or omit them from a migration snapshot.
+	for (auto& pool : state.region_pools) {
+		for (auto& slot : pool.worker_slots) {
+			if (slot) { drain_pending_instances(state, *slot); }
+		}
+	}
+	state.pending_registration_retry = false;
+}
+
 // parallel_for and parallel_transform run the SAME region: containers[0] is the range (the
 // transform's input), further containers are the zip's arrays (the transform's output is one),
 // every chunk gets one cursor per array, and each worker enters script once to run its chunk
@@ -2576,6 +2617,7 @@ struct region_plan {
 // The zip's arrays and the range: an array, the range's length, distinct from the range
 checked_result<void> run_region(engine& eng, region_plan& plan) {
 	parallel_engine_state& state = eng.parallel_state();
+	recover_pending_registrations(state);
 	const std::string pfx = std::string(plan.prefix) + ": ";
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
@@ -2599,6 +2641,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// contract A errors instead of silently demoting; snapshots of it stay legal.
 	std::vector<resolved_capture> captures;
 	state.last_captures.clear();
+	state.faults.checkpoint("region.capture_storage");
 	captures.reserve(adm->captures.size());
 	auto written_container = [&](const script_value& v) {
 		if (v.raw_storage_index() != script_value::TYPEID_ARRAY) { return false; }
@@ -2656,7 +2699,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		default:
 			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
 		}
+		state.faults.checkpoint("region.capture_metadata", captures.size());
 		state.last_captures.emplace_back(entry.name_id, cap.kind);
+		state.faults.checkpoint("region.capture_collect", captures.size());
 		captures.push_back(std::move(cap));
 		return {};
 	};
@@ -2674,6 +2719,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// proof (Dev ruling: the declared type of a typed array is a proven fact about every element).
 	const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
 	script_value boxed_range(std::monostate{}, &eng);
+	state.faults.checkpoint("region.input_storage");
 	if (source_node->is_typed() && !typed_obj) {
 		if (plan.inplace) {
 			const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
@@ -2705,6 +2751,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	element_proof proof;
 	const bool skip_proof = !plan.inplace && (statically_all_primitive(array_value) || parallel_content_all_primitive(array_value));
 	if (!skip_proof) {
+		state.faults.checkpoint("region.element_proof");
 		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types);
 		if (proof.failed != SIZE_MAX) {
 			if (!proof.what.empty()) {
@@ -2735,6 +2782,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		if (!zv.is_array()) {
 			return usage("zipped array " + std::to_string(j + 1) + " is not an array");
 		}
+		state.faults.checkpoint("region.zip_storage", j);
 		script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
 		if (znode->size() != n) {
 			return usage("zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
@@ -2770,6 +2818,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
 	size_t method_capture_base = 0;
+	state.faults.checkpoint("region.method_admission");
 	if (plan.inplace && !element_classes.empty()) {
 		method_adm.adm.element_method_calls = adm->element_method_calls;
 		for (const auto& entry : adm->captures) {
@@ -2800,9 +2849,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		return usage("custom execution backends are not supported");
 	}
 	const bool use_vm = engine_backend == backend_type::vm;
+	state.faults.checkpoint("region.pool_storage");
 	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
 	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
 	std::vector<size_t> bounds;
+	state.faults.checkpoint("region.bounds");
 	if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
 		bounds = plan.bounds;                       // the caller's weighted partition
 		worker_count = bounds.size() - 1;
@@ -2812,41 +2863,91 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 	fprintf(stderr, "[region-profile] %s n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", plan.prefix, n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
 #endif
+	state.faults.checkpoint("region.bounds_metadata");
 	state.last_chunk_bounds = bounds;
 	if (pool->worker_slots.size() < worker_count) {
+		state.faults.checkpoint("region.worker_storage");
 		pool->worker_slots.resize(worker_count);
 	}
 	std::vector<parallel_worker_slot*> contexts;
+	state.faults.checkpoint("region.context_storage");
 	contexts.reserve(worker_count);
 
-	// Join guard: no capture define, cursor or method pin survives this call - the holders
-	// pin the caller's arrays, and a dormant slot must never do that. Cached snapshot copies
-	// persist (worker-owned nodes only), and provisioned_nodes with them (rebuild-on-miss).
-	struct join_guard_t {
+	// One owner for activation, the thread table, join obligations and borrowed storage.
+	// A failed setup discards partial reusable slots; a completed setup keeps their caches.
+	struct region_guard_t {
 		engine& eng;
+		parallel_engine_state& state;
 		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
 		size_t count;
-		~join_guard_t() {
+		parallel_region_table table;
+		parallel_region_table* previous_region;
+		bool previous_frozen;
+		jai::thread_pool* pending_pool = nullptr;
+		bool active = false;
+		bool prepared = false;
+
+		region_guard_t(engine& e, parallel_engine_state& s,
+		               std::vector<std::unique_ptr<parallel_worker_slot>>& workers, size_t n)
+			: eng(e), state(s), slots(workers), count(n),
+			  previous_region(s.active_region), previous_frozen(e.get_symbolizer()->frozen()) {}
+		region_guard_t(const region_guard_t&) = delete;
+		region_guard_t& operator=(const region_guard_t&) = delete;
+
+		void activate(bool freeze_symbols) noexcept {
+			// Accepted work can create live copies even if a later submit throws.
+			// Only a complete post-join drain clears this obligation.
+			state.pending_registration_retry = true;
+			if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
+			state.active_region = &table;
+			active = true;
+		}
+		void join() {
+			if (pending_pool) {
+				pending_pool->wait_idle();
+				pending_pool = nullptr;
+			}
+		}
+		void restore() noexcept {
+			if (active) {
+				state.active_region = previous_region;
+				eng.get_symbolizer()->set_frozen(previous_frozen);
+				active = false;
+			}
+		}
+		~region_guard_t() {
+			join();                 // accepted work must finish before table/cursor destruction
+			restore();
 			for (size_t k = 0; k < count && k < slots.size(); ++k) {
+				if (!prepared) {
+					slots[k].reset();    // includes an environment whose publication only partly succeeded
+					continue;
+				}
 				parallel_worker_slot* slot = slots[k].get();
 				if (!slot) { continue; }
 				for (uint64_t id : slot->capture_name_ids) {
-					slot->root_env->define(id, script_value(std::monostate{}, &eng));
+					if (script_value* value = slot->root_env->get_own_value_ptr(id)) {
+						*value = script_value(std::monostate{}, &eng);   // existing storage, no allocation
+					}
 				}
 				slot->capture_name_ids.clear();
 				slot->element_refs.clear();
 				slot->cursors.clear();
+				slot->call_args.clear();
+				slot->raw_input = nullptr;
+				slot->typed_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
 				slot->method_pins.entries.clear();
 			}
 		}
-	} join_guard{ eng, pool->worker_slots, worker_count };
+	} region_guard{ eng, state, pool->worker_slots, worker_count };
 	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
 
 	auto& range_handle = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage()
 	                                            : const_cast<script_value&>(array_value).unchecked_get_array_storage();
 	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
 	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
+	state.faults.checkpoint("region.type_metadata");
 	value_types.insert(value_types.end(), tags.begin(), tags.end());   // subclass slots carry their own tags
 	value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
 	for (size_t j = 1; j < containers.size(); ++j) {
@@ -2855,6 +2956,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = pool->worker_slots[k];
+		state.faults.checkpoint("region.worker_slot", k);
 		if (slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
 		} else {
@@ -2872,6 +2974,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		// as it would the element (normalization made every element exclusive, so those copies
 		// touch no cross-thread counts). An admitted body cannot retain it past its iteration
 		// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
+		state.faults.checkpoint("region.cursor_storage", k);
 		if (slot->end > slot->begin) {
 			slot->element_refs.push_back(script_value::make_element_reference(range_handle, slot->begin, &eng, element_type));
 			for (size_t j = 0; j < zip_nodes.size(); ++j) {
@@ -2881,6 +2984,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
 			}
 		}
+		// Argument storage also belongs to the region guard. Build it before fan-out so an
+		// allocation failure cannot escape the worker's entry and be swallowed by the pool.
+		slot->call_args.clear();
+		state.faults.checkpoint("region.worker_arguments", slot->begin);
+		slot->call_args.reserve(slot->element_refs.size() + 1);
+		for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
+		slot->call_args.emplace_back(static_cast<script_int>(slot->end - slot->begin), &eng);
+
 		// Provision the captured reads into THIS worker's root env (single-threaded, charged
 		// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
 		// cross-region cache (content-proven against the live source), borrows mint the
@@ -2889,6 +3000,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		bool any_snapshot_miss = false;
 		std::vector<const void*> fresh_nodes;
 		for (const auto& cap : captures) {
+			state.faults.checkpoint("region.capture_value", k);
 			script_value provisioned(std::monostate{}, &eng);
 			try {
 				switch (cap.kind) {
@@ -2914,13 +3026,17 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			} catch (const std::exception& e) {
 				return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
 			}
-			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
+			state.faults.checkpoint("region.capture_track", k);
 			slot->capture_name_ids.push_back(cap.entry->name_id);
+			state.faults.checkpoint("region.capture_publish", k);
+			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
 		}
+		state.faults.checkpoint("region.snapshot_metadata", k);
 		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
 		// Method pins: each worker gets a dispatcher copy per admitted element method
 		slot->method_pins.entries.clear();
 		for (const auto& am : method_adm.admitted_methods) {
+			state.faults.checkpoint("region.method_pin", k);
 			const script_value shared_method = am.cls->get_method(am.name_id, false);
 			const script_method_dispatch* src = shared_method.is_function()
 				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
@@ -2943,6 +3059,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 
 	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze
+	state.faults.checkpoint("region.prewarm");
 	prewarm_region_types(eng, [&] {
 		std::vector<type_info*> seed = adm->referenced_types;
 		if (plan.extra_seed_adm) { seed.insert(seed.end(), plan.extra_seed_adm->referenced_types.begin(), plan.extra_seed_adm->referenced_types.end()); }
@@ -2958,31 +3075,37 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
 	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
 	// is built once per engine at the engine's worker count (calibrated then).
-	parallel_region_table table;
+	auto& table = region_guard.table;
+	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
+			state.faults.checkpoint("region.pool_create");
 			state.pool = std::make_unique<jai::thread_pool>(
-				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)));
+				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults);
+			region_guard.pending_pool = state.pool.get();
 			calibrate_pool_overhead(state);
+			region_guard.pending_pool = nullptr;   // calibration joined each completed batch
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
+			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
 		}
 	}
-	const bool freeze_symbols = !eng.allow_unsafe_parallel();
-	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
-	state.active_region = &table;
+	region_guard.prepared = true;
+	region_guard.activate(!eng.allow_unsafe_parallel());
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
 	fprintf(stderr, "[region-profile] %s setup split: normalize %llu | provision+rest %llu cyc\n", plan.prefix, (unsigned long long)(prof_norm1 - prof_norm0), (unsigned long long)(prof_t1 - prof_norm1));
 #endif
 	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
+	state.faults.checkpoint("region.tasks_reserve");
 	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 	for (size_t k = 1; k < worker_count; ++k) {
 		parallel_worker_slot* ctx = contexts[k];
 		engine* eng_ptr = &eng;
+		state.faults.checkpoint("region.task_build", k);
 		region_tasks.emplace_back(k - 1, [ctx, eng_ptr] {
 #ifdef JAISCRIPT_VM_PROFILE
 			ctx->prof_start_tsc = __rdtsc();
@@ -2994,7 +3117,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		});
 	}
 	if (!region_tasks.empty()) {
-		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size());
+		region_guard.pending_pool = state.pool.get();   // BEFORE a possibly partial submission
+		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size(), &state.faults);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();
@@ -3005,9 +3129,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t3 = __rdtsc();
 #endif
-	if (worker_count > 1) {
-		state.pool->wait_idle();
-	}
+	region_guard.join();
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t4 = __rdtsc();
 	if (plan.prof) {
@@ -3028,15 +3150,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 #endif
-	state.active_region = nullptr;
+	region_guard.restore();   // registration below can allocate or throw
 	for (auto* ctx : contexts) {   // worker-created instances join the class registries now, unlocked
-		for (auto& weak : ctx->pending_instances) {
-			if (auto live = weak.lock()) { live->get_class_definition()->register_instance_after_region(weak); }
-		}
-		ctx->pending_instances.clear();
+		drain_pending_instances(state, *ctx);
 	}
-	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(false); }
-
+	state.pending_registration_retry = false;
 	// JOIN: memory roll-up, then ITERATION order picks the error a region reports
 	size_t rolled_up = 0;
 	for (const auto& ctx : contexts) {

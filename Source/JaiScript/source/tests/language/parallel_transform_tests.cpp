@@ -4,8 +4,17 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/core/jaibite.hpp>
+#include <jaiscript/detail/string_symbolizer.hpp>
+#include <cstring>
+#include <new>
+#include <thread>
+#include <atomic>
+#include <unordered_set>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -2262,9 +2271,508 @@ public:
 	}
 };
 
+// These hooks model exceptions at named region/pool stages. They do not replace
+// the allocator or claim coverage of every nested allocation inside the STL.
+class parallel_region_fault_tests : public suite {
+public:
+	parallel_region_fault_tests() : suite("Parallel Region Faults") {}
+
+	struct fault_trace {
+		std::thread::id main_thread = std::this_thread::get_id();
+		std::vector<std::pair<std::string, size_t>> visits;
+		size_t fail_ordinal = SIZE_MAX;
+		const char* fail_point = nullptr;
+		bool fired = false;
+
+		static void visit(void* context, const char* point, size_t index) {
+			auto& trace = *static_cast<fault_trace*>(context);
+			// Worker checkpoints have their own pool/worker tests. This sweep's
+			// ordinal is deterministic and its trace needs no shared mutable state.
+			if (std::this_thread::get_id() != trace.main_thread) { return; }
+			const size_t ordinal = trace.visits.size();
+			trace.visits.emplace_back(point, index);
+			if (!trace.fired && (ordinal == trace.fail_ordinal ||
+			    (trace.fail_point && std::strcmp(point, trace.fail_point) == 0))) {
+				trace.fired = true;
+				throw std::bad_alloc();
+			}
+		}
+	};
+
+	struct fixture {
+		std::shared_ptr<engine> eng;
+		jai::jaibite call;
+		const script_array* input = nullptr;
+	};
+
+	// 0: transform, 1: in-place statement, 2: class-valued transform. The third
+	// shape reaches deferred registration, which primitive results cannot cover.
+	static fixture prepare(int shape, bool warm) {
+		fixture result;
+		result.eng = make_engine();
+		result.eng->execution_budget(0);
+		result.eng->parallel_thread_count(4);
+		result.eng->execute(R"(
+			int fault_bias = 7;
+			array<int> fault_lookup = [3];
+			array<string> fault_snapshot = ["a", "b"];
+			string fault_label = "abc";
+		)");
+		if (shape == 2) {
+			result.eng->execute(R"(
+				class FaultCell { int value = 0; FaultCell() {} }
+				array<FaultCell> fault_input = [];
+				for (int i = 0; i < 256; i++) { fault_input.push(FaultCell()); }
+				FaultCell fault_step(FaultCell x) {
+					x.value = fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
+					return x;
+				}
+			)");
+			result.call = result.eng->jaibite(R"(
+				var fault_output = parallel_transform(fault_input, fault_step);
+				fault_output[255].value;
+			)");
+		} else {
+			result.eng->execute(R"(
+				var fault_input = [];
+				for (int i = 0; i < 256; i++) { fault_input.push(i); }
+				int fault_step(int x) {
+					return x * 0 + fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
+				}
+			)");
+			result.call = result.eng->jaibite(shape == 1 ? R"(
+				parallel_for (auto& x : fault_input) {
+					x = fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
+				}
+				fault_input[255];
+			)" : R"(
+				var fault_output = parallel_transform(fault_input, fault_step);
+				fault_output[255];
+			)");
+		}
+		result.input = result.eng->get_variable("fault_input").unchecked_array_node();
+		if (warm) { check_eq(script_int(15), result.eng->execute(result.call).as_int()); }
+		// Adaptive fan-out is a performance hint, not a semantic input. Remove the
+		// measured cost from this test so fresh/warm ordinal traces use four slots.
+		auto& state = result.eng->parallel_state();
+		state.worker_overhead_ns = 0.0;
+		for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
+		return result;
+	}
+
+	static void arm(engine& eng, fault_trace& trace) {
+		auto& faults = eng.parallel_state().faults;
+		faults.context = &trace;
+		faults.callback = &fault_trace::visit;
+	}
+
+	static void disarm(engine& eng) {
+		auto& faults = eng.parallel_state().faults;
+		faults.callback = nullptr;
+		faults.context = nullptr;
+	}
+
+	static bool execute_injected(fixture& fixture, fault_trace& trace) {
+		arm(*fixture.eng, trace);
+		bool failed = false;
+		try { fixture.eng->execute(fixture.call); }
+		catch (const std::exception&) { failed = true; }
+		catch (...) {
+			disarm(*fixture.eng);
+			throw;
+		}
+		disarm(*fixture.eng);
+		return failed;
+	}
+
+	static void check_recovered(fixture& fixture, const std::string& label) {
+		auto& eng = *fixture.eng;
+		check_false(eng.parallel_region_active(), label + ": active region survived");
+		check_false(eng.parallel_state().region_running, label + ": running flag survived");
+		check_false(eng.get_symbolizer()->frozen(), label + ": symbolizer stayed frozen");
+		check_eq(uint32_t(0), fixture.input->live_elem_refs, label + ": input cursor survived");
+		check_eq(script_int(42), eng.execute("int after_injected_failure() { return 42; } after_injected_failure();").as_int(), label);
+		check_eq(script_int(15), eng.execute(fixture.call).as_int(), label + ": following identical region");
+		check_false(eng.parallel_region_active(), label);
+		check_false(eng.get_symbolizer()->frozen(), label);
+		check_eq(uint32_t(0), fixture.input->live_elem_refs, label + ": following region retained input");
+	}
+
+	void forge_tests() override {
+		test("task_storage_failure_restores_activation", [this]() {
+			auto fixture = prepare(0, false);
+			fault_trace trace;
+			trace.fail_point = "region.tasks_reserve";
+			const bool failed = execute_injected(fixture, trace);
+			const bool inactive = !fixture.eng->parallel_region_active();
+			const bool unfrozen = !fixture.eng->get_symbolizer()->frozen();
+			const bool stopped = !fixture.eng->parallel_state().region_running;
+			// This particular point precedes every region submission. Repair only
+			// after observing the flags so the test can fail safely on the old code.
+			fixture.eng->parallel_state().active_region = nullptr;
+			fixture.eng->parallel_state().region_running = false;
+			fixture.eng->get_symbolizer()->set_frozen(false);
+			check_true(trace.fired, "region.tasks_reserve checkpoint was not reached");
+			check_true(failed, "injected allocation failure did not reach the caller");
+			check_true(inactive, "allocation failure left a dangling active-region table");
+			check_true(unfrozen, "allocation failure left the symbolizer frozen");
+			check_true(stopped, "allocation failure left the reentrancy flag set");
+			check_recovered(fixture, "task storage");
+		});
+
+		test("worker_argument_failure_is_not_silently_swallowed", [this]() {
+			auto fixture = prepare(0, false);
+			auto call = fixture.eng->jaibite("parallel_transform(fault_input, fault_step).size();");
+			std::atomic<bool> fired{false};
+			auto& faults = fixture.eng->parallel_state().faults;
+			faults.context = &fired;
+			faults.callback = [](void* context, const char* point, size_t index) {
+				auto& fired = *static_cast<std::atomic<bool>*>(context);
+				if (std::strcmp(point, "region.worker_arguments") == 0 && index > 0 && !fired.exchange(true)) {
+					throw std::bad_alloc();
+				}
+			};
+			bool failed = false;
+			try { fixture.eng->execute(call); }
+			catch (const std::exception&) { failed = true; }
+			disarm(*fixture.eng);
+			check_true(fired.load(), "worker argument allocation checkpoint was not reached");
+			check_true(failed, "worker argument allocation failure was silently swallowed");
+			check_recovered(fixture, "worker arguments");
+		});
+
+		test("failed_provisioning_releases_worker_environment_cycles", [this]() {
+			std::weak_ptr<int> lifetime_probe;
+			{
+				auto token = std::make_shared<int>(7);
+				lifetime_probe = token;
+				fixture fixture;
+				fixture.eng = make_engine();
+				fixture.eng->execution_budget(0);
+				fixture.eng->parallel_thread_count(4);
+				fixture.eng->allow_unsafe_parallel(true);
+				// Admission currently still requires a whitelisted host name even in
+				// unsafe mode. Use a zero-argument sign overload local to this engine;
+				// the registered callable is the only remaining owner of the token.
+				fixture.eng->add_function("sign", [token]() -> script_int { return *token; });
+				token.reset();
+				check_false(lifetime_probe.expired(), "host callable did not retain its token");
+				fixture.eng->execute(R"(
+					array<int> lifetime_lookup = [1];
+					var lifetime_input = [];
+					for (int i = 0; i < 256; i++) { lifetime_input.push(i); }
+					int lifetime_wrapper(int x) { return x + sign() + lifetime_lookup[0]; }
+				)");
+				fixture.call = fixture.eng->jaibite("parallel_transform(lifetime_input, lifetime_wrapper).size();");
+				fault_trace trace;
+				trace.fail_point = "region.prewarm";
+				const bool failed = execute_injected(fixture, trace);
+				check_true(trace.fired, "failure must follow worker provisioning and capture publication");
+				check_true(failed, "prewarm failure did not reach the caller");
+				check_false(fixture.eng->parallel_region_active());
+				check_false(fixture.eng->parallel_state().region_running);
+				check_false(fixture.eng->get_symbolizer()->frozen());
+				check_eq(uint32_t(0), fixture.eng->get_variable("lifetime_input").unchecked_array_node()->live_elem_refs);
+				// No recovery call rebuilds the slots before this scope ends. Destroy
+				// every engine, bite and local owner; only the weak probe survives.
+			}
+			check_true(lifetime_probe.expired(),
+				"failed worker provisioning leaked a callable through its root-environment cycle");
+		});
+
+		test("every_main_thread_stage_recovers_fresh_and_reused_slots", [this]() {
+			for (int shape : {0, 1, 2}) {
+				for (bool warm : {false, true}) {
+					auto successful = prepare(shape, warm);
+					fault_trace trace;
+					check_false(execute_injected(successful, trace), "checkpoint discovery failed");
+					check_false(trace.visits.empty(), "no main-thread checkpoints recorded");
+					const auto expected = trace.visits;
+					bool saw_tasks = false;
+					bool saw_capture = false;
+					bool saw_registration = false;
+					for (const auto& event : expected) {
+						saw_tasks = saw_tasks || event.first == "region.tasks_reserve";
+						saw_capture = saw_capture || event.first == "region.capture_publish";
+						saw_registration = saw_registration || event.first == "region.instance_register";
+					}
+					check_true(saw_tasks, "task allocation checkpoint absent from trace");
+					check_true(saw_capture, "capture publication checkpoint absent from trace");
+					if (shape == 2) { check_true(saw_registration, "class output did not reach instance registration"); }
+
+					for (size_t ordinal = 0; ordinal < expected.size(); ++ordinal) {
+						auto fixture = prepare(shape, warm);
+						fault_trace injected;
+						injected.fail_ordinal = ordinal;
+						const bool failed = execute_injected(fixture, injected);
+						const auto& event = expected[ordinal];
+						const std::string label = std::string(warm ? "warm " : "fresh ") +
+							std::to_string(shape) + " " + event.first + "[" + std::to_string(event.second) +
+							"] #" + std::to_string(ordinal);
+						check_true(injected.fired, label + ": injection not reached");
+						check_true(failed, label + ": exception was swallowed");
+						check_eq(event.first, injected.visits[ordinal].first, label + ": checkpoint order drift");
+						check_eq(event.second, injected.visits[ordinal].second, label + ": checkpoint index drift");
+						check_recovered(fixture, label);
+					}
+				}
+			}
+		});
+
+		test("activation_restores_an_already_frozen_symbolizer", [this]() {
+			for (bool inject : {false, true}) {
+				auto fixture = prepare(0, true);
+				fault_trace trace;
+				if (inject) { trace.fail_point = "region.tasks_reserve"; }
+				fixture.eng->get_symbolizer()->set_frozen(true);
+				const bool failed = execute_injected(fixture, trace);
+				const bool still_frozen = fixture.eng->get_symbolizer()->frozen();
+				// The host deliberately froze it; return the engine to normal before
+				// assertion diagnostics or the fresh-symbol recovery test can run.
+				fixture.eng->get_symbolizer()->set_frozen(false);
+				check_eq(inject, failed, "unexpected warmed-region result");
+				check_true(still_frozen, "region discarded the host's prior frozen state");
+				if (inject) { check_true(trace.fired); }
+				check_recovered(fixture, "prior frozen state");
+			}
+		});
+	}
+};
+
+class parallel_registry_fault_tests : public suite {
+public:
+	parallel_registry_fault_tests() : suite("Parallel Registry Faults") {}
+
+	// A child copied into an in-place element survives an exceptional region. The
+	// normal join test already pins this value-semantic copy and later migration.
+	void check_pending_recovery(bool partial_submission, bool different_region, bool immediate_reload = false,
+	                            bool repeated_reload_failure = false) {
+		auto eng = make_engine();
+		eng->execution_budget(0);
+		eng->parallel_thread_count(4);
+		eng->execute(R"(
+			class PendingLeaf {
+				int v = 0;
+				PendingLeaf() {} PendingLeaf(int n) { v = n; }
+				int marker() { return v + 100; }
+			}
+			class PendingNode {
+				PendingLeaf a = PendingLeaf(0);
+				PendingLeaf b = PendingLeaf(0);
+				PendingNode() {}
+				PendingNode(int n) { a = PendingLeaf(n); b = PendingLeaf(-1); }
+			}
+			array<PendingNode> pending_nodes = [];
+			for (int i = 0; i < 256; i++) { pending_nodes.push(PendingNode(i)); }
+			bool pending_copy_enabled = false;
+		)");
+		auto call = eng->jaibite(R"(
+			parallel_for (auto& n : pending_nodes) {
+				if (pending_copy_enabled) { n.b = n.a; }
+			}
+			pending_nodes.size();
+		)");
+		// Warm the pool before arming the batch hook: calibration also submits a
+		// batch, but carries no class copies and is not the failure under test.
+		check_eq(script_int(256), eng->execute(call).as_int());
+		auto& state = eng->parallel_state();
+		state.worker_overhead_ns = 0.0;
+		for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
+		auto def = eng->get_class_registry().find_script_class("PendingLeaf");
+		check_not_null(def);
+		const size_t expected_live = def->live_instances().size();
+		const script_array* input = eng->get_variable("pending_nodes").unchecked_array_node();
+		eng->execute("pending_copy_enabled = true;");
+
+		struct injection {
+			const char* point;
+			size_t matches = 0;
+			bool fired = false;
+			static void visit(void* context, const char* point, size_t) {
+				auto& self = *static_cast<injection*>(context);
+				if (std::strcmp(self.point, point) == 0 && ++self.matches == 2) {
+					self.fired = true;
+					throw std::bad_alloc();
+				}
+			}
+		} failure{ partial_submission ? "pool.batch_enqueue" : "registry.instance_append" };
+		state.faults = { &failure, &injection::visit };
+		bool failed = false;
+		try { eng->execute(call); }
+		catch (const std::exception&) { failed = true; }
+		catch (...) { state.faults = {}; throw; }
+		state.faults = {};
+		check_true(failure.fired, "second submission/registration checkpoint was not reached");
+		check_true(failed, "injected failure did not reach the caller");
+		check_false(eng->parallel_region_active(), "exception left the region active");
+		check_false(state.region_running, "exception left the region running");
+		check_false(eng->get_symbolizer()->frozen(), "exception left the symbolizer frozen");
+		check_eq(uint32_t(0), input->live_elem_refs, "exception retained an element cursor");
+
+		if (repeated_reload_failure) {
+			// The first failed join retained a pending suffix. Fail AGAIN while an
+			// immediate hot reload drains it, before executing another region. A
+			// drain in redefine_class is too late: both backend builders have already
+			// replaced constructor ASTs and method overloads by the time it runs.
+			const std::string replacement = R"(
+				class PendingLeaf {
+					int v = 0;
+					PendingLeaf() {} PendingLeaf(int n) { v = n + 1000; }
+					int marker() { return v + 1000; }
+				}
+			)";
+			injection retry_failure{ "registry.instance_append" };
+			state.faults = { &retry_failure, &injection::visit };
+			bool reload_failed = false;
+			try { eng->execute(replacement); }
+			catch (const std::exception&) { reload_failed = true; }
+			catch (...) { state.faults = {}; throw; }
+			state.faults = {};
+			check_true(retry_failure.fired, "immediate reload did not retry pending registrations");
+			check_true(reload_failed, "second injected registration failure did not reach the caller");
+			check_true(state.pending_registration_retry, "second failure discarded the remaining retry obligation");
+			check_false(eng->parallel_region_active());
+			check_false(state.region_running);
+			check_false(eng->get_symbolizer()->frozen());
+
+			// Evaluate both observations before the assertion so the red diagnostic
+			// reports constructor AND method behavior. Temporaries die at each execute;
+			// the expected live-instance count must not grow just from this probe.
+			const script_int old_constructor = eng->execute("PendingLeaf(5).v;").as_int();
+			const script_int old_method = eng->execute("pending_nodes[0].a.marker();").as_int();
+			check_eq(std::string("5|100"), std::to_string(old_constructor) + "|" + std::to_string(old_method),
+			         "failed registration retry changed old constructor|method behavior");
+
+			// A later successful retry consumes the suffix once, then installs the
+			// replacement normally. This is not a blanket transactional-reload test:
+			// only failure in the pre-redefinition registration drain is pinned.
+			eng->execute(replacement);
+			check_false(state.pending_registration_retry);
+			check_eq(script_int(1005), eng->execute("PendingLeaf(5).v;").as_int());
+			check_eq(script_int(1000), eng->execute("pending_nodes[0].a.marker();").as_int());
+			auto live = def->live_instances();
+			std::unordered_set<const class_instance*> unique;
+			for (const auto& instance : live) { unique.insert(instance.get()); }
+			check_eq(live.size(), unique.size(), "reload retry duplicated an already-consumed instance");
+			check_eq(expected_live, live.size(), "reload retry lost surviving pending instances");
+			check_eq(uint32_t(0), input->live_elem_refs);
+			return;
+		}
+
+		if (immediate_reload) {
+			// A host may reload immediately after the exception, without first
+			// executing another region to recover the deferred registrations.
+			eng->execute(R"(
+				class PendingLeaf {
+					int v = 0; int extra = 7;
+					PendingLeaf() {} PendingLeaf(int n) { v = n; }
+				}
+			)");
+			check_eq(script_int(1), eng->execute(R"(
+				for (auto& n : pending_nodes) {
+					if (n.a.extra != 7 || n.b.extra != 7) { return 0; }
+				}
+				return 1;
+			)").as_int(), "immediate hot reload missed surviving worker copies");
+			check_eq(expected_live, def->live_instances().size(), "immediate hot reload left survivors unregistered");
+		}
+
+		// Do not overwrite the survivors on retry: that would hide both replayed
+		// registrations and entries incorrectly discarded on the exceptional exit.
+		eng->execute("pending_copy_enabled = false;");
+		state.worker_overhead_ns = 0.0;
+		for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
+		if (different_region) {
+			// Recovery must precede pool selection, not depend on reusing the failed
+			// statement's contexts; an unrelated region uses a different cache key.
+			check_eq(script_int(256), eng->execute(R"(
+				parallel_for (auto& n : pending_nodes) { n.a.v = n.a.v + 0; }
+				pending_nodes.size();
+			)").as_int());
+		} else {
+			check_eq(script_int(256), eng->execute(call).as_int());
+		}
+		auto live = def->live_instances();
+		std::unordered_set<const class_instance*> unique;
+		for (const auto& instance : live) { unique.insert(instance.get()); }
+		check_eq(live.size(), unique.size(), "retry registered an already-consumed survivor twice");
+		check_eq(expected_live, live.size(), "retry lost surviving deferred instances");
+		live.clear();
+		check_eq(uint32_t(0), input->live_elem_refs, "following region retained an element cursor");
+
+		// Migration is checked AFTER the following region has drained the retry.
+		eng->execute(R"(
+			class PendingLeaf {
+				int v = 0; int extra = 7;
+				PendingLeaf() {} PendingLeaf(int n) { v = n; }
+			}
+		)");
+		check_eq(script_int(1), eng->execute(R"(
+			for (auto& n : pending_nodes) {
+				if (n.a.extra != 7 || n.b.extra != 7) { return 0; }
+			}
+			return 1;
+		)").as_int(), "recovered child instances must participate in hot reload");
+	}
+
+	void forge_tests() override {
+		test("failed_join_registration_consumes_only_successful_prefix", [this]() {
+			check_pending_recovery(false, false);
+		});
+		test("partial_submit_registrations_recover_before_a_different_region", [this]() {
+			check_pending_recovery(true, true);
+		});
+		test("pending_registrations_recover_before_immediate_hot_reload", [this]() {
+			check_pending_recovery(false, false, true);
+			check_pending_recovery(true, true, true);
+		});
+		test("failed_reload_retry_preserves_old_constructor_and_method", [this]() {
+			check_pending_recovery(false, false, false, true);
+		});
+		test("failed_append_cannot_unregister_a_later_survivor", [this]() {
+			auto eng = make_engine();
+			eng->execute("class RegistryFaultCell {}");
+			auto def = eng->get_class_registry().find_script_class("RegistryFaultCell");
+			check_not_null(def);
+			check_false(def->has_live_instances());
+
+			// This models a worker-created instance awaiting registration. Setting
+			// its class definition does not put it in the live-instance registry.
+			auto failed = std::make_shared<class_instance>("RegistryFaultCell", eng.get());
+			failed->set_class_definition(def);
+			parallel_region_fault_tests::fault_trace trace;
+			trace.fail_point = "registry.instance_append";
+			detail::fault_injection faults{ &trace, &parallel_region_fault_tests::fault_trace::visit };
+			check_throws<std::bad_alloc>([&]() {
+				def->register_instance_after_region(failed, &faults);
+			});
+			check_true(trace.fired, "registry append checkpoint was not reached");
+			check_false(def->has_live_instances(), "failed append entered the registry");
+
+			// A successful registration now occupies exactly the index the failed
+			// append would have used. The failed instance must still be unregistered:
+			// destroying it must not remove this unrelated survivor's entry.
+			auto survivor = def->create_instance();
+			check_eq(size_t(1), def->live_instances().size());
+			failed.reset();
+			auto live = def->live_instances();
+			check_eq(size_t(1), live.size(), "failed instance destruction unregistered the survivor");
+			check_true(live.front() == survivor, "wrong registry survivor");
+			live.clear();
+			survivor.reset();
+			check_false(def->has_live_instances(), "successful registration did not unregister cleanly");
+			check_eq(script_int(42), eng->execute("6 * 7;").as_int());
+		});
+	}
+};
+
 } // namespace jai::foundry::tests
 
 using parallel_transform_tests = jai::foundry::tests::parallel_transform_tests;
 FOUNDRY_REGISTER(parallel_transform_tests)
 using parallel_for_tests = jai::foundry::tests::parallel_for_tests;
 FOUNDRY_REGISTER(parallel_for_tests)
+using parallel_region_fault_tests = jai::foundry::tests::parallel_region_fault_tests;
+FOUNDRY_REGISTER(parallel_region_fault_tests)
+using parallel_registry_fault_tests = jai::foundry::tests::parallel_registry_fault_tests;
+FOUNDRY_REGISTER(parallel_registry_fault_tests)

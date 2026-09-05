@@ -17,6 +17,7 @@
 // never allowed to kill a worker. Destruction drops queued-but-unstarted tasks,
 // finishes in-flight ones, and joins every thread.
 
+#include <jaiscript/detail/fault_injection.hpp>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -39,13 +40,23 @@ namespace jai {
             return hw > 1 ? hw - 1 : 1;
         }
 
-        explicit thread_pool(size_t worker_count = 0) {
+        explicit thread_pool(size_t worker_count = 0, const detail::fault_injection* faults = nullptr) {
             if (worker_count == 0) worker_count = default_worker_count();
-            workers_.reserve(worker_count);
-            for (size_t i = 0; i < worker_count; ++i) workers_.push_back(std::make_unique<worker>());
-            for (size_t i = 0; i < worker_count; ++i) {
-                workers_[i]->thread = std::thread([this, i] { run_worker(i); });
-                workers_[i]->id = workers_[i]->thread.get_id();
+            try {
+                if (faults) { faults->checkpoint("pool.worker_storage"); }
+                workers_.reserve(worker_count);
+                for (size_t i = 0; i < worker_count; ++i) {
+                    if (faults) { faults->checkpoint("pool.worker_create", i); }
+                    workers_.push_back(std::make_unique<worker>());
+                }
+                for (size_t i = 0; i < worker_count; ++i) {
+                    if (faults) { faults->checkpoint("pool.thread_start", i); }
+                    workers_[i]->thread = std::thread([this, i] { run_worker(i); });
+                    workers_[i]->id = workers_[i]->thread.get_id();
+                }
+            } catch (...) {
+                stop_and_join();
+                throw;
             }
         }
 
@@ -53,21 +64,7 @@ namespace jai {
         thread_pool& operator=(const thread_pool&) = delete;
 
         ~thread_pool() {
-            {
-                std::lock_guard<std::mutex> guard(mutex_);
-                stop_ = true;
-                outstanding_ -= shared_.size();
-                shared_.clear();
-                for (auto& w : workers_) {
-                    outstanding_ -= w->pinned.size();
-                    w->pinned.clear();
-                }
-            }
-            work_cv_.notify_all();
-            idle_cv_.notify_all();
-            for (auto& w : workers_) {
-                if (w->thread.joinable()) w->thread.join();
-            }
+            stop_and_join();
         }
 
         size_t worker_count() const noexcept { return workers_.size(); }
@@ -105,16 +102,23 @@ namespace jai {
         // per-task submit_to costs a W-worker region W lock round-trips and W
         // notify_alls (W x W wake predicate evaluations). Order within a worker's
         // queue matches the span's order.
-        void submit_pinned_batch(std::pair<size_t, task_type>* tasks, size_t count) {
+        void submit_pinned_batch(std::pair<size_t, task_type>* tasks, size_t count,
+                                 const detail::fault_injection* faults = nullptr) {
+            // Declare before the lock: exceptional unwinding unlocks FIRST, then wakes
+            // the accepted prefix. Otherwise its owner can wait forever trying to join.
+            struct notify_on_exit {
+                std::condition_variable& changed;
+                ~notify_on_exit() { changed.notify_all(); }
+            } notify{work_cv_};
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) return;
                 for (size_t i = 0; i < count; ++i) {
+                    if (faults) { faults->checkpoint("pool.batch_enqueue", i); }
                     workers_[tasks[i].first]->pinned.push_back(std::move(tasks[i].second));
                     ++outstanding_;
                 }
             }
-            work_cv_.notify_all();
         }
 
         // Receives every exception a task lets escape (worker stays alive either way).
@@ -135,6 +139,26 @@ namespace jai {
             std::thread::id id;
             std::deque<task_type> pinned;
         };
+
+        // Shared by normal destruction and failed construction. All worker storage
+        // stays alive until every thread started so far has observed stop and joined.
+        void stop_and_join() noexcept {
+            {
+                std::lock_guard<std::mutex> guard(mutex_);
+                stop_ = true;
+                outstanding_ -= shared_.size();
+                shared_.clear();
+                for (auto& w : workers_) {
+                    outstanding_ -= w->pinned.size();
+                    w->pinned.clear();
+                }
+            }
+            work_cv_.notify_all();
+            idle_cv_.notify_all();
+            for (auto& w : workers_) {
+                if (w->thread.joinable()) w->thread.join();
+            }
+        }
 
         void run_worker(size_t index) {
             worker& me = *workers_[index];

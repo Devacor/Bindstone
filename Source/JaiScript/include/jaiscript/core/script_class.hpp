@@ -204,6 +204,9 @@ public:
 
     // Clear all stored ASTs (for hot reload)
     void clear_asts() {
+        // Both backend reload builders enter here before mutating the old class.
+        // Recover surviving worker copies before a fallible retry can leave mixed ASTs.
+        if (auto eng = get_engine()) { eng->recover_parallel_registrations(); }
         method_asts_.clear();
         constructor_asts_.clear();
         destructor_ast_.reset();

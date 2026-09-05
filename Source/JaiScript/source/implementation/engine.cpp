@@ -1234,6 +1234,10 @@ std::vector<std::weak_ptr<class_instance>>* engine::parallel_pending_registratio
     return impl->parallel_->active_region->find_pending(std::this_thread::get_id());
 }
 
+void engine::recover_parallel_registrations() {
+    if (impl->parallel_) { detail::recover_pending_registrations(*impl->parallel_); }
+}
+
 detail::math_rng_state& engine::math_rng() {
     return impl->math_rng_;
 }

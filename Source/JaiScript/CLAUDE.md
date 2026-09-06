@@ -346,9 +346,47 @@ engine stays usable", not by `check_throws`.
   the cache key). Engine-core location builtins on every engine: `current_script_dir/path` (the executing
   file, a function because imports change it), `root_script_dir/path` (the outermost `execute_file`),
   `executable_dir` (alias `bin_dir`), `app_data_dir/app_cache_dir(name)` (platform defaults,
-  `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`. The engine never
-  touches the filesystem for a program: `read_file`/`write_file`/`list_dir`/`writable_dir` are host functions
-  (the runner has them). `.jaibite` siblings mark their own file (v14) so a moved folder keeps its names.
+  `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`. `parent_dir`
+  weakly canonicalizes its result (not purely lexical); `file_name` is lexical. Core source loading,
+  location queries and disk caches do touch the filesystem. General `read_file`/`write_file`/`list_dir`/
+  `writable_dir` are host functions (the runner has them). `.jaibite` siblings mark their own file (v14)
+  so a moved folder keeps its names.
+- **Filesystem privilege**: enabled by default. C++ `eng->disable(jai::filesystem)`, `enable(...)`,
+  `is_enabled(...)`; `jai::filesystem` aliases scoped `jai::privilege::filesystem`, the only built-in
+  privilege implemented. Script `reflect::is_enabled(requirements...)` is query-only: at least one
+  argument, builtin integer flags and/or permission-name strings, ALL enabled. Unknown names return
+  false without interning/registering; invalid bits/types raise. All core path queries (even lexical
+  `file_name`), `include`/`import`,
+  `execute_file`, explicit `jaibite_load`/`jaibite::save` require it. With it disabled, automatic disk
+  cache I/O/metadata and checker dependency discovery are skipped; source strings and in-memory jaibite
+  bytes remain usable. Filename labels grant no disk access. Deep refusals use `checked_result` with
+  the shared, catchable text `Insufficient privilege: filesystem.`; unhandled errors leave execution.
+  Change privileges only while idle or on the engine execution thread (including C++ callbacks):
+  subsequent gated operations see the change, work already started completes. Active parallel regions
+  reject changes until workers join. No concurrent cross-thread mutation, cancellation, atomics or
+  locks; the mask is plain engine-owned state. Optional final requirements on
+  `add_function(name, callable, jai::filesystem)`, `add_variadic_function` and `dynamic_binder::method`
+  are checked inside the
+  callable, preserving checks through aliases/reflection. The runner gates file/directory/archive/
+  download/audio-file start operations this way. Other native bindings must check or declare their
+  requirements; exposed streams and shared C++ state remain host-controlled. Separate engines isolate
+  script environments, not native objects or the process. Do not claim network/audio privileges, an OS
+  sandbox, or a general virtual-filesystem policy from this API. On the POSIX curl-executable fallback
+  only, `Download.received()` also requires filesystem because it polls the output file; WinHTTP/libcurl
+  progress queries use memory and remain available.
+- **Custom permissions**: `eng->register_privilege(name)` returns nothing and registers a string name,
+  disabled on first registration and idempotent thereafter (grant unchanged). `"filesystem"` aliases
+  the built-in without changing its grant. Use one string or an `initializer_list<string_view>` for
+  `enable`, `disable`, `is_enabled`, checked `require_privilege` and optional callable requirements:
+  `add_function(name, callable, {"filesystem", "app.edit"})` requires ALL. Original builtin flag APIs
+  stay available. Names are reusable across engines; each engine's registration/grants are independent.
+  Unknown queries return false without interning; grant/require/binding operations reject unknown names,
+  never auto-register. Names live only in the engine interner; binding resolves requirements once to
+  engine-local slot IDs, checked without name lookup or allocation at invocation. Registration/binding
+  may allocate. The shared checked kernel reports the first missing builtin, then custom permissions in
+  registration order: `Insufficient privilege: {name}.` No new locks/atomics/globals; registration and
+  grant changes obey the same execution-thread/idle-only, no-active-region ownership rule. A custom name
+  gates only callables/host code that require it; naming `"network"` does not install a network gate.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

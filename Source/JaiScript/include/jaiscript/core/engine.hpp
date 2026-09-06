@@ -20,6 +20,8 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <span>
+#include <initializer_list>
 #include <unordered_set>
 #include <typeindex>
 #include <iosfwd>
@@ -123,10 +125,34 @@ namespace jai {
         bool is_enabled(privilege flags) const noexcept;
         checked_result<void> require_privilege(privilege flags) const noexcept;
 
+        // Custom names are interned once, start disabled, and register idempotently.
+        // "filesystem" refers to the existing builtin, without changing its grant.
+        // The host uses names, never engine-local IDs. Bindings resolve names once.
+        void register_privilege(std::string_view name);
+        void enable(std::span<const std::string_view> names);
+        void disable(std::span<const std::string_view> names);
+        bool is_enabled(std::span<const std::string_view> names) const noexcept;
+        checked_result<void> require_privilege(std::span<const std::string_view> names) const noexcept;
+        void enable(std::string_view name) { enable(std::span(&name, 1)); }
+        void disable(std::string_view name) { disable(std::span(&name, 1)); }
+        bool is_enabled(std::string_view name) const noexcept { return is_enabled(std::span(&name, 1)); }
+        checked_result<void> require_privilege(std::string_view name) const noexcept { return require_privilege(std::span(&name, 1)); }
+        void enable(std::initializer_list<std::string_view> names) { enable(std::span(names.begin(), names.size())); }
+        void disable(std::initializer_list<std::string_view> names) { disable(std::span(names.begin(), names.size())); }
+        bool is_enabled(std::initializer_list<std::string_view> names) const noexcept { return is_enabled(std::span(names.begin(), names.size())); }
+        checked_result<void> require_privilege(std::initializer_list<std::string_view> names) const noexcept { return require_privilege(std::span(names.begin(), names.size())); }
+
         // Attach a requirement to the actual callable, so aliases, overload dispatch
         // and worker-local copies all recheck this engine's current grants. An empty
         // requirement returns the original callable with no invocation overhead.
         script_function guard_function(script_function function, privilege required);
+        script_function guard_function(script_function function, std::span<const std::string_view> names);
+        script_function guard_function(script_function function, std::string_view name) {
+            return guard_function(std::move(function), std::span(&name, 1));
+        }
+        script_function guard_function(script_function function, std::initializer_list<std::string_view> names) {
+            return guard_function(std::move(function), std::span(names.begin(), names.size()));
+        }
         
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
@@ -509,13 +535,22 @@ namespace jai {
         // Use this for functions like print(), max(), or functions with optional parameters
         // Example: engine.add_variadic_function("print", [](const std::vector<script_value>& args) { ... });
         void add_variadic_function(const std::string& name, script_function func, privilege required = privilege::none);
+        void add_variadic_function(const std::string& name, script_function func, std::span<const std::string_view> names) {
+            add_variadic_function(name, guard_function(std::move(func), names));
+        }
+        void add_variadic_function(const std::string& name, script_function func, std::string_view required) {
+            add_variadic_function(name, std::move(func), std::span(&required, 1));
+        }
+        void add_variadic_function(const std::string& name, script_function func, std::initializer_list<std::string_view> names) {
+            add_variadic_function(name, std::move(func), std::span(names.begin(), names.size()));
+        }
         void add_functionWithArity(const std::string& name, script_function func, size_t arity);
         
         // Typed function registration with automatic overloading
         // Use this for functions with specific C++ signatures
         // Example: engine.add_function("add", [](int a, int b) -> int { return a + b; });
-        template<typename Func>
-        void add_function(const std::string& name, Func&& func, privilege required = privilege::none) {
+        template<typename Func, typename Requirements = privilege>
+        void add_function(const std::string& name, Func&& func, Requirements required = privilege::none) {
             // Check for rejected container references
             binding_traits::check_binding_validity<Func>(name);
             
@@ -528,7 +563,7 @@ namespace jai {
             
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
-            wrappedFunc = guard_function(std::move(wrappedFunc), required);
+            wrappedFunc = guard_function(std::move(wrappedFunc), std::move(required));
             
             std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
 
@@ -548,7 +583,12 @@ namespace jai {
                 add_function_with_arity_and_full_types(name, wrappedFunc, arity, paramTypes);
             }
         }
-        
+
+        template<typename Func>
+        void add_function(const std::string& name, Func&& func, std::initializer_list<std::string_view> names) {
+            add_function(name, std::forward<Func>(func), std::span(names.begin(), names.size()));
+        }
+
     private:
         // Helper methods for numeric operator detection
         bool isNumericOperator(const std::string& name) const {
@@ -1020,6 +1060,15 @@ namespace jai {
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         void register_privilege_builtins();
         void set_privileges(privilege flags, bool enabled);
+        void set_privileges(std::span<const std::string_view> names, bool enabled);
+        void check_privilege_mutation() const;
+        std::optional<uint64_t> find_custom_privilege(std::string_view name) const noexcept;
+        struct resolved_privileges {
+            privilege builtins = privilege::none;
+            std::vector<uint64_t> custom;
+        };
+        resolved_privileges resolve_privileges(std::span<const std::string_view> names) const;
+        checked_result<void> require_privileges(privilege flags, std::span<const uint64_t> slots) const noexcept;
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
 
         // Single post-parse execution pipeline shared by execute(string) and

@@ -80,7 +80,11 @@ public:
     // Arming also suspends the execution budget (a paused script must not trip the
     // wall-clock cap) and restores it on disable.
     void set_enabled(bool on);
+    // Native labels are exact. Source paths (DAP) normalize only on the script
+    // thread at sync, and only while the engine permits filesystem access.
+    // Serialize breakpoint writers, as with the original snapshot publication.
     void set_breakpoints(const std::string& file, std::vector<int> lines);
+    void set_source_breakpoints(const std::string& file, std::vector<int> lines);
     void clear_breakpoints();
     void request_pause();                              // stop at the next statement
     void resume();                                     // continue
@@ -122,6 +126,20 @@ private:
     void park(const stop_info& si);
     bool should_stop(const ast_node* node, int depth, std::string& reason_out) const;
     bool breakpoint_hit(const std::string& file, int line) const;
+    void publish_breakpoints(const std::string& file, std::vector<int> lines, bool source_path);
+
+    struct breakpoint_record {
+        std::vector<int> lines;
+        uint64_t sequence = 0;
+    };
+    struct breakpoint_snapshot {
+        // Empty line sets are tombstones: clearing an alternate spelling must
+        // reach the script thread, where equivalent paths are resolved in order.
+        std::unordered_map<std::string, breakpoint_record> native;
+        std::unordered_map<std::string, breakpoint_record> source;
+        uint64_t sequence = 0;
+        uint64_t clear_sequence = 0;
+    };
 
     engine* engine_;
 
@@ -132,9 +150,10 @@ private:
     std::atomic<int> step_mode_{static_cast<int>(step_mode::none)};
     std::atomic<int> step_base_depth_{0};
     std::atomic<int> current_stop_depth_{0};   // depth of the current stop (step over/out base)
-    // Published snapshot + version: the transport thread swaps a fresh table on
-    // setBreakpoints and bumps the version; the script thread re-caches on mismatch.
-    std::atomic<std::shared_ptr<const breakpoint_table>> breakpoints_{std::make_shared<breakpoint_table>()};
+    // The existing snapshot/version handoff carries the latest edit per raw key,
+    // not a request queue. Retained keys are bounded by distinct spellings since
+    // clear_breakpoints(). No engine state is read on the publishing thread.
+    std::atomic<std::shared_ptr<const breakpoint_snapshot>> breakpoints_{std::make_shared<breakpoint_snapshot>()};
     std::atomic<uint64_t> bp_version_{0};
 
     // ---- script-thread hot cache ----
@@ -144,7 +163,8 @@ private:
     bool hot_step_or_pause_ = false;
     const uint64_t* hot_line_bloom_ = nullptr;           // null = no breakpoints
     std::vector<uint64_t> hot_line_bloom_storage_;
-    std::shared_ptr<const breakpoint_table> hot_bps_;    // snapshot the slow path resolves against
+    std::shared_ptr<const breakpoint_table> hot_bps_;    // installed table; retained across disable/rearm
+    uint64_t applied_bp_sequence_ = 0;
     uint64_t hot_bp_version_ = 0;                        // ~0 forces a re-cache (session re-arm)
 
     // park/pump handshake — one mutex, one cv, predicate wait (no lost wakeups).

@@ -12,10 +12,13 @@ cost model + the parallel-region atomicity ruling). **Next:** multi-frame stack,
 
 **Landed since (tooling pass):** a `jai::debug::listen(engine&, port=default_port, host)`
 convenience (build connector + attach + return it in one line — `connector.hpp`); the default
-port is `jai::debug::default_port = 52472`; the connector **normalizes each incoming breakpoint
-path** with `std::filesystem::canonical` (`connector.cpp` `normalize_bp_path`) so a VS Code path
+port is `jai::debug::default_port = 52472`; incoming breakpoint paths are **normalized on the
+script thread at its next debug sync**, using `std::filesystem::canonical` (`controller.cpp`
+`normalize_bp_path`) while the engine's filesystem privilege is enabled, so a VS Code path
 binds against the engine's canonical node paths regardless of drive-letter case / slash
-direction; and all three example hosts (`examples/{roguelike,crawler,demoreel}`) gained a
+direction. With filesystem access disabled, incoming paths remain exact virtual source labels
+and no normalization metadata calls run. Native `controller::set_breakpoints` always takes
+exact labels. All three example hosts (`examples/{roguelike,crawler,demoreel}`) gained a
 `--debug [--debug-port N]` flag that forces the interpreter and calls `listen()` — the
 connector listens for the whole engine lifetime (attach/detach/re-attach any time), and the
 demo boots immediately; an opt-in `--debug-wait` additionally holds boot until Enter for
@@ -229,19 +232,27 @@ sketch above is the shape; these are the rules.
   `step_*()`, and `post_command()` all mutate under the same mutex, then `notify`. This closes the
   **lost-wakeup race** (a `continue` arriving between "emit stopped" and "enter wait" is not lost)
   and gives the happens-before edge for step mode read after unpark.
-- **Breakpoint table is a swapped snapshot, not closure-mutated.** `setBreakpoints` arrives on the
-  transport thread while the script thread is *running* and reading the table every statement — so
-  it can't go through `post_command` (closures drain only while parked → initial attach breakpoints
-  would never bind). Publish it via `atomic<shared_ptr<const bp_table>>`; the hook does one relaxed
-  load per statement. The `pause` one-shot flag and step-cancel are likewise transport-writable
-  atomics. **Rule:** posted closures are *only* for live engine-state access; controller-owned
-  state (breakpoints, pause flag, step mode) is transport-writable under explicit synchronization.
+- **Breakpoint edits use the existing swapped snapshot and version, not a new queue.**
+  `setBreakpoints` arrives on the transport thread and is acknowledged even before execution;
+  it cannot require `post_command`, which drains only while parked. Each snapshot retains the
+  latest sorted line set and a sequence number per raw path, separately for native exact labels
+  and DAP source paths. Empty line sets are tombstones. At a debug sync the script thread applies
+  changed records in sequence order to its own installed table, so equivalent path spellings
+  replace or clear each other deterministically. Only this thread reads the engine's plain
+  privilege state or normalizes paths. Permission is checked when the update is applied, not when
+  the transport acknowledges it; previously installed breakpoints are not canceled by revocation.
+  Repeated requests replace a record: retained metadata is bounded by distinct raw paths since
+  `clear_breakpoints()`, which also resets the installed table at the next enabled sync. There is
+  no per-request history. Breakpoint writers must be serialized as for the original copy/publish
+  implementation; this adds no multi-writer coordination, mutex, atomic, or CAS loop. The existing
+  atomic snapshot/version handoff is unchanged, and the per-statement path reads only plain caches.
 - **`detach()` guarantees a parked thread always wakes.** On socket EOF/error, on the DAP
   `disconnect` request (reply *then* detach), and from the `debug_connector` destructor, call
-  `detach()`: atomically clear `enabled_`, clear breakpoints + step mode, set `resume_requested`,
-  notify. Without this, a client disconnect/crash while parked hangs the host forever — and in
+  `set_enabled(false)` to disarm the session; its `detach()` clears step mode, sets
+  `resume_requested`, and notifies. Without this, a client disconnect/crash while parked hangs the host forever — and in
   Bindstone the parked thread *is* the main thread, so the app can't even process its quit event.
-  **Teardown order:** `debug_connector` torn down (thread joined) **before** the engine, with
+  Installed breakpoints and pending snapshot edits survive disable/rearm; only an explicit clear
+  removes them. **Teardown order:** `debug_connector` torn down (thread joined) **before** the engine, with
   `detach()` first, so the script thread leaves the hook before anything it references dies.
 - **Single outbound writer.** `on_stopped` runs on the *script* thread; request responses are
   written by the *transport* thread. Two writers interleave `Content-Length` frames and corrupt the

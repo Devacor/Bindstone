@@ -487,8 +487,8 @@ public:
     }
 
     // Add method binding - member function pointer version
-    template<typename R, typename... Args>
-    dynamic_binder& method(const std::string& name, R(T::*method)(Args...), privilege required = privilege::none) {
+    template<typename R, typename... Args, typename Requirements = privilege>
+    dynamic_binder& method(const std::string& name, R(T::*method)(Args...), Requirements required = privilege::none) {
         auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
@@ -512,15 +512,15 @@ public:
         // Add method to the class definition (for object.method() calls), carrying the C++
         // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
         // by argument type instead of the last registration silently winning.
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), required), sizeof...(Args),
+        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
 
         return *this;
     }
 
     // Add const method binding
-    template<typename R, typename... Args>
-    dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const, privilege required = privilege::none) {
+    template<typename R, typename... Args, typename Requirements = privilege>
+    dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const, Requirements required = privilege::none) {
         auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
@@ -543,7 +543,7 @@ public:
 
         // Add method to the class definition with its C++ parameter signature (see non-const
         // overload) so same-arity const overloads resolve by argument type.
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), required), sizeof...(Args),
+        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
 
         return *this;
@@ -552,8 +552,8 @@ public:
     // Add lambda/callable method binding
     // Supports: .method("setText", [](Button& self, const std::string& text) { self.setText(text); })
     // Note: First parameter can be a reference to self for accessing the object
-    template<typename Callable>
-    dynamic_binder& method(const std::string& name, Callable&& callable, privilege required = privilege::none) {
+    template<typename Callable, typename Requirements = privilege>
+    dynamic_binder& method(const std::string& name, Callable&& callable, Requirements required = privilege::none) {
         // Detect accidental use of member data pointers - use property() instead
         static_assert(!std::is_member_object_pointer_v<std::decay_t<Callable>>,
             "Member data pointers cannot be passed to method(). Use property() instead.");
@@ -610,12 +610,17 @@ public:
         // argument type. Arity from script perspective excludes self.
         constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
         constexpr size_t self_offset = has_self_param ? 1 : 0;
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), required), script_arity,
+        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), script_arity,
             param_sig_from_tuple<args_tuple, self_offset, script_arity>());
 
         return *this;
     }
     
+    template<typename Callable>
+    dynamic_binder& method(const std::string& name, Callable&& callable, std::initializer_list<std::string_view> names) {
+        return method(name, std::forward<Callable>(callable), std::span(names.begin(), names.size()));
+    }
+
     // Add static method binding - for regular function pointers
     template<typename R, typename... Args>
     dynamic_binder& static_method(const std::string& name, R(*func)(Args...)) {

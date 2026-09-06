@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace jai {
 
@@ -76,7 +77,16 @@ namespace jai {
 			return { id, key };
 		}
 
-		// Fast path for known keys (no allocation). Returns empty view if OOB.
+		// Read-only lookup (no allocation). Returns nullopt for an unknown name.
+		// Unlike intern(), a query never inserts, including on a miss while frozen.
+		[[nodiscard]] std::optional<id_type> find(std::string_view sv) const noexcept {
+			if (auto it = index_.find(sv); it != index_.end()) {
+				return it->second;
+			}
+			return std::nullopt;
+		}
+
+		// Fast path for known IDs (no allocation). Returns empty view if OOB.
 		[[nodiscard]] inline std::string_view get_string(id_type id) const noexcept {
 			return id < ids_.size() ? ids_[id] : std::string_view{};
 		}

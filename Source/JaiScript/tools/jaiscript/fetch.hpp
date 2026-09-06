@@ -606,21 +606,26 @@ private:
 inline void register_fetch(jai::engine& eng) {
 	jai::dynamic_binder<download>(eng, "Download")
 		.constructor<>()
-		.method("start", &download::start)
+		.method("start", &download::start, jai::filesystem)
 		.method("pump", &download::pump)
 		.method("done", &download::done)
 		.method("success", &download::success)
 		.method("error", &download::error)
+#if !defined(_WIN32) && !defined(JAISCRIPT_RUNNER_HAS_CURL)
+		// The curl-executable fallback polls file_size; WinHTTP/libcurl read counters.
+		.method("received", &download::received, jai::filesystem)
+#else
 		.method("received", &download::received)
+#endif
 		.method("total", &download::total)
 		.method("fraction", &download::fraction)
 		.method("cancel", &download::cancel)
 		.build();
-	eng.add_function("sha256_file", [](const std::string& path) -> std::string { return sha256_file(path); });
-	eng.add_function("zip_entries", [](const std::string& zip) -> std::vector<std::string> { return zip_entries(zip); });
+	eng.add_function("sha256_file", [](const std::string& path) -> std::string { return sha256_file(path); }, jai::filesystem);
+	eng.add_function("zip_entries", [](const std::string& zip) -> std::vector<std::string> { return zip_entries(zip); }, jai::filesystem);
 	eng.add_function("zip_extract", [](const std::string& zip, const std::string& entry, const std::string& dest) -> bool {
 		return zip_extract(zip, entry, dest);
-	});
+	}, jai::filesystem);
 }
 
 } // namespace jai_runner

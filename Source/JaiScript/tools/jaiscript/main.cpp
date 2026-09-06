@@ -527,7 +527,7 @@ void register_console_game_io(jai::engine& eng) {
 		(void)path;
 		return false;
 #endif
-	});
+	}, jai::filesystem);
 	// background MIDI through winmm's MCI sequencer (mixes freely with
 	// play_wav). One track at a time; scripts poll midi_status() == "stopped"
 	// to loop. Same portability contract: no-ops off Windows.
@@ -541,7 +541,7 @@ void register_console_game_io(jai::engine& eng) {
 		(void)path;
 		return false;
 #endif
-	});
+	}, jai::filesystem);
 	eng.add_function("stop_midi", []() -> bool {
 #ifdef _WIN32
 		::mciSendStringA("stop jaimidi", nullptr, 0, nullptr);
@@ -1019,24 +1019,24 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	jai::stdlib::register_all(eng);
 
 	// Host file IO — a runner without it can't save anything (same shapes as the example games).
-	eng->add_function("read_file", [](const std::string& path) -> std::string { return slurp_file(path); });
+	eng->add_function("read_file", [](const std::string& path) -> std::string { return slurp_file(path); }, jai::filesystem);
 	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
 		return spill_file(path, content);
-	});
-	eng->add_function("file_exists", [](const std::string& path) -> bool { return fs::exists(path); });
+	}, jai::filesystem);
+	eng->add_function("file_exists", [](const std::string& path) -> bool { return fs::exists(path); }, jai::filesystem);
 	eng->add_function("delete_file", [](const std::string& path) -> bool {
 		std::error_code ec;
 		return fs::remove(path, ec);
-	});
+	}, jai::filesystem);
 	eng->add_function("dir_exists", [](const std::string& path) -> bool {
 		std::error_code ec;
 		return fs::is_directory(path, ec);
-	});
+	}, jai::filesystem);
 	eng->add_function("make_dirs", [](const std::string& path) -> bool {
 		std::error_code ec;
 		fs::create_directories(path, ec);
 		return fs::is_directory(path, ec);
-	});
+	}, jai::filesystem);
 	// The save-side question resolve_path cannot answer: can this folder take a file? Creates it
 	// if missing, writes and removes a probe. A program picks its save anchor with it:
 	// root_script_dir() when writable, app_data_dir(name) otherwise.
@@ -1051,14 +1051,14 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		}
 		fs::remove(probe, ec);
 		return true;
-	});
+	}, jai::filesystem);
 	eng->add_function("list_dir", [](const std::string& path) -> std::vector<std::string> {
 		std::vector<std::string> names;
 		std::error_code ec;
 		for (const auto& entry : fs::directory_iterator(path, ec)) { names.push_back(entry.path().filename().generic_string()); }
 		std::sort(names.begin(), names.end());
 		return names;
-	});
+	}, jai::filesystem);
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);
@@ -1645,6 +1645,121 @@ int run_selftest(const console_state& con) {
 		std::string text = out.str();
 		expect(text.find("JaiScript " + jai::version()) != std::string::npos, "repl: banner shows version");
 		expect(text.find("jai> ") != std::string::npos, "repl: prompt prints when interactive");
+	}
+
+	for (const char* backend : {"interp", "vm"}) {
+		// Process-owned fixtures only. The invalid URL is rejected before Download
+		// starts a worker, and missing audio files cannot produce audible output.
+		const fs::path fixture = dir / (std::string("filesystem privilege ") + backend);
+		auto expect_privilege = [&](bool ok, const std::string& name) {
+			expect(ok, (std::string("filesystem [") + backend + "]: " + name).c_str());
+		};
+		try {
+			const fs::path content = fixture / "content.txt";
+			const fs::path removable = fixture / "removable.txt";
+			if (!spill_file(content.string(), "unchanged") || !spill_file(removable.string(), "keep")) {
+				throw std::runtime_error("cannot create filesystem privilege fixtures");
+			}
+			options restricted_opt = opt;
+			restricted_opt.backend = backend;
+			std::ostringstream output;
+			auto eng = make_runner_engine(restricted_opt, &output);
+			eng->add_global("fixture", jai::script_value(fixture.generic_string(), eng.get()));
+			int revoke_calls = 0;
+			int guarded_calls = 0;
+			eng->add_function("revoke_filesystem", [engine_ptr = eng.get(), &revoke_calls]() {
+				++revoke_calls;
+				engine_ptr->disable(jai::filesystem);
+			});
+			eng->add_function("guarded_probe", [&guarded_calls]() {
+				++guarded_calls;
+				return true;
+			}, jai::filesystem);
+			expect_privilege(eng->execute("read_file(fixture + \"/content.txt\");").as_string() == "unchanged",
+				"default file access remains enabled");
+			eng->execute("var saved_read = read_file; var pending = Download(); var saved_start = pending.start;");
+			eng->execute("revoke_filesystem();");
+			expect_privilege(revoke_calls == 1 && !eng->is_enabled(jai::filesystem),
+				"host callback revokes subsequent access");
+			const std::string denial = "Insufficient privilege: filesystem.";
+			auto expect_denied = [&](const std::string& expression, const char* name) {
+				try {
+					const auto result = eng->execute("try { " + expression +
+						"; } catch (error) { return error; } return \"not denied\";").as_string();
+					expect_privilege(result == denial, std::string("denied ") + name);
+					if (result != denial) { std::printf("        actual: %s\n", result.c_str()); }
+				} catch (const std::exception& error) {
+					expect_privilege(false, std::string("catchable denial ") + name);
+					std::printf("        unexpected: %s\n", error.what());
+				}
+			};
+			const std::pair<const char*, const char*> denied_calls[] = {
+				{"read_file(fixture + \"/content.txt\")", "read_file"},
+				{"write_file(fixture + \"/content.txt\", \"changed\")", "write_file"},
+				{"file_exists(fixture + \"/content.txt\")", "file_exists"},
+				{"delete_file(fixture + \"/removable.txt\")", "delete_file"},
+				{"dir_exists(fixture)", "dir_exists"},
+				{"make_dirs(fixture + \"/created\")", "make_dirs"},
+				{"writable_dir(fixture + \"/probe-created\")", "writable_dir"},
+				{"list_dir(fixture)", "list_dir"},
+				{"play_wav(fixture + \"/missing.wav\")", "play_wav"},
+				{"play_midi(fixture + \"/missing.mid\")", "play_midi"},
+				{"sha256_file(fixture + \"/content.txt\")", "sha256_file"},
+				{"zip_entries(fixture + \"/missing.zip\")", "zip_entries"},
+				{"zip_extract(fixture + \"/missing.zip\", \"entry\", fixture + \"/extracted.txt\")", "zip_extract"},
+				{"pending.start(\"jaiscript-selftest://never-network\", fixture + \"/download.bin\")", "Download.start"},
+				{"saved_read(fixture + \"/content.txt\")", "saved read_file alias"},
+				{"saved_start(\"jaiscript-selftest://never-network\", fixture + \"/alias.bin\")", "saved Download.start alias"},
+				{"reflect::call(\"read_file\", fixture + \"/content.txt\")", "reflected read_file"},
+				{"reflect::invoke(pending, \"start\", \"jaiscript-selftest://never-network\", fixture + \"/reflected.bin\")", "reflected Download.start"}
+			};
+			for (const auto& [expression, name] : denied_calls) { expect_denied(expression, name); }
+			expect_denied("guarded_probe()", "host callback");
+			expect_privilege(guarded_calls == 0, "denied host callback never entered");
+			bool uncaught_denial = false;
+			try {
+				eng->execute("saved_read(fixture + \"/content.txt\");");
+			} catch (const std::exception& error) {
+				uncaught_denial = error.what() == denial + ": Insufficient privilege";
+			}
+			expect_privilege(uncaught_denial, "uncaught denial preserves public error suffix");
+			expect_privilege(slurp_file(content.string()) == "unchanged", "denied write leaves bytes unchanged");
+			expect_privilege(fs::exists(removable), "denied delete preserves file");
+			expect_privilege(!fs::exists(fixture / "created") && !fs::exists(fixture / "probe-created"),
+				"denied directory operations create nothing");
+			expect_privilege(!fs::exists(fixture / "extracted.txt") && !fs::exists(fixture / "download.bin")
+				&& !fs::exists(fixture / "alias.bin") && !fs::exists(fixture / "reflected.bin"),
+				"denied archive/download operations create nothing");
+			expect_privilege(eng->execute("!pending.pump() && !pending.done() && !pending.success() && "
+				"pending.error() == \"\" && pending.total() == -1 && pending.fraction() == 0;").as_bool(),
+				"denied start does not alter Download state; memory queries remain available");
+#if !defined(_WIN32) && !defined(JAISCRIPT_RUNNER_HAS_CURL)
+			// Only the curl-executable fallback polls the output file for progress.
+			expect_denied("pending.received()", "Download.received filesystem fallback");
+#else
+			expect_privilege(eng->execute("pending.received();").as_int() == 0,
+				"Download.received remains available when progress is memory-only");
+#endif
+			expect_privilege(eng->execute("pending.cancel(); stop_midi(); midi_status(); true;").as_bool(),
+				"explicit cancel, stop and status remain available");
+			expect_privilege(output.str().empty(), "denials produce no unexpected script output");
+			eng->enable(jai::filesystem);
+			expect_privilege(eng->execute("saved_read(fixture + \"/content.txt\");").as_string() == "unchanged",
+				"saved callable works after re-enable");
+			expect_privilege(eng->execute("write_file(fixture + \"/reenabled.txt\", \"enabled\") && "
+				"file_exists(fixture + \"/reenabled.txt\");").as_bool()
+				&& slurp_file((fixture / "reenabled.txt").string()) == "enabled",
+				"reenabled file operations retain normal behavior");
+			expect_privilege(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "
+				"fixture + \"/reenabled-download.bin\");").as_bool()
+				&& eng->execute("pending.error();").as_string() == "download: only http and https URLs are supported",
+				"reenabled Download alias reaches its original validation without network access");
+			expect_privilege(eng->execute("guarded_probe();").as_bool() && guarded_calls == 1,
+				"reenabled callback enters exactly once");
+		} catch (const std::exception& error) {
+			expect_privilege(false, "fixture/setup or recovery");
+			std::printf("        unexpected: %s\n", error.what());
+		}
 	}
 
 	std::printf("selftest: %d passed, %d failed\n", passed, failed);

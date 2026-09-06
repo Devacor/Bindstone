@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0">
+	<Profiles>
+		<SystemCollector Id="GloomCollector" Name="GLOOM CPU Collector">
+			<BufferSize Value="1024"/><Buffers Value="128"/>
+		</SystemCollector>
+		<EventCollector Id="GloomEvents" Name="GLOOM phase markers">
+			<BufferSize Value="64"/><Buffers Value="16"/>
+		</EventCollector>
+		<SystemProvider Id="GloomSystem">
+			<Keywords><Keyword Value="ProcessThread"/><Keyword Value="Loader"/><Keyword Value="SampledProfile"/></Keywords>
+			<Stacks><Stack Value="SampledProfile"/></Stacks>
+		</SystemProvider>
+		<EventProvider Id="GloomMarkers" Name="744b3f90-7d83-4b7b-a861-40637623c592" Level="5">
+			<Keywords><Keyword Value="0x1"/></Keywords>
+		</EventProvider>
+		<Profile Id="GloomCPU.Verbose.File" Name="GloomCPU" Description="GLOOM sampled CPU stacks and measured-loop markers" LoggingMode="File" DetailLevel="Verbose">
+			<Collectors>
+				<SystemCollectorId Value="GloomCollector"><SystemProviderId Value="GloomSystem"/></SystemCollectorId>
+				<EventCollectorId Value="GloomEvents"><EventProviders><EventProviderId Value="GloomMarkers"/></EventProviders></EventCollectorId>
+			</Collectors>
+		</Profile>
+	</Profiles>
+</WindowsPerformanceRecorder>

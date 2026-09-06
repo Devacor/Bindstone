@@ -10,6 +10,7 @@
 //   --bench runs the real loop on autopilot and reports the sim/draw split.
 
 #include "gloom_host.hpp"
+#include "ports/profile_capture.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -243,6 +244,10 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 		}
 
 		uint64_t hash = 14695981039346656037ull;
+#ifdef GLOOM_PROFILE_CAPTURE
+		profile_capture profile;
+		profile.begin();
+#endif
 		double t0 = now_seconds();
 		for (int64_t i = 0; i < opt.ticks; ++i) {
 			std::string text;
@@ -261,6 +266,9 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 			hash = fnv1a(hash, text);
 		}
 		double total_ms = (now_seconds() - t0) * 1000.0;
+#ifdef GLOOM_PROFILE_CAPTURE
+		profile.stop();
+#endif
 		per_tick[b] = total_ms / opt.ticks;
 		frame_hashes[b] = hash;
 		state_hashes[b] = session->state_hash();

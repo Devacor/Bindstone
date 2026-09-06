@@ -3,6 +3,7 @@ param(
 	[int]$Runs = 5
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'profile_process.ps1')
 $jaiRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $output = Join-Path $jaiRoot 'out\profile-2026-09'
 $binary = Join-Path $jaiRoot 'out\astra\profile\bin\jai_gloom.exe'
@@ -31,16 +32,15 @@ foreach ($workers in @(0,8)) {
 			$log = Join-Path $output "$stamp-$mode-$run.log"
 			$err = Join-Path $output "$stamp-$mode-$run.err"
 			$arguments = @('--smoke','--backend','vm','--workers',"$workers",'--ticks','600','--warmup','600','--seed','666')
-			$process = Start-Process -FilePath $binary -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $err
 			$mask = if ($workers -eq 0) { [IntPtr]1 } else { [IntPtr]0xC03C03 }
-			$process.ProcessorAffinity = $mask
-			$process.WaitForExit()
-			$process.Refresh()
-			$text = Get-Content -LiteralPath $log -Raw
-			$ok = $process.ExitCode -eq 0 -and $text -match 'dfd969ed5a336dca\s+\|\s+1503537018'
-			$manifest.Add([pscustomobject]@{mode=$mode;run=$run;pid=$process.Id;exit=$process.ExitCode;hash_match=$ok;log=$log;trace=$trace;affinity=$mask.ToInt64()})
+			$result = Invoke-GloomProfileProcess -FilePath $binary -Arguments $arguments -Affinity $mask
+			[IO.File]::WriteAllText($log, $result.Stdout, [Text.UTF8Encoding]::new($false))
+			[IO.File]::WriteAllText($err, $result.Stderr, [Text.UTF8Encoding]::new($false))
+			$hashMatch = $result.Stdout -match 'dfd969ed5a336dca\s+\|\s+1503537018'
+			$ok = $result.ExitCode -eq 0 -and $hashMatch
+			$manifest.Add([pscustomobject]@{mode=$mode;run=$run;pid=$result.Pid;exit=$result.ExitCode;hash_match=$hashMatch;passed=$ok;log=$log;trace=$trace;affinity=$mask.ToInt64()})
 			$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output "$stamp-captures.json") -Encoding UTF8
-			if (-not $ok) { throw "GLOOM hash/exit gate failed: $log" }
+			if (-not $ok) { throw "GLOOM failed: exit=$($result.ExitCode), hash_match=$hashMatch; stdout=$log; stderr=$err" }
 			Write-Host "$mode run $run/${Runs}: hashes match"
 		}
 	} finally {

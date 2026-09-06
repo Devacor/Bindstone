@@ -138,6 +138,8 @@ namespace jai::vm {
         // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
         // [2]=slice resolution declined [3]=mic guard failed
         uint64_t profile_slice_gate_[4] = {};
+        uint64_t profile_push_sections_[8] = {};
+        uint64_t profile_push_prologue_ = 0;   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
         // [3]=full convert [4]=reference bind [5]=default arg [6]=escape-boxed
@@ -1388,6 +1390,7 @@ namespace jai::vm {
         const script_value* fused_ident_value(frame& f, const fused_operand& operand,
                                               std::optional<script_value>& scratch,
                                               size_t cache_slot);
+        op_status exec_push_fused(frame& f, const vm_instruction& ins);
         op_status exec_index(frame& f, const vm_instruction& ins);
         op_status exec_index_assign(frame& f, const vm_instruction& ins);
         op_status exec_index_compound(frame& f, const vm_instruction& ins);

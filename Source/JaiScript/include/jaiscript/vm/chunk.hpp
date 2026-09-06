@@ -59,6 +59,20 @@ namespace jai::vm {
         uint32_t member_node = k_invalid_u32;
     };
 
+    // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
+    // literal value; site is the call_site the unfused sequence would have used (the replay
+    // path and its argument metadata)
+    struct push_proto {
+        fused_operand receiver;
+        fused_operand value;              // ident / literal / one-level subscript (base ident, ident-or-literal index)
+        uint32_t site = k_invalid_u32;
+        // subscript value: the unfused sequence probes the member before the argument runs
+        // (call_args_need_probe) and reads the element as an lvalue-shaped op_index; the
+        // replay path reproduces both
+        bool value_is_subscript = false;
+        uint32_t value_index_flags = 0;
+    };
+
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)
     struct call_site {
         std::vector<uint64_t> arg_symbols;
@@ -311,6 +325,7 @@ namespace jai::vm {
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
+        std::vector<push_proto> push_protos;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

@@ -9421,7 +9421,126 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	return {};
 }
 
+// `recv.push(v);` fused (op_push_fused): the receiver resolves first, then the value, both
+// through the LOAD-identical operand ladders; an array receiver with the builtin push runs
+// the sliced push kernel VERBATIM (compat text, element conversion, memory charge, append)
+// and pushes the call result (null) for the statement's discard; every other receiver
+// (null, map, string, an instance with its own push, an unwarmed worker) replays the exact
+// unfused sequence: receiver copy, value, CALL_METHOD through the same call site.
+op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
+	const push_proto& p = f.code->push_protos[ins.a];
+	const call_site& site = f.code->call_sites[p.site];
+	std::optional<script_value> rscratch, vscratch;
+	const script_value* recv = fused_cmp_operand(f, p.receiver, f.ip * 3);
+	if (!recv) {
+		recv = fused_ident_value(f, p.receiver, rscratch, f.ip * 3);
+		if (!recv) return op_status::failed;
+	}
+	// The value: a literal materializes, an identifier resolves through the LOAD ladder, a
+	// subscript resolves AFTER the receiver is known to be an array (the general sequence
+	// probes the member before the argument runs, and an array always has push)
+	const script_value* val = nullptr;
+	std::optional<script_value> vconst;
+	auto resolve_value = [&]() -> bool {
+		if (p.value.const_index != k_invalid_u32) {
+			vconst.emplace(materialize_constant(f.code->constants[p.value.const_index]));
+			val = &*vconst;
+			return true;
+		}
+		if (p.value_is_subscript) {
+			val = fused_subscript_value(f, p.value, vscratch, f.ip * 3 + 1);
+			return val != nullptr;
+		}
+		val = fused_cmp_operand(f, p.value, f.ip * 3 + 1);
+		if (!val) { val = fused_ident_value(f, p.value, vscratch, f.ip * 3 + 1); }
+		return val != nullptr;
+	};
+	const script_value& objd = recv->deref();
+	if (objd.raw_storage_index() == script_value::TYPEID_ARRAY && f.code->builtin_indexed &&
+	    site.bi_array != builtin_method_registries::k_no_builtin) {
+		auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
+		uint64_t push_member_id = member->member_id;
+		if (push_member_id == UINT64_MAX && !parallel_worker_) {
+			push_member_id = symbolizer_->intern(member->member);
+			member->member_id = push_member_id;
+		}
+		if (push_member_id == builtin_push_id_) {
+			if (!resolve_value()) return op_status::failed;
+			auto array_type_info = objd.get_type_info();
+			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+			if (!vm_is_element_type_compatible(*val, element_type, const_cast<script_value&>(objd))) {
+				std::string value_type = vm_value_type_name(val->deref());
+				std::string expected_type = vm_type_info_name(element_type);
+				uint64_t value_type_id = symbolizer_->intern(value_type);
+				uint64_t expected_type_id = symbolizer_->intern(expected_type);
+				return raise_(
+					make_error_code(runtime_error_code::array_element_type_mismatch),
+					"Cannot push '{0}' to array<{1}>",
+					value_type_id, expected_type_id);
+			}
+			// The unfused pair pinned the node through the receiver's stack copy; a
+			// conversion can run user code, so pin it the same way before converting
+			strong_ptr<script_array> node = const_cast<script_value&>(objd).unchecked_get_array_storage();
+			auto converted_result = vm_convert_array_element(engine_, *val, element_type);
+			if (!converted_result) { return raise_from(converted_result); }
+			script_value converted = std::move(converted_result.value());
+			const size_t bytes = sizeof(script_value) +
+				(converted.is_string() ? converted.unchecked_as_string().size() : 0);
+			if (!limits_->memory_charge(bytes)) [[unlikely]] {
+				return raise_from(detail::raise_memory_cap(*limits_));
+			}
+			node->push(std::move(converted));
+			stack_.push_back(make_null());   // the call result the statement discards
+			return {};
+		}
+	}
+	// replay: exactly what the unfused sequence leaves on the stack, in its order: the
+	// receiver (LOAD pushes the cell's referent), the member probe when the argument owed
+	// one, the argument (an element read as its lvalue-shaped op_index), then the call
+	stack_.push_back(recv->deref());
+	if (p.value_is_subscript) {
+		const vm_instruction probe_ins{opcode::op_probe_member, p.site, 0, 0};
+		VM_TRY(exec_probe_member(f, probe_ins));
+		if (is_unwinding_) [[unlikely]] { return {}; }
+		fused_operand base = p.value;
+		base.subscript_chain.clear();
+		std::optional<script_value> bscratch;
+		const script_value* bp = fused_cmp_operand(f, base, f.ip * 3 + 1);
+		if (!bp) {
+			bp = fused_ident_value(f, base, bscratch, f.ip * 3 + 1);
+			if (!bp) return op_status::failed;
+		}
+		stack_.push_back(bp->deref());
+		const fused_subscript_index& level = p.value.subscript_chain[0];
+		if (level.kind == fused_subscript_index::index_literal) {
+			stack_.push_back(script_value(level.literal, engine_));
+		} else {
+			fused_operand index_operand;
+			index_operand.slot = level.slot;
+			index_operand.symbol = level.symbol;
+			std::optional<script_value> iscratch;
+			const script_value* ip = fused_cmp_operand(f, index_operand, f.ip * 3 + 2);
+			if (!ip) {
+				ip = fused_ident_value(f, index_operand, iscratch, f.ip * 3 + 2);
+				if (!ip) return op_status::failed;
+			}
+			stack_.push_back(ip->deref());
+		}
+		const vm_instruction index_ins{opcode::op_index, p.value_index_flags, 0, 0};
+		VM_TRY(exec_index(f, index_ins));
+		if (is_unwinding_) [[unlikely]] { return {}; }
+	} else {
+		if (!resolve_value()) return op_status::failed;
+		stack_.push_back(val->deref());
+	}
+	const vm_instruction call_ins{opcode::op_call_method, 1, p.site, 0};
+	return exec_call_method(f, call_ins);
+}
+
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t cm_entry = __rdtsc();
+#endif
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
@@ -9528,6 +9647,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				if (push_member_id == builtin_push_id_) {
 #ifdef JAISCRIPT_VM_PROFILE
 					++profile_builtin_direct_names_["<push-sliced>"];
+					const uint64_t push_t0 = __rdtsc();
+					profile_push_prologue_ += push_t0 - cm_entry;
+					{
+						const script_array* pn = objd.unchecked_get_array_storage().get();
+						if (pn->is_typed()) { ++profile_push_sections_[0]; }
+						else { ++profile_push_sections_[1]; if (pn->values().size() == pn->values().capacity()) { ++profile_push_sections_[2]; } }
+					}
 #endif
 					auto array_type_info = objd.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
@@ -9541,20 +9667,35 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							"Cannot push '{0}' to array<{1}>",
 							value_type_id, expected_type_id);
 					}
+#ifdef JAISCRIPT_VM_PROFILE
+					const uint64_t push_t1 = __rdtsc(); profile_push_sections_[3] += push_t1 - push_t0;
+#endif
 					auto converted_result = vm_convert_array_element(engine_, stack_[args_base], element_type);
 					if (!converted_result) { return raise_from(converted_result); }
 					script_value converted = std::move(converted_result.value());
+#ifdef JAISCRIPT_VM_PROFILE
+					const uint64_t push_t2 = __rdtsc(); profile_push_sections_[4] += push_t2 - push_t1;
+#endif
 					const size_t bytes = sizeof(script_value) +
 						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
 					if (!limits_->memory_charge(bytes)) [[unlikely]] {
 						return raise_from(detail::raise_memory_cap(*limits_));
 					}
+#ifdef JAISCRIPT_VM_PROFILE
+					const uint64_t push_t3 = __rdtsc(); profile_push_sections_[5] += push_t3 - push_t2;
+#endif
 					// Conversions can run user code and the stack can move (invariant
 					// 2b): re-resolve the receiver by INDEX before the append
 					script_value& recv_after = stack_[args_base - 1].deref();
 					recv_after.unchecked_get_array_storage()->push(std::move(converted));
+#ifdef JAISCRIPT_VM_PROFILE
+					const uint64_t push_t4 = __rdtsc(); profile_push_sections_[6] += push_t4 - push_t3;
+#endif
 					stack_.pop_back();                    // the arg
 					stack_.back() = make_null();          // receiver slot becomes the call result
+#ifdef JAISCRIPT_VM_PROFILE
+					profile_push_sections_[7] += __rdtsc() - push_t4;
+#endif
 					return {};
 				}
 			}
@@ -12137,6 +12278,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_set_static: return exec_set_static(f, ins);
 		case opcode::op_member_compound: return exec_member_compound(f, ins);
 		case opcode::op_call_method: return exec_call_method(f, ins);
+		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
 		case opcode::op_class_decl: return exec_class_decl(f, ins);
 		case opcode::op_namespace_decl: return exec_namespace_decl(f, ins);
@@ -12284,6 +12426,12 @@ void vm_backend::dump_opcode_profile() const {
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
+	if (profile_push_sections_[0] + profile_push_sections_[1]) {
+		const double n = double(profile_push_sections_[0] + profile_push_sections_[1]);
+		fprintf(stderr, "[vm-profile] push slice: prologue %.1f | typed %llu | hetero %llu (realloc %llu) | avg cyc: compat %.1f convert %.1f charge %.1f append %.1f tail %.1f\n",
+			profile_push_prologue_ / n, (unsigned long long)profile_push_sections_[0], (unsigned long long)profile_push_sections_[1], (unsigned long long)profile_push_sections_[2],
+			profile_push_sections_[3] / n, profile_push_sections_[4] / n, profile_push_sections_[5] / n, profile_push_sections_[6] / n, profile_push_sections_[7] / n);
+	}
 	if (!profile_builtin_direct_names_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> bns(profile_builtin_direct_names_.begin(), profile_builtin_direct_names_.end());
 		std::sort(bns.begin(), bns.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
@@ -12721,6 +12869,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_call_method:
 				VM_TRY_OP_SHARED(exec_call_method(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
+				break;
+			case opcode::op_push_fused:
+				VM_TRY_OP_SHARED(exec_push_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;

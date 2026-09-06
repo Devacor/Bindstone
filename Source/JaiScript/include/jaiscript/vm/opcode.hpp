@@ -170,6 +170,10 @@ namespace jai::vm {
         op_parallel_advance,   // parallel_for chunk loop: pops the counter, advances the worker's
                                // element cursor to the next slot, pushes counter + 1
         op_parallel_element,   // pushes the worker's element cursor (a by-value body copies through it)
+        op_push_fused,         // a=push_protos index: `recv.push(v);` as a statement, receiver and value
+                               // resolved as operands; an array receiver appends through the builtin's
+                               // exact kernel and pushes the call result (null), anything else replays
+                               // the unfused LOAD, LOAD, CALL_METHOD sequence through its call site
         op_halt,
     };
 
@@ -329,6 +333,7 @@ namespace jai::vm {
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";
+            case opcode::op_push_fused: return "PUSH_FUSED";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

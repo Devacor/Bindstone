@@ -75,3 +75,22 @@ measurement of one compiler mechanism.
 command, output filename, hash verdict, CPU affinity and background CPU reading.
 `summary.json` contains only accepted runs. A port that fails conformance has
 no timing result.
+
+## Sampled CPU profiles on Windows
+
+Build a separate Release configuration with symbols and measured-loop markers:
+
+```powershell
+cmake -S Source/JaiScript -B Source/JaiScript/out/astra/profile -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DCMAKE_CXX_FLAGS=/DGLOOM_PROFILE_CAPTURE "-DCMAKE_CXX_FLAGS_RELEASE=/O2 /DNDEBUG /Zi" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG:FULL /INCREMENTAL:NO" -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_RUNNER=OFF
+cmake --build Source/JaiScript/out/astra/profile --target jai_gloom
+```
+
+Then run `capture_profile.ps1` in Administrator PowerShell. It uses the
+custom `gloom_cpu.wprp` profile, records five sequential runs per configuration,
+checks the 600-tick hashes, and writes ETL files and a process manifest under
+`out/profile-2026-09`. Existing WPR recordings are left alone.
+
+Provider `744b3f90-7d83-4b7b-a861-40637623c592` marks the start and end of
+each measured loop. Filter samples by the recorded PID and these markers to
+exclude loading, warm-up and final summaries. The provider registration is
+owned by each smoke execution. Normal builds compile out the marker code.

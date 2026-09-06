@@ -4238,6 +4238,75 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("push_fused_statement_matches_the_interpreter_on_every_receiver", [this]() {
+			// `recv.push(v);` as a statement compiles to one PUSH_FUSED; an array receiver
+			// appends through the builtin's kernel, everything else replays the unfused call.
+			// The interpreter is the oracle: every case must produce the same text.
+			auto vm = vm_engine();
+			auto* symbolizer = vm->get_symbolizer();
+			auto listing_of = [&](const char* script) {
+				auto templates = vm->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, vm.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				jai::vm::vm_compiler compiler(symbolizer);
+				auto compiled = compiler.compile_program(parse_result.value());
+				return jai::vm::disassemble(*compiled, symbolizer);
+			};
+			check_true(listing_of("var a = []; a.push(1); var z = 0;").find("PUSH_FUSED") != std::string::npos, "literal arg fuses");   // a program's last statement is its implicit result, so it is not a statement form
+			check_true(listing_of("var a = []; var f = function() { int v = 2; a.push(v); }; var z = 0;").find("PUSH_FUSED") != std::string::npos, "env receiver + slot arg fuses");   // closure bodies are listed; function bodies compile at first call
+			check_true(listing_of("var a = []; int v = 2; var f = function() { a.push(v); }; var z = 0;").find("PUSH_FUSED") == std::string::npos, "an env-resolved argument keeps the probe order");
+			check_true(listing_of("var a = []; var r = a.push(1); var z = 0;").find("PUSH_FUSED") == std::string::npos, "an expression use keeps the general call");
+			check_true(listing_of("var a = []; a.push(g()); var z = 0;").find("PUSH_FUSED") == std::string::npos, "a call argument keeps the probe order");
+			check_true(listing_of("var a = []; a?.push(1); var z = 0;").find("PUSH_FUSED") == std::string::npos, "null-safe keeps the general call");
+			check_true(listing_of("var a = []; var t = [1]; var f = function() { int k = 0; a.push(t[k]); }; var z = 0;").find("PUSH_FUSED") != std::string::npos, "a one-level subscript argument fuses");
+			check_true(listing_of("var a = []; var t = [[1]]; var f = function() { a.push(t[0][0]); }; var z = 0;").find("PUSH_FUSED") == std::string::npos, "a two-level subscript keeps the general call");
+
+			const char* cases[] = {
+				"array<int> a = []; a.push(1); a.push(2.9); int v = 7; a.push(v); return to_string(a[0]) + \",\" + to_string(a[1]) + \",\" + to_string(a[2]);",
+				"array<int> a = []; string m = \"ok\"; try { a.push(\"x\"); } catch (e) { m = e; } return m + \"|\" + to_string(a.size());",
+				"array<int> a = []; var big = 1e100; string m = \"ok\"; try { a.push(big); } catch (e) { m = e; } return m;",
+				"var a = []; a.push(1); a.push(\"s\"); a.push(2.5); return to_string(a.size()) + \":\" + to_string(a[1]) + type_of(a[2]);",
+				"var a; string m = \"ok\"; try { a.push(1); } catch (e) { m = e; } return m;",
+				"var m = {}; string r = \"ok\"; try { m.push(1); } catch (e) { r = e; } return r;",
+				"var s = \"x\"; string r = \"ok\"; try { s.push(1); } catch (e) { r = e; } return r;",
+				"class P { array<int> xs = []; void push(int v) { xs.push(v * 2); } } auto p = P(); p.push(3); return to_string(p.xs[0]);",
+				"class Q { int n = 0; } auto q = Q(); string r = \"ok\"; try { q.push(1); } catch (e) { r = e; } return r;",
+				"var G = []; void f() { G.push(1); G.push(2); } f(); return to_string(G.size()) + \":\" + to_string(G[1]);",
+				"class C { array<int> xs = []; void add(int v) { xs.push(v); } } auto c = C(); c.add(4); c.add(5); return to_string(c.xs[0] + c.xs[1]);",
+				"array<int> a = []; var& r = a; r.push(5); return to_string(a[0]) + \":\" + to_string(a.size());",
+				"string r = \"ok\"; try { nope.push(1); } catch (e) { r = e; } return r;",
+				"array<string> names = []; names.push(\"a\"); names.push(\"b\"); return names[0] + names[1];",
+				"array<float> fs = []; fs.push(1); fs.push(2.5); return to_string(fs[0] + fs[1]);",
+				"class N { int v = 1; } array<N> ns = []; N one = N(); ns.push(one); one.v = 9; return to_string(ns[0].v);",
+				"var a = [1]; int i = 0; while (i < 5) { a.push(i); i = i + 1; } return to_string(a.size());",
+				"array<string> pal = [\"r\", \"g\"]; var parts = []; int k = 1; parts.push(pal[k]); parts.push(pal[0]); return parts.join(\"\");",
+				"array<int> src = [7, 8]; array<int> dst = []; int k = 1; dst.push(src[k]); dst.push(src[0]); return to_string(dst[0] * 10 + dst[1]);",
+				"array<int> src = [7]; array<int> dst = []; int k = 5; string m = \"ok\"; try { dst.push(src[k]); } catch (e) { m = e; } return m + \"|\" + to_string(dst.size());",
+				"var src = [1]; var d; string m = \"ok\"; try { d.push(src[0]); } catch (e) { m = e; } return m;",
+				"class Q { int n = 0; } auto q = Q(); var src = [1]; int k = 9; string r = \"ok\"; try { q.push(src[k]); } catch (e) { r = e; } return r;",
+				"class P { array<int> xs = []; void push(int& v) { v = v + 1; xs.push(v); } } auto p = P(); array<int> src = [5]; p.push(src[0]); return to_string(src[0]) + \":\" + to_string(p.xs[0]);",
+				"var m = {\"k\": 3}; var a = []; a.push(m[\"k\"]); return to_string(a[0]);",
+				"var src = [1]; var a = []; string r = \"ok\"; try { a.push(src[nope]); } catch (e) { r = e; } return r;",
+			};
+			for (const char* body : cases) {
+				std::string program = std::string("string run() { ") + body + " } run();";
+				auto interp = jai::engine::make();
+				jai::stdlib::register_all(*interp);
+				auto vmx = vm_engine();
+				jai::stdlib::register_all(*vmx);
+				std::string want, got;
+				try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+				try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+				check_eq(want, got, body);
+			}
+			auto vmx = vm_engine();
+			jai::stdlib::register_all(*vmx);
+			check_eq(std::string("Cannot push 'string' to array<int>|0"), vmx->execute("string run() { array<int> a = []; string m = \"ok\"; try { a.push(\"x\"); } catch (e) { m = e; } return m + \"|\" + to_string(a.size()); } run();").as_string());
+			check_eq(std::string("Cannot convert float to integer: non-finite or out of range"), vmx->execute("string run() { array<int> a = []; var big = 1e100; string m = \"ok\"; try { a.push(big); } catch (e) { m = e; } return m; } run();").as_string());
+		});
 	}
 };
 

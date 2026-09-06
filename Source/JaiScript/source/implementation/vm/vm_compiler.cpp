@@ -138,6 +138,7 @@ namespace {
 			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
+			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
 			case opcode::op_from_this:
@@ -255,6 +256,7 @@ namespace {
 			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
+			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
 			case opcode::op_from_this:
@@ -1535,6 +1537,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		compile_assignment(std::static_pointer_cast<assignment_expr>(expr), as_statement);
 		return;
 	case node_type::call_expr:
+		if (as_statement && try_emit_fused_push(std::static_pointer_cast<call_expr>(expr))) return;
 		compile_call(std::static_pointer_cast<call_expr>(expr));
 		return;
 	case node_type::lambda_expr:
@@ -2172,6 +2175,73 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation),
 	     add_message("Complex assignment targets not yet implemented"), k_invalid_u32);
 	emit(opcode::op_null);
+}
+
+// `recv.push(v);` as a statement (GLOOM profile: 95% of method calls, ~440 cycles as
+// LOAD, LOAD, CALL_METHOD, POP): receiver an identifier, value a slotted identifier or a
+// literal, so no probe is owed (call_args_need_probe's exact admission) and the receiver
+// resolves before the value exactly as the unfused pair reads them. The call site is built
+// as compile_call builds it: the exec replays through it on any guard miss.
+bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
+	if (expr->callee->get_type() != node_type::member_expr || expr->arguments.size() != 1) return false;
+	auto member = std::static_pointer_cast<member_expr>(expr->callee);
+	if (member->is_static || member->null_safe || member->member != "push") return false;
+	if (member->object->get_type() != node_type::identifier_expr) return false;
+	const auto& arg = expr->arguments[0];
+	bool value_is_subscript = false;
+	if (arg->get_type() == node_type::identifier_expr) {
+		auto* arg_ident = static_cast<identifier_expr*>(arg.get());
+		if (arg_ident->global_qualified || identifier_slot_operand(arg_ident) == k_invalid_u32) return false;
+	} else if (arg->get_type() == node_type::binary_expr) {
+		// `recv.push(table[i])`: one level, identifier base, ident-or-literal index. Not a
+		// transient read (an argument may bind a T& parameter), so the replay reads it as
+		// the lvalue-shaped op_index the general path emits; the builtin lane reads the
+		// element by value, which is what push consumes either way
+		const auto* sub = static_cast<const binary_expr*>(arg.get());
+		if (sub->op.type != token_type::left_bracket) return false;
+		if (sub->left->get_type() != node_type::identifier_expr ||
+		    static_cast<const identifier_expr*>(sub->left.get())->global_qualified) return false;
+		if (!fusable_subscript_index(sub->right.get())) return false;
+		value_is_subscript = true;
+	} else if (arg->get_type() != node_type::literal_expr) {
+		return false;
+	}
+	call_site site;
+	site.member_node = add_node(member);
+	site.call_node = add_node(expr);
+	auto* recv_ident = static_cast<identifier_expr*>(member->object.get());
+	site.receiver_symbol = recv_ident->symbol_id;
+	site.receiver_slot = identifier_slot_operand(recv_ident);
+	if (builtins_) {
+		auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
+			auto it = index.find(member->member_id);
+			return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;
+		};
+		site.bi_array = builtin_index_for(builtins_->array_index);
+		site.bi_map = builtin_index_for(builtins_->map_index);
+		site.bi_string = builtin_index_for(builtins_->string_index);
+		chunk_->builtin_indexed = true;
+	}
+	if (arg->get_type() == node_type::identifier_expr) {
+		auto* arg_ident = static_cast<identifier_expr*>(arg.get());
+		site.arg_symbols.push_back(arg_ident->symbol_id);
+		site.arg_slots.push_back(identifier_slot_operand(arg_ident));
+	} else {
+		site.arg_symbols.push_back(UINT64_MAX);
+		site.arg_slots.push_back(k_invalid_u32);
+	}
+	push_proto proto;
+	proto.receiver = make_fused_operand(member->object);
+	proto.value = make_fused_operand(arg);
+	proto.value_is_subscript = value_is_subscript;
+	if (value_is_subscript) {
+		proto.value_index_flags = is_lvalue_shaped(static_cast<const binary_expr*>(arg.get())->left.get()) ? index_flag_lvalue_shape : 0;
+	}
+	chunk_->call_sites.push_back(std::move(site));
+	proto.site = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+	chunk_->push_protos.push_back(std::move(proto));
+	emit(opcode::op_push_fused, static_cast<uint32_t>(chunk_->push_protos.size() - 1));
+	return true;
 }
 
 void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {

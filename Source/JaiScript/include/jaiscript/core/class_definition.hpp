@@ -2487,11 +2487,14 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         null_val.set_type_info(target_type);
         return slot_conversion::converted_to(std::move(null_val));
     };
-    auto boundary = [&]() {
+    auto boundary = [&]() -> checked_result<slot_conversion> {
         if (v.get_type_info().get() == target_type.get()) {
             return slot_conversion::of(verdict::identity);   // the declared representation already
         }
         auto outcome = enforce_container_boundary(v, target_type, eng);
+        if (outcome.error) {
+            return checked_result<slot_conversion>(outcome.error->ec, outcome.error->static_msg, outcome.error->symbol_id, outcome.error->symbol_id2);
+        }
         if (!outcome.value) {
             slot_conversion out = slot_conversion::of(verdict::container_mismatch);
             out.mismatch = std::make_unique<std::pair<std::string, std::string>>(std::move(outcome.offending), std::move(outcome.expected));

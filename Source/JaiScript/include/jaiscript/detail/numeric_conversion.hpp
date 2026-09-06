@@ -29,4 +29,11 @@ inline checked_result<Integer> checked_float_to_integer(script_float value) noex
 	return static_cast<Integer>(value);
 }
 
+// The range half of checked_float_to_integer on its own: the typed-buffer store lanes admit
+// a float rhs only when this holds and send everything else through the enforcing path,
+// which raises the kernel's error.
+inline bool float_fits_script_int(script_float value) noexcept {
+	return value >= -0x1p63 && value < 0x1p63;
+}
+
 } // namespace jai::detail

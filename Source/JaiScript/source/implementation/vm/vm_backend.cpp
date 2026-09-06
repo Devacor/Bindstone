@@ -132,7 +132,7 @@ namespace {
 		return detail::container_element_compatible(element, element_type, array_owner.get_engine());
 	}
 
-	script_value vm_convert_array_element(engine* eng, const script_value& element, type_info_ptr element_type) {
+	checked_result<script_value> vm_convert_array_element(engine* eng, const script_value& element, type_info_ptr element_type) {
 		return detail::convert_container_element(eng, element, element_type);
 	}
 
@@ -5545,7 +5545,9 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 				"Cannot assign '{0}' to element of type '{1}'",
 				value_type_id, expected_type_id);
 		}
-		script_value converted = vm_convert_array_element(engine_, value, element_type);
+		auto converted_result = vm_convert_array_element(engine_, value, element_type);
+		if (!converted_result) { return raise_from(converted_result); }
+		script_value converted = std::move(converted_result.value());
 		*target_ptr = std::move(converted);
 	} else {
 		// No element type constraint - values deep-copy, shared_ptr handles share
@@ -5671,7 +5673,9 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 				"Cannot assign '{0}' to element of type '{1}'",
 				value_type_id, expected_type_id);
 		}
-		script_value converted = vm_convert_array_element(engine_, resultValue, element_type);
+		auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
+		if (!converted_result) { return raise_from(converted_result); }
+		script_value converted = std::move(converted_result.value());
 		*target_ptr = std::move(converted);
 	} else {
 		*target_ptr = std::move(resultValue.clone());
@@ -5705,7 +5709,8 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
 				const size_t ri = rhs_peek.raw_storage_index();
-				if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
+				if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT &&
+				    (storage->kind() == script_array::kind_t::f64 || detail::float_fits_script_int(rhs_peek.unchecked_as_float())))) {
 					stack_.pop_back();   // index (decoded above)
 					script_value container_local = std::move(stack_.back());
 					stack_.pop_back();
@@ -5736,7 +5741,9 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 							"Cannot assign '{0}' to element of type '{1}'",
 							value_type_id, expected_type_id);
 					}
-					script_value converted = vm_convert_array_element(engine_, value, element_type);
+					auto converted_result = vm_convert_array_element(engine_, value, element_type);
+					if (!converted_result) { return raise_from(converted_result); }
+					script_value converted = std::move(converted_result.value());
 					*target_ptr = std::move(converted);
 				} else {
 					// No element type constraint - values deep-copy, shared_ptr handles share
@@ -6361,7 +6368,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		    index >= 0 && index < static_cast<script_int>(node->size())) {
 			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 			const size_t ri = rhs_peek.raw_storage_index();
-			if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
+			if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT &&
+			    (node->kind() == script_array::kind_t::f64 || detail::float_fits_script_int(rhs_peek.unchecked_as_float())))) {
 				if (node->kind() == script_array::kind_t::i64) {
 					node->ints()[static_cast<size_t>(index)] = ri == script_value::TYPEID_FLOAT
 						? static_cast<script_int>(rhs_peek.unchecked_as_float()) : rhs_peek.unchecked_as_int();
@@ -6427,7 +6435,9 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 						"Cannot assign '{0}' to element of type '{1}'",
 						value_type_id, expected_type_id);
 				}
-				script_value converted = vm_convert_array_element(engine_, value, element_type);
+				auto converted_result = vm_convert_array_element(engine_, value, element_type);
+				if (!converted_result) { return raise_from(converted_result); }
+				script_value converted = std::move(converted_result.value());
 				*target_ptr = std::move(converted);
 			} else {
 				// No element type constraint - values deep-copy, shared_ptr handles share
@@ -6495,6 +6505,10 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
 				script_value resultValue = make_null();
 				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs));
+				if (storage->kind() == script_array::kind_t::i64 && resultValue.raw_storage_index() == script_value::TYPEID_FLOAT &&
+				    !detail::float_fits_script_int(resultValue.unchecked_as_float())) {
+					return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), detail::float_to_integer_error);
+				}
 				storage->set(static_cast<size_t>(index), resultValue);
 				stack_.pop_back();   // rhs
 				stack_.pop_back();   // index
@@ -6539,7 +6553,9 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 								value_type_id, expected_type_id);
 						}
 						// Numeric-to-numeric conversion: no user code (int/float only)
-						script_value converted = vm_convert_array_element(engine_, resultValue, element_type);
+						auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
+						if (!converted_result) { return raise_from(converted_result); }
+						script_value converted = std::move(converted_result.value());
 						*target_ptr = std::move(converted);
 					} else {
 						*target_ptr = std::move(resultValue.clone());
@@ -9521,7 +9537,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							"Cannot push '{0}' to array<{1}>",
 							value_type_id, expected_type_id);
 					}
-					script_value converted = vm_convert_array_element(engine_, stack_[args_base], element_type);
+					auto converted_result = vm_convert_array_element(engine_, stack_[args_base], element_type);
+					if (!converted_result) { return raise_from(converted_result); }
+					script_value converted = std::move(converted_result.value());
 					const size_t bytes = sizeof(script_value) +
 						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
 					if (!limits_->memory_charge(bytes)) [[unlikely]] {
@@ -9804,7 +9822,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							"Cannot push '{0}' to array<{1}>",
 							value_type_id, expected_type_id);
 					}
-					script_value converted = vm_convert_array_element(engine_, arguments[0], element_type);
+					auto converted_result = vm_convert_array_element(engine_, arguments[0], element_type);
+					if (!converted_result) { return raise_from(converted_result); }
+					script_value converted = std::move(converted_result.value());
 					const size_t bytes = sizeof(script_value) +
 						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
 					if (!limits_->memory_charge(bytes)) [[unlikely]] {

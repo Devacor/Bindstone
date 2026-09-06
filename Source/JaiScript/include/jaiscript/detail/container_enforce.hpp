@@ -7,6 +7,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/numeric_conversion.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -129,7 +130,28 @@ namespace jai::detail {
 		return false;
 	}
 
-	inline script_value convert_container_element(engine* eng, const script_value& element, const type_info_ptr& element_type) {
+	inline constexpr const char* container_boundary_mismatch_text = "Cannot store {0} in {1}";
+
+	struct container_boundary_outcome {
+		std::optional<script_value> value;      // engaged on success
+		std::string offending;                  // failure: the mismatched element/key/value type
+		std::string expected;                   // failure: the target container's canonical name
+		std::optional<error_propagator> error;  // failure already worded by a kernel: a float outside the int range, a nested boundary's verdict
+	};
+
+	inline container_boundary_outcome enforce_container_boundary(script_value value, const type_info_ptr& target_type, engine* eng);
+
+	// The one text for an element that does not belong, interned the way the backends do
+	inline error_propagator container_mismatch_error(engine* eng, const std::string& offending, const std::string& expected) {
+		auto* sym = eng ? eng->get_symbolizer() : nullptr;
+		return error_propagator{ make_error_code(runtime_error_code::array_element_type_mismatch), container_boundary_mismatch_text,
+		                         sym ? sym->intern(offending) : 0, sym ? sym->intern(expected) : 0 };
+	}
+
+	// The element boundary's numeric rows are the scalar slot's rows: a float into an int
+	// element runs the same checked kernel (`int x = 1e100` and `array<int> x = [1e100]`
+	// reject with one text), an int into a float element widens.
+	inline checked_result<script_value> convert_container_element(engine* eng, const script_value& element, const type_info_ptr& element_type) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 
 		auto actual_type_info = actual_element.get_type_info();
@@ -144,8 +166,28 @@ namespace jai::detail {
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
 
+		if (target_type == script_value_type::jai_array_type || target_type == script_value_type::jai_map_type) {
+			// a nested container element: the same boundary one level down, reading the
+			// source in place. A rebuild (inner literal -> typed node) IS the store's copy;
+			// a node that already fits comes back as the same handle and gets the one copy
+			// value semantics owe the store, exactly like a flat element.
+			if (elem_type != target_type) {
+				return container_mismatch_error(eng, container_value_type_name(actual_element), element_type->canonical_name());
+			}
+			auto inner = enforce_container_boundary(actual_element, element_type, eng);
+			if (inner.error) { return *inner.error; }
+			if (!inner.value) { return container_mismatch_error(eng, inner.offending, inner.expected); }
+			const bool rebuilt = inner.value->raw_storage_index() != actual_element.raw_storage_index() ||
+			                     (target_type == script_value_type::jai_array_type
+			                          ? inner.value->unchecked_array_node() != actual_element.unchecked_array_node()
+			                          : &inner.value->unchecked_as_map() != &actual_element.unchecked_as_map());
+			return rebuilt ? std::move(*inner.value) : inner.value->clone_element();
+		}
+
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			return script_value(static_cast<script_int>(actual_element.unchecked_as_float()), eng);
+			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());
+			if (!converted) { return converted.error_value(); }
+			return script_value(converted.value(), eng);
 		}
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
@@ -314,13 +356,6 @@ namespace jai::detail {
 	}
 
 	// The one message both backends raise at a failed boundary (byte-identical errors).
-	inline constexpr const char* container_boundary_mismatch_text = "Cannot store {0} in {1}";
-
-	struct container_boundary_outcome {
-		std::optional<script_value> value;  // engaged on success
-		std::string offending;              // failure: the mismatched element/key/value type
-		std::string expected;               // failure: the target container's canonical name
-	};
 
 	inline container_boundary_outcome enforce_container_boundary(script_value value, const type_info_ptr& target_type, engine* eng) {
 		container_boundary_outcome out;
@@ -400,6 +435,11 @@ namespace jai::detail {
 					     target_elem_base == script_value_type::jai_float_type)) {
 						needs_conversion = true;
 					}
+					if (target_elem_base == script_value_type::jai_array_type || target_elem_base == script_value_type::jai_map_type) {
+						// nested: the inner tag decides; an untagged or differently tagged inner
+						// node is rebuilt through its own boundary
+						if (actual.get_type_info().get() != element_type.get()) { needs_conversion = true; }
+					}
 				}
 			}
 			if (!needs_conversion) {
@@ -413,8 +453,16 @@ namespace jai::detail {
 			for (size_t i = 0; i < count; ++i) {
 				// representation change only: object handles copy as-is (ownership - clone or
 				// share - is decided by the assignment or binding site, exactly as before)
-				dest.push(expected_kind == script_array::kind_t::obj ? src->get(i, eng)
-				                                                       : convert_container_element(eng, src->get(i, eng), element_type));
+				if (expected_kind == script_array::kind_t::obj) {
+					dest.push(src->get(i, eng));
+					continue;
+				}
+				auto converted = convert_container_element(eng, src->get(i, eng), element_type);
+				if (!converted) {
+					out.error = converted.error_value();
+					return out;
+				}
+				dest.push(std::move(converted.value()));
 			}
 			rebuilt.set_type_info(target_type);
 			out.value = std::move(rebuilt);
@@ -456,6 +504,10 @@ namespace jai::detail {
 					     value_base == script_value_type::jai_float_type)) {
 						needs_conversion = true;
 					}
+					if ((value_base == script_value_type::jai_array_type || value_base == script_value_type::jai_map_type) &&
+					    actual.get_type_info().get() != value_type.get()) {
+						needs_conversion = true;   // nested value: rebuilt through its own boundary below
+					}
 				}
 			}
 			if (!needs_conversion) {
@@ -467,7 +519,12 @@ namespace jai::detail {
 			auto& dest = rebuilt.get_map_storage();
 			for (const auto& entry : entries) {
 				const script_value& actual_key = entry.first.is_reference() ? entry.first.deref() : entry.first;
-				dest->emplace(actual_key.clone(), convert_container_element(eng, entry.second, value_type));
+				auto converted = convert_container_element(eng, entry.second, value_type);
+				if (!converted) {
+					out.error = converted.error_value();
+					return out;
+				}
+				dest->emplace(actual_key.clone(), std::move(converted.value()));
 			}
 			rebuilt.set_type_info(target_type);
 			out.value = std::move(rebuilt);

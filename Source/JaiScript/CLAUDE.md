@@ -255,7 +255,9 @@ engine stays usable", not by `check_throws`.
   `array<UserType>` object-slot buffers follow the same rule); `array<var>` (and literals without
   a spelled element type) is the only `script_value`-vector form; converting between them
   is an explicit assignment (`array<var> x = ints;`), nothing demotes silently, no
-  Debug/Release difference. On the C++ side `as_array()`/`checked_as_array()` are the
+  Debug/Release difference. The boundary recurses: `array<array<int>>` and `map<string, array<int>>`
+  type their inner nodes too, and a float into an int element runs the scalar slot's checked
+  kernel (`array<int> x = [1e100]` rejects like `int x = 1e100`; `detail/numeric_conversion.hpp`). On the C++ side `as_array()`/`checked_as_array()` are the
   `array<var>` view (a typed node returns one error), readers use `script_array::for_each`,
   `bound_array<int64_t>&` mutates the buffer in place, `std::vector<script_int>` extracts
   unboxed. Typed map STORAGE is the open campaign (`docs/typed_array_design.md` stage 6,

@@ -149,7 +149,7 @@ static bool is_element_type_compatible(
     return detail::container_element_compatible(element, element_type, array_owner.get_engine());
 }
 
-static script_value convert_array_element(
+static checked_result<script_value> convert_array_element(
     engine* eng,
     const script_value& element,
     type_info_ptr element_type
@@ -408,7 +408,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
-        script_value converted = convert_array_element(ctx.get_engine(), args[0], element_type);
+        auto converted_result = convert_array_element(ctx.get_engine(), args[0], element_type);
+        if (!converted_result) { return converted_result.error_value(); }
+        script_value converted = std::move(converted_result.value());
 
         // engine::memory_cap chokepoint: deny the growth before it exists
         if (engine* eng = ctx.get_engine()) {
@@ -6077,8 +6079,9 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
                 value_type_id, expected_type_id);
         }
         // Convert element if needed (e.g., int -> float for array<float>)
-        script_value converted = convert_array_element(engine_, value, element_type);
-        *target_ptr = std::move(converted);
+        auto converted = convert_array_element(engine_, value, element_type);
+        if (!converted) { return converted.error_value(); }
+        *target_ptr = std::move(converted.value());
     } else {
         // No element type constraint - values deep-copy, shared_ptr handles share
         *target_ptr = clone_for_assignment(value);

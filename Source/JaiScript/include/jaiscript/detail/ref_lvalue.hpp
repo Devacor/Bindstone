@@ -16,6 +16,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/operator_table.hpp>
+#include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <vector>
 
@@ -708,7 +709,7 @@ namespace jai::detail {
 		return ref_container_kind_compatible(actual_element, element_type, elem_type, target_type);
 	}
 
-	inline script_value ref_convert_for_constraint(engine* eng, const script_value& element, type_info_ptr element_type) {
+	inline checked_result<script_value> ref_convert_for_constraint(engine* eng, const script_value& element, type_info_ptr element_type) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 		auto actual_type_info = actual_element.get_type_info();
 		if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
@@ -720,7 +721,9 @@ namespace jai::detail {
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			return script_value(static_cast<script_int>(actual_element.unchecked_as_float()), eng);
+			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());   // the scalar slot's kernel
+			if (!converted) { return converted.error_value(); }
+			return script_value(converted.value(), eng);
 		}
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
@@ -825,8 +828,9 @@ namespace jai::detail {
 		if (!ref_constraint_compatible(value, constraint, eng, is_field)) {
 			return ref_constraint_error(symbolizer, value, constraint, is_field);
 		}
-		script_value converted = ref_convert_for_constraint(eng, value, constraint);
-		ref_write_through(refLocal, std::move(converted));
+		auto converted = ref_convert_for_constraint(eng, value, constraint);
+		if (!converted) { return converted.error_value(); }
+		ref_write_through(refLocal, std::move(converted.value()));
 		return {};
 	}
 
@@ -911,8 +915,9 @@ namespace jai::detail {
 			auto err = ref_constraint_error(symbolizer, resultValue, constraint, is_field);
 			return err.error_value();
 		}
-		script_value converted = ref_convert_for_constraint(eng, resultValue, constraint);
-		ref_write_through(refLocal, std::move(converted));
+		auto converted = ref_convert_for_constraint(eng, resultValue, constraint);
+		if (!converted) { return converted.error_value(); }
+		ref_write_through(refLocal, std::move(converted.value()));
 		return resultValue;
 	}
 

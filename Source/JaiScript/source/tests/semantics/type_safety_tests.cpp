@@ -957,25 +957,17 @@ public:
             check_eq(result.as<int>(), 2, "push array to array<array<int>> works");
         });
 
-        test("LIMITATION_nested_array_inner_type_not_checked", [this]() {
+        test("nested_array_inner_type_is_checked", [this]() {
+            // The container boundary recurses: an inner literal converts to array<int> (a
+            // typed node) or is rejected, so array<array<int>> is typed at every level
             auto eng = make_engine();
-
-            // LIMITATION: Pushing a string array to array<array<int>> doesn't fail
-            // because array literals are untyped - they don't carry element type info
-            // The check only verifies "is this an array?" not "is this array<int>?"
-            bool caught = false;
-            try {
+            check_throws([&]() {
                 eng->execute(R"(
                     array<array<int>> matrix = [[1, 2]];
-                    matrix.push(["hello", "world"]);  // Should fail but doesn't
+                    matrix.push(["hello", "world"]);
                 )");
-            } catch (const std::exception&) {
-                caught = true;
-            }
-
-            // Current behavior: Does NOT catch the mismatch
-            // Future enhancement: Recursively validate inner element types
-            check_false(caught, "LIMITATION: nested array inner types not validated");
+            });
+            check_eq((int64_t)3, eng->execute("array<array<int>> m = [[1, 2]]; m.push([3, 4]); m[1][0];").as_int());
         });
 
         test("array_of_maps", [this]() {

@@ -1,4 +1,4 @@
-// gloom_lua: Lua 5.4 / sol2 adapter for the GLOOM shared host. Binds the host
+// Lua 5.4, Lua 5.5 and LuaJIT JIT / sol2 adapter for the GLOOM shared host. Binds the host
 // API (REFERENCE.md section 2) into a sol::state — the shared gloom_rng as a
 // usertype (int64 passthrough via lua_Integer, no double round-trip), host
 // services as free functions, HOST_* flags as globals — loads the Lua game
@@ -12,6 +12,12 @@
 #include <stdexcept>
 #include <string>
 
+#ifndef GLOOM_LUA_PROGRAM
+#define GLOOM_LUA_PROGRAM "gloom_lua"
+#define GLOOM_LUA_LABEL "Lua 5.4.8 / sol2"
+#define GLOOM_LUA_BACKEND "lua"
+#endif
+
 namespace {
 
 class lua_session : public gloom::script_session {
@@ -22,13 +28,31 @@ public:
 		lua_.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
 			sol::lib::table, sol::lib::coroutine, sol::lib::package, sol::lib::debug);
 
+#ifdef GLOOM_LUAJIT
+		lua_.open_libraries(sol::lib::jit, sol::lib::ffi, sol::lib::bit32);
+		// LuaJIT numbers cannot carry the RNG state losslessly. Assemble uint64
+		// cdata from two exactly representable halves inside this Lua state.
+		lua_.script(R"(
+			local ffi = require("ffi")
+			function __gloom_rng_state(lo, hi)
+				return ffi.new("uint64_t", hi) * 4294967296ULL + ffi.new("uint64_t", lo)
+			end
+		)");
+		auto rng_state = [this](const gloom::gloom_rng& a_rng) -> sol::object {
+			const uint64_t value = static_cast<uint64_t>(a_rng.state());
+			return call("__gloom_rng_state", static_cast<uint32_t>(value),
+				static_cast<uint32_t>(value >> 32)).get<sol::object>();
+		};
+#else
+		auto rng_state = &gloom::gloom_rng::state;
+#endif
 		lua_.new_usertype<gloom::gloom_rng>("Rng",
 			sol::constructors<gloom::gloom_rng(int64_t)>(),
 			"next", &gloom::gloom_rng::next,
 			"roll", &gloom::gloom_rng::roll,
 			"chance", &gloom::gloom_rng::chance,
 			"nextf", &gloom::gloom_rng::nextf,
-			"state", &gloom::gloom_rng::state);
+			"state", rng_state);
 
 		lua_["host_log"] = [log = services_.log](const std::string& line) { log(line); };
 		lua_["key_down"] = [key_down = services_.key_down](const std::string& name) -> bool {
@@ -55,7 +79,11 @@ public:
 			"",
 #endif
 			"gloom_scripts_lua", "main.lua");
-		lua_["package"]["path"] = dir + "/?.lua";
+		std::string module_path = dir + "/?.lua";
+#ifdef GLOOM_LUA_COMMON_SCRIPTS_DIR
+		module_path += std::string(";") + GLOOM_LUA_COMMON_SCRIPTS_DIR + "/?.lua";
+#endif
+		lua_["package"]["path"] = module_path;
 		sol::protected_function_result result = lua_.safe_script_file(
 			dir + "/main.lua", sol::script_pass_on_error);
 		if (!result.valid()) { throw_lua_error(result); }
@@ -103,11 +131,11 @@ private:
 
 class lua_adapter : public gloom::script_adapter {
 public:
-	std::string program_name() const override { return "gloom_lua"; }
-	std::string language() const override { return "Lua/sol2"; }
-	std::vector<std::string> backends() const override { return {"lua"}; }
+	std::string program_name() const override { return GLOOM_LUA_PROGRAM; }
+	std::string language() const override { return GLOOM_LUA_LABEL; }
+	std::vector<std::string> backends() const override { return {GLOOM_LUA_BACKEND}; }
 	std::string title() const override {
-		return "gloom_lua - GLOOM, a terminal raycast shooter (Lua 5.4 / sol2 port)";
+		return std::string(GLOOM_LUA_PROGRAM) + " - GLOOM (" + GLOOM_LUA_LABEL + ")";
 	}
 	std::unique_ptr<gloom::script_session> make_session(const std::string& backend,
 			const gloom::host_services& services, const gloom::host_options& opt,

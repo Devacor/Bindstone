@@ -180,6 +180,43 @@ public:
 			check_eq(script_int{3}, eng->execute("map<string, array<int>> m = {\"k\": [1, 2.9]}; m[\"k\"][0] + m[\"k\"][1];").as_int());
 		});
 
+		test("aggregate_copies_share_explicit_handles", [this]() {
+			// C++ copy semantics for every aggregate copy (Astra review 2, Dev's standing
+			// ruling): value members deep-copy, shared_ptr<T> members keep sharing their
+			// object, on instances, arrays and maps alike; a direct handle copy shares as before.
+			auto eng = make_engine();
+			eng->execute(R"(
+				class N { int v = 1; }
+				class H { shared_ptr<N> p; N owned; H() { p = new N(); owned = N(); } }
+				H a = H();
+				H b = a;
+				b.p.v = 5;
+				b.owned.v = 50;
+				shared_ptr<N> q = a.p;
+				q.v = q.v + 2;
+				array<shared_ptr<N>> xs = [a.p];
+				array<shared_ptr<N>> ys = xs;
+				ys[0].v = ys[0].v + 10;
+				map<string, shared_ptr<N>> m1 = {"k": a.p};
+				map<string, shared_ptr<N>> m2 = m1;
+				m2["k"].v = m2["k"].v + 100;
+				array<H> hs = [a];
+				array<H> hs2 = hs;
+				hs2[0].p.v = hs2[0].p.v + 1000;
+				hs2[0].owned.v = 7;
+			)");
+			check_eq(script_int{1117}, eng->execute("a.p.v").as_int());          // 5 + 2 + 10 + 100 + 1000: one object throughout
+			check_eq(script_int{1}, eng->execute("a.owned.v").as_int());         // the value member copied
+			check_eq(script_int{50}, eng->execute("b.owned.v").as_int());
+			check_eq(script_int{1}, eng->execute("hs[0].owned.v").as_int());
+			check_true(eng->execute("same_object(a.p, b.p) && same_object(a.p, ys[0]) && same_object(a.p, m2[\"k\"]) && same_object(a.p, hs2[0].p)").as_bool());
+			check_false(eng->execute("same_object(a.owned, b.owned)").as_bool());
+			// nested value aggregates still copy all the way down
+			check_eq(script_int{1}, eng->execute("class G { array<array<int>> grid = [[1]]; } G g1 = G(); G g2 = g1; g2.grid[0][0] = 9; g1.grid[0][0];").as_int());
+			// weak handles observe the shared object too
+			check_eq(script_int{3}, eng->execute("class W { weak_ptr<N> w; } W w1 = W(); shared_ptr<N> keep = new N(); keep.v = 3; w1.w = keep; W w2 = w1; w2.w.lock().v;").as_int());
+		});
+
 		test("numeric_failed_store_preserves_value", [this]() {
 			auto eng = make_engine();
 			check_eq(script_int{14}, eng->execute(R"(

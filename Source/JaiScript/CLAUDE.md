@@ -295,6 +295,10 @@ engine stays usable", not by `check_throws`.
   deep-copies through the store kernel (`shared_ptr` handles share, scalars/strings are copies
   already), so `f().push(4)` never grows the callee's storage; `-> T&` returns alias and the
   top-level `return` is unchanged. Kernel `detail/return_conv.hpp`, one site per backend.
+- **Aggregate copies are C++ copies** (Dev ruling 2026-09-05): copying a class instance, array or map
+  copies value members/elements and SHARES `shared_ptr`/`weak_ptr` ones (`script_value::clone_element`
+  is the member-copy rule; `clone()` on a bare handle stays the explicit pointee clone for hosts). A
+  `weak_ptr<T>` field/static takes a shared handle like the declaration form.
 - **`==` is memberwise on heavy values** (Dev ruling 2026-09-05; `detail/structural_equality.hpp`, one
   kernel for both backends): arrays elementwise, maps entrywise under the map's key ordering, class
   instance VALUES fieldwise (same class only; a user `operator==` takes precedence at every level),

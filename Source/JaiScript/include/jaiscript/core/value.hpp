@@ -189,6 +189,9 @@ namespace jai {
         // default case for these raw indexes IS the copy constructor - the same gate
         // clone_for_assignment applies at store boundaries), so container copies and
         // element conversions spend the out-of-line clone only where a deep copy can happen
+        // The member copy an aggregate copy makes (C++ copy-constructor semantics): values
+        // deep-copy, an explicit shared_ptr<T>/weak_ptr<T> handle copies as a handle and keeps
+        // sharing its object. clone() on a bare handle stays the explicit pointee clone.
         script_value clone_element() const {
             switch (raw_storage_index()) {
                 case TYPEID_NULL:
@@ -199,6 +202,9 @@ namespace jai {
                 case TYPEID_BOOL:
                     return *this;
                 default:
+                    if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
+                        return *this;
+                    }
                     return clone();
             }
         }

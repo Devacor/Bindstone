@@ -2358,7 +2358,7 @@ inline size_t class_instance::field_value_count() const {
 
 inline void class_instance::copy_fields_from(const class_instance& other) {
     other.for_each_field([&](uint64_t id, const script_value& value) {
-        materialize_field(id, value.clone());
+        materialize_field(id, value.clone_element());
     });
 }
 
@@ -2463,6 +2463,26 @@ inline bool class_slot_admits(const slot_class_view& view, const script_value& v
         return true;
     }
     return !view.def && !tagged;
+}
+
+// weak_ptr<T> slot taking a shared_ptr handle (C++: weak = shared): the pointee class must be
+// T or derive from it, then the handle downgrades to a weak one. false = not this row.
+inline bool weak_slot_takes_shared(const script_value& value, const type_info_ptr& target_type, engine* eng) {
+    if (!target_type || target_type->base_type != script_value_type::jai_weak_ptr_type ||
+        value.type() != script_value_type::jai_shared_ptr_type) {
+        return false;
+    }
+    auto expected_type = target_type->element_type();
+    auto value_type_info = value.get_type_info();
+    if (!expected_type || !value_type_info || expected_type->base_type == script_value_type::jai_any_type) {
+        return true;
+    }
+    const std::string& expected_class = expected_type->type_name;
+    const std::string& actual_class = value_type_info->element_type() ? value_type_info->element_type()->type_name
+                                                                       : value_type_info->type_name;
+    if (expected_class == actual_class) { return true; }
+    auto actual_def = eng ? eng->get_class_definition(actual_class) : nullptr;
+    return actual_def && actual_def->is_subtype_of(expected_class);
 }
 
 inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
@@ -2596,6 +2616,11 @@ inline std::optional<script_value> field_handle_rows(const script_value& v, cons
     const auto target = declared->base_type;
     if (v.type() == target) {
         return v;
+    }
+    if (weak_slot_takes_shared(v, declared, eng)) {   // weak_ptr<T> field = shared handle (C++: weak = shared)
+        auto weak = script_value::make_weak_ptr(v, eng);
+        if (weak) { return std::move(weak.value()); }
+        return std::nullopt;
     }
     if (target != script_value_type::jai_shared_ptr_type) {
         return std::nullopt;
@@ -3085,10 +3110,10 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                         continue;
                     }
                 }
-                new_instance->set_field(id, cell->clone());
+                new_instance->set_field(id, cell->clone_element());
                 continue;
             }
-            new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone());
+            new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone_element());
         }
         class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
         return new_instance;
@@ -3113,7 +3138,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
             }
         }
 
-        new_instance->set_field(id, value.clone());
+        new_instance->set_field(id, value.clone_element());
     });
 
     // The copies above landed in overflow (no definition yet, matching the old

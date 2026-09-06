@@ -39,7 +39,13 @@ def main():
 		destination = deps / folder
 		if not destination.exists():
 			with tarfile.open(archive) as bundle:
-				bundle.extractall(deps, filter="data")
+				# Python 3.11.0 has no extraction filters. Pinned archives contain
+				# only directories and regular files, all under their source root.
+				for member in bundle.getmembers():
+					if not (member.isdir() or member.isfile()):
+						raise RuntimeError("Archive link/device refused: " + member.name)
+					(deps / member.name).resolve().relative_to(destination.resolve())
+				bundle.extractall(deps)
 		manifest[name] = {"root": str(destination), "url": url, "sha256": actual}
 		print(name + ": verified " + actual)
 	# This changes version admission and the removed Lua error-code fallback only.

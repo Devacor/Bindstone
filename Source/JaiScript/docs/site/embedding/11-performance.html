@@ -240,19 +240,21 @@ run; reference machine</td><td><strong>6.3–6.4 ms/tic</strong> (sim 0.4, rende
 ~5.1, blit ~0.8), <strong>4.5&times; realtime</strong></td><td>real gameplay measured, not a
 synthetic scene: the whole game replays a 114-second demo in ~25 seconds, and the tape&#x27;s state
 hash doubles as a standing regression gate for engine changes</td></tr>
-<tr><td><strong>GLOOM</strong> (<code>examples/gloom</code>) vs its own Squirrel and Lua 5.4 ports:
-same game, bit-exact sim conformance hashes, 600-tick headless benchmark; reference machine</td><td>VM
-<strong>2.5 ms/tick</strong> &middot; Squirrel <strong>1.24</strong> &middot; Lua
-<strong>0.42</strong></td><td>~2&times; behind Squirrel&#x27;s same-technique VM and ~6&times; behind
-Lua on a workload that is almost entirely per-pixel element traffic. The honest gap: bulk scripted
-pixel-pushing is where a tagged-value VM pays list price</td></tr>
-<tr><td><strong>GLOOM five-way report</strong> (<a href="https://github.com/Devacor/JaiScript/blob/master/docs/GLOOM_COMPARISON.md"><code>docs/GLOOM_COMPARISON.md</code></a>): the same game
-implemented idiomatically in five languages, all held to bit-exact conformance hashes; report machine,
-July 2026 build</td><td>Lua 1.4 &middot; Python 2.5 &middot; Squirrel 2.9 &middot; JaiScript VM 33
-&middot; ChaiScript 273 ms/tick</td><td>ChaiScript&#x27;s 273 ms/tick (~3.5 fps) is what &quot;technically
-fully playable&quot; looks like when a runtime can&#x27;t keep up. JaiScript sat 24&times; behind Lua in that
-report; the GLOOM row above is the current build, where the gap is ~6&times;. Most of the movement is
-engine work since (typed arrays for the grids, parallel bulk stages), some of it is the machine.</td></tr>
+<tr><td><strong>GLOOM, 2026-09-06 snapshot</strong>: the same 600 measured ticks
+after 600 warm-up ticks, seed 666, 100&times;40 quad output. Serial configurations
+use one performance core; the parallel VM uses eight. MSVC Release with LTCG,
+Core Ultra 9 285HX.</td><td>JaiScript VM serial: <strong>2.388 ms/tick</strong> (padding -1.11% to +0.62%)<br>
+JaiScript VM 8 workers: <strong>2.025 ms/tick</strong> (padding -1.77% to +0.13%)<br>
+Lua 5.4.8: <strong>0.384 ms/tick</strong> (padding -4.18% to +1.02%)<br>
+Lua 5.5.1: <strong>0.396 ms/tick</strong> (padding -4.11% to -0.01%)<br>
+LuaJIT 2.1 JIT: <strong>0.102 ms/tick</strong> (padding -18.83% to +4.60%)</td><td>
+Every configuration matches the frame and state hashes. Three interleaved
+A B A B rounds give six accepted runs per binary. Padding bands are paired
+control-to-normal deltas and include run variation. Desktop background was
+screened at 1.0 core-equivalent across 24 cores; zero-background measurements
+were not obtained. Lua 5.4.8 and 5.5.1 have overlapping observed ranges.
+LuaJIT JIT is a runtime-code-generation ceiling. Its JIT configuration is
+excluded from the iOS target. <a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS.md">Full results, control medians, versions and methodology</a>.</td></tr>
 <tr><td><strong>Demoreel</strong> (<code>examples/demoreel</code>): thirteen truecolor scenes at
 100&times;40 = 4,000 cells per frame, the whole reel including transitions
 (<code>--smoke</code>, 1,700 frames; the example&#x27;s README is the record)</td><td>interpreter

@@ -170,7 +170,17 @@ auto l = w.lock();
 l.x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">expired: false
 == result: 3</code></pre></div>
-<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> raises at run time: a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>.</p>
+<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> raises at run time: a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>. A <code>weak_ptr&lt;P&gt;</code> field or static takes a shared handle the same way a declaration does.</p>
+<p>The handle keeps sharing inside a copy, exactly as a <code>std::shared_ptr</code> member does in C++. Copying a class instance, an array or a map copies every value member and element and shares every <code>shared_ptr</code> and <code>weak_ptr</code> one:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
+class Holder { shared_ptr&lt;Node&gt; link; Node own; Holder() { link = new Node(); own = Node(); } }
+Holder a = Holder();
+Holder b = a;          // b.own is a copy; b.link is the same Node as a.link
+b.link.v = 5;
+b.own.v = 50;
+print(to_string(a.link.v) + &quot; &quot; + to_string(a.own.v) + &quot; &quot; + to_string(same_object(a.link, b.link)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 1 true</code></pre></div>
+<p>The same holds for <code>array&lt;shared_ptr&lt;Node&gt;&gt;</code> and <code>map&lt;string, shared_ptr&lt;Node&gt;&gt;</code>: a copy of the container is a new container whose handles point at the old objects. Cloning through a handle is an explicit act: copy the object the handle names (<code>Node fresh = a.link;</code>, a value declaration from a handle) and wrap it again.</p>
 <h2 id="escape-hatch-6-cast-t-and-cast-shared-ptr-t">Escape hatch 6: <code>cast&lt;T&amp;&gt;</code> and <code>cast&lt;shared_ptr&lt;T&gt;&gt;</code><a class="hlink" href="#escape-hatch-6-cast-t-and-cast-shared-ptr-t" aria-label="Link to this section">&#8203;</a></h2>
 <p><code>cast</code> comes in three forms, and the difference between them is exactly this chapter&#x27;s subject: <code>cast&lt;T&gt;(e)</code> is a <strong>copy</strong>, <code>cast&lt;T&amp;&gt;(e)</code> is a <strong>reference</strong> to the same object, <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing it. The reference form earns its place here as the strict-mode fix for a classic situation: a base-typed variable holding a derived object, and you need a member only the derived class declares.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }

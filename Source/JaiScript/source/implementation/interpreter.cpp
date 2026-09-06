@@ -6744,9 +6744,13 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                 sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
         }
         case verdict::handle_target:
-            // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is (outside the table)
+            // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is; a shared handle
+            // downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
             if (value.type() == target_type->base_type) {
                 return std::move(value);
+            }
+            if (detail::weak_slot_takes_shared(value, target_type, engine_)) {
+                return script_value::make_weak_ptr(value, engine_);
             }
             [[fallthrough]];
         default:

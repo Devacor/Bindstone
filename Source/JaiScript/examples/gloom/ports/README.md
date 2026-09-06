@@ -10,7 +10,7 @@ Bindstone's iOS configuration, which cannot use runtime code generation.
 
 ## Build on Windows
 
-Use Python 3.11.8 or newer, CMake, Ninja, and an x64 Visual Studio Native Tools
+Use Python 3.11 or newer, CMake, Ninja, and an x64 Visual Studio Native Tools
 environment. From the repository root:
 
 ```powershell

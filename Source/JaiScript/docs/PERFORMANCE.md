@@ -1,14 +1,34 @@
 # JaiScript Performance Report
 
-**2026-07, VM-perf branch (HEAD 08933539).** The definitive current numbers: both JaiScript
-backends head-to-head against Lua 5.4 (sol2), Squirrel 3.x, and ChaiScript 6.1, plus per-op
-ladders, aliasing costs, parallel scaling, debugger overhead, and jaibite cache numbers.
-Methodology in Appendix A; everything here is min-of-5 (min-of-3 for the long parallel
-suite) integer-µs Foundry rows on a quiet machine, full suite green (88 suites, 1948 tests)
-on both backends at the measured commit. The recursion, loop, and method rows were
-**refreshed 2026-07-08** after the flat-stack and method-cost campaigns landed (Appendix A). The 2025-12 tree-walker-era analysis this file used
-to hold is preserved in git history (`git show 9c268ffd:Source/JaiScript/docs/PERFORMANCE.md`);
-its optimization-history table survives as Appendix B.
+## GLOOM snapshot: 2026-09-06
+
+600 measured ticks after 600 warm-up ticks, seed 666, 100x40 quad output.
+MSVC 19.51.36252 Release with LTCG; Intel Core Ultra 9 285HX.
+Serial configurations use one performance core; the parallel VM uses eight.
+Three A B A B rounds give six accepted measurements per binary.
+
+| Runtime | P cores | Normal median ms/tick | Padding median ms/tick | Paired padding band | Normal observed range ms/tick |
+|---|---:|---:|---:|---|---|
+| JaiScript VM serial | 1 | 2.388277 | 2.379183 | -1.11% to +0.62% | 2.384786 to 2.397669 |
+| JaiScript VM 8 workers | 8 | 2.024679 | 2.022994 | -1.77% to +0.13% | 2.019064 to 2.048779 |
+| Lua 5.4.8 | 1 | 0.384455 | 0.387616 | -4.18% to +1.02% | 0.382099 to 0.405084 |
+| Lua 5.5.1 | 1 | 0.395992 | 0.392296 | -4.11% to -0.01% | 0.395717 to 0.404249 |
+| LuaJIT 2.1 JIT | 1 | 0.101952 | 0.092693 | -18.83% to +4.60% | 0.090147 to 0.118107 |
+
+All configurations match frame `dfd969ed5a336dca` and state `1503537018`.
+Padding bands are paired control-to-normal deltas and include run variation.
+These are screened desktop measurements with background below 1.0
+core-equivalent across 24 cores. Zero-background measurements were not
+obtained. Lua 5.4.8 and 5.5.1 have overlapping observed ranges. LuaJIT JIT's
+wider band does not support attributing its padding delta to a runtime change.
+
+LuaJIT JIT is a runtime-code-generation ceiling, not a Bindstone iOS shipping
+target. [Full results, versions, flags and evidence](../examples/gloom/ports/RESULTS.md).
+
+## Microbenchmark snapshot: 2026-07
+
+Revision `08933539`; Lua 5.4 via sol2, Squirrel 3.x and ChaiScript 6.1.
+The tables below use the machine and measurement settings in Appendix A.
 
 ## Executive summary
 

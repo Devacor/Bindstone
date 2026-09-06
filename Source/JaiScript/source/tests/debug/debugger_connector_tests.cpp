@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <thread>
 
@@ -118,13 +119,131 @@ int extract_int(const std::string& buf, const std::string& key) {
     return any ? sign * v : -1;
 }
 
+// Keep the regression buildable against the pre-privilege baseline: that engine
+// cannot revoke filesystem access, so the virtual-label assertion must fail there.
+template<typename Engine>
+void set_filesystem_grant(Engine& eng, bool enabled) {
+    if constexpr (requires { typename Engine::privilege; }) {
+        using privilege = typename Engine::privilege;
+        if (enabled) eng.enable(privilege::filesystem);
+        else eng.disable(privilege::filesystem);
+    }
+}
+
 } // namespace
 
 class debugger_connector_tests : public suite {
 public:
     debugger_connector_tests() : suite("Debugger Connector") {}
 
+    void check_breakpoint_path(bool filesystem_enabled, int alias_update = 0,
+                               bool revoke_after_ack = false) {
+        wsa_up();
+        // '.' exists, so baseline normalization necessarily changes this spelling.
+        // The source is supplied in memory; no fixture file or cache is written.
+        const std::string requested_path = "./__jai_dap_virtual__/../breakpoint.jai";
+        const std::string normalized_path = std::filesystem::weakly_canonical(requested_path).string();
+        check_ne(requested_path, normalized_path, "fixture must distinguish raw and normalized labels");
+
+        auto eng = make_engine();
+        eng->jaibite_cache(false);
+        auto conn = std::make_shared<jai::debug::debug_connector>(0);
+        eng->set_debug_connector(conn);
+        sock_t cli = connect_client(conn->port());
+        check_true(cli != kBad);
+        if (cli == kBad) return;
+        struct client_guard {
+            sock_t socket;
+            ~client_guard() { close_client(socket); }
+        } close{cli};
+
+        std::string buf;
+        send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+        check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+        send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
+        check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+
+        // Change grants after transport attachment: each new request must consult
+        // the live engine setting, not a snapshot taken when the connector began.
+        set_filesystem_grant(*eng, filesystem_enabled || revoke_after_ack);
+        send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":")"
+            + requested_path + R"("},"breakpoints":[{"line":1}]}})");
+        check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
+        check_true(wait_for(cli, buf, "\"verified\":true"));
+
+        if (alias_update != 0) {
+            std::string alias_buf;
+            send_dap(cli, R"({"seq":4,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"./breakpoint.jai"},"breakpoints":[)"
+                + std::string(alias_update > 0 ? R"({"line":2})" : "") + "]}}");
+            check_true(wait_for(cli, alias_buf, "\"command\":\"setBreakpoints\""));
+        }
+        if (revoke_after_ack) set_filesystem_grant(*eng, false);
+
+        std::string script_error;
+        std::thread script([&]() {
+            try {
+                eng->execute_file_source(filesystem_enabled ? normalized_path : requested_path,
+                    "int breakpoint_value = 41;\nbreakpoint_value += 1;\n");
+            } catch (const std::exception& error) {
+                script_error = error.what();
+            }
+        });
+        struct script_guard {
+            jai::debug::controller& debugger;
+            std::thread& thread;
+            ~script_guard() {
+                debugger.set_enabled(false);
+                if (thread.joinable()) thread.join();
+            }
+        } join{eng->debugger(), script};
+
+        const bool stopped = wait_for(cli, buf, "\"event\":\"stopped\"", 1500);
+        int stopped_line = -1;
+        if (stopped) {
+            std::string frames_buf;
+            send_dap(cli, R"({"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}})");
+            if (wait_for(cli, frames_buf, "\"stackFrames\"")) {
+                stopped_line = extract_int(frames_buf, "line");
+            }
+        }
+        // Disarm before asserting, including the expected-red path: a failed test
+        // must not leave a parked script thread behind or destroy a joinable thread.
+        eng->debugger().set_enabled(false);
+        script.join();
+        check_true(script_error.empty(), "in-memory script failed: " + script_error);
+        if (alias_update < 0) {
+            check_false(stopped, "clearing an equivalent path spelling must remove the earlier breakpoint");
+        } else {
+            check_true(stopped, filesystem_enabled
+                ? "enabled debugger must preserve filesystem path normalization"
+                : "restricted debugger must preserve the exact virtual source label");
+            check_eq(alias_update > 0 ? 2 : 1, stopped_line,
+                "later equivalent path spelling must replace, not merge, the earlier line set");
+        }
+        check_eq(int64_t(42), eng->get_variable("breakpoint_value").as_int());
+    }
+
     void forge_tests() override {
+        test("dap_restricted_breakpoints_keep_virtual_source_labels", [this]() {
+            check_breakpoint_path(false);
+        });
+
+        test("dap_enabled_breakpoints_keep_path_normalization", [this]() {
+            check_breakpoint_path(true);
+        });
+
+        test("dap_breakpoint_alias_updates_preserve_request_order", [this]() {
+            check_breakpoint_path(true, 1);
+        });
+
+        test("dap_breakpoint_alias_clear_replaces_previous_spelling", [this]() {
+            check_breakpoint_path(true, -1);
+        });
+
+        test("dap_breakpoint_normalization_observes_grant_at_execution_sync", [this]() {
+            check_breakpoint_path(false, 0, true);
+        });
+
         test("dap_attach_breakpoint_inspect_continue", [this]() {
             wsa_up();
 

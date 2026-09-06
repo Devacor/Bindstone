@@ -30,7 +30,6 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
-#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
@@ -44,20 +43,6 @@
 namespace jai::debug {
 
 namespace {
-
-// VS Code sends a breakpoint's source.path in the OS's own spelling — on Windows the drive-
-// letter case and separators can differ from what the engine stamped. Breakpoints are matched
-// by EXACT string against each node's location.filename, and the engine stamps
-// std::filesystem::canonical() paths (execute_file / import), so normalize the incoming path
-// the same way or nothing binds. Fall back to the raw string for a virtual / not-yet-real path.
-std::string normalize_bp_path(const std::string& path) {
-    if (path.empty()) { return path; }
-    std::error_code ec;
-    auto canon = std::filesystem::canonical(std::filesystem::path(path), ec);
-    if (!ec) { return canon.string(); }
-    canon = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
-    return ec ? path : canon.string();
-}
 
 // ---- platform socket shims -------------------------------------------------
 #ifdef _WIN32
@@ -626,7 +611,7 @@ struct debug_connector::impl {
                 if (const jval* lv = args->find("lines"); lv && lv->kind == jval::t::array)
                     for (const auto& l : lv->arr) lines.push_back(l.as_int());
         }
-        ctrl_->set_breakpoints(normalize_bp_path(path), lines);
+        ctrl_->set_source_breakpoints(path, lines);
         std::string arr = "[";
         for (size_t i = 0; i < lines.size(); ++i) {
             if (i) arr += ",";

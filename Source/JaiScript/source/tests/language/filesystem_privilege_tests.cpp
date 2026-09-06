@@ -221,7 +221,7 @@ public:
             auto eng = make_engine();
             check_eq(std::string("reflect::is_enabled expects at least 1 argument: Function argument count mismatch"),
                 failure([&]() { eng->execute("reflect::is_enabled()"); }));
-            for (const char* args : {"\"filesystem\"", "-1", "2", "jai::filesystem, 2"}) {
+            for (const char* args : {"true", "-1", "2", "jai::filesystem, 2"}) {
                 check_eq(std::string("reflect::is_enabled expects valid privilege flags: Type mismatch"),
                     failure([&]() { eng->execute(std::string("reflect::is_enabled(") + args + ")"); }));
             }

@@ -5,8 +5,25 @@
 #include <jaiscript/detail/environment.hpp>
 
 #include <algorithm>
+#include <filesystem>
 
 namespace jai::debug {
+
+namespace {
+
+// Match the canonical filename stamped by execute_file/import. This kernel runs
+// only on the script thread after the filesystem grant check; denied paths remain
+// exact virtual labels. Keep the connector's previous fallback behavior unchanged.
+std::string normalize_bp_path(const std::string& path) {
+    if (path.empty()) { return path; }
+    std::error_code ec;
+    auto canon = std::filesystem::canonical(std::filesystem::path(path), ec);
+    if (!ec) { return canon.string(); }
+    canon = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
+    return ec ? path : canon.string();
+}
+
+} // namespace
 
 controller::controller(engine* eng) : engine_(eng) {}
 
@@ -26,18 +43,30 @@ void controller::set_enabled(bool on) {
 }
 
 void controller::set_breakpoints(const std::string& file, std::vector<int> lines) {
+    publish_breakpoints(file, std::move(lines), false);
+}
+
+void controller::set_source_breakpoints(const std::string& file, std::vector<int> lines) {
+    publish_breakpoints(file, std::move(lines), true);
+}
+
+void controller::publish_breakpoints(const std::string& file, std::vector<int> lines, bool source_path) {
     std::sort(lines.begin(), lines.end());
     lines.erase(std::unique(lines.begin(), lines.end()), lines.end());
     auto current = breakpoints_.load(std::memory_order_acquire);
-    auto next = std::make_shared<breakpoint_table>(*current);
-    if (lines.empty()) next->erase(file);
-    else (*next)[file] = std::move(lines);
+    auto next = std::make_shared<breakpoint_snapshot>(*current);
+    auto& records = source_path ? next->source : next->native;
+    records[file] = breakpoint_record{std::move(lines), ++next->sequence};
     breakpoints_.store(std::move(next), std::memory_order_release);
-    bp_version_.fetch_add(1, std::memory_order_release);   // after the table: sync sees version -> at-least-as-new table
+    bp_version_.fetch_add(1, std::memory_order_release);   // after publication: sync sees an at-least-as-new snapshot
 }
 
 void controller::clear_breakpoints() {
-    breakpoints_.store(std::make_shared<breakpoint_table>(), std::memory_order_release);
+    auto current = breakpoints_.load(std::memory_order_acquire);
+    auto next = std::make_shared<breakpoint_snapshot>();
+    next->sequence = current->sequence + 1;
+    next->clear_sequence = next->sequence;
+    breakpoints_.store(std::move(next), std::memory_order_release);
     bp_version_.fetch_add(1, std::memory_order_release);
 }
 
@@ -161,31 +190,64 @@ bool controller::sync_hot_state() {
         hot_step_or_pause_ = false;
         hot_line_bloom_ = nullptr;
         hot_line_bloom_storage_.clear();
-        hot_bps_.reset();
-        hot_bp_version_ = ~0ull;   // a re-armed session re-caches even an unchanged table
+        // Disarming hides the hot cache, not the installed table or pending edits.
+        hot_bp_version_ = ~0ull;   // a re-armed session rebuilds even an unchanged bloom
         return false;
     }
     hot_step_or_pause_ = pending_pause_.load(std::memory_order_relaxed) != 0
         || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none);
     const uint64_t version = bp_version_.load(std::memory_order_acquire);
     if (version != hot_bp_version_) {
-        hot_bps_ = breakpoints_.load(std::memory_order_acquire);
-        bool any = false;
-        for (const auto& [file, lines] : *hot_bps_) {
-            if (!lines.empty()) { any = true; break; }
+        auto snapshot = breakpoints_.load(std::memory_order_acquire);
+        auto installed = hot_bps_;
+        if (!installed || snapshot->sequence != applied_bp_sequence_) {
+            auto next = installed ? std::make_shared<breakpoint_table>(*installed)
+                                  : std::make_shared<breakpoint_table>();
+            if (snapshot->clear_sequence > applied_bp_sequence_) next->clear();
+
+            struct pending_record {
+                const std::string* file;
+                const breakpoint_record* record;
+                bool source_path;
+            };
+            std::vector<pending_record> changed;
+            auto collect = [&](const auto& records, bool source_path) {
+                for (const auto& [file, record] : records) {
+                    if (record.sequence > applied_bp_sequence_) {
+                        changed.push_back({&file, &record, source_path});
+                    }
+                }
+            };
+            collect(snapshot->native, false);
+            collect(snapshot->source, true);
+            std::sort(changed.begin(), changed.end(), [](const auto& a, const auto& b) {
+                return a.record->sequence < b.record->sequence;
+            });
+            for (const auto& change : changed) {
+                const std::string file = change.source_path && engine_->is_enabled(jai::filesystem)
+                    ? normalize_bp_path(*change.file) : *change.file;
+                if (change.record->lines.empty()) next->erase(file);
+                else (*next)[file] = change.record->lines;
+            }
+            installed = std::move(next);
         }
-        if (any) {
-            hot_line_bloom_storage_.assign(line_bloom_bits / 64, 0);
-            for (const auto& [file, lines] : *hot_bps_) {
+
+        // Commit table, bloom and sequence together after all fallible work. A
+        // failed rebuild leaves the previous installed table available for retry.
+        std::vector<uint64_t> bloom;
+        if (!installed->empty()) {
+            bloom.assign(line_bloom_bits / 64, 0);
+            for (const auto& [file, lines] : *installed) {
                 for (int line : lines) {
                     const uint32_t b = static_cast<uint32_t>(line) & (line_bloom_bits - 1);
-                    hot_line_bloom_storage_[b >> 6] |= (uint64_t{1} << (b & 63u));
+                    bloom[b >> 6] |= (uint64_t{1} << (b & 63u));
                 }
             }
-        } else {
-            hot_line_bloom_storage_.clear();
         }
+        hot_bps_ = std::move(installed);
+        hot_line_bloom_storage_.swap(bloom);
         hot_line_bloom_ = hot_line_bloom_storage_.empty() ? nullptr : hot_line_bloom_storage_.data();
+        applied_bp_sequence_ = snapshot->sequence;
         hot_bp_version_ = version;
     }
     return true;

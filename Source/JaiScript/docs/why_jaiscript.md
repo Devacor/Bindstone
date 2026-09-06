@@ -76,15 +76,38 @@ changed field types convert permissively, new fields take their initializers —
 finish on their old bodies; the next call gets the new one. The dungeon crawler in
 `examples/crawler` reloads its own scripts mid-game on a keypress.
 
-### 6. Safe at the boundary, by construction
+### 6. A boundary the host controls
 
-A script can only touch what the host registered — there is no built-in file, network, or
-system access to sandbox away; the binding surface *is* the allowlist. On top of that:
-integer overflow raises instead of wrapping (build-time policy), deep recursion is a
-catchable error rather than a stack fault, an execution budget bounds runaway scripts, and
-`engine::memory_cap` bounds runaway allocation. Budget and cap exhaustion are *terminal* —
-a hostile script cannot catch-and-swallow its way past the host's limits. Untrusted
-scripts are a configuration, not a rewrite.
+File loading and path queries are built in, with filesystem access **enabled by default**.
+Call `engine->disable(jai::filesystem)` to refuse explicit file operations and skip automatic
+disk caching and checker dependency discovery. Source strings and jaibite bytes supplied in
+memory still work. A denied operation raises the catchable error
+`Insufficient privilege: filesystem.`; an uncaught denial reaches the host. Scripts can ask
+`reflect::is_enabled(jai::filesystem)`, but cannot grant themselves access.
+
+Native bindings are the other part of the boundary. Register a file-using function with
+`engine->add_function(name, callable, jai::filesystem)` (or the corresponding
+`add_variadic_function` overload, or `dynamic_binder::method`) so aliases and reflection retain
+the check. Define finer host rules with `register_privilege("savegame.write")`: the name starts
+disabled. Bind a callable with `{"filesystem", "savegame.write"}` to require both, then enable
+the custom name explicitly. Re-registering preserves its grant; the same name may be used in
+another engine with independent grants. Binding resolves names once to internal IDs, so calls
+do not add name lookups or allocations. Scripts can mix names and
+built-in flags in `reflect::is_enabled(jai::filesystem, "savegame.write")`; unknown names
+return false without registering anything. The standalone
+runner uses that gate for its file-backed operations; arbitrary host callbacks, streams and
+shared C++ objects remain deliberate exposure. A callback can disable access for subsequent
+operations without cancelling work already started. Separate engines isolate script
+environments, **not processes or native objects**; use an OS boundary for process isolation.
+Filesystem is the only built-in privilege; custom names protect only the host APIs that
+declare or check them. There is no automatic network or audio permission.
+
+Alongside that boundary: checked integer overflow is the default build policy (wrapping is
+an explicit alternative), script recursion has catchable limits, an execution budget bounds
+runaway scripts, and `engine::memory_cap` provides approximate allocation accounting.
+Budget exhaustion is terminal. The first memory-cap denial is catchable; a second in the
+same execution is terminal, preventing catch-and-retry from defeating the limit. The
+[safety chapter](site/embedding/05-safety-rails.html) covers defaults and limitations.
 
 ### 7. Parse once, run anywhere in your pipeline
 
@@ -100,7 +123,8 @@ loop pays the parse once. Loading a `.jaibite` skips parsing entirely and re-int
 into the loading engine — save on one engine, load on another. And file-based loads
 (include/import/`execute_file`) maintain a sibling `.jaibite` automatically: after the first
 run, unchanged scripts never parse again — even across processes (`engine->jaibite_cache(false)`
-to opt out).
+to opt out). Disabling `jai::filesystem` skips the automatic disk cache entirely and refuses
+explicit file loads and saves; in-memory source caching and jaibite bytes remain available.
 
 ## The receipts
 
@@ -139,8 +163,8 @@ to opt out).
 ## Who it's for
 
 Teams embedding scripting in a C++ engine who want: iteration speed (hot reload, script
-classes), safety rails on by default (budgets, caps, checked arithmetic, no ambient
-authority), types that scale from prototype (`var`) to production (`int` + strict
+classes), host-controlled filesystem access, configurable budgets and memory caps, checked
+arithmetic by default, types that scale from prototype (`var`) to production (`int` + strict
 checking) *within the same file*, and a language whose behavior is enforced by two
 implementations arguing with each other rather than a document nobody reads.
 

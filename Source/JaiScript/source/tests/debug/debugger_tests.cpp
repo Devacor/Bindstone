@@ -8,10 +8,22 @@
 #include <thread>
 #include <chrono>
 #include <future>
+#include <filesystem>
 
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// The old connector performed this normalization before its native setter. Keep
+// that baseline spelling available while the new source-path entry point is added.
+template<typename Controller>
+void set_source_breakpoints_for_test(Controller& dbg, const std::string& path, std::vector<int> lines) {
+    if constexpr (requires { dbg.set_source_breakpoints(path, lines); }) {
+        dbg.set_source_breakpoints(path, std::move(lines));
+    } else {
+        dbg.set_breakpoints(std::filesystem::weakly_canonical(path).string(), std::move(lines));
+    }
+}
 
 // Phase 5: BOTH backends carry the statement hook, driven by the one engine-owned
 // controller. The core flows run twice — an interpreter engine and a vm engine built
@@ -342,6 +354,87 @@ public:
     }
 
     void forge_tests() override {
+        test("native_and_source_breakpoints_with_same_spelling_remain_distinct", [this]() {
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            auto& dbg = eng->debugger();
+            const std::string raw = "./virtual/../mixed.jai";
+            const std::string canonical = std::filesystem::weakly_canonical(raw).string();
+            std::vector<jai::debug::stop_info> stops;
+            dbg.set_on_stopped([&](const jai::debug::stop_info& info) {
+                stops.push_back(info);
+                dbg.resume();
+            });
+            dbg.set_breakpoints(raw, {1});
+            set_source_breakpoints_for_test(dbg, raw, {2});
+            dbg.set_enabled(true);
+            eng->execute_file_source(raw, "1;\n2;\n");
+            eng->execute_file_source(canonical, "1;\n2;\n");
+            dbg.set_enabled(false);
+            check_eq(size_t(2), stops.size());
+            check_eq(raw, stops[0].file);
+            check_eq(1, stops[0].line);
+            check_eq(canonical, stops[1].file);
+            check_eq(2, stops[1].line);
+        });
+
+        test("native_breakpoint_labels_survive_disable_and_rearm", [this]() {
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            auto& dbg = eng->debugger();
+            const std::string first = "./virtual/../first.jai";
+            const std::string second = "./virtual/../second.jai";
+            std::vector<jai::debug::stop_info> stops;
+            dbg.set_on_stopped([&](const jai::debug::stop_info& info) {
+                stops.push_back(info);
+                dbg.resume();
+            });
+            dbg.set_breakpoints(first, {1});
+            dbg.set_enabled(true);
+            eng->execute_file_source(first, "1;\n2;\n");
+            check_eq(size_t(1), stops.size());
+
+            dbg.set_enabled(false);
+            check_false(dbg.sync_hot_state());
+            dbg.set_breakpoints(second, {2});
+            check_false(dbg.sync_hot_state());
+            dbg.set_enabled(true);
+            eng->execute_file_source(first, "1;\n2;\n");
+            eng->execute_file_source(second, "1;\n2;\n");
+            check_eq(size_t(3), stops.size(), "rearm must retain installed and queued breakpoints");
+            check_eq(first, stops[1].file, "native breakpoint labels are exact, never filesystem-normalized");
+            check_eq(second, stops[2].file);
+            check_eq(2, stops[2].line);
+
+            dbg.set_breakpoints(first, {2});
+            dbg.clear_breakpoints();
+            dbg.set_breakpoints(second, {1});
+            eng->execute_file_source(first, "1;\n2;\n");
+            eng->execute_file_source(second, "1;\n2;\n");
+            check_eq(size_t(4), stops.size(), "clear-all must preserve its order among queued updates");
+            check_eq(second, stops[3].file);
+            check_eq(1, stops[3].line);
+            dbg.set_enabled(false);
+        });
+
+        test("breakpoint_edit_while_paused_applies_at_park_exit", [this]() {
+            auto eng = make_engine();
+            auto& dbg = eng->debugger();
+            std::vector<int> lines;
+            dbg.set_on_stopped([&](const jai::debug::stop_info& info) {
+                lines.push_back(info.line);
+                if (lines.size() == 1) dbg.set_breakpoints("<script>", {2});
+                dbg.resume();
+            });
+            dbg.set_breakpoints("<script>", {1});
+            dbg.set_enabled(true);
+            eng->execute("1;\n2;\n3;\n");
+            dbg.set_enabled(false);
+            check_eq(size_t(2), lines.size());
+            check_eq(1, lines[0]);
+            check_eq(2, lines[1]);
+        });
+
         test("breakpoint_inspect_step_resume", [this]() {
             breakpoint_inspect_step_resume(jai::backend_type::interpreter);
         });

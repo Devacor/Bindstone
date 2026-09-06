@@ -271,7 +271,7 @@ struct engine::implementation {
     // script; parallel regions keep them immutable until their workers join.
     uint64_t privileges_ = static_cast<uint64_t>(privilege::filesystem);
     // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
-    // Declared FIRST so it is destroyed LAST - every other member releasing reference
+    // Before other owning members so it is destroyed LAST - members releasing reference
     // values on teardown returns its blocks to a live pool. The teardown orphans the
     // pool if user-held references still exist; the last release then frees it.
     struct ref_holder_pool_slot_holder {
@@ -1186,6 +1186,18 @@ struct engine::implementation {
         }
         return overloadSet;
     }
+
+    // Optional host configuration: engines without custom permissions do not
+    // allocate a registry or shift the offsets of existing hot members.
+    struct custom_privilege_state {
+        struct record {
+            uint64_t name_id;
+            bool enabled = false;
+        };
+        std::vector<record> records;
+        std::unordered_map<uint64_t, uint64_t> slots;
+    };
+    std::unique_ptr<custom_privilege_state> custom_privileges_;
 };
 
 engine::implementation::implementation()
@@ -2916,12 +2928,114 @@ void engine::disable(privilege flags) {
 
 void engine::set_privileges(privilege flags, bool enabled) {
     if (!valid_privileges(flags)) { throw runtime_error("Invalid privilege flags"); }
-    if (impl->parallel_ && impl->parallel_->active_region) {
-        throw runtime_error("Cannot change privileges during a parallel region");
-    }
+    check_privilege_mutation();
     const auto bits = static_cast<uint64_t>(flags);
     if (enabled) { impl->privileges_ |= bits; }
     else { impl->privileges_ &= ~bits; }
+}
+
+void engine::check_privilege_mutation() const {
+    if (impl->parallel_ && impl->parallel_->active_region) {
+        throw runtime_error("Cannot change privileges during a parallel region");
+    }
+}
+
+void engine::register_privilege(std::string_view name) {
+    check_privilege_mutation();
+    if (name.empty()) { throw runtime_error("Privilege name must not be empty"); }
+    if (name == "filesystem") { return; }
+    const auto name_id = impl->string_symbolizer_.intern(name);
+    if (!impl->custom_privileges_) {
+        impl->custom_privileges_ = std::make_unique<implementation::custom_privilege_state>();
+    }
+    auto& state = *impl->custom_privileges_;
+    if (state.slots.contains(name_id)) { return; }
+    const auto slot = static_cast<uint64_t>(state.records.size());
+    // A failed map insertion rolls back the record; an interned but unregistered
+    // name is inert. Nothing exposes these engine-local slots to the host.
+    state.records.push_back({name_id, false});
+    try {
+        state.slots.emplace(name_id, slot);
+    } catch (...) {
+        state.records.pop_back();
+        throw;
+    }
+}
+
+std::optional<uint64_t> engine::find_custom_privilege(std::string_view name) const noexcept {
+    if (!impl->custom_privileges_) { return std::nullopt; }
+    const auto name_id = impl->string_symbolizer_.find(name);
+    if (!name_id) { return std::nullopt; }
+    const auto& slots = impl->custom_privileges_->slots;
+    const auto it = slots.find(*name_id);
+    if (it == slots.end()) { return std::nullopt; }
+    return it->second;
+}
+
+engine::resolved_privileges engine::resolve_privileges(std::span<const std::string_view> names) const {
+    resolved_privileges result;
+    for (const auto name : names) {
+        if (name == "filesystem") { result.builtins = result.builtins | privilege::filesystem; }
+        else {
+            const auto slot = find_custom_privilege(name);
+            if (!slot) { throw runtime_error("Unknown privilege name"); }
+            result.custom.push_back(*slot);
+        }
+    }
+    std::sort(result.custom.begin(), result.custom.end());
+    result.custom.erase(std::unique(result.custom.begin(), result.custom.end()), result.custom.end());
+    return result;
+}
+
+void engine::enable(std::span<const std::string_view> names) {
+    set_privileges(names, true);
+}
+
+void engine::disable(std::span<const std::string_view> names) {
+    set_privileges(names, false);
+}
+
+void engine::set_privileges(std::span<const std::string_view> names, bool enabled) {
+    check_privilege_mutation();
+    const auto required = resolve_privileges(names);
+    // Resolve every name before changing any grant. The updates cannot allocate.
+    set_privileges(required.builtins, enabled);
+    for (const auto slot : required.custom) { impl->custom_privileges_->records[slot].enabled = enabled; }
+}
+
+bool engine::is_enabled(std::span<const std::string_view> names) const noexcept {
+    return bool(require_privilege(names));
+}
+
+checked_result<void> engine::require_privilege(std::span<const std::string_view> names) const noexcept {
+    privilege flags = privilege::none;
+    std::optional<uint64_t> missing;
+    for (const auto name : names) {
+        if (name == "filesystem") { flags = flags | privilege::filesystem; }
+        else {
+            const auto slot = find_custom_privilege(name);
+            if (!slot) {
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), "Unknown privilege name");
+            }
+            if (!impl->custom_privileges_->records[*slot].enabled && (!missing || *slot < *missing)) { missing = *slot; }
+        }
+    }
+    // Same deterministic denial order as a resolved binding, without allocating
+    // a temporary slot vector for name queries or manual checked guards.
+    return require_privileges(flags, missing ? std::span(&*missing, 1) : std::span<const uint64_t>{});
+}
+
+checked_result<void> engine::require_privileges(privilege flags, std::span<const uint64_t> slots) const noexcept {
+    auto allowed = require_privilege(flags);
+    if (!allowed) { return allowed; }
+    for (const auto slot : slots) {
+        const auto& record = impl->custom_privileges_->records[slot];
+        if (!record.enabled) {
+            return checked_result<void>(make_error_code(runtime_error_code::insufficient_privilege),
+                "Insufficient privilege: {0}.", record.name_id);
+        }
+    }
+    return {};
 }
 
 bool engine::is_enabled(privilege flags) const noexcept {
@@ -2948,6 +3062,17 @@ script_function engine::guard_function(script_function function, privilege requi
     };
 }
 
+script_function engine::guard_function(script_function function, std::span<const std::string_view> names) {
+    auto required = resolve_privileges(names);
+    // Preserve both the original unguarded callable and the builtin-only fast path.
+    if (required.custom.empty()) { return guard_function(std::move(function), required.builtins); }
+    return [this, function = std::move(function), required = std::move(required)](const std::vector<script_value>& args) -> checked_result<script_value> {
+        auto allowed = require_privileges(required.builtins, required.custom);
+        if (!allowed) { return allowed.error_value(); }
+        return function(args);
+    };
+}
+
 void engine::register_privilege_builtins() {
     auto& jai_namespace = script_namespaces()[symbolize("jai")];
     if (!jai_namespace) { jai_namespace = std::make_shared<script_namespace_data>(); }
@@ -2960,16 +3085,20 @@ void engine::register_privilege_builtins() {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                     "reflect::is_enabled expects at least 1 argument");
             }
-            privilege required = privilege::none;
+            bool enabled = true;
             for (const auto& arg : args) {
                 const auto& value = arg.deref();
+                if (value.is_string()) {
+                    enabled = is_enabled(value.unchecked_as_string()) && enabled;
+                    continue;
+                }
                 if (!value.is_int() || !valid_privileges(static_cast<privilege>(value.unchecked_as_int()))) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
                         "reflect::is_enabled expects valid privilege flags");
                 }
-                required = required | static_cast<privilege>(value.unchecked_as_int());
+                enabled = is_enabled(static_cast<privilege>(value.unchecked_as_int())) && enabled;
             }
-            return script_value(is_enabled(required), this);
+            return script_value(enabled, this);
         }, this);
 }
 

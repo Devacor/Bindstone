@@ -105,8 +105,8 @@ endif()
 
 # --- gloom_lua: Lua + sol2 port (opt-in; builds Lua from source) ---
 if(GLOOM_PORT_LUA)
-    set(GLOOM_LUA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../lua")
-    set(GLOOM_SOL2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../sol2")
+    set(GLOOM_LUA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../lua" CACHE PATH "Lua 5.4 source root")
+    set(GLOOM_SOL2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../sol2" CACHE PATH "sol2 source root")
     if(NOT EXISTS "${GLOOM_LUA_ROOT}/src/lua.h" OR NOT EXISTS "${GLOOM_SOL2_ROOT}/include/sol/sol.hpp")
         message(FATAL_ERROR "GLOOM_PORT_LUA=ON but Lua/sol2 not found at ${GLOOM_LUA_ROOT} / ${GLOOM_SOL2_ROOT}")
     endif()
@@ -138,3 +138,6 @@ if(GLOOM_PORT_LUA)
     endif()
     message(STATUS "GLOOM: gloom_lua enabled (${GLOOM_LUA_ROOT} + ${GLOOM_SOL2_ROOT})")
 endif()
+
+# Additional pinned Lua comparisons and optional placement controls.
+include(ports/comparison.cmake)

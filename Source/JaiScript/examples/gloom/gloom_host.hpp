@@ -19,7 +19,9 @@ struct host_options {
 	int64_t seed = 666;
 	std::string backend;             // "" = adapter default; validated against adapter.backends()
 	bool smoke = false;
+	bool backend_selected = false;  // explicit --backend narrows smoke to that backend
 	int64_t ticks = 2000;            // smoke tick budget
+	int64_t warmup_ticks = 0;        // smoke: untimed ticks, then reboot the same runtime
 	int64_t workers = -1;            // parallel width; -1 = engine default, 0 = serial (ports: always serial)
 	bool param_alias = true;         // jai: engine::parameter_alias (--no-param-alias for an A/B on one binary)
 	int64_t width = 0;               // 0 = autodetect

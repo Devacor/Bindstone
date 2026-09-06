@@ -215,7 +215,8 @@ host_services make_services(console_host& console, bool live_input) {
 int run_smoke(script_adapter& adapter, const host_options& opt, console_host& console) {
 	const int w = 100, h = 40;
 	const double dt = 1.0 / 30.0;
-	const std::vector<std::string> names = adapter.backends();
+	const std::vector<std::string> names = opt.backend_selected
+		? std::vector<std::string>{opt.backend} : adapter.backends();
 	std::printf("%s --smoke: %lld ticks @ %dx%d, seed %lld, fixed dt %.5f, workers %lld\n\n",
 		adapter.program_name().c_str(),
 		static_cast<long long>(opt.ticks), w, h, static_cast<long long>(opt.seed),
@@ -232,6 +233,14 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 		auto session = adapter.make_session(names[b], services, opt, false);
 		session->load_scripts();
 		session->boot(w, h);
+		if (opt.warmup_ticks > 0) {
+			for (int64_t i = 0; i < opt.warmup_ticks; ++i) {
+				session->frame(dt, "", 0.0, 0.0, 0.0);
+			}
+			// Retain runtime/JIT caches; boot restores the seed and game state.
+			// The runner checks the measured hashes against an unwarmed reference.
+			session->boot(w, h);
+		}
 
 		uint64_t hash = 14695981039346656037ull;
 		double t0 = now_seconds();
@@ -255,7 +264,7 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 		per_tick[b] = total_ms / opt.ticks;
 		frame_hashes[b] = hash;
 		state_hashes[b] = session->state_hash();
-		std::printf("%-12s | %10.1f | %9.3f | %016llx   | %lld\n",
+		std::printf("%-12s | %10.3f | %9.6f | %016llx   | %lld\n",
 			names[b].c_str(), total_ms, per_tick[b],
 			static_cast<unsigned long long>(hash),
 			static_cast<long long>(state_hashes[b]));
@@ -277,6 +286,51 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 }
 
 void print_usage(script_adapter& adapter) {
+#if defined(GLOOM_LAYOUT_PADDING)
+	// Placement control: retained volatile work in --help, never executed by smoke.
+	volatile uint64_t padding = 1;
+	padding = (padding * 3ull) ^ 17ull;
+	padding = (padding * 5ull) ^ 7936ull;
+	padding = (padding * 7ull) ^ 15855ull;
+	padding = (padding * 9ull) ^ 23774ull;
+	padding = (padding * 11ull) ^ 31693ull;
+	padding = (padding * 13ull) ^ 39612ull;
+	padding = (padding * 15ull) ^ 47531ull;
+	padding = (padding * 17ull) ^ 55450ull;
+	padding = (padding * 19ull) ^ 63369ull;
+	padding = (padding * 21ull) ^ 71288ull;
+	padding = (padding * 23ull) ^ 79207ull;
+	padding = (padding * 25ull) ^ 87126ull;
+	padding = (padding * 27ull) ^ 95045ull;
+	padding = (padding * 29ull) ^ 102964ull;
+	padding = (padding * 31ull) ^ 110883ull;
+	padding = (padding * 33ull) ^ 118802ull;
+	padding = (padding * 35ull) ^ 126721ull;
+	padding = (padding * 37ull) ^ 134640ull;
+	padding = (padding * 39ull) ^ 142559ull;
+	padding = (padding * 41ull) ^ 150478ull;
+	padding = (padding * 43ull) ^ 158397ull;
+	padding = (padding * 45ull) ^ 166316ull;
+	padding = (padding * 47ull) ^ 174235ull;
+	padding = (padding * 49ull) ^ 182154ull;
+	padding = (padding * 51ull) ^ 190073ull;
+	padding = (padding * 53ull) ^ 197992ull;
+	padding = (padding * 55ull) ^ 205911ull;
+	padding = (padding * 57ull) ^ 213830ull;
+	padding = (padding * 59ull) ^ 221749ull;
+	padding = (padding * 61ull) ^ 229668ull;
+	padding = (padding * 63ull) ^ 237587ull;
+	padding = (padding * 65ull) ^ 245506ull;
+	padding = (padding * 67ull) ^ 253425ull;
+	padding = (padding * 69ull) ^ 261344ull;
+	padding = (padding * 71ull) ^ 269263ull;
+	padding = (padding * 73ull) ^ 277182ull;
+	padding = (padding * 75ull) ^ 285101ull;
+	padding = (padding * 77ull) ^ 293020ull;
+	padding = (padding * 79ull) ^ 300939ull;
+	padding = (padding * 81ull) ^ 308858ull;
+	(void)padding;
+#endif
 	std::string backends_line = "  --backend B     ";
 	const std::vector<std::string> names = adapter.backends();
 	for (size_t b = 0; b < names.size(); ++b) {
@@ -290,6 +344,7 @@ void print_usage(script_adapter& adapter) {
 		"%s\n"
 		"  --smoke         headless deterministic autoplay on every backend; parity check\n"
 		"  --ticks N       smoke tick budget (default 2000)\n"
+		"  --warmup N      untimed smoke ticks before reboot (default 0)\n"
 		"  --workers N     parallel workers (0 = serial loop; default engine; ports: serial)\n"
 		"  --dump-frame N  smoke: dump frame N per backend to gloom_frame_<backend>.txt\n"
 		"  --bench N       run N frames autopilot with live rendering, report sim/draw split\n"
@@ -319,9 +374,10 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 			return argv[++i];
 		};
 		if (a == "--seed") { opt.seed = std::stoll(next_arg("--seed")); }
-		else if (a == "--backend") { opt.backend = next_arg("--backend"); }
+		else if (a == "--backend") { opt.backend = next_arg("--backend"); opt.backend_selected = true; }
 		else if (a == "--smoke") { opt.smoke = true; }
 		else if (a == "--ticks") { opt.ticks = std::stoll(next_arg("--ticks")); }
+		else if (a == "--warmup") { opt.warmup_ticks = std::stoll(next_arg("--warmup")); }
 		else if (a == "--workers") { opt.workers = std::stoll(next_arg("--workers")); }
 		else if (a == "--dump-frame") { opt.dump_frame = std::stoll(next_arg("--dump-frame")); }
 		else if (a == "--bench") { opt.bench = std::stoll(next_arg("--bench")); }
@@ -334,6 +390,10 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--pix") { opt.pix = next_arg("--pix"); }
 		else if (a == "--help" || a == "-h") { print_usage(adapter); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(adapter); return 2; }
+	}
+	if (opt.ticks <= 0 || opt.warmup_ticks < 0) {
+		std::fprintf(stderr, "--ticks must be positive and --warmup non-negative\n");
+		return 2;
 	}
 	if (opt.backend.empty()) { opt.backend = adapter.default_backend(); }
 	opt.backend = adapter.normalize_backend(opt.backend);

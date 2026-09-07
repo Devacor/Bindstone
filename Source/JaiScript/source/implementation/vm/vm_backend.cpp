@@ -4971,28 +4971,17 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 	if (!computed) [[unlikely]] {
 		return {};   // compute unwound before its sink ran (pair parity: the decl never runs)
 	}
-	// Scalar slot decls land directly - the exec_decl_var fast-path preconditions,
-	// KEPT IN SYNC with it. A fused-binary result is never a reference, so the
-	// deref leg is structurally absent here.
+	// Scalar and string slot decls land directly - the exec_decl_var fast-path
+	// preconditions, KEPT IN SYNC with it. A fused-binary result is never a reference,
+	// so the deref leg is structurally absent here.
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
-		const size_t vi = computed->raw_storage_index();
-		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
-			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
-			const bool matches = bt == script_value_type::jai_any_type ||
-				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
-				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
-				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
-				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
-			if (matches) {
-				if (decl->type) {
-					computed->set_type_info(decl->type);
-				}
-				frame_slot_set(f, decl->slot_index, std::move(*computed));
-				return {};
-			}
+	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level &&
+	    variable_decl::identity_payload(computed->raw_storage_index(), decl->type.get())) {
+		if (decl->type) {
+			computed->set_type_info(decl->type);
 		}
+		frame_slot_set(f, decl->slot_index, std::move(*computed));
+		return {};
 	}
 	// Every other decl shape: push and run op_decl_var verbatim (semantics by
 	// construction; a fused-binary result is a temporary, so lvalue_init = 0)
@@ -5270,13 +5259,13 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 	if (bare_rhs) {
 		if (cp.rhs.const_index != k_invalid_u32) {
 			// KEEP BYTE-PARALLEL with run_dispatch's op_const case: engine-less parse-time
-			// template re-materialized with the engine (strings get a fresh payload)
+			// template re-materialized with the engine
 			const script_value& tmpl = f.code->constants[cp.rhs.const_index];
 			const auto& storage = tmpl.get_storage();
 			switch (storage.index()) {
 				case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
 				case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
-				case script_value::TYPEID_STRING: stack_.push_back(script_value(*storage.get<strong_ptr<script_string>>(), engine_)); break;
+				case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(storage.get<strong_ptr<script_string>>())); break;
 				case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
 				case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 				case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
@@ -5898,7 +5887,7 @@ script_value vm_backend::materialize_constant(const script_value& tmpl) {
 	switch (storage.index()) {
 		case script_value::TYPEID_INT: return script_value(storage.get<script_int>(), engine_);
 		case script_value::TYPEID_FLOAT: return script_value(storage.get<script_float>(), engine_);
-		case script_value::TYPEID_STRING: return script_value(*storage.get<strong_ptr<script_string>>(), engine_);
+		case script_value::TYPEID_STRING: return literal_string_value(storage.get<strong_ptr<script_string>>());
 		case script_value::TYPEID_CHAR: return script_value(storage.get<script_char>(), engine_);
 		case script_value::TYPEID_BOOL: return script_value(storage.get<script_bool>(), engine_);
 		case script_value::TYPEID_NULL: return make_null();
@@ -6263,7 +6252,8 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 				if (vi == proto.decl_expect ||
 				    (proto.decl_expect == 0xFF &&
 				     (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-				      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR))) {
+				      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR ||
+				      vi == script_value::TYPEID_STRING))) {
 					land(std::move(v));
 				} else {
 					vm->stack_.push_back(std::move(v));   // general landing below
@@ -6740,12 +6730,12 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 	const bool lvalue_init = ins.c != 0;
 	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
 
-	// Decl fast path (construction-stamped flags): a scalar payload whose storage
-	// index already matches the declared type stores straight into the slot -
-	// enforce/clone/homogeneity are provably identity for int/float/bool/char
-	// (clone of a scalar is a copy, so lvalue_init is irrelevant here). Anything
-	// else - references, mismatched payloads, env-resident decls, escape-boxed
-	// decls - falls through to the untouched full path below.
+	// Decl fast path (construction-stamped flags): a scalar or string payload whose
+	// storage index already matches the declared type stores straight into the slot -
+	// enforce/clone/homogeneity are provably identity there (a scalar clones as a copy,
+	// a string as its shared node, so lvalue_init is irrelevant). Anything else -
+	// references, mismatched payloads, env-resident decls, escape-boxed decls - falls
+	// through to the untouched full path below.
 	// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
 	    has_init && !decl->ref_escaping &&
@@ -6755,42 +6745,30 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		// Subscript-initialized decls (`float d = ch[ci]`) arrive as rhs-lvalue
 		// reference wrappers - the profiled DOMINANT shape (63% of GLOOM decls). The
 		// decl consumes the VALUE (the full path derefs identically), so a matching
-		// scalar pointee takes the same identity store: copy out BEFORE the pop (the
-		// stack holder OWNS the deref target).
+		// pointee takes the same identity store: copy out BEFORE the pop (the stack
+		// holder OWNS the deref target).
 		const script_value* seen = &top;
 		if (vi == script_value::TYPEID_REFERENCE) {
 			seen = &top.deref();
 			vi = seen->raw_storage_index();
 		}
-		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
-			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
-			const bool matches = bt == script_value_type::jai_any_type ||
-				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
-				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
-				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
-				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
-			if (matches) {
+		if (variable_decl::identity_payload(vi, decl->type.get())) {
 #ifdef JAISCRIPT_VM_PROFILE
-				++profile_decl_paths_[0];
+			++profile_decl_paths_[0];
 #endif
-				JAI_DECL_SUB(1);
-				script_value value = seen == &top ? std::move(top) : script_value(*seen);
-				stack_.pop_back();
-				JAI_DECL_SUB(2);
-				if (decl->type) {
-					value.set_type_info(decl->type);
-				}
-				frame_slot_set(f, decl->slot_index, std::move(value));
-				JAI_DECL_SUB(3);
-				return {};
+			JAI_DECL_SUB(1);
+			script_value value = seen == &top ? std::move(top) : script_value(*seen);
+			stack_.pop_back();
+			JAI_DECL_SUB(2);
+			if (decl->type) {
+				value.set_type_info(decl->type);
 			}
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_decl_paths_[4];
-#endif
+			frame_slot_set(f, decl->slot_index, std::move(value));
+			JAI_DECL_SUB(3);
+			return {};
 		}
 #ifdef JAISCRIPT_VM_PROFILE
-		else { ++profile_decl_paths_[3]; }
+		++profile_decl_paths_[3];
 #endif
 	}
 #ifdef JAISCRIPT_VM_PROFILE
@@ -12801,7 +12779,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				switch (storage.index()) {
 					case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
 					case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
-					case script_value::TYPEID_STRING: stack_.push_back(script_value(*storage.get<strong_ptr<script_string>>(), engine_)); break;
+					case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(storage.get<strong_ptr<script_string>>())); break;
 					case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
 					case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 					case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;

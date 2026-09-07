@@ -2627,8 +2627,9 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 				case script_value_type::jai_float_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
 				case script_value_type::jai_bool_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_BOOL); break;
 				case script_value_type::jai_char_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_CHAR); break;
+				case script_value_type::jai_string_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
 				case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
-				default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // non-scalar decls: general landing
+				default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // container/object decls: general landing
 				}
 			}
 			return;

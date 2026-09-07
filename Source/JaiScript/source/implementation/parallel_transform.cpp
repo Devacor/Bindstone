@@ -2095,24 +2095,31 @@ namespace {
 				v = v.parallel_detached_copy();
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
-			// Keys are const in the map node; a shared KEY string forces a whole-map
-			// detach (fresh keys). Values normalize in place.
-			bool shared_key = false;
-			for (const auto& [key, val] : *handle) {
-				(void)val;
-				if (key.raw_storage_index() == script_value::TYPEID_STRING &&
-				    const_cast<script_value&>(key).unchecked_get_string_storage().use_count() > 1) {
-					shared_key = true;
+			// A shared KEY string (a literal every map built from the same source holds)
+			// detaches in place through the node handle: same bytes, so the ordering the
+			// comparator sees is unchanged and the map's values stay where they are. A
+			// structured key detaches the map wholesale, then the values re-walk.
+			bool structured_key = false;
+			for (auto it = handle->begin(); it != handle->end();) {
+				const size_t ki = it->first.raw_storage_index();
+				if (ki == script_value::TYPEID_ARRAY || ki == script_value::TYPEID_MAP || ki == script_value::TYPEID_OBJECT) {
+					structured_key = true;
 					break;
 				}
-				if (key.raw_storage_index() == script_value::TYPEID_ARRAY ||
-				    key.raw_storage_index() == script_value::TYPEID_MAP ||
-				    key.raw_storage_index() == script_value::TYPEID_OBJECT) {
-					shared_key = true;   // structured keys: detach wholesale, then values re-walk
-					break;
+				if (ki == script_value::TYPEID_STRING &&
+				    const_cast<script_value&>(it->first).unchecked_get_string_storage().use_count() > 1) {
+					auto next = std::next(it);
+					auto entry = handle->extract(it);
+					auto& key_handle = entry.key().unchecked_get_string_storage();
+					eng.execution_limits().memory_charge_deferred(key_handle->size() + sizeof(script_string));
+					key_handle = make_strong<script_string>(*key_handle);
+					handle->insert(next, std::move(entry));
+					it = next;
+					continue;
 				}
+				++it;
 			}
-			if (shared_key) {
+			if (structured_key) {
 				v = v.parallel_detached_copy();
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}

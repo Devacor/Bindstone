@@ -312,12 +312,22 @@ namespace jai {
 
         // AST literals carry no engine/type_info; rebuild a real value before any slow-path
         // consumer sees them (operator-method args get cloned during param bind).
+        // A string literal's value: the engine that parsed the program shares the AST
+        // node (copies share string storage everywhere else; a write unshares); a parallel
+        // worker copies the bytes, because the node's refcount is not atomic and the main
+        // engine and the other workers hold the same literal
+        script_value literal_string_value(const strong_ptr<script_string>& node) const {
+            if (!engine_) {
+                throw runtime_error("Engine pointer is null - cannot create script_value");
+            }
+            return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
+        }
         script_value hydrate_literal(const script_value& lit) const {
             const auto& storage = lit.get_storage();
             switch (storage.index()) {
                 case 1: return make_value(storage.get<script_int>());
                 case 2: return make_value(storage.get<script_float>());
-                case 3: return make_value(*storage.get<strong_ptr<script_string>>());
+                case 3: return literal_string_value(storage.get<strong_ptr<script_string>>());
                 case 4: return make_value(storage.get<script_char>());
                 case 5: return make_value(storage.get<script_bool>());
                 case 0: return make_value();

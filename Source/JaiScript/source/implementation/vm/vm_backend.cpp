@@ -4662,12 +4662,112 @@ op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
 	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
 }
 
+const script_value* vm_backend::direct_operand(frame& f, const fused_operand& operand) noexcept {
+	if (operand.const_index != k_invalid_u32) {
+		return &f.code->constants[operand.const_index];
+	}
+	if (f.window_backed) {
+		return operand.slot < f.window_live ? &stack_[f.window_base + operand.slot] : nullptr;
+	}
+	return f.locals ? f.locals->get_local(operand.slot) : nullptr;
+}
+
+// int/int and float/float rows only; every error case (overflow, a zero divisor) is left
+// to the general kernel so the texts stay its own
+template <typename Sink>
+bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& sink) {
+	const script_value* lp = direct_operand(f, p.left);
+	const script_value* rp = direct_operand(f, p.right);
+	if (!lp || !rp) return false;
+	const token_type op = static_cast<token_type>(p.op);
+	if (p.typed_class == 1) {
+		if (lp->raw_storage_index() != script_value::TYPEID_INT || rp->raw_storage_index() != script_value::TYPEID_INT) return false;
+		const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+		auto emit_int = [&](script_int v) {
+			if constexpr (requires(Sink& s) { s.raw_int(script_int{}); }) { sink.raw_int(v); }
+			else { sink(script_value(v, engine_)); }
+		};
+		script_int r;
+		switch (op) {
+		case token_type::plus: if (!ints::try_add(a, b, r)) return false; emit_int(r); return true;
+		case token_type::minus: if (!ints::try_sub(a, b, r)) return false; emit_int(r); return true;
+		case token_type::star: if (!ints::try_mul(a, b, r)) return false; emit_int(r); return true;
+		case token_type::slash: if (b == 0 || !ints::try_div(a, b, r)) return false; emit_int(r); return true;
+		case token_type::percent: if (b == 0) return false; emit_int(ints::mod(a, b)); return true;
+		case token_type::less: sink(script_value(a < b, engine_)); return true;
+		case token_type::less_equal: sink(script_value(a <= b, engine_)); return true;
+		case token_type::greater: sink(script_value(a > b, engine_)); return true;
+		case token_type::greater_equal: sink(script_value(a >= b, engine_)); return true;
+		case token_type::equal_equal: sink(script_value(a == b, engine_)); return true;
+		case token_type::bang_equal: sink(script_value(a != b, engine_)); return true;
+		default: return false;
+		}
+	}
+	if (lp->raw_storage_index() != script_value::TYPEID_FLOAT || rp->raw_storage_index() != script_value::TYPEID_FLOAT) return false;
+	const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
+	auto emit_float = [&](script_float v) {
+		if constexpr (requires(Sink& s) { s.raw_float(script_float{}); }) { sink.raw_float(v); }
+		else { sink(script_value(v, engine_)); }
+	};
+	switch (op) {
+	case token_type::plus: emit_float(a + b); return true;
+	case token_type::minus: emit_float(a - b); return true;
+	case token_type::star: emit_float(a * b); return true;
+	case token_type::slash: if (b == 0.0) return false; emit_float(a / b); return true;
+	case token_type::percent: if (b == 0.0) return false; emit_float(std::fmod(a, b)); return true;
+	case token_type::less: sink(script_value(a < b, engine_)); return true;
+	case token_type::less_equal: sink(script_value(a <= b, engine_)); return true;
+	case token_type::greater: sink(script_value(a > b, engine_)); return true;
+	case token_type::greater_equal: sink(script_value(a >= b, engine_)); return true;
+	case token_type::equal_equal: sink(script_value(a == b, engine_)); return true;
+	case token_type::bang_equal: sink(script_value(a != b, engine_)); return true;
+	default: return false;
+	}
+}
+
+bool vm_backend::typed_cmp_jump_head(frame& f, const vm_instruction& ins, const fused_binary_proto& p) noexcept {
+	const script_value* lp = direct_operand(f, p.left);
+	const script_value* rp = direct_operand(f, p.right);
+	if (!lp || !rp) return false;
+	bool truthy;
+	if (p.typed_class == 1) {
+		if (lp->raw_storage_index() != script_value::TYPEID_INT || rp->raw_storage_index() != script_value::TYPEID_INT) return false;
+		const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+		switch (static_cast<token_type>(p.op)) {
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		case token_type::greater_equal: truthy = a >= b; break;
+		case token_type::equal_equal: truthy = a == b; break;
+		case token_type::bang_equal: truthy = a != b; break;
+		default: return false;
+		}
+	} else {
+		if (lp->raw_storage_index() != script_value::TYPEID_FLOAT || rp->raw_storage_index() != script_value::TYPEID_FLOAT) return false;
+		const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
+		switch (static_cast<token_type>(p.op)) {
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		case token_type::greater_equal: truthy = a >= b; break;
+		case token_type::equal_equal: truthy = a == b; break;
+		case token_type::bang_equal: truthy = a != b; break;
+		default: return false;
+		}
+	}
+	f.ip = truthy ? f.ip + 1 : ins.a;
+	return true;
+}
+
 // The ONE fused-binary computation, sink-templated (flatstack stage 6): op_binary_fused
 // pushes; the dest-addressed variants land the result in a slot/decl with no push and
 // no second dispatch. One body, every sink - parity by construction.
 template <typename Sink>
 op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[proto_index];
+	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_binary_head(f, p, sink)) {
+		return {};
+	}
 	const token_type op = static_cast<token_type>(p.op);
 
 	std::optional<script_value> lscratch, rscratch;
@@ -4946,6 +5046,9 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 // like the unfused pair did before its jump executed).
 op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
+	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_cmp_jump_head(f, ins, p)) {
+		return {};
+	}
 	const token_type op = static_cast<token_type>(p.op);
 
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool

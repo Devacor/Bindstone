@@ -351,3 +351,164 @@ xperf -i capture.etl -symbols -o samples.csv -a dumper -stacktimeshifting
 Astra's changes are limited to comparison/capture tooling and reports.
 Protected runtime files, reference scripts, the JaiScript adapter, shared
 build directories and git worktrees were not edited by this task.
+
+## Exact allocation attribution, 2026-09-06
+
+The heap captures contain 4,530.397 allocations per measured tick in serial and
+a median 6,899.007 with eight workers. Borrowed string reads add 2,083.865
+allocations per tick: 1,308.553 string wrappers and 775.312 character buffers.
+That source accounts for 88.0% of the median increase in allocation count.
+The largest shared source is string constant materialization through fused
+push, at 2,821.582 allocations per tick in both configurations.
+
+These are heap-event counts, not estimates from the sampled CPU percentages
+above. The serial allocation/free CPU share was 4.70%, versus 8.80% with eight
+workers; the new count and size evidence describes which calls produced that
+traffic. CPU share, allocation count and allocated bytes are different metrics.
+
+### Capture and count audit
+
+The private executable `jai_gloom_alloc.exe` is byte-identical to the original
+profile binary, SHA256
+`C7EF13D99303CEB6EB8B8E64D813C35365B51B73896A5EC6B299D1D48DB5F4C6`.
+The workload is pinned to the pre-background-typing GLOOM scripts from
+`423e5d8a` through an explicit `--scripts` path. It runs 600 warm-up ticks,
+then 600 measured ticks, seed 666. All six processes exited 0 and reproduced
+frame `dfd969ed5a336dca` and state `1503537018`. The P-core affinity is
+CPU 0 for serial and CPUs 0, 1, 10, 11, 12, 13, 22, 23 for eight workers.
+
+Windows heap tracing was enabled only for the private executable name, for three
+serial runs followed by three eight-worker runs. Its original disabled setting
+was restored. Allocation events are selected by PID and the exact QPC interval
+between the GLOOM measured-loop markers. Loading and warm-up are excluded.
+
+Every trace reports zero lost events and zero lost buffers. Every selected
+allocation matched its stack by trigger timestamp and thread ID; there are no
+unmatched allocations, unmatched stacks or schema failures. There are zero
+HeapRealloc events inside these windows. The decoder counted version-2 HeapAlloc
+records and their requested sizes; it did not infer count from a sampled stack.
+A separate xperf heap aggregation of the first serial interval independently
+reported the same 2,718,238 allocations. All 386 distinct private-image addresses
+resolved against the matching PDB; 125 have inline context.
+
+| Configuration | Allocations/tick, median [min, max] | Requested bytes/tick, median [min, max] |
+|---|---:|---:|
+| Serial | 4,530.397 [4,530.397, 4,530.397] | 1,337,636.143 [1,337,636.143, 1,337,636.143] |
+| Eight workers | 6,899.007 [6,879.533, 6,904.152] | 1,465,445.743 [1,463,193.743, 1,466,010.223] |
+
+All three serial runs have exactly 2,718,238 allocations and 802,581,686 requested
+bytes. The eight-worker totals are 4,142,491 / 4,127,720 / 4,139,404 allocations.
+Their variation is concentrated in scope-environment acquisition and region
+setup. Borrowed string allocation counts are identical across all three.
+
+Sizes below are the bytes requested at the Windows heap boundary. They include
+any C++ library over-allocation or alignment bookkeeping inside that request;
+they are not payload sizes, retained bytes or heap bucket capacity. For example,
+a vector's large aligned allocation can request 4,359 bytes. Each row lists its
+most frequent sizes, followed by the full observed range. The raw JSON preserves
+the exact histogram for every source and stack.
+
+### Sources present in serial
+
+Rows are disjoint call-stack classifications. Counts and bytes are medians of
+three runs, divided by 600 measured ticks. These rows and the parallel-only table
+sum to the whole-process allocation totals apart from displayed rounding.
+
+| Allocating function or kernel | Serial alloc/tick | Eight alloc/tick | Frequent sizes; full range (bytes) | Serial KiB/tick | Eight KiB/tick |
+|---|---:|---:|---|---:|---:|
+| <code>materialize_constant through exec_push_fused</code> | 2,821.582 | 2,821.582 | 56, 80; 56 to 80 | 154.306 | 154.306 |
+| <code>string concatenation and conversion in binary operators</code> | 318.388 | 318.388 | 56, 32, 48, 64, ...; 32 to 160 | 19.781 | 19.781 |
+| <code>construct_instance_pre_body and environment setup</code> | 295.680 | 295.680 | 32, 24, 128, 56, ...; 8 to 1024 | 20.803 | 20.803 |
+| <code>array.join string buffer growth</code> | 274.357 | 274.357 | 32, 48, 71, 106, ...; 32 to 33211 | 127.628 | 127.628 |
+| <code>script_array::push through exec_push_fused</code> | 243.642 | 243.642 | 384, 576, 864, 1280, ...; 96 to 557927 | 461.507 | 461.507 |
+| <code>script_value::make_array</code> | 168.030 | 170.003 | 176, 256, 64, 128; 64 to 256 | 35.440 | 35.857 |
+| <code>run_dispatch string constant load</code> | 159.638 | 159.638 | 56, 32; 32 to 56 | 8.730 | 8.730 |
+| <code>make_bound_method_thunk</code> | 63.880 | 63.880 | 8, 32, 88, 168; 8 to 168 | 4.616 | 4.616 |
+| <code>script_value::clone at assignment/return/container boundaries</code> | 59.630 | 59.630 | 176, 96, 64, 128, ...; 40 to 435239 | 430.584 | 430.584 |
+| <code>array.join result wrapper</code> | 34.547 | 34.547 | 56 only | 1.889 | 1.889 |
+| <code>other JaiScript runtime</code> | 31.668 | 32.650 | 32, 192, 8, 72, ...; 8 to 131072 | 23.899 | 23.929 |
+| <code>materialize_constant outside fused push</code> | 22.343 | 22.343 | 56 only | 1.222 | 1.222 |
+| <code>script_array::push through method call</code> | 14.458 | 11.498 | 384, 576, 864, 1280, ...; 32 to 21831 | 14.779 | 13.361 |
+| <code>builtin repeat</code> | 10.907 | 10.907 | 32, 48, 64; 32 to 64 | 0.401 | 0.401 |
+| <code>builtin substr</code> | 10.647 | 10.647 | 56, 48; 48 to 56 | 0.544 | 0.544 |
+| <code>host / C++ runtime</code> | 1.000 | 1.000 | 160 only | 0.156 | 0.156 |
+
+The `other JaiScript runtime` row is 0.7% of serial allocations. It includes
+constructor argument vectors and small call/type/registry allocations.
+`attributed-groups.json` preserves each physical/inline function, source line,
+count and exact size histogram for that remainder as well as the named rows.
+
+Reading the matching source identifies `interpreter.cpp:772` as
+`array.join` appending string elements and line 788 as its returned string
+wrapper. `value.cpp:336/338` creates the array node and initial storage.
+The 56-byte constant-materialization entries are `make_strong<string>`
+allocations reached through `materialize_constant` and `exec_push_fused`.
+These semantic names are source-based attribution of the measured native stacks.
+
+### Sources introduced by the parallel configuration
+
+| Allocating function or kernel | Serial alloc/tick | Eight alloc/tick [range when variable] | Frequent sizes; full range (bytes) | Serial KiB/tick | Eight KiB/tick |
+|---|---:|---:|---|---:|---:|
+| <code>parallel_borrow_subscript_read: string wrapper</code> | 0.000 | 1,308.553 | 56 only | 0.000 | 71.562 |
+| <code>parallel_borrow_subscript_read: string bytes</code> | 0.000 | 775.312 | 32 only | 0.000 | 24.228 |
+| <code>acquire_scope_env / setup_callee_env</code> | 0.000 | 96.150 [80.810, 100.560] | 128, 32, 24, 16, ...; 16 to 320 | 0.000 | 10.141 |
+| <code>parallel run_region</code> | 0.000 | 73.228 [69.095, 73.963] | 32, 64, 8, 24, ...; 8 to 1088 | 0.000 | 7.648 |
+| <code>parallel prewarm_region_types</code> | 0.000 | 68.037 | 24, 128, 8, 1024, ...; 8 to 1024 | 0.000 | 7.666 |
+| <code>parallel admission_builder::admission_builder</code> | 0.000 | 35.500 | 128, 24, 32; 24 to 128 | 0.000 | 2.658 |
+| <code>parallel provision_snapshot_capture</code> | 0.000 | 2.960 | 32, 152, 224; 32 to 224 | 0.000 | 0.393 |
+| <code>parallel partition_flat</code> | 0.000 | 2.958 | 72, 16, 64, 40, ...; 16 to 72 | 0.000 | 0.148 |
+| <code>parallel jai::detail::run_parallel_transform</code> | 0.000 | 1.973 | 64, 1088; 64 to 1088 | 0.000 | 1.110 |
+| <code>parallel prove_elements</code> | 0.000 | 1.972 | 8 only | 0.000 | 0.015 |
+| <code>parallel seed_classes_by_member</code> | 0.000 | 1.972 | 120, 104; 104 to 120 | 0.000 | 0.216 |
+
+`parallel_borrow_subscript_read` at `parallel_transform.cpp:3449` copies
+the borrowed bytes into a worker-local `script_string` and `script_value`.
+The trace distinguishes its fixed 56-byte strong wrapper from 32-byte character
+buffer requests. Strings that fit inline need no separate character buffer.
+
+“Parallel-only” means introduced when eight workers are enabled. It does not
+mean every allocation occurs on a background thread: the main thread also
+executes chunks. The median background-thread allocation count is 5,119.028/tick,
+out of 6,899.007/tick overall. `attributed-totals.json` separates background
+threads from the marker/main thread for every row.
+
+### Limits and evidence
+
+The counts and size histograms are exact for these six instrumented executions.
+Heap tracing changes scheduling and the opportunity to reuse pooled environments.
+The varying `acquire_scope_env` and `run_region` counts must not be treated
+as exact counts for an uninstrumented eight-worker run. The three identical
+borrowed-string totals establish a repeatable source of traffic in this capture.
+
+No heap-traced wall time is reported as performance. Padding bands do not apply
+to allocation event counts; those tables report the observed three-run count
+range. The earlier sampling table's padding bands still apply to its wall times.
+No engine, allocator, checker or scripting-contract change is proposed here.
+
+Raw evidence root:
+`out/astra/alloc-20260906/20260906-194744/`.
+
+- `captures.json` and `w0-r1` through `w0-r3` / `w8-r1` through
+  `w8-r3` ETLs and logs: exits, hashes and complete captures.
+- `*.allocations.json`: exact marker interval, loss audit, allocation/free
+  totals, native stack addresses, size histograms and thread counts.
+- `symbols.jsonl` and `symbol-resolution.log`: matching-PDB physical and
+  inline resolution. `attributed-groups.json` keeps every resolved call stack.
+- `attributed-totals.json` and `attribution-summary.json`: disjoint source
+  groups and the per-tick table inputs.
+- `w0-r1-heap-stacks.txt` and `w0-r1-tracestats.txt`: independent xperf
+  count/loss check.
+- `initial-heap-config.txt` / `final-heap-config.txt`: disabled before/after.
+
+The parent folder preserves `capture_allocations.ps1`, `heap.wprp`,
+`heap_events.cpp`, `analyze_events.ps1`, `attribute.py`, the pinned
+executable/PDB and workload copy. Microsoft documents the allocation/stack capture
+and aggregation mechanisms in [Enabling Heap Data Capture](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/enabling-heap-data-capture)
+and [xperf heap](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/heap).
+
+Verified by running: all six hash gates, event/stack matching, loss audit, exact
+counts/sizes and PDB resolution. Inferred from reading: source-level names and the
+pooling/scheduling explanation for varying setup counts. Full Debug suites on
+both backends and 300-tick GLOOM hashes passed before this documentation change;
+logs are `out/astra/debug-brief-interpreter.log`,
+`out/astra/debug-brief-vm.log` and `out/astra/gloom-brief-300.log`.

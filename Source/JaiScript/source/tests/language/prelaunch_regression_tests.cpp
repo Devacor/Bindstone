@@ -5,6 +5,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace jai::foundry::tests {
 
@@ -255,6 +256,27 @@ public:
 			check_eq(std::string("keep"), eng->execute("\"keep\"").as<std::string>());
 			check_eq(std::string("x0,x,x1,x,x2,x"), eng->execute("parts.join(\",\")").as<std::string>());
 			check_eq(std::string("x"), eng->execute("\"x\"").as<std::string>());
+		});
+
+		test("script_objects_outliving_their_engine_destroy_safely", [this]() {
+			// A host that keeps a script value past engine teardown (Bindstone's login page: a
+			// signal receiver capturing a script object, destroyed after the engine) must be
+			// able to drop it: the instance's destructor used to reach into its destroyed
+			// class definition to unregister itself (Astra's -loginshot 0xC0000005 in
+			// class_definition::unregister_instance). The definition orphans its live
+			// instances as it dies; dropping them afterwards is a plain destruction.
+			std::optional<script_value> instance, closure, nested;
+			{
+				auto eng = make_engine();
+				instance.emplace(eng->execute("class K { int v = 1; string s = \"x\"; } K k = K(); k;"));
+				closure.emplace(eng->execute("class L { int w = 2; } L l = L(); var f = function() { return l.w; }; f;"));
+				nested.emplace(eng->execute("class M { array<K> ks = [K(), K()]; map<string, L> ls = {\"a\": L()}; } M m = M(); m;"));
+				check_true(instance->is_object());
+			}
+			instance.reset();
+			nested.reset();
+			closure.reset();
+			check_true(true);
 		});
 
 		test("numeric_failed_store_preserves_value", [this]() {

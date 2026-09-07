@@ -3169,6 +3169,9 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.ip > 0) { ++profile_store_prev_[static_cast<uint8_t>(f.code->code[f.ip - 1].op)]; }
+#endif
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 #ifdef JAISCRIPT_VM_PROFILE
@@ -6323,17 +6326,10 @@ bool vm_backend::typed_decl_land_float(frame& f, const fused_index_proto& p, scr
 	return true;
 }
 
-bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
-	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
-	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
-	// op later as exactly this copy; every other element falls to the kernel untouched
-	const bool folded = p.index_binary != k_invalid_u32;
-	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
-	if (!cp) return false;
-	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
-	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
-	script_int index;
-	if (folded) {
+// The proven index: a direct slot or literal, or the int fold with its chain steps (the
+// operands' cache roles are the kernel's: binary left/right at ip*3 / ip*3+1)
+bool vm_backend::typed_fold_index(frame& f, const fused_index_proto& p, script_int& index) {
+	if (p.index_binary != k_invalid_u32) {
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
 		const script_value* lp = fast_operand(f, bp.left, f.ip * 3);
 		const script_value* rp = lp ? fast_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
@@ -6345,11 +6341,25 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 			if (!r2 || r2->raw_storage_index() != script_value::TYPEID_INT) return false;
 			if (!typed_int_index_row(static_cast<token_type>(sp.op), index, r2->unchecked_as_int(), index)) return false;
 		}
-	} else {
-		const script_value* ip = fast_operand(f, p.index, f.ip * 3 + 1);
-		if (!ip || ip->raw_storage_index() != script_value::TYPEID_INT) return false;
-		index = ip->unchecked_as_int();
+		return true;
 	}
+	const script_value* ip = fast_operand(f, p.index, f.ip * 3 + 1);
+	if (!ip || ip->raw_storage_index() != script_value::TYPEID_INT) return false;
+	index = ip->unchecked_as_int();
+	return true;
+}
+
+bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
+	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
+	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
+	// op later as exactly this copy; every other element falls to the kernel untouched
+	const bool folded = p.index_binary != k_invalid_u32;
+	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	if (!cp) return false;
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+	script_int index;
+	if (!typed_fold_index(f, p, index)) return false;
 	const script_array* node = cp->unchecked_array_node();
 	if (index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
 	const size_t at = static_cast<size_t>(index);
@@ -6387,6 +6397,64 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	default:
 		return false;
 	}
+}
+
+bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {
+	const bool folded = p.index_binary != k_invalid_u32;
+	const bool value_operand = p.store_value.const_index != k_invalid_u32 || p.store_value.symbol != k_invalid_u32;
+	// the value first (the kernel resolves it first, so an undefined name keeps its position)
+	const script_value* vp;
+	if (value_operand) {
+		vp = fast_operand(f, p.store_value, folded ? SIZE_MAX : f.ip * 3 + 2);
+		if (!vp) return false;
+	} else {
+		if (stack_.empty()) return false;
+		vp = &stack_.back();
+	}
+	const script_value& v = vp->deref();
+	const size_t vi = v.raw_storage_index();
+	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT) return false;
+	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	if (!cp) return false;
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+	script_int index;
+	if (!typed_fold_index(f, p, index)) return false;
+	script_array* node = const_cast<script_value&>(*cp).unchecked_get_array_storage().get();
+	if (!node || index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
+	const size_t at = static_cast<size_t>(index);
+	switch (node->kind()) {
+	case script_array::kind_t::i64:
+		// set()'s exact cast; a float outside the int range runs the kernel's checked text
+		if (vi == script_value::TYPEID_FLOAT && !detail::float_fits_script_int(v.unchecked_as_float())) return false;
+		node->ints()[at] = vi == script_value::TYPEID_FLOAT ? static_cast<script_int>(v.unchecked_as_float()) : v.unchecked_as_int();
+		break;
+	case script_array::kind_t::f64:
+		node->floats()[at] = vi == script_value::TYPEID_INT ? static_cast<script_float>(v.unchecked_as_int()) : v.unchecked_as_float();
+		break;
+	case script_array::kind_t::hetero: {
+		// the kernel's plain-scalar in-place row: no element type, same storage kind
+		const type_info* ti = cp->get_type_info().get();
+		if (ti && ti->element_type().get()) return false;
+		script_value& target = node->values()[at];
+		if (target.raw_storage_index() != vi) return false;
+		if (vi == script_value::TYPEID_INT) { target.unchecked_set_int_payload(v.unchecked_as_int()); }
+		else { target.unchecked_set_float_payload(v.unchecked_as_float()); }
+		target.set_type_info(v.get_type_info());
+		target.set_engine(v.get_engine());
+		break;
+	}
+	default:
+		return false;
+	}
+	// the kernel's result discipline: an operand value pushes when a result is wanted; a
+	// stack value pops when it is not (when it is, the pending value IS the result)
+	if (value_operand) {
+		if (!no_result) { stack_.push_back(*vp); }
+	} else if (no_result) {
+		stack_.pop_back();
+	}
+	return true;
 }
 
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
@@ -6493,8 +6561,19 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 // pushes the operands above the value and replays the unfused sequence.
 op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	std::optional<script_value> cscratch, mscratch, iscratch, vscratch;
 	const bool no_result = ins.c != 0;
+	if (p.typed_lane && !has_custom_numeric_ops_) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_typed_store_[0];
+#endif
+		if (typed_index_store(f, p, no_result)) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_typed_store_[1];
+#endif
+			return {};
+		}
+	}
+	std::optional<script_value> cscratch, mscratch, iscratch, vscratch;
 	const bool value_operand = p.store_value.const_index != k_invalid_u32 ||
 	                           p.store_value.symbol != k_invalid_u32;
 	const script_value* value_ptr = nullptr;
@@ -6901,6 +6980,10 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 #endif
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	JAI_DECL_SUB(0);
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.ip > 0) { ++profile_decl_var_prev_[static_cast<uint8_t>(f.code->code[f.ip - 1].op)]; }
+	if (ins.b != 0 && !stack_.empty()) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_decl_var_kinds_[k < 16 ? k : 15]; }
+#endif
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
 	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
@@ -12764,8 +12847,16 @@ void vm_backend::dump_opcode_profile() const {
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
-	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu\n",
-		(unsigned long long)profile_typed_decl_read_[0], (unsigned long long)profile_typed_decl_read_[1]);
+	dump_next_histogram("DECL_VAR producers (previous opcode, not consumers)", profile_decl_var_prev_);
+	dump_next_histogram("STORE producers (previous opcode, not consumers)", profile_store_prev_);
+	fprintf(stderr, "[vm-profile] DECL_VAR initializer kinds: null %llu int %llu float %llu string %llu char %llu bool %llu array %llu map %llu object %llu function %llu reference %llu shared %llu weak %llu other %llu\n",
+		(unsigned long long)profile_decl_var_kinds_[0], (unsigned long long)profile_decl_var_kinds_[1], (unsigned long long)profile_decl_var_kinds_[2], (unsigned long long)profile_decl_var_kinds_[3],
+		(unsigned long long)profile_decl_var_kinds_[4], (unsigned long long)profile_decl_var_kinds_[5], (unsigned long long)profile_decl_var_kinds_[6], (unsigned long long)profile_decl_var_kinds_[7],
+		(unsigned long long)profile_decl_var_kinds_[8], (unsigned long long)profile_decl_var_kinds_[9], (unsigned long long)profile_decl_var_kinds_[10], (unsigned long long)profile_decl_var_kinds_[11],
+		(unsigned long long)profile_decl_var_kinds_[12], (unsigned long long)profile_decl_var_kinds_[13] + profile_decl_var_kinds_[14] + profile_decl_var_kinds_[15]);
+	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu | typed store: tried %llu hit %llu\n",
+		(unsigned long long)profile_typed_decl_read_[0], (unsigned long long)profile_typed_decl_read_[1],
+		(unsigned long long)profile_typed_store_[0], (unsigned long long)profile_typed_store_[1]);
 	fprintf(stderr, "[vm-profile] push_fused lanes: append %llu | kernel %llu | replay %llu\n",
 		(unsigned long long)profile_push_fused_lane_[0], (unsigned long long)profile_push_fused_lane_[1], (unsigned long long)profile_push_fused_lane_[2]);
 	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu | cmp_jump hit %llu miss %llu unstamped %llu\n",

@@ -4,6 +4,7 @@
 // output). The host is deliberately thin: engine + stdlib + file IO + a console; every
 // engine call in here is the canonical shape from docs/site/embedding.
 
+#include "../../examples/gloom/ports/profile_capture.hpp"
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -127,10 +128,56 @@ struct options {
 	int debug_port = 0;                    // 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
+	int benchmark_main = 0;               // file execution warms main; then call it N more times
 	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
 };
 
 void print_usage() {
+#ifdef JAISCRIPT_LAYOUT_PADDING
+	// Cold placement control: these stores run only for --help, never a gate.
+	volatile uint64_t padding = 1;
+	padding = (padding * 3ull) ^ 17ull;
+	padding = (padding * 5ull) ^ 7936ull;
+	padding = (padding * 7ull) ^ 15855ull;
+	padding = (padding * 9ull) ^ 23774ull;
+	padding = (padding * 11ull) ^ 31693ull;
+	padding = (padding * 13ull) ^ 39612ull;
+	padding = (padding * 15ull) ^ 47531ull;
+	padding = (padding * 17ull) ^ 55450ull;
+	padding = (padding * 19ull) ^ 63369ull;
+	padding = (padding * 21ull) ^ 71288ull;
+	padding = (padding * 23ull) ^ 79207ull;
+	padding = (padding * 25ull) ^ 87126ull;
+	padding = (padding * 27ull) ^ 95045ull;
+	padding = (padding * 29ull) ^ 102964ull;
+	padding = (padding * 31ull) ^ 110883ull;
+	padding = (padding * 33ull) ^ 118802ull;
+	padding = (padding * 35ull) ^ 126721ull;
+	padding = (padding * 37ull) ^ 134640ull;
+	padding = (padding * 39ull) ^ 142559ull;
+	padding = (padding * 41ull) ^ 150478ull;
+	padding = (padding * 43ull) ^ 158397ull;
+	padding = (padding * 45ull) ^ 166316ull;
+	padding = (padding * 47ull) ^ 174235ull;
+	padding = (padding * 49ull) ^ 182154ull;
+	padding = (padding * 51ull) ^ 190073ull;
+	padding = (padding * 53ull) ^ 197992ull;
+	padding = (padding * 55ull) ^ 205911ull;
+	padding = (padding * 57ull) ^ 213830ull;
+	padding = (padding * 59ull) ^ 221749ull;
+	padding = (padding * 61ull) ^ 229668ull;
+	padding = (padding * 63ull) ^ 237587ull;
+	padding = (padding * 65ull) ^ 245506ull;
+	padding = (padding * 67ull) ^ 253425ull;
+	padding = (padding * 69ull) ^ 261344ull;
+	padding = (padding * 71ull) ^ 269263ull;
+	padding = (padding * 73ull) ^ 277182ull;
+	padding = (padding * 75ull) ^ 285101ull;
+	padding = (padding * 77ull) ^ 293020ull;
+	padding = (padding * 79ull) ^ 300939ull;
+	padding = (padding * 81ull) ^ 308858ull;
+	(void)padding;
+#endif
 	std::puts(
 		"jaiscript - standalone JaiScript runner / REPL / live-coding watcher\n"
 		"\n"
@@ -151,6 +198,7 @@ void print_usage() {
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
 		"                        the embedded-engine default of 1.0s is deliberately lifted here)\n"
 		"  --time                print wall time for each run\n"
+		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
@@ -211,6 +259,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
+		else if (a.rfind("--benchmark-main", 0) == 0) { opt.benchmark_main = std::stoi(value_of("--benchmark-main")); }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
 		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
@@ -227,6 +276,10 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 			std::fprintf(stderr, "%s\n", con.red("unexpected extra argument: " + a + " (script args go after --)").c_str());
 			return 2;
 		}
+	}
+	if (opt.benchmark_main < 0 || (opt.benchmark_main > 0 && (opt.script.empty() || opt.watch))) {
+		std::fprintf(stderr, "--benchmark-main needs a file, a non-negative count and no --watch\n");
+		return 2;
 	}
 	if (opt.backend == "interpreter") { opt.backend = "interp"; }
 	if (opt.backend != "vm" && opt.backend != "interp") {
@@ -1193,7 +1246,34 @@ int run_file_mode(const options& opt, const console_state& con) {
 	wire_debugger(opt, *eng, con, debug_note);
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
 
+	if (opt.benchmark_main > 0) { std::cout << "JAI_BENCHMARK_PHASE warmup\n"; }
 	run_result r = run_file_in_engine(*eng, opt.script);
+	if (r.ok && r.exit_code == 0 && opt.benchmark_main > 0) {
+		for (int repetition = 1; repetition <= opt.benchmark_main; ++repetition) {
+			std::cout << "JAI_BENCHMARK_PHASE measured " << repetition << "\n";
+			try {
+#ifdef GLOOM_PROFILE_CAPTURE
+				gloom::profile_capture capture(L"JaiDOOM measured main");
+				capture.begin();
+#endif
+				jai::script_value callable = eng->get_variable("main");
+				const std::vector<jai::script_value> arguments;
+				auto result = callable.as_function()(arguments);
+				if (!result) { throw std::runtime_error(std::string(result.message())); }
+				r.exit_code = result_to_exit_code(result.value());
+#ifdef GLOOM_PROFILE_CAPTURE
+				capture.stop();
+#endif
+			} catch (const std::exception& ex) {
+				r.ok = false;
+				r.exit_code = 1;
+				r.error = ex.what();
+				r.stack_trace = trim(eng->format_stack_trace());
+			}
+			std::cout << "JAI_BENCHMARK_END " << repetition << " exit " << r.exit_code << "\n";
+			if (!r.ok || r.exit_code != 0) { break; }
+		}
+	}
 	if (!r.ok) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: " + r.error).c_str());
 		if (!r.stack_trace.empty()) { std::fprintf(stderr, "%s\n", r.stack_trace.c_str()); }

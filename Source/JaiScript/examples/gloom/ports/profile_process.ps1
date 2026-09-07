@@ -3,12 +3,24 @@ function Invoke-GloomProfileProcess {
 	param(
 		[Parameter(Mandatory=$true)][string]$FilePath,
 		[string[]]$Arguments = @(),
-		[IntPtr]$Affinity = [IntPtr]1
+		[IntPtr]$Affinity = [IntPtr]1,
+		[string]$WorkingDirectory = '',
+		[hashtable]$Environment = @{}
 	)
 	$startInfo = [Diagnostics.ProcessStartInfo]::new()
 	$startInfo.FileName = $FilePath
-	# GLOOM arguments are fixed flag names and numbers, with no shell expansion.
-	$startInfo.Arguments = $Arguments -join ' '
+	# Quote for the Windows argv decoder; no command shell is involved.
+	$quoted = foreach ($argument in $Arguments) {
+		if ($argument.Length -gt 0 -and $argument -notmatch '[\s"]') { $argument }
+		else {
+			$escaped = [regex]::Replace($argument, '(\\*)"', '$1$1\"')
+			$escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+			'"' + $escaped + '"'
+		}
+	}
+	$startInfo.Arguments = $quoted -join ' '
+	if ($WorkingDirectory) { $startInfo.WorkingDirectory = $WorkingDirectory }
+	foreach ($key in $Environment.Keys) { $startInfo.EnvironmentVariables[$key] = $Environment[$key] }
 	$startInfo.UseShellExecute = $false
 	$startInfo.CreateNoWindow = $true
 	$startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden

@@ -1,4 +1,4 @@
-# GLOOM runtime comparisons
+# GLOOM and JaiDOOM whole-program gates
 
 The ports execute the shared host's deterministic 100x40, quad-pixel workload.
 Lua 5.4.8 and Lua 5.5.1 use the same Lua scripts and the same sol2 adapter.
@@ -64,7 +64,10 @@ at a time, pins serial configurations to one performance core and the
 eight-worker configuration to eight performance cores, and records the CPU
 topology and affinity. It waits for competing compiler/test/benchmark processes
 to finish and for the requested background CPU threshold. Busy samples are
-retained in the raw JSON but excluded from summary statistics.
+retained in the raw JSON but excluded from summary statistics. While a child
+runs, the runner checks for competing processes every 250 ms as well as at the
+end; any observed competitor invalidates that timing sample. Shorter-lived
+processes can still escape polling, so the shared timing window must stay clear.
 
 Each reported median carries the padding control median, the range of paired
 padding deltas and the observed run range. The padding band includes normal
@@ -76,21 +79,74 @@ command, output filename, hash verdict, CPU affinity and background CPU reading.
 `summary.json` contains only accepted runs. A port that fails conformance has
 no timing result.
 
-## Sampled CPU profiles on Windows
+## JaiDOOM timedemo
 
-Build a separate Release configuration with symbols and measured-loop markers:
+The default command runs both whole programs. For JaiScript increments, omit
+the Lua configurations with:
 
 ```powershell
-cmake -S Source/JaiScript -B Source/JaiScript/out/astra/profile -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DCMAKE_CXX_FLAGS=/DGLOOM_PROFILE_CAPTURE "-DCMAKE_CXX_FLAGS_RELEASE=/O2 /DNDEBUG /Zi" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG:FULL /INCREMENTAL:NO" -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_RUNNER=OFF
-cmake --build Source/JaiScript/out/astra/profile --target jai_gloom
+python Source/JaiScript/examples/gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build Source/JaiScript/out/astra/release --output Source/JaiScript/out/astra/whole-program-REFERENCE
 ```
 
-Then run `capture_profile.ps1` in Administrator PowerShell. It uses the
-custom `gloom_cpu.wprp` profile, records five sequential runs per configuration,
-checks the 600-tick hashes, and writes ETL files and a process manifest under
-`out/profile-2026-09`. Existing WPR recordings are left alone.
+JaiDOOM uses `examples/jaidoom/scripts/p10_timedemo.jai`, `demo.json` and
+`doom1.wad` at 120x78. Each process first executes the entire timedemo as a
+warm-up, then invokes its existing `main()` again in the same engine with
+`--benchmark-main=1`. Both replays must produce state `1746772898`.
+The measured replay must report 3984 tics. The reported integer elapsed
+milliseconds divided by 3984 gives ms/tic; the script also prints a rounded
+two-decimal ms/tic value, retained in the raw record. Script loading and the
+warm-up replay are excluded. The script's replay-loop timer excludes level
+loading and final hashing.
 
-Provider `744b3f90-7d83-4b7b-a861-40637623c592` marks the start and end of
-each measured loop. Filter samples by the recorded PID and these markers to
-exclude loading, warm-up and final summaries. The provider registration is
-owned by each smoke execution. Normal builds compile out the marker code.
+`JAISCRIPT_RUNNER_PADDING_CONTROL=ON` builds `jaiscript_padding.exe` with
+40 retained volatile statements in its cold help function. The normal and
+padding binaries run A B A B in each of three rounds, giving six accepted
+measurements per layout and the same paired padding band as GLOOM.
+
+Pass `--jai-workload-root PATH` to use a frozen JaiScript source/workload
+copy, including its `examples/jaidoom/demo.json` and `wads/doom1.wad`.
+GLOOM then receives an explicit `--scripts` path as well. This keeps Fable's
+live script edits out of a measurement window.
+
+Pass `--compare-build PATH` to compare a candidate build in the same command.
+For each workload and round the order is normal baseline, normal candidate,
+padding baseline, padding candidate, repeated twice. Thus baseline/candidate
+and normal/padding both interleave. `differences.json` records candidate
+deltas separately for the two layouts. `summary.json` retains each build's
+padding band. The band is the minimum and maximum paired padding/normal
+percentage difference, not a confidence interval. No baseline/candidate
+improvement is established merely by exceeding zero.
+
+The runner defaults to a 0.20-core background CPU ceiling. Any override through
+`--max-background-cores` is recorded in `metadata.json`. This is a desktop
+activity allowance, not a claim that the machine was otherwise idle. Timing
+runs require a clear build/test/benchmark process list. Do not build or run
+other workloads during the measurement window. A hash failure invalidates a
+configuration; it never becomes a timing point. Use a fresh evidence directory
+for each run. The runner records executable and workload input SHA256 hashes
+and checks them again at the end; an input change invalidates the session.
+
+## Sampled CPU profiles on Windows
+
+Build all normal and padding targets with symbols and markers:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Source/JaiScript/examples/gloom/ports/build_comparison.ps1 -OutputRoot Source/JaiScript/out/astra/gates-profile -ProfileMarkers
+```
+
+Run `capture_profile.ps1` in Administrator PowerShell. It calls the same
+combined runner with `--engines jai --workloads gloom,timedemo --rounds 3`,
+including the gates, warm-ups, CPU pinning and padding controls. Parameters
+`-BuildRoot`, `-Rounds`, `-Workloads` and `-MaxBackgroundCores` select
+the build and capture. ETL, logs and JSON go under
+`out/astra/cpu-captures/TIMESTAMP`. Existing WPR recordings are left alone.
+Recorded timings are labelled `WPR` and must not be used as uninstrumented
+performance results.
+
+Provider `744b3f90-7d83-4b7b-a861-40637623c592` emits paired begin/end
+markers. GLOOM markers delimit its measured loop, excluding loading, warm-up
+and summaries. JaiDOOM markers delimit the repeated `main()` call, including
+that call's level/demo setup; its printed ms/tic still measures only the replay
+loop. Filter samples by PID and marker interval and state which interval was
+used. Provider registration belongs to each execution; normal builds compile
+out the marker code.

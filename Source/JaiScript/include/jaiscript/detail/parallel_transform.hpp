@@ -293,6 +293,11 @@ namespace jai::detail {
                                                                 const script_value& index,
                                                                 engine* eng,
                                                                 bool lvalue_write);
+    // The string a borrowed-array read would copy: the element's live bytes (a hetero string
+    // element or a string-buffer slot) when the index is an int in range, else null and the
+    // read runs the kernel above. Lets a worker serve repeated reads of the same table cell
+    // from its own copy (validated against these bytes) instead of allocating per read.
+    const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index) noexcept;
 
     // Read-only by-value parameter elision. Bit i of the result: the body of `fn` (and every
     // script function it calls) would be admitted in a parallel body - so it writes nothing

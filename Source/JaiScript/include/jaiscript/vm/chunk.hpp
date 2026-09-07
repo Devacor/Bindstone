@@ -303,6 +303,12 @@ namespace jai::vm {
         uint32_t decl_slot = k_invalid_u32;
         uint8_t decl_expect = 0xFF;
         type_info* decl_type = nullptr;
+        // Typed element-read lane (docs/typed_regions_design.md): the compiler proved the
+        // shape - a plain identifier container, an index that is a direct slot, a literal or
+        // an int/int-stamped fold whose chain steps are int/int with direct or literal
+        // rights - and the decl lane facts above hold, so exec_index_fused_decl opens with
+        // typed_decl_read; any runtime miss runs the general kernel unchanged.
+        bool typed_lane = false;
     };
 
     struct chunk {

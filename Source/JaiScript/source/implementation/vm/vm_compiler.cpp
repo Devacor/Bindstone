@@ -1730,11 +1730,37 @@ static void stamp_typed_class(fused_binary_proto& p, const binary_expr* node) {
 		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
 		case token_type::equal_equal: case token_type::bang_equal:
 			break;
+		case token_type::ampersand: case token_type::pipe: case token_type::caret:
+		case token_type::left_shift: case token_type::right_shift:
+			// integer-only rows: the float head has no bitwise row, so the float class stays unstamped
+			if (node->static_operand_class == operand_class_int_int) { p.typed_class = 1; }
+			return;
 		default:
 			return;
 	}
 	if (node->static_operand_class == operand_class_int_int) { p.typed_class = 1; }
 	else if (node->static_operand_class == operand_class_float_float) { p.typed_class = 2; }
+}
+
+// An index-chain STEP's proto keeps an empty left (the accumulator stands in): the step is
+// int/int when the checker proved the node so and its right addresses directly
+static void stamp_chain_step_typed_class(fused_binary_proto& sp, const binary_expr* node) {
+	if (!sp.right.direct && sp.right.const_index == k_invalid_u32) return;
+	if (node->static_operand_class == operand_class_int_int) { sp.typed_class = 1; }
+}
+
+// The typed element-read lane's shape proof (fused_index_proto::typed_lane)
+static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_proto& p) {
+	if (p.container.const_index != k_invalid_u32 || p.container.member_node != k_invalid_u32 ||
+	    p.container.is_subscript() || p.container.load_flags != 0) return false;
+	if (p.index_binary == k_invalid_u32) {
+		return p.index.direct || p.index.const_index != k_invalid_u32;
+	}
+	if (code.fused_binary_protos[p.index_binary].typed_class != 1) return false;
+	for (uint32_t step : p.index_chain_ext) {
+		if (code.fused_binary_protos[step].typed_class != 1) return false;
+	}
+	return true;
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
@@ -1803,12 +1829,14 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 					bp.op = static_cast<uint8_t>(inner->op.type);
 					bp.left = make_fused_operand(inner->left);
 					bp.right = make_fused_operand(inner->right);
+					stamp_typed_class(bp, inner);
 					chunk_->fused_binary_protos.push_back(bp);
 					p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 					for (int i = depth - 2; i >= 0; --i) {
 						fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
 						sp.op = static_cast<uint8_t>(spine[i]->op.type);
 						sp.right = make_fused_operand(spine[i]->right);
+						stamp_chain_step_typed_class(sp, spine[i]);
 						chunk_->fused_binary_protos.push_back(sp);
 						p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
 					}
@@ -2630,6 +2658,9 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 				case script_value_type::jai_string_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
 				case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
 				default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // container/object decls: general landing
+				}
+				if (proto.decl_slot != k_invalid_u32 && index_proto_typed_lane_shape(*chunk_, proto)) {
+					proto.typed_lane = true;
 				}
 			}
 			return;

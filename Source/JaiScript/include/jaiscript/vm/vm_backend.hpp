@@ -140,7 +140,10 @@ namespace jai::vm {
         uint64_t profile_slice_gate_[4] = {};
         uint64_t profile_push_sections_[8] = {};
         uint64_t profile_push_prologue_ = 0;
-        uint64_t profile_typed_head_[6] = {};   // binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
+        uint64_t profile_typed_head_[6] = {};
+        uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
+        uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
+        // typed heads: binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
         // [3]=full convert [4]=reference bind [5]=default arg [6]=escape-boxed
@@ -303,8 +306,21 @@ namespace jai::vm {
             std::shared_ptr<void> pin;
             const chunk* code = nullptr;
             std::vector<env_lookup_cache_entry> entries;
+            // The worker's own copy of each string constant, minted on first use (indexed
+            // like chunk::constants; the pin keeps that table alive): a literal evaluated
+            // in a region shares this node instead of allocating per evaluation, and the
+            // main engine's node is never touched from the worker thread
+            std::vector<script_value> string_constants;
         };
         std::vector<worker_chunk_env_cache> worker_env_caches_;
+        worker_chunk_env_cache* worker_chunk_record(const chunk* code);
+        // A worker's own copies of the borrowed table cells it reads, keyed by (array node,
+        // index) and validated against the live bytes on every hit (a recycled node address
+        // or a rebuilt table can only refresh the copy, never return stale text): the row
+        // builders read the same palette cells thousands of times per region, and each read
+        // allocated a string. Bounded; cleared when it grows past the cap.
+        std::unordered_map<uint64_t, script_value> worker_borrowed_strings_;
+        script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
         size_t worker_env_mru_ = 0;
         environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
 
@@ -899,12 +915,28 @@ namespace jai::vm {
         bool object_to_bool_via_method(const script_value& value);
         std::string value_to_string_with_method(const script_value& val);
         script_value materialize_constant(const script_value& tmpl);
+        script_value materialize_constant(const chunk& code, uint32_t const_index);
         // A string literal's value: the main engine shares the AST node (string copies share
-        // storage everywhere else; a write unshares); a parallel worker copies the bytes,
-        // because the node's refcount is not atomic and the main engine and the other
-        // workers hold the same literal (the XTHREAD canary pins this)
+        // storage everywhere else; a write unshares); a parallel worker never touches that
+        // node's count (not atomic; the main engine and the other workers hold the same
+        // literal, the XTHREAD canary pins this): it shares its own per-chunk copy when the
+        // chunk is pinned in its tables, else it copies the bytes
         script_value literal_string_value(const strong_ptr<script_string>& node) const {
             return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
+        }
+        script_value literal_string_value(const chunk& code, uint32_t const_index, const strong_ptr<script_string>& node) {
+            if (!parallel_worker_) { return script_value(node, engine_); }
+            if (worker_chunk_env_cache* rec = worker_chunk_record(&code)) {
+                if (rec->string_constants.size() <= const_index) [[unlikely]] {
+                    rec->string_constants.resize(code.constants.size(), script_value(std::monostate{}, engine_));
+                }
+                script_value& own = rec->string_constants[const_index];
+                if (own.raw_storage_index() != script_value::TYPEID_STRING) [[unlikely]] {
+                    own = script_value(*node, engine_);
+                }
+                return own;
+            }
+            return script_value(*node, engine_);
         }
         bool object_defines_custom_equality(const script_value& v) const;
         std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
@@ -1370,6 +1402,15 @@ namespace jai::vm {
         // variant lands in the declared slot.
         template <bool SinkIsStack, typename Sink>
         op_status index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink);
+        // Typed element-read lane for the proven decl shape (fused_index_proto::typed_lane):
+        // operands straight off the frame or the per-site cache, the int index folded raw,
+        // the element landed in the declared slot by the decl lane's rules. false = a
+        // runtime miss (not an array, a non-int operand, an overflowing fold, out of
+        // bounds, a kind the lane does not land): the general kernel runs unchanged.
+        const script_value* fast_operand(frame& f, const fused_operand& operand, size_t cache_slot);
+        bool typed_decl_read(frame& f, const fused_index_proto& p, uint32_t flags);
+        bool typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv);
+        bool typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);

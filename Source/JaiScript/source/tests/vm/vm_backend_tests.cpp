@@ -4238,6 +4238,88 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("typed_decl_read_lane_matches_the_interpreter", [this]() {
+			// `T x = arr[index]` with a proven shape lands through typed_decl_read; every
+			// runtime miss (kind, bounds, overflowing fold, shift range, float decl from an
+			// int buffer, auto decls keeping the element tag) runs the kernel: same values and
+			// texts as the interpreter with proofs on and off
+			const char* cases[] = {
+				"array<int> PIX = [1, 2, 3, 4, 5, 6, 7, 8]; string run() { int vw = 2; int acc = 0; for (int ry = 0; ry < 2; ++ry) { int itop = ry * 2 * vw; for (int cx = 0; cx < 1; ++cx) { int xx = cx * 2; int p0 = PIX[itop + xx]; int p1 = PIX[itop + xx + 1]; int p2 = PIX[itop + vw + xx]; int p3 = PIX[itop + vw + xx + 1]; acc = acc * 10 + p0 + p1 + p2 + p3; } } return to_string(acc); } run();",
+				"array<float> F = [0.5, 1.5, 2.5]; string run() { int i = 1; float a = F[i]; float b = F[i + 1]; var c = F[0]; return to_string(a + b) + type_of(c); } run();",
+				"array<int> A = [10, 20, 30]; string run() { int i = 1; float f = A[i]; var v = A[i + 1]; auto a = A[0]; return to_string(f) + type_of(f) + to_string(v) + type_of(a); } run();",
+				"var H = [1, 2.5, \"s\", true, 'c']; string run() { int i = 0; var a = H[i]; var b = H[i + 1]; var c = H[i + 2]; var d = H[3]; var e = H[i + 4]; auto f = H[0]; return type_of(a) + type_of(b) + type_of(c) + type_of(d) + type_of(e) + type_of(f) + to_string(a) + c; } run();",
+				"var H = [1, \"s\"]; string run() { int i = 1; string m = \"ok\"; try { int x = H[i]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = 5; string m = \"ok\"; try { int x = A[i]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = -1; string m = \"ok\"; try { int x = A[i + 0]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int big = 0x7fffffffffffffff; string m = \"ok\"; try { int x = A[big + 1]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int big = 0x7fffffffffffffff; int two = 2; string m = \"ok\"; try { int x = A[big * two]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int one = 1; int n = 70; string m = \"ok\"; try { int x = A[one << n]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int z = 0; int i = 1; string m = \"ok\"; try { int x = A[i / z]; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [5, 6, 7, 8]; string run() { int i = 3; int x = A[i & 1]; int y = A[i >> 1]; int z = A[(i ^ 1) | 0]; return to_string(x) + to_string(y) + to_string(z); } run();",
+				"array<int> A = [5, 6, 7, 8]; string run(var& pix) { int i = 1; int x = pix[i + 1]; int y = pix[i]; return to_string(x + y); } run(A);",
+				"array<int> A = [5, 6, 7, 8]; string run(array<int> pix) { int i = 1; int x = pix[i + 2]; return to_string(x); } run(A);",
+				"class G { array<int> pix = [4, 5, 6]; int w = 1; string f() { int i = 1; int p = pix[i]; int q = pix[i + w]; return to_string(p * 10 + q); } } string run() { G g = G(); return g.f(); } run();",
+				"array<int> pix = [40, 50, 60]; class G { array<int> pix = [4, 5, 6]; string f() { int i = 1; int p = pix[i]; return to_string(p); } } string run() { G g = G(); int i = 2; int q = pix[i]; return g.f() + to_string(q); } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = 1; { int i = 2; int x = A[i]; if (x != 3) { return \"bad\"; } } int y = A[i]; return to_string(y); } run();",
+				"var A = [1, 2, 3]; string run() { int i = 0; int s = 0; for (int k = 0; k < 3; ++k) { int x = A[i + k]; s += x; } return to_string(s); } run();",
+				"array<string> S = [\"a\", \"bb\"]; string run() { int i = 1; string x = S[i]; var y = S[i - 1]; x += \"!\"; return x + y + S[i]; } run();",
+				"array<bool> B = [true, false]; array<char> C = ['x', 'y']; string run() { int i = 1; bool b = B[i]; char c = C[i]; var d = C[0]; return to_string(b) + c + d + type_of(d); } run();",
+				"string run() { var m = {\"k\": 4}; int i = 0; string s = \"ok\"; try { int x = m[i]; } catch (e) { s = e; } var y = m[\"k\"]; return s + to_string(y); } run();",
+				"string run() { int n = 3; int i = 1; string s = \"ok\"; try { int x = n[i]; } catch (e) { s = e; } return s; } run();",
+			};
+			for (bool proofs : {true, false}) {
+				for (const char* program : cases) {
+					auto interp = jai::engine::make();
+					jai::stdlib::register_all(*interp);
+					interp->type_proofs(proofs);
+					auto vmx = vm_engine();
+					jai::stdlib::register_all(*vmx);
+					vmx->type_proofs(proofs);
+					std::string want, got;
+					try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+					try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+					check_eq(want, got, program);
+				}
+			}
+		});
+
+		test("typed_int_head_bitwise_rows_match_the_interpreter", [this]() {
+			// The typed int head computes & | ^ << >> on proven int/int operands; a shift
+			// outside 0..63, a char or float operand, or proofs off all run the general kernel
+			// with its texts, so every row below agrees with the interpreter both ways
+			const char* cases[] = {
+				"int tx = 37; int ty = 11; int tone = ((tx >> 2) + (ty >> 2)) & 1; if ((ty & 7) == 7) { tone = 2; } return to_string(tone) + to_string((tx ^ ty) | 64) + to_string(tx << 3);",
+				"int a = -8; int b = 1; return to_string(a >> b) + \",\" + to_string(a << 60) + \",\" + to_string(a & 0xff) + \",\" + to_string(a | b) + \",\" + to_string(a ^ -1);",
+				"int a = 1; int n = 63; return to_string(a << n) + \",\" + to_string((a << n) >> n);",
+				"int a = 1; int n = 64; string m = \"ok\"; try { int r = a << n; } catch (e) { m = e; } return m;",
+				"int a = 1; int n = -1; string m = \"ok\"; try { int r = a >> n; } catch (e) { m = e; } return m;",
+				"float a = 1.5; int n = 1; string m = \"ok\"; try { var r = a & n; } catch (e) { m = e; } return m;",
+				"char c = 'a'; int n = 1; return to_string(c & n) + to_string(c >> n) + to_string(c | 128);",
+				"var a = 6; var b = 3; return to_string(a & b) + to_string(a | b) + to_string(a ^ b) + to_string(a << b) + to_string(a >> 1);",
+				"int acc = 0; for (int i = 0; i < 40; ++i) { acc += (i & 3) + (i >> 1) + ((i ^ 5) | 8); } return to_string(acc);",
+				"int x = 0x7fffffffffffffff; int one = 1; return to_string(x << one) + \",\" + to_string((x | one) >> 62);",
+			};
+			for (bool proofs : {true, false}) {
+				for (const char* body : cases) {
+					std::string program = std::string("string run() { ") + body + " } run();";
+					auto interp = jai::engine::make();
+					jai::stdlib::register_all(*interp);
+					interp->type_proofs(proofs);
+					auto vmx = vm_engine();
+					jai::stdlib::register_all(*vmx);
+					vmx->type_proofs(proofs);
+					std::string want, got;
+					try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+					try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+					check_eq(want, got, body);
+				}
+			}
+			auto vmx = vm_engine();
+			jai::stdlib::register_all(*vmx);
+			check_eq(std::string("Shift amount must be between 0 and 63"), vmx->execute("string run() { int a = 1; int n = 64; string m = \"ok\"; try { int r = a << n; } catch (e) { m = e; } return m; } run();").as_string());
+			check_eq(std::string("Bitwise & requires integer operands"), vmx->execute("string run() { float a = 1.5; int n = 1; string m = \"ok\"; try { var r = a & n; } catch (e) { m = e; } return m; } run();").as_string());
+		});
+
 		test("push_fused_statement_matches_the_interpreter_on_every_receiver", [this]() {
 			// `recv.push(v);` as a statement compiles to one PUSH_FUSED; an array receiver
 			// appends through the builtin's kernel, everything else replays the unfused call.
@@ -4290,6 +4372,21 @@ public:
 				"class P { array<int> xs = []; void push(int& v) { v = v + 1; xs.push(v); } } auto p = P(); array<int> src = [5]; p.push(src[0]); return to_string(src[0]) + \":\" + to_string(p.xs[0]);",
 				"var m = {\"k\": 3}; var a = []; a.push(m[\"k\"]); return to_string(a[0]);",
 				"var src = [1]; var a = []; string r = \"ok\"; try { a.push(src[nope]); } catch (e) { r = e; } return r;",
+				// append lane rows: payloads the buffer takes as-is, and the ones that must not
+				"var a = []; a.push(null); a.push(true); a.push('c'); a.push(-3); a.push(0.5); a.push(\"s\"); return type_of(a[0]) + type_of(a[1]) + type_of(a[2]) + type_of(a[3]) + type_of(a[4]) + type_of(a[5]) + to_string(a.size());",
+				"var a = []; string s = \"lit\"; a.push(s); s += \"!\"; a[0] += \"?\"; return s + a[0];",
+				"var a = []; a.push(\"k\"); a[0] += \"1\"; a.push(\"k\"); return a[0] + a[1] + \"k\";",
+				"array<float> fs = []; int i = 3; fs.push(i); fs.push(2.5); float x = 1.25; fs.push(x); return type_of(fs[0]) + to_string(fs[0] + fs[1] + fs[2]);",
+				"array<int> a = []; float f = 2.9; a.push(f); a.push(-0.5); return to_string(a[0]) + \",\" + to_string(a[1]);",
+				"array<int> a = []; bool b = true; a.push(b); return to_string(a[0]) + type_of(a[0]);",
+				"array<string> ss = []; string k = \"x\"; ss.push(k); k += \"y\"; ss[0] += \"z\"; return k + ss[0] + to_string(ss.size());",
+				"array<string> ss = []; string m = \"ok\"; try { ss.push(5); } catch (e) { m = e; } return m + to_string(ss.size());",
+				"array<bool> bs = []; bs.push(true); bs.push(1); return to_string(bs.size()) + to_string(bs[1]);",
+				"array<array<int>> g = []; var row = [1, 2]; g.push(row); row.push(3); return to_string(g[0].size()) + to_string(row.size());",
+				"array<array<int>> g = []; string m = \"ok\"; try { g.push(\"x\"); } catch (e) { m = e; } return m;",
+				"class V { int v = 2; } var a = []; V one = V(); a.push(one); one.v = 5; return to_string(a[0].v);",
+				"class V { int v = 2; } var a = []; shared_ptr<V> one = new V(); a.push(one); one.v = 5; return to_string(a[0].v);",
+				"var a = []; var f = function() { return 4; }; a.push(f); return to_string(a[0]());",
 			};
 			for (const char* body : cases) {
 				std::string program = std::string("string run() { ") + body + " } run();";
@@ -4301,6 +4398,19 @@ public:
 				try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
 				try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
 				check_eq(want, got, body);
+			}
+			// the append lane charges the kernel's exact bytes: the memory cap trips at the same push
+			{
+				const char* capped = "string run() { var a = []; int n = 0; try { while (true) { a.push(n); n = n + 1; } } catch (e) { return to_string(n) + \":\" + e; } return \"none\"; } run();";
+				auto interp = jai::engine::make();
+				jai::stdlib::register_all(*interp);
+				interp->memory_cap(64 * 1024);
+				auto capped_vm = vm_engine();
+				jai::stdlib::register_all(*capped_vm);
+				capped_vm->memory_cap(64 * 1024);
+				const std::string want = interp->execute(capped).as_string();
+				check_true(want.find(':') != std::string::npos && want != "none", "the cap raised");
+				check_eq(want, capped_vm->execute(capped).as_string(), "same push trips the cap on both backends");
 			}
 			auto vmx = vm_engine();
 			jai::stdlib::register_all(*vmx);

@@ -190,7 +190,7 @@ function build_render_tables(int mi) -> void {
 	}
 	// prebaked background: one deep-copy assignment per frame replaces the
 	// per-pixel ceiling/floor loops outright
-	var bg = [];
+	array<int> bg = [];
 	for (int y2 = 0; y2 < G.vh; ++y2) {
 		// (a ternary of two element reads mis-types into an int local; if/else works)
 		int c = 0;

@@ -4765,9 +4765,18 @@ bool vm_backend::typed_cmp_jump_head(frame& f, const vm_instruction& ins, const 
 template <typename Sink>
 op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[proto_index];
+#ifdef JAISCRIPT_VM_PROFILE
+	if (p.typed_class == 0) { ++profile_typed_head_[2]; }
+#endif
 	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_binary_head(f, p, sink)) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_typed_head_[0];
+#endif
 		return {};
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	if (p.typed_class != 0) { ++profile_typed_head_[1]; }
+#endif
 	const token_type op = static_cast<token_type>(p.op);
 
 	std::optional<script_value> lscratch, rscratch;
@@ -5046,9 +5055,18 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 // like the unfused pair did before its jump executed).
 op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
+#ifdef JAISCRIPT_VM_PROFILE
+	if (p.typed_class == 0) { ++profile_typed_head_[5]; }
+#endif
 	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_cmp_jump_head(f, ins, p)) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_typed_head_[3];
+#endif
 		return {};
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	if (p.typed_class != 0) { ++profile_typed_head_[4]; }
+#endif
 	const token_type op = static_cast<token_type>(p.op);
 
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
@@ -12529,6 +12547,9 @@ void vm_backend::dump_opcode_profile() const {
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
+	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu | cmp_jump hit %llu miss %llu unstamped %llu\n",
+		(unsigned long long)profile_typed_head_[0], (unsigned long long)profile_typed_head_[1], (unsigned long long)profile_typed_head_[2],
+		(unsigned long long)profile_typed_head_[3], (unsigned long long)profile_typed_head_[4], (unsigned long long)profile_typed_head_[5]);
 	if (profile_push_sections_[0] + profile_push_sections_[1]) {
 		const double n = double(profile_push_sections_[0] + profile_push_sections_[1]);
 		fprintf(stderr, "[vm-profile] push slice: prologue %.1f | typed %llu | hetero %llu (realloc %llu) | avg cyc: compat %.1f convert %.1f charge %.1f append %.1f tail %.1f\n",

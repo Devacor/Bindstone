@@ -139,7 +139,8 @@ namespace jai::vm {
         // [2]=slice resolution declined [3]=mic guard failed
         uint64_t profile_slice_gate_[4] = {};
         uint64_t profile_push_sections_[8] = {};
-        uint64_t profile_push_prologue_ = 0;   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
+        uint64_t profile_push_prologue_ = 0;
+        uint64_t profile_typed_head_[6] = {};   // binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
         // [3]=full convert [4]=reference bind [5]=default arg [6]=escape-boxed

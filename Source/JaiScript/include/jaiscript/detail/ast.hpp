@@ -722,18 +722,19 @@ namespace jai {
 
         // Construction-time classification for both backends' decl fast path
         // (exec_decl_var / visit_variable_decl): a decl carrying BOTH bits stores a
-        // scalar payload whose storage index already matches the declared type straight
-        // into its slot - conversion/clone/homogeneity are provably identity there.
+        // scalar or string payload whose storage index already matches the declared type
+        // straight into its slot - conversion/clone/homogeneity are provably identity there
+        // (a string copies as its shared node, exactly what clone_for_assignment does).
         // 0 = always the full path (weak_ptr/shared_ptr/reference declared types).
         static constexpr uint8_t decl_fast_plain = 1 << 0;  // no weak_ptr/shared_ptr/reference init rules apply
-        static constexpr uint8_t decl_fast_scalar = 1 << 1; // auto/var/int/float/bool/char: matching payloads need no conversion
+        static constexpr uint8_t decl_fast_scalar = 1 << 1; // auto/var/int/float/bool/char/string: matching payloads need no conversion
         static constexpr uint8_t decl_fast_slot_store = decl_fast_plain | decl_fast_scalar;
         uint8_t decl_fast_flags = 0;
         mutable uint8_t static_init_proof = proof_none;
 
         static uint8_t classify_decl_fast(const type_info_ptr& t) {
             if (!t) {
-                return decl_fast_slot_store;   // auto: infer-then-enforce, matching scalars pass untouched
+                return decl_fast_slot_store;   // auto: infer-then-enforce, matching payloads pass untouched
             }
             switch (t->base_type) {
                 case script_value_type::jai_weak_ptr_type:
@@ -745,9 +746,25 @@ namespace jai {
                 case script_value_type::jai_float_type:
                 case script_value_type::jai_bool_type:
                 case script_value_type::jai_char_type:
+                case script_value_type::jai_string_type:
                     return decl_fast_slot_store;
                 default:
-                    return decl_fast_plain;   // string/container/object: payload needs full enforcement
+                    return decl_fast_plain;   // container/object: payload needs full enforcement
+            }
+        }
+
+        // The fast path's admission, shared by every decl landing on both backends: a raw
+        // int/float/bool/char/string payload (never a bound or reference storage index) lands
+        // as-is when the declared type is var/auto or names that payload's type
+        static bool identity_payload(size_t storage_index, const type_info* declared) noexcept {
+            const script_value_type bt = declared ? declared->base_type : script_value_type::jai_any_type;
+            switch (storage_index) {
+                case script_value::TYPEID_INT: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_int_type;
+                case script_value::TYPEID_FLOAT: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_float_type;
+                case script_value::TYPEID_BOOL: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_bool_type;
+                case script_value::TYPEID_CHAR: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_char_type;
+                case script_value::TYPEID_STRING: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_string_type;
+                default: return false;
             }
         }
 

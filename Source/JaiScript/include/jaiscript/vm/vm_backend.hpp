@@ -899,6 +899,13 @@ namespace jai::vm {
         bool object_to_bool_via_method(const script_value& value);
         std::string value_to_string_with_method(const script_value& val);
         script_value materialize_constant(const script_value& tmpl);
+        // A string literal's value: the main engine shares the AST node (string copies share
+        // storage everywhere else; a write unshares); a parallel worker copies the bytes,
+        // because the node's refcount is not atomic and the main engine and the other
+        // workers hold the same literal (the XTHREAD canary pins this)
+        script_value literal_string_value(const strong_ptr<script_string>& node) const {
+            return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
+        }
         bool object_defines_custom_equality(const script_value& v) const;
         std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
         std::optional<bool> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);

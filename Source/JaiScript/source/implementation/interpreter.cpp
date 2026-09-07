@@ -2939,7 +2939,7 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
             push_value(make_value(storage.get<script_float>()));
             break;
         case 3:  // script_string (wrapped in strong_ptr)
-            push_value(make_value(*storage.get<strong_ptr<script_string>>()));
+            push_value(literal_string_value(storage.get<strong_ptr<script_string>>()));
             break;
         case 4:  // script_char
             push_value(make_value(storage.get<script_char>()));
@@ -6519,44 +6519,35 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             value = std::move(pop_value());
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
-            // Decl fast path (construction-stamped flags): a scalar payload whose
-            // storage index already matches the declared type stores straight into the
-            // slot - enforce/clone/homogeneity are provably identity for
-            // int/float/bool/char (clone of a scalar is a copy, so is_lvalue_expression
-            // is irrelevant here). Anything else - references, mismatched payloads,
-            // env-resident decls, escape-boxed decls - falls through to the untouched
-            // full path below. (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            // Decl fast path (construction-stamped flags): a scalar or string payload
+            // whose storage index already matches the declared type stores straight into
+            // the slot - enforce/clone/homogeneity are provably identity there (a scalar
+            // clones as a copy, a string as its shared node, so is_lvalue_expression is
+            // irrelevant). Anything else - references, mismatched payloads, env-resident
+            // decls, escape-boxed decls - falls through to the untouched full path below.
+            // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
             if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
                 !decl->ref_escaping && decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
                 size_t vi = value.raw_storage_index();
                 // Subscript-initialized decls arrive as rhs-lvalue reference wrappers
                 // (the dominant profiled shape): the decl consumes the VALUE, so a
-                // matching scalar pointee takes the same identity store - copy out
-                // BEFORE overwriting `value` (its holder OWNS the deref target).
+                // matching pointee takes the same identity store - copy out BEFORE
+                // overwriting `value` (its holder OWNS the deref target).
                 const script_value* seen = &value;
                 if (vi == script_value::TYPEID_REFERENCE) {
                     seen = &value.deref();
                     vi = seen->raw_storage_index();
                 }
-                if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-                    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
-                    const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
-                    const bool matches = bt == script_value_type::jai_any_type ||
-                        (vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
-                        (vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
-                        (vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
-                        (vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
-                    if (matches) {
-                        if (seen != &value) {
-                            script_value pointee(*seen);
-                            value = std::move(pointee);
-                        }
-                        if (decl->type) {
-                            value.set_type_info(decl->type);
-                        }
-                        call_stack_.back().set_local(decl->slot_index, std::move(value));
-                        return {};
+                if (variable_decl::identity_payload(vi, decl->type.get())) {
+                    if (seen != &value) {
+                        script_value pointee(*seen);
+                        value = std::move(pointee);
                     }
+                    if (decl->type) {
+                        value.set_type_info(decl->type);
+                    }
+                    call_stack_.back().set_local(decl->slot_index, std::move(value));
+                    return {};
                 }
             }
 

@@ -217,6 +217,46 @@ public:
 			check_eq(script_int{3}, eng->execute("class W { weak_ptr<N> w; } W w1 = W(); shared_ptr<N> keep = new N(); keep.v = 3; w1.w = keep; W w2 = w1; w2.w.lock().v;").as_int());
 		});
 
+		test("string_values_share_their_node_until_written", [this]() {
+			// Strings copy as a shared node at every boundary (literal, declaration, element
+			// read, argument); every write goes through the copy-on-write gate, so the source
+			// keeps its bytes: the literal evaluates to the same text on the next pass, the
+			// element and the other variable are untouched, and the mutating builtins on a
+			// copy never reach the original.
+			auto eng = make_engine();
+			eng->execute(R"(
+				function tag() -> string { string s = "ab"; s += "c"; return s; }
+				function again() -> string { string s = "ab"; return s; }
+				var log = [];
+				for (int i = 0; i < 3; ++i) { log.push(tag()); log.push(again()); }
+				array<string> names = ["left", "right"];
+				string n = names[0];
+				n += "!";
+				var v = names[1];
+				v.to_upper();
+				var w = names[1];
+				w.reverse();
+				string lit = "keep";
+				var lit2 = lit;
+				lit2.erase(0, 1);
+				lit2.insert(0, "Z");
+				string q = "seed";
+				var parts = [];
+				for (int i = 0; i < 3; ++i) { string p = "x"; if (i == 0) { p += "0"; } else if (i == 1) { p += "1"; } else { p += "2"; } parts.push(p); parts.push("x"); }
+			)");
+			check_eq(std::string("abc,ab,abc,ab,abc,ab"), eng->execute("log.join(\",\")").as<std::string>());
+			check_eq(std::string("left!"), eng->execute("n").as<std::string>());
+			check_eq(std::string("left"), eng->execute("names[0]").as<std::string>());
+			check_eq(std::string("RIGHT"), eng->execute("v").as<std::string>());
+			check_eq(std::string("thgir"), eng->execute("w").as<std::string>());
+			check_eq(std::string("right"), eng->execute("names[1]").as<std::string>());
+			check_eq(std::string("keep"), eng->execute("lit").as<std::string>());
+			check_eq(std::string("Zeep"), eng->execute("lit2").as<std::string>());
+			check_eq(std::string("keep"), eng->execute("\"keep\"").as<std::string>());
+			check_eq(std::string("x0,x,x1,x,x2,x"), eng->execute("parts.join(\",\")").as<std::string>());
+			check_eq(std::string("x"), eng->execute("\"x\"").as<std::string>());
+		});
+
 		test("numeric_failed_store_preserves_value", [this]() {
 			auto eng = make_engine();
 			check_eq(script_int{14}, eng->execute(R"(

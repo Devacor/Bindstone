@@ -1590,26 +1590,41 @@ script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, 
 	return ptr;
 }
 
-env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, size_t cache_slot) {
+script_value vm_backend::worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source) {
+	const uint64_t node_bits = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(borrow.parallel_borrow_array()));
+	const uint64_t key = (node_bits * 0x9E3779B97F4A7C15ull) ^ static_cast<uint64_t>(index.deref().unchecked_as_int());
+	if (worker_borrowed_strings_.size() > 8192) [[unlikely]] { worker_borrowed_strings_.clear(); }
+	auto it = worker_borrowed_strings_.find(key);
+	if (it != worker_borrowed_strings_.end() && it->second.unchecked_as_string() == source) {
+		return it->second;
+	}
+	script_value own(script_string(source), engine_);
+	if (it != worker_borrowed_strings_.end()) { it->second = own; }
+	else { worker_borrowed_strings_.emplace(key, own); }
+	return own;
+}
+
+vm_backend::worker_chunk_env_cache* vm_backend::worker_chunk_record(const chunk* code) {
 	if (worker_env_mru_ < worker_env_caches_.size() &&
 	    worker_env_caches_[worker_env_mru_].code == code) {
-		auto& rec = worker_env_caches_[worker_env_mru_];
-		if (rec.entries.size() < code->code.size() * 3) [[unlikely]] {
-			rec.entries.resize(code->code.size() * 3);
-		}
-		return &rec.entries[cache_slot];
+		return &worker_env_caches_[worker_env_mru_];
 	}
 	for (size_t i = 0; i < worker_env_caches_.size(); ++i) {
 		if (worker_env_caches_[i].code == code) {
 			worker_env_mru_ = i;
-			auto& rec = worker_env_caches_[i];
-			if (rec.entries.size() < code->code.size() * 3) [[unlikely]] {
-				rec.entries.resize(code->code.size() * 3);
-			}
-			return &rec.entries[cache_slot];
+			return &worker_env_caches_[i];
 		}
 	}
 	return nullptr;
+}
+
+env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, size_t cache_slot) {
+	worker_chunk_env_cache* rec = worker_chunk_record(code);
+	if (!rec) { return nullptr; }
+	if (rec->entries.size() < code->code.size() * 3) [[unlikely]] {
+		rec->entries.resize(code->code.size() * 3);
+	}
+	return &rec->entries[cache_slot];
 }
 
 void vm_backend::worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code) {
@@ -4694,6 +4709,12 @@ bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& 
 		case token_type::star: if (!ints::try_mul(a, b, r)) return false; emit_int(r); return true;
 		case token_type::slash: if (b == 0 || !ints::try_div(a, b, r)) return false; emit_int(r); return true;
 		case token_type::percent: if (b == 0) return false; emit_int(ints::mod(a, b)); return true;
+		// bitwise rows: handle_binary_op's int cases verbatim (a shift outside 0..63 raises there)
+		case token_type::ampersand: emit_int(a & b); return true;
+		case token_type::pipe: emit_int(a | b); return true;
+		case token_type::caret: emit_int(a ^ b); return true;
+		case token_type::left_shift: if (b < 0 || b > 63) return false; emit_int(a << b); return true;
+		case token_type::right_shift: if (b < 0 || b > 63) return false; emit_int(a >> b); return true;
 		case token_type::less: sink(script_value(a < b, engine_)); return true;
 		case token_type::less_equal: sink(script_value(a <= b, engine_)); return true;
 		case token_type::greater: sink(script_value(a > b, engine_)); return true;
@@ -5265,7 +5286,7 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 			switch (storage.index()) {
 				case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
 				case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
-				case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(storage.get<strong_ptr<script_string>>())); break;
+				case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(*f.code, cp.rhs.const_index, storage.get<strong_ptr<script_string>>())); break;
 				case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
 				case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 				case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
@@ -5435,7 +5456,14 @@ op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 		// Parallel captured-read borrow: element reads go through the shared kernel
 		// (detail/parallel_transform.hpp - parity with the interpreter twin by
 		// construction); writes hit the runtime write wall inside it. No element
-		// reference is ever minted into a borrowed container.
+		// reference is ever minted into a borrowed container. A string cell comes from
+		// the worker's own copy of it (same bytes the kernel would copy).
+		if (!lvalue_write) {
+			if (const script_string* source = detail::parallel_borrow_string_source(left, right)) {
+				stack_.push_back(worker_borrowed_string(left, right, *source));
+				return {};
+			}
+		}
 		auto elem = detail::parallel_borrow_subscript_read(left, right, engine_, lvalue_write);
 		if (!elem) { return raise_(elem.error(), elem.static_message()); }
 		stack_.push_back(std::move(elem).value());
@@ -5882,6 +5910,15 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 // literal's own block (KEEP BYTE-PARALLEL with run_dispatch's op_const case). A raw
 // copy would refcount that shared block — parallel workers touch it cross-thread,
 // and the non-atomic counts corrupt (found via JAISCRIPT_DIAG_XTHREAD_RC).
+// A chunk constant by index: the string row reaches the worker's per-chunk copy
+script_value vm_backend::materialize_constant(const chunk& code, uint32_t const_index) {
+	const script_value& tmpl = code.constants[const_index];
+	if (tmpl.raw_storage_index() == script_value::TYPEID_STRING) {
+		return literal_string_value(code, const_index, tmpl.get_storage().get<strong_ptr<script_string>>());
+	}
+	return materialize_constant(tmpl);
+}
+
 script_value vm_backend::materialize_constant(const script_value& tmpl) {
 	const auto& storage = tmpl.get_storage();
 	switch (storage.index()) {
@@ -6040,14 +6077,14 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			// per remaining step, finished by the real op_index. Remaining steps can run
 			// user code (object operands / overloads); everything they see matches the
 			// unfused twin because it IS the unfused twin.
-			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 			else { stack_.push_back(*container_ptr); }
 			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 			else { stack_.push_back(script_value(raw_index, engine_)); }
 			for (size_t i = chain_pos; i < chain.size(); ++i) {
 				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
 				if (sp.right.const_index != k_invalid_u32) {
-					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
+					stack_.push_back(materialize_constant(*f.code, sp.right.const_index));
 				} else {
 					std::optional<script_value> rs;
 					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
@@ -6194,11 +6231,11 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_index_read_paths_[5];
 #endif
-	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
 	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
-	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
 	if constexpr (SinkIsStack) {
@@ -6225,8 +6262,146 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 // at the peephole, so a matching scalar read writes the slot with zero per-exec decl
 // checks. Every other shape (mismatched scalars, references, env decls) pushes and
 // runs op_decl_var verbatim with lvalue_init=1 — a subscript init is lvalue-shaped.
+// direct slot when the compiler proved one, a literal, else the nullable fast head (env
+// cache, member scope); never the full ladder, which may run user code
+const script_value* vm_backend::fast_operand(frame& f, const fused_operand& operand, size_t cache_slot) {
+	if (operand.const_index != k_invalid_u32) {
+		return &f.code->constants[operand.const_index];
+	}
+	if (operand.direct) {
+		if (f.window_backed) {
+			return operand.slot < f.window_live ? &stack_[f.window_base + operand.slot] : nullptr;
+		}
+		return f.locals ? f.locals->get_local(operand.slot) : nullptr;
+	}
+	return fused_cmp_operand(f, operand, cache_slot);
+}
+
+// One int row of the index fold: the arithmetic rows are raw_int_arith's (an overflow or a
+// zero divisor misses, the kernel raises), the bitwise rows handle_binary_op's
+static bool typed_int_index_row(token_type op, script_int a, script_int b, script_int& out) noexcept {
+	switch (op) {
+	case token_type::plus: return ints::try_add(a, b, out);
+	case token_type::minus: return ints::try_sub(a, b, out);
+	case token_type::star: return ints::try_mul(a, b, out);
+	case token_type::slash: return b != 0 && ints::try_div(a, b, out);
+	case token_type::percent: if (b == 0) return false; out = ints::mod(a, b); return true;
+	case token_type::ampersand: out = a & b; return true;
+	case token_type::pipe: out = a | b; return true;
+	case token_type::caret: out = a ^ b; return true;
+	case token_type::left_shift: if (b < 0 || b > 63) return false; out = a << b; return true;
+	case token_type::right_shift: if (b < 0 || b > 63) return false; out = a >> b; return true;
+	default: return false;
+	}
+}
+
+bool vm_backend::typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv) {
+	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && p.decl_expect != 0xFF) return false;   // a float decl converts in op_decl_var
+	if (script_value* slot = frame_slot(f, p.decl_slot)) {
+		if (slot->raw_storage_index() == script_value::TYPEID_INT && slot->get_type_info().get() == p.decl_type) {
+			slot->unchecked_set_int_payload(iv);
+			return true;
+		}
+	}
+	script_value v(iv, engine_);
+	if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
+	frame_slot_set(f, p.decl_slot, std::move(v));
+	return true;
+}
+
+bool vm_backend::typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv) {
+	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && p.decl_expect != 0xFF) return false;
+	if (script_value* slot = frame_slot(f, p.decl_slot)) {
+		if (slot->raw_storage_index() == script_value::TYPEID_FLOAT && slot->get_type_info().get() == p.decl_type) {
+			slot->unchecked_set_float_payload(fv);
+			return true;
+		}
+	}
+	script_value v(fv, engine_);
+	if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
+	frame_slot_set(f, p.decl_slot, std::move(v));
+	return true;
+}
+
+bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
+	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
+	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
+	// op later as exactly this copy; every other element falls to the kernel untouched
+	const bool folded = p.index_binary != k_invalid_u32;
+	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	if (!cp) return false;
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+	script_int index;
+	if (folded) {
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		const script_value* lp = fast_operand(f, bp.left, f.ip * 3);
+		const script_value* rp = lp ? fast_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
+		if (!rp || lp->raw_storage_index() != script_value::TYPEID_INT || rp->raw_storage_index() != script_value::TYPEID_INT) return false;
+		if (!typed_int_index_row(static_cast<token_type>(bp.op), lp->unchecked_as_int(), rp->unchecked_as_int(), index)) return false;
+		for (const uint32_t step : p.index_chain_ext) {
+			const fused_binary_proto& sp = f.code->fused_binary_protos[step];
+			const script_value* r2 = fast_operand(f, sp.right, SIZE_MAX);   // proven direct or literal
+			if (!r2 || r2->raw_storage_index() != script_value::TYPEID_INT) return false;
+			if (!typed_int_index_row(static_cast<token_type>(sp.op), index, r2->unchecked_as_int(), index)) return false;
+		}
+	} else {
+		const script_value* ip = fast_operand(f, p.index, f.ip * 3 + 1);
+		if (!ip || ip->raw_storage_index() != script_value::TYPEID_INT) return false;
+		index = ip->unchecked_as_int();
+	}
+	const script_array* node = cp->unchecked_array_node();
+	if (index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
+	const size_t at = static_cast<size_t>(index);
+	switch (node->kind()) {
+	case script_array::kind_t::i64: return typed_decl_land_int(f, p, node->ints()[at]);
+	case script_array::kind_t::f64: return typed_decl_land_float(f, p, node->floats()[at]);
+	case script_array::kind_t::str: {
+		if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_STRING) && p.decl_expect != 0xFF) return false;
+		script_value v(node->strs()[at], engine_);   // the buffer's node, shared like every string copy
+		if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
+		frame_slot_set(f, p.decl_slot, std::move(v));
+		return true;
+	}
+	case script_array::kind_t::hetero: {
+		// the kernel's untyped rows: a raw int/float lands raw only when the decl stamps its
+		// own tag (decl_type set); every other element keeps the full copy and the sink's
+		// expect check
+		const script_value& el = node->values()[at];
+		const size_t ei = el.raw_storage_index();
+		if (p.decl_type) {
+			if (ei == script_value::TYPEID_INT) return typed_decl_land_int(f, p, el.unchecked_as_int());
+			if (ei == script_value::TYPEID_FLOAT) return typed_decl_land_float(f, p, el.unchecked_as_float());
+		}
+		if (ei == p.decl_expect ||
+		    (p.decl_expect == 0xFF &&
+		     (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT || ei == script_value::TYPEID_BOOL ||
+		      ei == script_value::TYPEID_CHAR || ei == script_value::TYPEID_STRING))) {
+			script_value v(el);
+			if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
+			frame_slot_set(f, p.decl_slot, std::move(v));
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	if (p.typed_lane && !has_custom_numeric_ops_ && f.locals && !f.top_level) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_typed_decl_read_[0];
+#endif
+		if (typed_decl_read(f, p, ins.b)) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_typed_decl_read_[1];
+#endif
+			return {};
+		}
+	}
 	if (p.decl_slot != k_invalid_u32 && f.locals && !f.top_level) [[likely]] {
 		// Raw-capable lane sink: typed-array payloads arrive as raw int64/double and
 		// land in the slot with exactly ONE value mint; boxed arrivals keep the
@@ -6327,7 +6502,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		// Value resolves FIRST — the unfused sequence evaluated it before the container,
 		// so undefined-variable errors keep their position
 		if (p.store_value.const_index != k_invalid_u32) {
-			vscratch.emplace(materialize_constant(f.code->constants[p.store_value.const_index]));
+			vscratch.emplace(materialize_constant(*f.code, p.store_value.const_index));
 			value_ptr = &*vscratch;
 		} else {
 			const script_value* resolved = fused_ident_value(f, p.store_value, vscratch,
@@ -6430,14 +6605,14 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			// Boxed chain tail above the pending value: [value, container, acc] then one
 			// op_binary per remaining step, finished by the real op_index_store
 			if (value_operand) { stack_.push_back(*value_ptr); }
-			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 			else { stack_.push_back(*container_ptr); }
 			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 			else { stack_.push_back(script_value(raw_index, engine_)); }
 			for (size_t i = chain_pos; i < chain.size(); ++i) {
 				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
 				if (sp.right.const_index != k_invalid_u32) {
-					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
+					stack_.push_back(materialize_constant(*f.code, sp.right.const_index));
 				} else {
 					std::optional<script_value> rs;
 					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
@@ -6563,11 +6738,11 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		}
 	}
 	if (value_operand) { stack_.push_back(*value_ptr); }
-	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
 	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
-	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
 	const op_status st = exec_index_store(f, store_ins);
@@ -9542,7 +9717,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	std::optional<script_value> vconst;
 	auto resolve_value = [&]() -> bool {
 		if (p.value.const_index != k_invalid_u32) {
-			vconst.emplace(materialize_constant(f.code->constants[p.value.const_index]));
+			vconst.emplace(materialize_constant(*f.code, p.value.const_index));
 			val = &*vconst;
 			return true;
 		}
@@ -9554,17 +9729,74 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 		if (!val) { val = fused_ident_value(f, p.value, vscratch, f.ip * 3 + 1); }
 		return val != nullptr;
 	};
+	// The statement discards the call's result: the unfused pair pushed a null and the
+	// POP that follows consumed it; every path below lands it the same way
+	auto land_discarded = [&]() {
+		if (next_op_discards_result(f)) { ++f.ip; }
+		else { stack_.push_back(make_null()); }
+	};
 	const script_value& objd = recv->deref();
 	if (objd.raw_storage_index() == script_value::TYPEID_ARRAY && f.code->builtin_indexed &&
 	    site.bi_array != builtin_method_registries::k_no_builtin) {
-		auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
-		uint64_t push_member_id = member->member_id;
-		if (push_member_id == UINT64_MAX && !parallel_worker_) {
-			push_member_id = symbolizer_->intern(member->member);
-			member->member_id = push_member_id;
+		// The site is `.push` by construction (try_emit_fused_push) and the receiver is an
+		// array, so the builtin is push: no member-node walk, no id compare
+		if (!resolve_value()) return op_status::failed;
+		{
+			// Payloads the buffer takes as-is (the slice kernel's compat + convert + push
+			// collapse to one append): a null/scalar/string into a var array is its own
+			// shared copy; an int into an int buffer, an int or float into a float buffer,
+			// a string into a string buffer. The memory charge is the kernel's exact
+			// formula, so the cap trips at the same push. Everything else (typed classes,
+			// nested containers, a float into an int buffer) runs the kernel below.
+			const script_value& pv = val->deref();
+			const size_t vi = pv.raw_storage_index();
+			script_array* node = const_cast<script_value&>(objd).unchecked_get_array_storage().get();
+			const script_array::kind_t kind = node->kind();
+			bool appended = false;
+			auto charge = [&](size_t bytes) -> bool { return limits_->memory_charge(bytes); };
+			if (kind == script_array::kind_t::hetero) {
+				const type_info* ti = objd.get_type_info().get();
+				const type_info* et = ti ? ti->element_type().get() : nullptr;
+				if ((!et || et->base_type == script_value_type::jai_any_type) &&
+				    (vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+				     vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
+					const size_t bytes = sizeof(script_value) + (vi == script_value::TYPEID_STRING ? pv.unchecked_as_string().size() : 0);
+					if (!charge(bytes)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+					node->values().push_back(pv);
+					appended = true;
+				}
+			} else if (kind == script_array::kind_t::i64) {
+				if (vi == script_value::TYPEID_INT) {
+					if (!charge(sizeof(script_value))) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+					node->ints().push_back(pv.unchecked_as_int());
+					appended = true;
+				}
+			} else if (kind == script_array::kind_t::f64) {
+				if (vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_INT) {
+					if (!charge(sizeof(script_value))) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+					node->floats().push_back(vi == script_value::TYPEID_FLOAT ? pv.unchecked_as_float()
+					                                                          : static_cast<script_float>(pv.unchecked_as_int()));
+					appended = true;
+				}
+			} else if (kind == script_array::kind_t::str) {
+				if (vi == script_value::TYPEID_STRING) {
+					if (!charge(sizeof(script_value) + pv.unchecked_as_string().size())) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+					node->strs().push_back(pv.unchecked_string_handle());
+					appended = true;
+				}
+			}
+			if (appended) {
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_push_fused_lane_[0];
+#endif
+				land_discarded();
+				return {};
+			}
 		}
-		if (push_member_id == builtin_push_id_) {
-			if (!resolve_value()) return op_status::failed;
+		{
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_push_fused_lane_[1];
+#endif
 			auto array_type_info = objd.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 			if (!vm_is_element_type_compatible(*val, element_type, const_cast<script_value&>(objd))) {
@@ -9589,10 +9821,13 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 				return raise_from(detail::raise_memory_cap(*limits_));
 			}
 			node->push(std::move(converted));
-			stack_.push_back(make_null());   // the call result the statement discards
+			land_discarded();
 			return {};
 		}
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_push_fused_lane_[2];
+#endif
 	// replay: exactly what the unfused sequence leaves on the stack, in its order: the
 	// receiver (LOAD pushes the cell's referent), the member probe when the argument owed
 	// one, the argument (an element read as its lvalue-shaped op_index), then the call
@@ -9633,7 +9868,11 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 		stack_.push_back(val->deref());
 	}
 	const vm_instruction call_ins{opcode::op_call_method, 1, p.site, 0};
-	return exec_call_method(f, call_ins);
+	VM_TRY(exec_call_method(f, call_ins));
+	// an inline (native) call left its result on the stack: op_call_method's dispatch
+	// discard, verbatim; a script frame lands its own result (land_call_result)
+	if (!switch_to_ && !is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
+	return {};
 }
 
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
@@ -12525,6 +12764,10 @@ void vm_backend::dump_opcode_profile() const {
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
+	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu\n",
+		(unsigned long long)profile_typed_decl_read_[0], (unsigned long long)profile_typed_decl_read_[1]);
+	fprintf(stderr, "[vm-profile] push_fused lanes: append %llu | kernel %llu | replay %llu\n",
+		(unsigned long long)profile_push_fused_lane_[0], (unsigned long long)profile_push_fused_lane_[1], (unsigned long long)profile_push_fused_lane_[2]);
 	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu | cmp_jump hit %llu miss %llu unstamped %llu\n",
 		(unsigned long long)profile_typed_head_[0], (unsigned long long)profile_typed_head_[1], (unsigned long long)profile_typed_head_[2],
 		(unsigned long long)profile_typed_head_[3], (unsigned long long)profile_typed_head_[4], (unsigned long long)profile_typed_head_[5]);
@@ -12779,7 +13022,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				switch (storage.index()) {
 					case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
 					case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
-					case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(storage.get<strong_ptr<script_string>>())); break;
+					case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(*f.code, ins.a, storage.get<strong_ptr<script_string>>())); break;
 					case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
 					case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
 					case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
@@ -12977,7 +13220,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_push_fused:
 				VM_TRY_OP_SHARED(exec_push_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 
 			// One grouped dispatch: a VM_TRY_OP temp per case would bloat run()'s

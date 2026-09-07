@@ -361,6 +361,41 @@ public:
 			}
 		});
 
+		test("borrowed_string_cells_reread_across_rebuilt_tables", [this]() {
+			// A worker serves repeated reads of one table cell from its own copy of the bytes.
+			// The copy must stay the worker's own (a body that appends to its local never
+			// reaches the table or the next read), and a table rebuilt between regions with
+			// different text at the same cells must be read fresh; string literals evaluated
+			// in the body come from the worker's per-chunk copy the same way.
+			for (const char* decl : {"var pal = [];", "array<string> pal = [];"}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				const std::string src = std::string(decl) + R"(
+					var a = [];
+					for (var i = 0; i < 96; i++) { a.push(i); }
+					string f(int x) {
+						string s = pal[x % 8];
+						s += "!";
+						string t = pal[x % 8];
+						string lit = "<";
+						lit += pal[(x * 3) % 8];
+						return s + t + lit + ">" + pal[x % 8];
+					}
+					var pout = [];
+					var sout = [];
+					for (int round = 0; round < 4; round++) {
+						pal.clear();
+						for (var i = 0; i < 8; i++) { pal.push("r" + to_string(round) + "c" + to_string(i)); }
+						var p = parallel_transform(a, f);
+						for (auto v : p) { pout.push(v); }
+						for (auto x : a) { sout.push(f(x)); }
+					}
+					return [pout, sout];
+				)";
+				check_matches_serial_at(e, src, {1, 2, 8});
+			}
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

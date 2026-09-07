@@ -3426,6 +3426,21 @@ uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& f
 	return mask;
 }
 
+const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index_raw) noexcept {
+	const script_value& index = index_raw.deref();
+	const auto* arr = borrow.parallel_borrow_array();
+	if (!arr || !index.is_int()) { return nullptr; }
+	const script_int i = index.unchecked_as_int();
+	if (i < 0 || i >= static_cast<script_int>(arr->size())) { return nullptr; }
+	if (arr->is_typed()) {
+		if (arr->kind() != script_array::kind_t::str) { return nullptr; }
+		return arr->strs()[static_cast<size_t>(i)].get();
+	}
+	const script_value& elem = arr->values()[static_cast<size_t>(i)];
+	if (elem.raw_storage_index() != script_value::TYPEID_STRING) { return nullptr; }
+	return elem.unchecked_string_handle().get();
+}
+
 checked_result<script_value> parallel_borrow_subscript_read(const script_value& borrow,
                                                             const script_value& index_raw,
                                                             engine* eng,

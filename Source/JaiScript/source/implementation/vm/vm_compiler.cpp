@@ -2073,12 +2073,14 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 			bp.op = static_cast<uint8_t>(inner->op.type);
 			bp.left = make_fused_operand(inner->left);
 			bp.right = make_fused_operand(inner->right);
+			stamp_typed_class(bp, inner);
 			chunk_->fused_binary_protos.push_back(bp);
 			p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 			for (int i = depth - 2; i >= 0; --i) {
 				fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
 				sp.op = static_cast<uint8_t>(spine[i]->op.type);
 				sp.right = make_fused_operand(spine[i]->right);
+				stamp_chain_step_typed_class(sp, spine[i]);
 				chunk_->fused_binary_protos.push_back(sp);
 				p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
 			}
@@ -2098,6 +2100,9 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	if (!value_operand) {
 		compile_expression(value);
 	}
+	// the typed store lane's shape proof (typed_index_store): the value rides the stack or
+	// resolves as an operand; container and index as the read lane requires
+	p.typed_lane = index_proto_typed_lane_shape(*chunk_, p);
 	chunk_->fused_index_protos.push_back(p);
 	emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape,
 	     no_result ? 1u : 0u);

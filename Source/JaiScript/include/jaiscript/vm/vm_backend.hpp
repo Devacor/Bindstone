@@ -143,6 +143,7 @@ namespace jai::vm {
         uint64_t profile_typed_head_[6] = {};
         uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
         uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
+        uint64_t profile_typed_store_[2] = {};       // tried, hit
         // typed heads: binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
@@ -164,6 +165,9 @@ namespace jai::vm {
         uint64_t profile_binary_fused_next_[256] = {};
         uint64_t profile_load_next_[256] = {};
         uint64_t profile_index_fused_next_[256] = {};
+        uint64_t profile_decl_var_prev_[256] = {};    // what produced DECL_VAR's initializer (previous opcode)
+        uint64_t profile_store_prev_[256] = {};       // what produced STORE's value
+        uint64_t profile_decl_var_kinds_[16] = {};    // DECL_VAR initializer storage index
         // index_fused_read branch taxonomy: [0]=raw-int lane [1]=raw-float lane
         // [2]=untyped array element copy [3]=lvalue element-ref [4]=const-string map
         // [5]=general replay [6]=binary-index raw fold [7]=member-node container
@@ -1408,7 +1412,12 @@ namespace jai::vm {
         // runtime miss (not an array, a non-int operand, an overflowing fold, out of
         // bounds, a kind the lane does not land): the general kernel runs unchanged.
         const script_value* fast_operand(frame& f, const fused_operand& operand, size_t cache_slot);
+        bool typed_fold_index(frame& f, const fused_index_proto& p, script_int& index);
         bool typed_decl_read(frame& f, const fused_index_proto& p, uint32_t flags);
+        // Typed element-store lane for the proven shape: a numeric value (operand or the
+        // stack top) into an int/float buffer or an untyped array's same-kind element,
+        // exactly the kernel's raw and in-place lanes with the operands off the frame.
+        bool typed_index_store(frame& f, const fused_index_proto& p, bool no_result);
         bool typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv);
         bool typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);

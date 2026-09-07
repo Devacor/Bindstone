@@ -4238,6 +4238,49 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("typed_index_store_lane_matches_the_interpreter", [this]() {
+			// `arr[index] = v` with a proven shape stores through typed_index_store; a float
+			// outside the int range, a string, a typed hetero element, an object, out of
+			// bounds, an overflowing fold and the expression-result forms all run the kernel:
+			// same post-state and texts as the interpreter with proofs on and off
+			const char* cases[] = {
+				"array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0]; string run() { int vw = 2; for (int ry = 0; ry < 2; ++ry) { int itop = ry * 2 * vw; for (int cx = 0; cx < 1; ++cx) { int xx = cx * 2; int c = ry * 10 + cx; PIX[itop + xx] = c; PIX[itop + xx + 1] = c + 1; PIX[itop + vw + xx] = 2.9; PIX[itop + vw + xx + 1] = -0.5; } } var s = \"\"; for (auto v : PIX) { s += to_string(v) + \",\"; } return s; } run();",
+				"array<float> F = [0.0, 0.0, 0.0]; string run() { int i = 1; F[i] = 3; F[i + 1] = 2.5; F[0] = -1; return to_string(F[0]) + \",\" + to_string(F[1]) + \",\" + to_string(F[2]) + type_of(F[1]); } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = 1; float big = 1e100; string m = \"ok\"; try { A[i] = big; } catch (e) { m = e; } return m + to_string(A[1]); } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = 1; string m = \"ok\"; try { A[i] = \"x\"; } catch (e) { m = e; } return m + to_string(A[1]); } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = 7; string m = \"ok\"; try { A[i] = 5; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int i = -1; string m = \"ok\"; try { A[i + 0] = 5; } catch (e) { m = e; } return m; } run();",
+				"array<int> A = [1, 2, 3]; string run() { int big = 0x7fffffffffffffff; string m = \"ok\"; try { A[big + 1] = 5; } catch (e) { m = e; } return m; } run();",
+				"var H = [1, 2.5, \"s\"]; string run() { int i = 0; H[i] = 7; H[i + 1] = 1.5; H[2] = 9; H[0] = 2.25; return type_of(H[0]) + to_string(H[0]) + type_of(H[1]) + to_string(H[1]) + type_of(H[2]) + to_string(H[2]); } run();",
+				"var H = [1, 2]; string run() { int i = 0; int x = 5; float y = 0.5; H[i] = x; H[i + 1] = y; x = 6; y = 0.25; return to_string(H[0]) + \",\" + to_string(H[1]); } run();",
+				"array<int> A = [0, 0, 0]; string run(var& pix) { int i = 1; int c = 4; pix[i] = c; pix[i + 1] = c * 2; return to_string(pix[1] + pix[2]); } run(A) + to_string(A[2]);",
+				"array<int> A = [0, 0, 0]; string run() { int i = 1; int x = 2; A[i] = x + 3; A[i + 1] = x * x; return to_string(A[1]) + to_string(A[2]); } run();",
+				"array<int> A = [0, 0, 0]; string run() { int i = 1; int r = (A[i] = 5); var q = (A[i + 1] = 2.9); return to_string(r) + to_string(A[1]) + type_of(q) + to_string(q) + to_string(A[2]); } run();",
+				"array<int> A = [0, 0, 0]; string run() { int i = 1; int one = 1; int n = 70; string m = \"ok\"; try { A[one << n] = 1; } catch (e) { m = e; } return m + to_string(A[1]); } run();",
+				"array<int> A = [0, 0, 0, 0]; string run() { int i = 3; A[i & 1] = 1; A[i >> 1] = 2; A[(i ^ 1) | 0] = 3; return to_string(A[0]) + to_string(A[1]) + to_string(A[2]) + to_string(A[3]); } run();",
+				"class G { array<int> pix = [0, 0, 0]; int w = 1; string f() { int i = 1; pix[i] = 4; pix[i + w] = 5; return to_string(pix[1] * 10 + pix[2]); } } string run() { G g = G(); return g.f(); } run();",
+				"array<int> A = [0, 0, 0]; string run() { int i = 1; { int i = 2; A[i] = 9; } A[i] = 8; return to_string(A[1]) + to_string(A[2]); } run();",
+				"array<int> A = [0, 0]; string run() { int i = 0; string m = \"ok\"; try { A[i] = nope; } catch (e) { m = e; } return m + to_string(A[0]); } run();",
+				"string run() { int n = 3; int i = 1; string m = \"ok\"; try { n[i] = 1; } catch (e) { m = e; } return m; } run();",
+				"array<bool> B = [false, false]; array<string> S = [\"a\", \"b\"]; string run() { int i = 1; B[i] = true; S[i] = \"z\"; S[0] = 5; return to_string(B[1]) + S[1] + S[0]; } run();",
+				"class V { int v = 1; } var A = [V(), V()]; string run() { int i = 0; V nv = V(); nv.v = 7; A[i] = nv; nv.v = 8; return to_string(A[0].v); } run();",
+			};
+			for (bool proofs : {true, false}) {
+				for (const char* program : cases) {
+					auto interp = jai::engine::make();
+					jai::stdlib::register_all(*interp);
+					interp->type_proofs(proofs);
+					auto vmx = vm_engine();
+					jai::stdlib::register_all(*vmx);
+					vmx->type_proofs(proofs);
+					std::string want, got;
+					try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+					try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+					check_eq(want, got, program);
+				}
+			}
+		});
+
 		test("typed_decl_read_lane_matches_the_interpreter", [this]() {
 			// `T x = arr[index]` with a proven shape lands through typed_decl_read; every
 			// runtime miss (kind, bounds, overflowing fold, shift range, float decl from an

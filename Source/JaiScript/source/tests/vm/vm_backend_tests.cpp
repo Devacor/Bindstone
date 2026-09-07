@@ -4309,6 +4309,10 @@ public:
 				"array<bool> B = [true, false]; array<char> C = ['x', 'y']; string run() { int i = 1; bool b = B[i]; char c = C[i]; var d = C[0]; return to_string(b) + c + d + type_of(d); } run();",
 				"string run() { var m = {\"k\": 4}; int i = 0; string s = \"ok\"; try { int x = m[i]; } catch (e) { s = e; } var y = m[\"k\"]; return s + to_string(y); } run();",
 				"string run() { int n = 3; int i = 1; string s = \"ok\"; try { int x = n[i]; } catch (e) { s = e; } return s; } run();",
+				// int -> float widening on every decl landing: LOAD, CONST, fused binary, member, element
+				"class Q { int n = 7; } array<int> A = [3, 4]; string run() { int i = 1; int k = 9007199254740993; Q q = Q(); float a = k; float b = 5; float c = i + k; float d = q.n; float e = A[i]; float g = A[i - 1] * 2; return type_of(a) + type_of(b) + type_of(c) + type_of(d) + type_of(e) + type_of(g) + to_string(a) + \",\" + to_string(b) + \",\" + to_string(c) + \",\" + to_string(d) + \",\" + to_string(e) + \",\" + to_string(g); } run();",
+				"string run() { int i = 2; float f = i; f += 0.5; int j = i; return to_string(f) + to_string(j) + type_of(f) + type_of(j); } run();",
+				"string run() { bool t = true; float f = t; int i = t; return to_string(f) + type_of(f) + to_string(i); } run();",
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {

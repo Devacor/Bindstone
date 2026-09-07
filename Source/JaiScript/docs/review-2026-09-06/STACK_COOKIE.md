@@ -121,6 +121,21 @@ game hashes do not test that protection. Microsoft describes the coverage and
 limitations in [/GS (Buffer Security Check)](https://learn.microsoft.com/en-us/cpp/build/reference/gs-buffer-security-check?view=msvc-170).
 This report makes no adoption recommendation.
 
+## Prior ruling
+
+Dev ruled on this cost on 2026-07-14, when `__security_check_cookie` measured 3.5% of
+JaiDOOM's in-process CPU in an xperf native pass (recorded in the session notes of that
+pass; the repository carries no earlier document on it). The ruling sets the opt-out bar
+per function, not per translation unit: prove the function cannot overflow a stack buffer
+(no writable fixed-size locals, or every buffer write provably bounded), then mark that
+function `__declspec(safebuffers)` on MSVC and `__attribute__((no_stack_protector))` on
+clang 8+ and gcc 11+ behind one portable macro (Linux, macOS, Android and iOS are all in
+scope, and the NDK defaults to `-fstack-protector-strong`); a function whose bound cannot
+be proved keeps the check. A blanket `/GS-` on `vm_backend.cpp` is the measurement in this
+report, not the form the ruling admits: the adoption question is which VM functions carry
+the cost (the run loop, the operand resolvers and the fused kernels have no fixed-size
+stack buffers) and whether the per-function marks recover the same delta.
+
 The earlier 2.8% serial CPU share of `__security_check_cookie` is an exclusive
 sampled-function share from the older C7EF13D9 binary. It excludes some caller
 prolog/epilog work and is not a speedup prediction for this newer source snapshot.

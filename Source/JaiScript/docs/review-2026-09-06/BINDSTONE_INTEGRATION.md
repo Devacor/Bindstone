@@ -48,6 +48,75 @@ script receivers before their engine/class registry is destroyed? Check the
 `GameEditor` and `Managers` destruction sequence against the dump before
 choosing a fix. No engine code was changed.
 
+## Host teardown order
+
+The ownership chain behind the stack, read from the source the client was built from
+(`Source/Game`, `Source/SolutionSpecific/BindstoneClient`):
+
+| Step | Owner | Anchor |
+|---|---|---|
+| The login screen connects named script receivers to the lobby signals: `[self]` captures the page object, `[email, password]` capture its fields | `Assets/Interface/Login/initialize.script:18`, `Assets/Interface/Login/loginButton.script:6`, `Assets/Interface/interfaceManager.script:7` | script |
+| Those signals are the three `jai::signal_emitter` members of `StandardMessages`, exposed to script as the `messages` global by a non-owning `shared_ptr` | `Source/Game/managers.h:20-24`, `Source/Game/game.cpp:17-19`, `Source/Game/game.cpp:51` | host |
+| `StandardMessages messages` is a member of `Managers` | `Source/Game/managers.h:44` | host |
+| `Managers managers` is declared before `Game game` in `GameEditor`; `Game` constructs the engine from `managers.services` and owns it as `jaiEngine_` | `Source/Game/gameEditor.h:95`, `Source/Game/gameEditor.h:105`, `Source/Game/game.cpp:44-47`, `Source/Game/game.h:140` | host |
+| Inside `Game`, `jaiEngine_` is declared after `gameData`, `ourGui`, `ourInstance` and `rootScene` | `Source/Game/game.h:134-140` | host |
+| `-loginshot` builds one `GameEditor` on the stack and returns | `Source/SolutionSpecific/BindstoneClient/main.cpp:956-957` | host |
+
+Members destroy in reverse declaration order, so `GameEditor`'s teardown runs `editor`,
+then `game` (whose `jaiEngine_` is the engine's last owner: the class registry and every
+`class_definition` die here), then `managers`, whose `messages` emitters destroy the named
+receivers, whose script callables destroy their captured environments, whose
+`class_instance` values reach into the destroyed definitions. That is the stack in the dump.
+The same inversion exists one level down: `rootScene`, `ourGui` and `ourInstance` are
+destroyed after `jaiEngine_`, so scene components holding script receivers (`Clickable`
+callbacks, creature scripts) sit on the same edge whenever they capture a script object.
+
+Engine side, landed in the JaiScript tree: `class_definition::~class_definition` orphans its
+live instances (`class_def_` and `registry_slot_` reset), so an instance that outlives its
+definition destroys without touching the registry. Regression test
+`script_objects_outliving_their_engine_destroy_safely` (`source/tests/language/prelaunch_regression_tests.cpp`)
+keeps three script values (an instance, a closure capturing one, nested containers of them)
+past `engine` destruction and drops them.
+
+Host side, the smallest ordering fix (proposed, not applied): let the engine outlive every
+host member that can hold a script value.
+
+```cpp
+// Source/Game/game.h: move the engine to the FIRST member so it is destroyed last within Game
+class Game {
+	...
+private:
+	std::shared_ptr<jai::engine> jaiEngine_;   // was after rootScene (game.h:140)
+	GameData gameData;
+	std::unique_ptr<MV::InterfaceManager> ourGui;
+	std::unique_ptr<GameInstance> ourInstance;
+	std::shared_ptr<MV::Scene::Node> rootScene;
+	...
+public:
+	std::shared_ptr<jai::engine> scriptShared() const { return jaiEngine_; }
+};
+
+// Source/Game/gameEditor.h: a keep-alive declared BEFORE managers, filled in the ctor body
+class GameEditor {
+	...
+	std::shared_ptr<jai::engine> engineKeepAlive_;   // first member: destroyed after managers
+	MV::TapDevice mouse;
+	Managers managers;
+	...
+};
+
+// Source/Game/gameEditor.cpp, end of GameEditor::GameEditor's body
+engineKeepAlive_ = game.scriptShared();
+```
+
+`Game::Game` initializes `jaiEngine_` from its `Managers&` argument only, so the move is
+legal (members initialize in declaration order; nothing before it is read). The keep-alive
+cannot be an initializer (`managers` would not exist yet), hence the body assignment. With
+both in place the engine dies after `managers.messages`, `rootScene`, `ourGui` and
+`ourInstance`, and the receivers' script objects unregister against a live registry. The
+engine-side fix makes the client safe without this change; the host change removes the
+inversion for every future capture, including host code that runs script from a destructor.
+
 ## Other diagnostics
 
 The successful headless asset gate wrote:

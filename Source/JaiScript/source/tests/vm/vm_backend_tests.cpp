@@ -4238,6 +4238,39 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("member_compound_lands_through_the_field_write_cache", [this]() {
+			// `obj.f op= v` and `this.f op= v` write back through the same proven-field and
+			// site-IC landing op_set_member uses; accessors, non-public chains, statics,
+			// mismatches and overflow keep the general ladder and its texts
+			const char* cases[] = {
+				"class P { int x = 1; float f = 0.5; string s = \"a\"; var v = 2; } string run() { P p = P(); int k = 3; p.x += k; p.x -= 1; p.x *= 4; p.f += k; p.f /= 2; p.s += \"b\"; p.v += 1.5; p.v *= 2; return to_string(p.x) + \",\" + to_string(p.f) + \",\" + p.s + \",\" + to_string(p.v) + type_of(p.v); } run();",
+				"class P { int x = 1; void bump(int d) { this.x += d; x += d; this.x *= 2; } } string run() { P p = P(); for (int i = 0; i < 4; ++i) { p.bump(i); } return to_string(p.x); } run();",
+				"class P { int x = 7; } string run() { P p = P(); int a = (p.x += 3); int b = p.x++; int c = ++p.x; int d = (p.x %= 4); return to_string(a) + to_string(b) + to_string(c) + to_string(d) + to_string(p.x); } run();",
+				"class P { int x = 1; string m = \"ok\"; } string run() { P p = P(); try { p.x += \"s\"; } catch (e) { p.m = e; } return p.m + to_string(p.x); } run();",
+				"class P { int x = 0x7fffffffffffffff; } string run() { P p = P(); string m = \"ok\"; try { p.x += 1; } catch (e) { m = e; } return m + to_string(p.x); } run();",
+				"class P { int x = 1; int z = 0; } string run() { P p = P(); string m = \"ok\"; try { p.x /= p.z; } catch (e) { m = e; } return m; } run();",
+				"class A { int x = 1; int _set_x(int v) { x = v * 10; return v; } int _get_x() { return x; } } string run() { A a = A(); a.x += 2; return to_string(a.x); } run();",
+				"class S { static int n = 5; } string run() { S::n += 3; S s = S(); return to_string(S::n); } run();",
+				"class P { int x = 1; } string run() { P p = P(); var& r = p; r.x += 5; shared_ptr<P> h = new P(); h.x += 6; return to_string(p.x) + to_string(h.x); } run();",
+				"class P { float f = 1.0; } string run() { P p = P(); int k = 2; p.f += k; p.f *= 0.5; return to_string(p.f) + type_of(p.f); } run();",
+				"class Q { int n = 0; } string run() { var q = Q(); q.n += 1; var w; string m = \"ok\"; try { w.n += 1; } catch (e) { m = e; } return to_string(q.n) + m; } run();",
+			};
+			for (bool proofs : {true, false}) {
+				for (const char* program : cases) {
+					auto interp = jai::engine::make();
+					jai::stdlib::register_all(*interp);
+					interp->type_proofs(proofs);
+					auto vmx = vm_engine();
+					jai::stdlib::register_all(*vmx);
+					vmx->type_proofs(proofs);
+					std::string want, got;
+					try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+					try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+					check_eq(want, got, program);
+				}
+			}
+		});
+
 		test("typed_index_store_lane_matches_the_interpreter", [this]() {
 			// `arr[index] = v` with a proven shape stores through typed_index_store; a float
 			// outside the int range, a string, a typed hetero element, an object, out of

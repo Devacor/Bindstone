@@ -65,7 +65,7 @@ namespace jai::vm {
         op_get_static,      // a=node index (member_expr with ::); pushes static member
         op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value
-        op_member_compound, // a=node index, c=compound kind; stack [object, current, rhs] (no object for a :: target) -> pushes result
+        op_member_compound, // a=node index, b=static store proof, c=compound kind; stack [object, current, rhs] (no object for a :: target) -> pushes result
         op_call_method,     // a=argc, b=call site (member_node/receiver_symbol); stack [object, args...]
         op_new,             // a=node index (new_expr), b=argc; pops args, pushes instance
         op_class_decl,      // a=node index (class_decl); defines/redefines the class

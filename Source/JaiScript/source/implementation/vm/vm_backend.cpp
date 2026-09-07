@@ -6971,6 +6971,11 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 // the result. Arg pointers are deref'd in place; the kernel copies nothing.
 op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.b;
+	// the emitter bounds a math:: call at eight arguments (compile_call); the buffer below
+	// is the only fixed-size stack array in this file, so the bound holds here too
+	if (argc > 8 || argc > stack_.size()) [[unlikely]] {
+		return raise_(make_error_code(runtime_error_code::unsupported_operation), "math:: intrinsic arity exceeds the compiled bound");
+	}
 	const size_t base = stack_.size() - argc;
 	const script_value* argp[8] = {};
 	for (size_t i = 0; i < argc; ++i) {

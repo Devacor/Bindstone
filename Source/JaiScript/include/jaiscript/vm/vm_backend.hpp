@@ -1330,6 +1330,11 @@ namespace jai::vm {
                                       bool as_callee = false);
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
         op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
+        // The field-write landing op_set_member and op_member_compound share: the proven
+        // field write, then the write-side site IC (member_ic at ins_index). nullopt = the
+        // general assign_member ladder runs; a value is the landed store's status.
+        std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
+                                                         const script_value& dereferenced, const script_value& value);
         op_status store_static_target(frame& f, member_expr* member, const script_value& result);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare

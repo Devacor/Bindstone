@@ -9518,12 +9518,29 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	if (auto landed = member_field_write_fast(f, static_cast<size_t>(&ins - f.code->code.data()), ins.b, member, dereferenced, value)) {
+		if (*landed == op_status::failed) { return op_status::failed; }
+		stack_.push_back(std::move(value));
+		return {};
+	}
+
+	VM_TRY(assign_member(f, dereferenced, member, value));
+	if (is_unwinding_) {
+		stack_.push_back(make_null());
+		return {};
+	}
+	stack_.push_back(std::move(value));
+	return {};
+}
+
+std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
+                                                             const script_value& dereferenced, const script_value& value) {
 	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
 	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
 	if (member->proven_class && member->proven_field_write && cached_global_env_) {
 		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch)) {
 			script_value incoming = clone_for_assignment(value);
-			if (ins.b == proof_same_type && member->proven_field_type &&
+			if (proof == proof_same_type && member->proven_field_type &&
 			    detail::same_type_payload(incoming, member->proven_field_type)) {
 				if (detail::retags_on_field_write(member->proven_field_type)) {
 					incoming.set_type_info(type_info_ptr{member->proven_field_type});
@@ -9536,8 +9553,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 				incoming = std::move(enforced).value();
 			}
 			inst->field_slot_write(member->proven_slot, std::move(incoming));
-			stack_.push_back(std::move(value));
-			return {};
+			return op_status{};
 		}
 	}
 	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
@@ -9547,7 +9563,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	// declared-but-absent cells materialize exactly like set_field_unchecked.
 	if (cached_global_env_ &&
 	    dereferenced.raw_storage_index() == script_value::TYPEID_OBJECT) {
-		auto& holder = dereferenced.unchecked_get_object_storage();
+		auto& holder = const_cast<script_value&>(dereferenced).unchecked_get_object_storage();
 		if (holder && holder->is_class_instance_wrapper && holder->data) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
 			if (class_definition* cd = inst->get_class_definition()) {
@@ -9555,7 +9571,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 				if (code.member_ic.empty()) {
 					code.member_ic.resize(code.code.size());
 				}
-				auto& entry = code.member_ic[static_cast<size_t>(&ins - code.code.data())];
+				auto& entry = code.member_ic[ins_index];
 				if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 					if (entry.slot != UINT32_MAX) {
 						auto enforced = inst->enforce_field_write(member->member_id,
@@ -9564,8 +9580,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 							return raise_from(enforced);
 						}
 						inst->field_slot_write(entry.slot, std::move(enforced).value());
-						stack_.push_back(std::move(value));
-						return {};
+						return op_status{};
 					}
 				} else {
 					uint32_t slot = UINT32_MAX;
@@ -9588,14 +9603,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
-
-	VM_TRY(assign_member(f, dereferenced, member, value));
-	if (is_unwinding_) {
-		stack_.push_back(make_null());
-		return {};
-	}
-	stack_.push_back(std::move(value));
-	return {};
+	return std::nullopt;
 }
 
 op_status vm_backend::store_static_target(frame& f, member_expr* member, const script_value& result) {
@@ -9787,17 +9795,21 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 
-	script_value objectValue = objectValueRaw.deref();
+	const script_value& objectValue = objectValueRaw.deref();
 	if (!objectValue.is_object()) {
 		raise_script_exception("Cannot assign to member of non-object type", member->location);
 		stack_.push_back(make_null());
 		return {};
 	}
 
-	VM_TRY(assign_member(f, objectValue, member, resultValue));
-	if (is_unwinding_) {
-		stack_.push_back(make_null());
-		return {};
+	if (auto landed = member_field_write_fast(f, static_cast<size_t>(&ins - f.code->code.data()), ins.b, member, objectValue, resultValue)) {
+		if (*landed == op_status::failed) { return op_status::failed; }
+	} else {
+		VM_TRY(assign_member(f, objectValue, member, resultValue));
+		if (is_unwinding_) {
+			stack_.push_back(make_null());
+			return {};
+		}
 	}
 
 	stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));

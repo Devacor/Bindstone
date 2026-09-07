@@ -4963,6 +4963,10 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 				landed = true;
 				return;
 			}
+			if (fast_ok && bt == script_value_type::jai_float_type) {
+				raw_float(static_cast<script_float>(iv));   // the decl's int -> float row, widened here
+				return;
+			}
 			boxed.emplace(script_value(iv, vm->engine_));
 		}
 		void raw_float(script_float fv) {
@@ -4999,13 +5003,20 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 	// preconditions, KEPT IN SYNC with it. A fused-binary result is never a reference,
 	// so the deref leg is structurally absent here.
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level &&
-	    variable_decl::identity_payload(computed->raw_storage_index(), decl->type.get())) {
-		if (decl->type) {
-			computed->set_type_info(decl->type);
+	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		if (variable_decl::identity_payload(computed->raw_storage_index(), decl->type.get())) {
+			if (decl->type) {
+				computed->set_type_info(decl->type);
+			}
+			frame_slot_set(f, decl->slot_index, std::move(*computed));
+			return {};
 		}
-		frame_slot_set(f, decl->slot_index, std::move(*computed));
-		return {};
+		if (variable_decl::widening_payload(computed->raw_storage_index(), decl->type.get())) {
+			script_value widened(static_cast<script_float>(computed->unchecked_as_int()), engine_);
+			widened.set_type_info(decl->type);
+			frame_slot_set(f, decl->slot_index, std::move(widened));
+			return {};
+		}
 	}
 	// Every other decl shape: push and run op_decl_var verbatim (semantics by
 	// construction; a fused-binary result is a temporary, so lvalue_init = 0)
@@ -6299,7 +6310,10 @@ static bool typed_int_index_row(token_type op, script_int a, script_int b, scrip
 }
 
 bool vm_backend::typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv) {
-	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && p.decl_expect != 0xFF) return false;   // a float decl converts in op_decl_var
+	if (p.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+		return typed_decl_land_float(f, p, static_cast<script_float>(iv));   // the decl's int -> float row
+	}
+	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && p.decl_expect != 0xFF) return false;
 	if (script_value* slot = frame_slot(f, p.decl_slot)) {
 		if (slot->raw_storage_index() == script_value::TYPEID_INT && slot->get_type_info().get() == p.decl_type) {
 			slot->unchecked_set_int_payload(iv);
@@ -6517,8 +6531,10 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 						}
 					}
 					land(script_value(iv, vm->engine_));
+				} else if (proto.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+					raw_float(static_cast<script_float>(iv));   // the decl's int -> float row
 				} else {
-					(*this)(script_value(iv, vm->engine_));   // e.g. float decl: op_decl_var converts
+					(*this)(script_value(iv, vm->engine_));   // e.g. bool decl: op_decl_var converts
 				}
 			}
 			void raw_float(script_float fv) {
@@ -7023,6 +7039,16 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			}
 			frame_slot_set(f, decl->slot_index, std::move(value));
 			JAI_DECL_SUB(3);
+			return {};
+		}
+		if (variable_decl::widening_payload(vi, decl->type.get())) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_decl_paths_[0];
+#endif
+			script_value widened(static_cast<script_float>(seen->unchecked_as_int()), engine_);
+			stack_.pop_back();
+			widened.set_type_info(decl->type);
+			frame_slot_set(f, decl->slot_index, std::move(widened));
 			return {};
 		}
 #ifdef JAISCRIPT_VM_PROFILE

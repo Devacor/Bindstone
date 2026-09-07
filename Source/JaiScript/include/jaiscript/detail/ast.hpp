@@ -767,6 +767,12 @@ namespace jai {
                 default: return false;
             }
         }
+        // The one implicit scalar conversion a declaration performs with no user code and no
+        // failure mode: a raw int into a float slot widens (the conversion table's int -> float
+        // row); both fast paths land it as the widened value stamped with the declared type
+        static bool widening_payload(size_t storage_index, const type_info* declared) noexcept {
+            return storage_index == script_value::TYPEID_INT && declared && declared->base_type == script_value_type::jai_float_type;
+        }
 
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, expression_ptr init = nullptr)
             : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false), slot_index(SIZE_MAX), decl_fast_flags(classify_decl_fast(t)) {}

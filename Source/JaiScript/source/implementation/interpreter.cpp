@@ -748,7 +748,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "join() takes 0 or 1 argument (separator)");
         }
 
-        std::string sep = "";
+        std::string_view sep;
         if (args.size() > 0) {
             if (!args[0].is_string()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "join() argument must be a string");
@@ -757,17 +757,20 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         const script_array* node = self.unchecked_array_node();
+        engine* eng = ctx.get_engine();
+        // one buffer: string elements by their length, everything else by a short estimate;
+        // hetero elements read in place, typed kinds box once per element
+        size_t total = node->size() > 1 ? sep.size() * (node->size() - 1) : 0;
+        node->for_each(eng, [&](const script_value& e) { total += e.is_string() ? e.unchecked_as_string().size() : 8; });
         std::string result;
+        result.reserve(total);
 
         bool first = true;
-        for (size_t join_i = 0; join_i < node->size(); ++join_i) {
-            const script_value elem = node->get(join_i, ctx.get_engine());
+        node->for_each(eng, [&](const script_value& elem) {
             if (!first) {
                 result += sep;
             }
             first = false;
-
-            // Convert element to string
             if (elem.is_string()) {
                 result += elem.unchecked_as_string();
             } else if (elem.is_int()) {
@@ -783,7 +786,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else {
                 result += "[object]";
             }
-        }
+        });
 
         return ctx.make_value(std::move(result));
     }}
@@ -6547,6 +6550,12 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                         value.set_type_info(decl->type);
                     }
                     call_stack_.back().set_local(decl->slot_index, std::move(value));
+                    return {};
+                }
+                if (variable_decl::widening_payload(vi, decl->type.get())) {
+                    script_value widened(static_cast<script_float>(seen->unchecked_as_int()), engine_);
+                    widened.set_type_info(decl->type);
+                    call_stack_.back().set_local(decl->slot_index, std::move(widened));
                     return {};
                 }
             }

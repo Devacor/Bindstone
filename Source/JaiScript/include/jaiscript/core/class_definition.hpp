@@ -315,7 +315,17 @@ protected:
 public:
     enum class_type { cpp_class, script_class, vm_class };
 
-    virtual ~class_definition() = default;
+    // An instance that outlives its definition (a host object holding a script value past
+    // engine teardown, a signal receiver capturing one) must not reach back into it from its
+    // own destructor: orphan every live registrant first (unregister is then a no-op)
+    virtual ~class_definition() {
+        for (auto& entry : instances_) {
+            if (auto live = entry.lock()) {
+                live->class_def_ = nullptr;
+                live->registry_slot_ = SIZE_MAX;
+            }
+        }
+    }
 
     class_definition(std::string_view name, uint64_t type_id, engine* eng)
         : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),

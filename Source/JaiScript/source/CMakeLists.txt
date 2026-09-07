@@ -28,6 +28,15 @@ set(JAISCRIPT_SOURCES
 # Create the library
 add_library(jaiscript STATIC ${JAISCRIPT_SOURCES})
 
+# Measurement-only control. Never disable stack cookies for the whole library.
+option(JAISCRIPT_EXPERIMENT_VM_NO_GS "Measure /GS- on vm_backend.cpp only (MSVC; security experiment)" OFF)
+if(JAISCRIPT_EXPERIMENT_VM_NO_GS)
+	if(NOT MSVC)
+		message(FATAL_ERROR "JAISCRIPT_EXPERIMENT_VM_NO_GS requires MSVC")
+	endif()
+	set_property(SOURCE implementation/vm/vm_backend.cpp APPEND PROPERTY COMPILE_OPTIONS /GS-)
+endif()
+
 # Include directories
 target_include_directories(jaiscript
     PUBLIC

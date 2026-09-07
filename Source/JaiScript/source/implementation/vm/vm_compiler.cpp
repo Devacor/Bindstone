@@ -1719,6 +1719,24 @@ static int index_chain_spine(binary_expr* rb, binary_expr* (&spine)[8]) {
 	return 0;
 }
 
+// Proof-grade operand class onto a fused proto (typed heads): the checker stamped the
+// node's operand kinds in every mode (cleared when proofs are off); both operands must
+// address directly (frame slot, temp or literal) and the op must be one the heads compute.
+static void stamp_typed_class(fused_binary_proto& p, const binary_expr* node) {
+	auto direct_or_literal = [](const fused_operand& o) { return o.direct || o.const_index != k_invalid_u32; };
+	if (!direct_or_literal(p.left) || !direct_or_literal(p.right)) return;
+	switch (static_cast<token_type>(p.op)) {
+		case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
+		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
+		case token_type::equal_equal: case token_type::bang_equal:
+			break;
+		default:
+			return;
+	}
+	if (node->static_operand_class == operand_class_int_int) { p.typed_class = 1; }
+	else if (node->static_operand_class == operand_class_float_float) { p.typed_class = 2; }
+}
+
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		compile_expression(expr->left);
@@ -1812,6 +1830,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		proto.op = static_cast<uint8_t>(expr->op.type);
 		proto.left = make_fused_operand(expr->left);
 		proto.right = make_fused_operand(expr->right);
+		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
 		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
 		return;
@@ -1877,6 +1896,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				lo = fused_operand{};
 				lo.slot = t;
 				lo.symbol = temp_symbol_index();
+				lo.direct = true;
 			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
 				if (operand_shape(e.get())) { return make_fused_operand(e); }
@@ -1887,6 +1907,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				p.left = side(b->left);
 				sequence_left(p.left, b->right.get());
 				p.right = side(b->right);
+				stamp_typed_class(p, b);
 				chunk_->fused_binary_protos.push_back(p);
 				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 				temp_next_ = mark;   // children die into this op
@@ -1897,6 +1918,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				fused_operand out;
 				out.slot = t;
 				out.symbol = temp_symbol_index();
+				out.direct = true;
 				return out;
 			};
 			const size_t temp_mark = temp_next_;
@@ -1905,6 +1927,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			outer.left = side(expr->left);
 			sequence_left(outer.left, expr->right.get());
 			outer.right = side(expr->right);
+			stamp_typed_class(outer, expr.get());
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
 			temp_next_ = temp_mark;   // LIFO release: temps die once the outer op consumed them
@@ -1941,6 +1964,7 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 		    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 			out.load_flags |= load_flag_type_ctor;
 		}
+		out.direct = out.slot != k_invalid_u32 && out.load_flags == 0;
 	} else if (e->get_type() == node_type::binary_expr) {
 		// fusable_subscript_operand-vetted chain: walk to the base identifier collecting
 		// indexes innermost-first (application order), base rides the ident fields

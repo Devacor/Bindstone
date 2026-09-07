@@ -1346,6 +1346,14 @@ namespace jai::vm {
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
         template <typename Sink>
         op_status binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
+        // Typed heads (docs/typed_regions_design.md): a proto whose operands the checker
+        // proved int/int or float/float addresses its slots directly and computes with one
+        // tag guard per operand; false = not handled (guard miss, an error case, a dead
+        // slot), the general kernel then runs and raises exactly as before.
+        const script_value* direct_operand(frame& f, const fused_operand& operand) noexcept;
+        bool typed_cmp_jump_head(frame& f, const vm_instruction& ins, const fused_binary_proto& p) noexcept;
+        template <typename Sink>
+        bool typed_binary_head(frame& f, const fused_binary_proto& p, Sink& sink);
         op_status exec_binary_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_binary_fused_store(frame& f, const vm_instruction& ins);
         // Fused subscript read/store: container+index as operands (no LOAD dispatches);

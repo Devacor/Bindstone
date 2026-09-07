@@ -57,6 +57,10 @@ namespace jai::vm {
         // the member through its own member_ic row (fill = exec_get_member's exact probe)
         // or the member_access_value ladder, base→member→index order preserved.
         uint32_t member_node = k_invalid_u32;
+
+        // A plain frame-slot identifier (or a compiler temp): the typed heads address it
+        // straight off the frame, no resolution ladder (docs/typed_regions_design.md)
+        bool direct = false;
     };
 
     // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
@@ -175,6 +179,11 @@ namespace jai::vm {
     // on the value stack (the vm's analog of the interpreter's AST-shape fast paths)
     struct fused_binary_proto {
         uint8_t op = 0;                        // token_type
+        // The checker's proof-grade operand class (binary_expr::static_operand_class) when
+        // both operands are direct slots or literals: 1 = int/int, 2 = float/float, 0 = none.
+        // Selects the typed head; the head's tag guards keep it sound and the general
+        // kernel below it runs on any miss (proofs off = 0 everywhere, byte-identical).
+        uint8_t typed_class = 0;
         fused_operand left;
         fused_operand right;
     };

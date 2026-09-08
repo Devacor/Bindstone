@@ -117,7 +117,9 @@ fixed per-worker cost (`worker_overhead_ns`, the minimum; ~4 us on the reference
 statement's region pool keeps the smoothed ns per element of main's own chunk
 (`ns_per_element`). A statement's first region fans out to every thread with an even split
 (the baseline); after that a region wakes only as many pool workers as can each be handed a
-chunk worth `k_parallel_chunk_overhead_ratio` (3x) the wake cost. Measured on the floor
+chunk worth `k_parallel_chunk_overhead_ratio` (3x) the wake cost. Every region of two or more
+elements takes this path; there is no separate small-count cutoff (the fixed 16 that preceded the
+cost model kept a 15-element region of 24 us elements on the calling thread). Measured on the floor
 benchmark (vm, us per region, parallel vs serial): N=32 17 vs 7.5 (one context), N=256 55 vs 61,
 N=2048 280 vs 500 - below a few hundred light elements the per-element host-to-script call on
 the worker still dominates, and that call is the next lever.

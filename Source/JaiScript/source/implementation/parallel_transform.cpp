@@ -218,7 +218,8 @@ namespace {
 		pending.clear();
 	}
 
-	constexpr size_t k_parallel_small_n = 16;   // below this, one context on the calling thread
+	constexpr size_t k_parallel_small_n = 2;   // one element has nothing to split; from two on, the measured-cost cap below decides
+	                                           // (a fixed 16 kept GLOOM's 15 wall chunks, 27% of its frame, on the calling thread)
 	// A pool worker earns its keep when its chunk is worth k_parallel_chunk_overhead_ratio times
 	// the fixed cost of waking and joining it - both sides measured per statement on the machine
 	// at hand (no constants from one box). Chunking never changes results (iteration order wins

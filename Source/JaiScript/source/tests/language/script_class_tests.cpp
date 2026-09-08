@@ -12,6 +12,35 @@ public:
     script_class_tests() : suite("Script Class Tests") {}
     
     void forge_tests() override {
+        test("class_typed_reference_declaration_aliases_the_object", [this]() {
+            // `Base& b = derived;` at statement level is a reference declaration on both
+            // backends (it parsed as bitwise-and plus an assignment to an undeclared name):
+            // stores through it land on the object, a base-typed reference reads a derived
+            // instance, and `Box& get()` keeps its reference-return meaning beside it
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                class A { int x = 1; }
+                class B : A { int y = 2; }
+                B b = B();
+                A& a = b;
+                a.x = 5;
+                A& again = a;
+                again.x += 1;
+                class Box { int v = 0; }
+                Box box = Box();
+                Box& get() { return box; }
+                get().v = 9;
+                int through(A& r) { return r.x; }
+                return [b.x, a.x, through(b), box.v, b.y];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)6, v[0].as_int(), "the store landed on the object");
+            check_eq((int64_t)6, v[1].as_int(), "the reference reads the object");
+            check_eq((int64_t)6, v[2].as_int());
+            check_eq((int64_t)9, v[3].as_int(), "reference-return function unchanged");
+            check_eq((int64_t)2, v[4].as_int());
+        });
+
         test("basic_class_with_fields", [this]() {
             auto js_engine = make_engine();
             

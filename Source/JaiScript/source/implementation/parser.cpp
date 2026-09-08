@@ -2411,12 +2411,21 @@ checked_result<declaration_ptr> parser::declaration_body() {
             return variable_declaration();
         } else if (check(token_type::ampersand) &&
                    current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::identifier &&
-                   current_ + 2 < tokens_.size() && tokens_[current_ + 2].type == token_type::left_paren) {
+                   current_ + 2 < tokens_.size() &&
+                   (tokens_[current_ + 2].type == token_type::left_paren ||
+                    tokens_[current_ + 2].type == token_type::equal ||
+                    tokens_[current_ + 2].type == token_type::semicolon)) {
             // Pattern: ClassName& name( - a class-typed reference-return free function
-            // (Box& get() { ... }). Declaration wins like the identifier-identifier
-            // form above; a bitwise-and expression spells it (Box) & get().
+            // (Box& get() { ... }); ClassName& name = / ClassName& name; - a class-typed
+            // reference variable (Base& b = derived;). Declaration wins like the
+            // identifier-identifier form above (C++: whatever can be a declaration is one);
+            // a bitwise-and expression spells it (Box) & get().
+            const bool is_function = tokens_[current_ + 2].type == token_type::left_paren;
             current_ = savedPos;
-            return function_declaration();
+            if (is_function) {
+                return function_declaration();
+            }
+            return variable_declaration();
         } else {
             // Not a simple declaration pattern, restore and parse as expression
             current_ = savedPos;
@@ -3420,6 +3429,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 continue;
             }
             auto var_decl = std::make_shared<variable_decl>(name.location, nullptr, name.lexeme, get_symbol_id(name), init);
+            var_decl->function_spelling = true;
             member = var_decl;
         } else if (match(token_type::function_keyword) || (member_is_coroutine && bare_coroutine_head())) {
             // Method declaration with 'function' keyword: function name(...) or function operator=(...);
@@ -4153,6 +4163,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
 }
 
 checked_result<declaration_ptr> parser::variable_declaration() {
+    const bool function_spelling = check(token_type::function_keyword);
     JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());
 
     // Check for reference after type (e.g., int& x or auto& x)
@@ -4200,6 +4211,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
 
     auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+    decl->function_spelling = function_spelling;
 
     // If we're inside a function, assign a slot for this local variable
     if (in_function_scope() && decl->name_id != UINT64_MAX) {

@@ -2002,6 +2002,49 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ins = vm_instruction{t, cp.slot | (k_typed_dst_compound << k_typed_dst_shift), cp.slot, right};
 			break;
 		}
+		case opcode::op_index_fused_decl: {
+			// the proven element read landing in a decl (typed_decl_read's shape) with at most
+			// two chain steps: flatten the proto into the site row
+			const fused_index_proto& fp = c.fused_index_protos[ins.a];
+			if (!fp.typed_lane || fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask) break;
+			if (fp.index_chain_ext.size() > 2) break;
+			auto operand_of = [&](const fused_operand& o, uint32_t& out) -> bool {
+				if (o.const_index != k_invalid_u32) {
+					if (o.const_index >= k_typed_slot_mask) return false;
+					out = k_typed_const_bit | o.const_index;
+					return true;
+				}
+				if (!o.direct || o.slot == k_invalid_u32 || o.slot >= k_typed_slot_mask) return false;
+				out = o.slot;
+				return true;
+			};
+			chunk::typed_site site;
+			site.cont_slot = fp.container.direct && fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask
+				? fp.container.slot : k_invalid_u32;
+			bool ok = true;
+			if (fp.index_binary == k_invalid_u32) {
+				ok = operand_of(fp.index, site.operands[0]);
+			} else {
+				const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
+				ok = operand_of(bp.left, site.operands[0]) && operand_of(bp.right, site.operands[1]);
+				site.fold_ops[0] = bp.op;
+				site.fold_count = 1;
+				for (size_t k = 0; ok && k < fp.index_chain_ext.size(); ++k) {
+					const fused_binary_proto& sp = c.fused_binary_protos[fp.index_chain_ext[k]];
+					ok = operand_of(sp.right, site.operands[k + 2]);
+					site.fold_ops[k + 1] = sp.op;
+					site.fold_count = static_cast<uint8_t>(k + 2);
+				}
+			}
+			if (!ok) break;
+			site.orig = ins;
+			site.stamp = fp.decl_type;
+			site.decl_expect = fp.decl_expect;
+			chunk_ = &c;
+			typed_site_at(ip) = site;
+			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
+			break;
+		}
 		case opcode::op_push_fused: {
 			// a slot receiver and a slot or literal value on a site the builtin index knows:
 			// the append rows of exec_push_fused with nothing to decode

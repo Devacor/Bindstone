@@ -349,6 +349,16 @@ namespace jai::vm {
             vm_instruction orig{opcode::op_halt, 0, 0, 0};
             vm_instruction orig2{opcode::op_halt, 0, 0, 0};
             type_info* stamp = nullptr;
+            // op_t_load: the fused index proto flattened into one row. cont_slot = the
+            // container's frame slot, k_invalid_u32 = env-resident (resolved through the
+            // original proto's operand); index = operands[0] when fold_ops == 0, else
+            // operands[0] op[0] operands[1], then op[k] operands[k + 1] for each chain step;
+            // an operand is a slot or a constant index behind k_typed_const_bit
+            uint32_t cont_slot = k_invalid_u32;
+            uint32_t operands[4] = {};
+            uint8_t fold_ops[3] = {};
+            uint8_t fold_count = 0;
+            uint8_t decl_expect = 0xFF;
         };
         std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;

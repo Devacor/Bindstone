@@ -388,6 +388,12 @@ namespace jai {
         void allow_unsafe_parallel(bool allowed);
         bool allow_unsafe_parallel() const;
 
+        // How long a pool worker (and the joining thread) spins for the next region before
+        // parking on the kernel, when regions arrive at least that densely (a frame's worth of
+        // fork-joins); sparse regions park at once. 0 = always park. Default 1000 us.
+        void parallel_spin_wait_us(size_t microseconds);
+        size_t parallel_spin_wait_us() const;
+
         // Hot-reload work counter: per-instance field migrations performed since engine
         // construction. Tests assert DELTAS of this instead of wall-clock ratios (a
         // fields-unchanged reload proves itself by migrating zero instances).

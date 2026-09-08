@@ -250,6 +250,7 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 #endif
 		double t0 = now_seconds();
 		for (int64_t i = 0; i < opt.ticks; ++i) {
+			if (i == opt.profile_reset_tick) { session->profile_reset(); }
 			std::string text;
 			try {
 				text = session->frame(dt, "", 0.0, 0.0, 0.0);
@@ -258,7 +259,6 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 				throw std::runtime_error("tick " + std::to_string(i) + " [" + names[b] + "]: " +
 					ex.what() + (trace.empty() ? "" : "\n" + trace));
 			}
-			if (i == opt.profile_reset_tick) { session->profile_reset(); }
 			if (i == opt.dump_frame) {
 				std::ofstream out(std::string("gloom_frame_") + names[b] + ".txt",
 					std::ios::binary | std::ios::trunc);

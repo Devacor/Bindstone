@@ -184,3 +184,33 @@ covered only by the background CPU screen and the coordinated quiet window.
 CPU trace analysis additionally needs Windows Performance Toolkit (`xperf`)
 and matching PDBs. The marked binaries have been built and hash-checked; the
 combined administrative CPU-recording wrapper has not yet been run end to end.
+
+
+## VM function/line cycle profiles
+
+A build with `-DCMAKE_CXX_FLAGS=/DJAISCRIPT_VM_PROFILE` prints diagnostic
+opcode-cycle attribution by script function and source line. This instrumentation
+is separate from ETW sampling and must not supply ordinary benchmark timings.
+
+For the warmed GLOOM reference, use:
+
+```powershell
+jai_gloom.exe --smoke --backend vm --workers 0 --warmup 600 --ticks 600 --seed 666 --profile-reset-tick 0
+```
+
+The reset occurs before the named zero-based measured tick. It therefore
+excludes loading, warm-up and reboot while retaining all 600 reference frames.
+The later state-hash and summary script calls are also present in the dump.
+
+In a profile build, `jaiscript.exe --benchmark-main=1` resets function/opcode
+counters after the warm-up returns and before the repeated `main()` begins.
+The dump describes that replay, including its level/demo setup; its printed
+ms/tic still uses the workload's replay-loop timer. Reset occurs outside active
+VM execution. With multiple repetitions, the final dump describes the last.
+
+The initial profiler at `4922f220` double-charges coroutine reentry to the
+caller opcode and omits host/coroutine entry/inclusive accounting. Worker
+reports also carry the same heading as the parent. Treat that version's rows
+as opcode-charge rankings, not disjoint script CPU self time. Other diagnostic
+counters may include warm-up because the reset covers function/IP and opcode
+totals, not every auxiliary counter.

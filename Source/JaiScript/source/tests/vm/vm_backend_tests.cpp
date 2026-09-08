@@ -4310,6 +4310,31 @@ public:
 				check_eq(want, got, program);
 				check_true(got.rfind("7,", 0) != 0, "the typed decl did not bypass the operator table: " + got);   // the general path answers here (today: a resolution error on both backends), never the raw sum
 			}
+			// the override can arrive between execute calls (typed ops read the flag per
+			// execution) or from a native callback while the function runs; every timing agrees
+			// with the interpreter (Astra's operator-transition matrix)
+			for (bool proofs : {true, false}) {
+				const char* define = "int calc(int a, int b) { int c = a + b; int d = (a + b) * 10; return c * 1000 + d; } function later() { install(); return calc(1, 1); }";
+				auto make = [&](bool interp) {
+					std::shared_ptr<jai::engine> e = interp ? jai::engine::make() : vm_engine();
+					jai::stdlib::register_all(*e);
+					e->type_proofs(proofs);
+					std::weak_ptr<jai::engine> weak = e;
+					e->add_function("install", [weak]() { if (auto eng = weak.lock()) { eng->add_function("+", [](script_int x, script_int y) { return x * y; }); } });
+					e->execute(define);
+					return e;
+				};
+				auto interp = make(true);
+				auto vmx = make(false);
+				auto run = [](std::shared_ptr<jai::engine>& e, const char* src) {
+					try { return std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+				};
+				check_eq(run(interp, "calc(1, 1);"), run(vmx, "calc(1, 1);"), "before the install");
+				check_eq(std::string("2020"), run(vmx, "calc(1, 1);"), "plain sum before the install");
+				check_eq(run(interp, "later();"), run(vmx, "later();"), "installed from a native callback mid-execution");
+				check_eq(run(interp, "calc(1, 1);"), run(vmx, "calc(1, 1);"), "after the install, a later execute");
+				check_true(run(vmx, "calc(1, 1);") != "2020", "the typed slots see the installed operator: " + run(vmx, "calc(1, 1);"));
+			}
 			// the lowering happens: a closure body with typed slots lists the typed ops (closure
 			// bodies compile with the program; the checker's stamps come from a checked parse)
 			{

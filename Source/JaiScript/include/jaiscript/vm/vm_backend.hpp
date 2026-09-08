@@ -802,6 +802,13 @@ namespace jai::vm {
 
         checked_result<void> run(frame& entry);
         op_status run_dispatch(frame*& fp, const size_t records_base);
+#ifdef JAISCRIPT_VM_PROFILE
+        // A nested dispatch (a coroutine resume, a native callback re-entering script) runs
+        // inside one opcode of the outer loop; its whole span is added here at its exit so
+        // the outer loop subtracts it from that opcode instead of charging it twice
+        uint64_t profile_nested_cycles_ = 0;
+        op_status run_dispatch_profiled(frame*& fp, const size_t records_base);
+#endif
         // In-loop call machinery: push/pop of call_records_ without native recursion.
         // ArgsT is value_stack (zero-copy slice [args_base, args_base+argc) with the
         // callee slot at args_base-1 — args IS stack_, which conversions can relocate

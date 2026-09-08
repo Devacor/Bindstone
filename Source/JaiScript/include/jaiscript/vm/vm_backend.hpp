@@ -325,6 +325,14 @@ namespace jai::vm {
         // allocated a string. Bounded; cleared when it grows past the cap.
         std::unordered_map<uint64_t, script_value> worker_borrowed_strings_;
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
+        // A worker-minted string node can be published into the parent's output by the region
+        // that minted it; from then on the main thread copies it, so the worker must hold no
+        // handle to it in a later region (the counts are not atomic). Called at the end of the
+        // worker's chunk, on the worker thread, before the join.
+        void release_region_strings() noexcept {
+            worker_borrowed_strings_.clear();
+            for (auto& rec : worker_env_caches_) { rec.string_constants.clear(); }
+        }
         size_t worker_env_mru_ = 0;
         environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
 

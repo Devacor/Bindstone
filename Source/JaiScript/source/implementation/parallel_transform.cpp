@@ -1834,7 +1834,15 @@ namespace {
 		ctx.cursors = std::move(ctx.element_refs);   // [0] = the range, then the zip's arrays
 		ctx.element_refs.clear();
 		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); }
-		struct cursor_reset { parallel_worker_slot& c; ~cursor_reset() { if (c.vm) { c.vm->set_parallel_cursors(nullptr); } } } cursor_guard{ ctx };
+		struct cursor_reset {
+			parallel_worker_slot& c;
+			~cursor_reset() {
+				if (c.vm) {
+					c.vm->set_parallel_cursors(nullptr);
+					c.vm->release_region_strings();   // published nodes belong to the main thread from here
+				}
+			}
+		} cursor_guard{ ctx };
 		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
 		try {
 			auto r = ctx.backend->execute_callable(ctx.chunk_payload, ctx.call_args);

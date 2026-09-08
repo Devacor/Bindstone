@@ -1324,6 +1324,12 @@ engine::~engine() {
         }
         impl->tearing_down = true;
         impl->backend.reset();
+        // Definitions a host or a captured environment keeps alive past this point must not
+        // consult the engine from an instance destructor (registry_lock reads it)
+        for (auto& [name, def] : impl->classes) { if (def) { def->detach_for_teardown(); } }
+        for (auto& [id, def] : impl->classesByTypeId) { if (def) { def->detach_for_teardown(); } }
+        for (auto& [type, def] : impl->classesByType) { if (def) { def->detach_for_teardown(); } }
+        for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->detach_for_teardown(); } }
     }
 }
 

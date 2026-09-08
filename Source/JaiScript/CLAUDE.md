@@ -284,7 +284,7 @@ engine stays usable", not by `check_throws`.
   `class_definition.hpp` `convert_for_typed_slot_core`): declaration, `=`, by-value parameter,
   typed return and field store all run the assignment table (`docs/static_checking.md` rule
   table) - `string` slots take anything, `bool` is truthiness, `int`/`float` take bool and
-  `to_int()`/`to_float()` objects, exactly ONE converting ctor (no chaining), the array/map
+  `to_int()`/`to_float()` objects, a `function` slot takes a callable or null (a std::function's rule), exactly ONE converting ctor (no chaining), the array/map
   element boundary on every path; each site owns its rejection text.
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.

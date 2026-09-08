@@ -13,6 +13,27 @@ public:
     strong_types_tests() : suite("Strong Types") {}
 
     void forge_tests() override {
+        test("callable_slot_resets_to_null_and_takes_a_callable_again", [this]() {
+            // The typed-slot table's function row (the checker's callable-or-null rule holds at
+            // runtime too): a slot locked to a callable takes null, then a callable again; a
+            // call through the null raises a catchable error; a non-callable still rejects
+            for (bool vm : {false, true}) {
+                for (bool strict : {true, false}) {
+                    auto e = engine::make();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    if (!strict) { e->static_checking(check_mode::off); }
+                    const std::string label = std::string(vm ? "vm" : "interp") + (strict ? " strict" : " off");
+                    auto run = [&](const char* src) {
+                        try { return std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                    };
+                    check_eq(std::string("7"), run("function f = []() { return 1; }; f = null; f = []() { return 7; }; f();"), label + " local reset");
+                    check_eq(std::string("3"), run("class C { function cb = []() { return 1; }; } C c = C(); c.cb = null; c.cb = []() { return 3; }; c.cb();"), label + " field reset");
+                    check_eq(std::string("1"), run("function g = []() { return 1; }; g = null; int caught = 0; try { g(); } catch (err) { caught = 1; } caught;"), label + " null call is catchable");
+                    check_true(run("function h = []() { return 1; }; h = null; h = 42; 0;").rfind("throw:", 0) == 0, label + " a non-callable still rejects after the reset");
+                }
+            }
+        });
+
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {

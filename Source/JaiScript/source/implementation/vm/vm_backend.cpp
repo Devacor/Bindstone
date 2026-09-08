@@ -13554,10 +13554,15 @@ void vm_backend::dump_opcode_profile() const {
 
 #ifdef JAISCRIPT_VM_PROFILE
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
-	const uint64_t span_start = __rdtsc();
-	const op_status st = run_dispatch_profiled(fp, records_base);
-	profile_nested_cycles_ += __rdtsc() - span_start;
-	return st;
+	// Published as (counter at entry) + (this loop's whole span): a span already contains
+	// every deeper loop, so an outer loop's delta since its own mark is exactly the one
+	// nested span beneath its opcode, at any depth (Astra's depth-two control); the guard
+	// publishes on an exception exit too
+	struct span_publisher {
+		vm_backend* vm; uint64_t mark; uint64_t start;
+		~span_publisher() { vm->profile_nested_cycles_ = mark + (__rdtsc() - start); }
+	} publish{this, profile_nested_cycles_, __rdtsc()};
+	return run_dispatch_profiled(fp, records_base);
 }
 op_status vm_backend::run_dispatch_profiled(frame*& fp, const size_t records_base) {
 #else

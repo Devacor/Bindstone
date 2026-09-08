@@ -1144,6 +1144,11 @@ namespace {
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm
+				// the accessor ids a method call probes on either backend (the user-accessor check
+				// runs before dispatch): interned here, single-threaded, so a worker's probe never
+				// misses the frozen interner - in unsafe mode too, where the pin is bypassed
+				m->getter_id = sym.get_getter_id_with_view(m->member_id).first;
+				(void)sym.get_setter_id_with_view(m->member_id);
 				// A method on captured state must be a known read-only builtin: anything
 				// else may mutate the (worker-private snapshot of the) receiver, which
 				// would silently diverge across worker counts
@@ -3155,7 +3160,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	region_guard.prepared = true;
-	region_guard.activate(!eng.allow_unsafe_parallel());
+	// The interner freezes in every mode: it is not thread-safe, and unsafe mode vouches for
+	// the script's sharing, not for the runtime's tables (a miss asserts in Debug, the tripwire)
+	region_guard.activate(true);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
 	fprintf(stderr, "[region-profile] %s setup split: normalize %llu | provision+rest %llu cyc\n", plan.prefix, (unsigned long long)(prof_norm1 - prof_norm0), (unsigned long long)(prof_t1 - prof_norm1));

@@ -7921,17 +7921,18 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		if (holder && holder->is_class_instance_wrapper && holder->data && member_id != same_as_id_) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
 			class_definition* cd = inst->get_class_definition();
-			if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
-				// Worker verdict (parallel-method-admission ruling): the call op's text
+			if (parallel_worker_) [[unlikely]] {
+				// Worker verdict (parallel-method-admission ruling): the call op's text; a pin
+				// answers in unsafe mode too (no shared count or cache), unpinned is unsafe's business
 				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
 					? parallel_method_pins_->find(cd, member_id) : nullptr;
-				if (!pin) {
+				if (pin) { return {}; }
+				if (!engine_->allow_unsafe_parallel()) {
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
 						"public methods on the element's own class touching only element, local, or "
 						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member_id);
 				}
-				return {};
 			}
 			if (cached_global_env_ && cd) {
 				const uint64_t epoch = cd->method_epoch();
@@ -10433,7 +10434,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					auto* inst = static_cast<class_instance*>(holder->data.get());
 					class_definition* cd = inst->get_class_definition();
 					// Worker pin (pre-resolved at the barrier): slice-enter directly
-					if (parallel_worker_ && cd && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+					if (parallel_worker_ && cd) [[unlikely]] {
 						const detail::parallel_method_pin* pin = parallel_method_pins_
 							? parallel_method_pins_->find(cd, member->member_id) : nullptr;
 						if (pin) {
@@ -10599,17 +10600,19 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// worker-private state (fresh dispatcher value, pre-resolved overload,
 			// pre-compiled chunk — no shared count or cache is ever touched); anything
 			// unpinned keeps the wall error. Trusted scripts still opt out entirely.
-			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data &&
-			    !engine_->allow_unsafe_parallel()) [[unlikely]] {
+			const detail::parallel_method_pin* worker_pin = nullptr;
+			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data) [[unlikely]] {
 				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
-				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
-					? parallel_method_pins_->find(cd, member->member_id) : nullptr;
-				if (!pin) {
+				worker_pin = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
+				if (!worker_pin && !engine_->allow_unsafe_parallel()) {
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
 						"public methods on the element's own class touching only element, local, or "
 						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
 				}
+			}
+			if (worker_pin) [[unlikely]] {
+				const detail::parallel_method_pin* pin = worker_pin;
 				script_value method_val = pin->method_value;   // pin-private control block
 				const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
 #ifdef JAISCRIPT_VM_PROFILE

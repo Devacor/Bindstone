@@ -1878,6 +1878,33 @@ public:
 			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
 		});
 
+		test("unsafe_mode_method_calls_fan_out_on_warm_names", [this]() {
+			// Unsafe mode bypasses the method pins (a trusted script may call anything), and a
+			// region of eight elements fans out to eight workers since the cost model took over
+			// the small-region cutoff; the method call's user-accessor probe then interned
+			// _get_<name> from every worker at once and tore the interner (0xC0000005 on both
+			// backends). The names are warm at admission and the interner is frozen in every
+			// mode, so Debug's frozen-miss assert is the detector; the results are the serial
+			// loop's
+			for (int round = 0; round < 8; ++round) {
+				auto e = make_engine();
+				e->allow_unsafe_parallel(true);
+				e->parallel_thread_count(8);
+				auto r = e->execute(R"(
+					class Cell3 { int v = 0; int doubled() { return v * 2; } int plus(int k) { return v + k; } }
+					var a3 = [];
+					for (var i = 0; i < 8; i++) { auto c = Cell3(); c.v = i; a3.push(c); }
+					parallel_for (auto& c : a3) { c.v = c.doubled() + c.plus(1); }
+					var out = [];
+					for (auto& c : a3) { out.push(c.v); }
+					return out;
+				)");
+				const auto& out = r.as_array();
+				check_eq((size_t)8, out.size());
+				for (int64_t i = 0; i < 8; ++i) { check_eq(i * 2 + i + 1, out[static_cast<size_t>(i)].as_int(), "element " + std::to_string(i)); }
+			}
+		});
+
 		test("method_call_unsafe_override", [this]() {
 			// Trusted scripts keep the anything-goes path
 			auto e = make_engine();

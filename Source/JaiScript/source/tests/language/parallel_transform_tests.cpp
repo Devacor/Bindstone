@@ -396,6 +396,46 @@ public:
 			}
 		});
 
+		test("published_worker_strings_are_not_touched_by_later_regions", [this]() {
+			// A literal or a borrowed table cell returned from a region lands in the parent's
+			// output as the worker's own node; the worker releases every cached handle at the
+			// end of its chunk, so the main thread copying that node races nothing in a later
+			// region. Bytes stay right under copy-on-write either way; this pins the values and
+			// the sharing shape (the XTHREAD canary build pins the counts).
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					array<string> pal = ["p0", "p1", "p2", "p3"];
+					var a = [];
+					for (var i = 0; i < 64; i++) { a.push(i); }
+					string lit(int x) { return "L"; }
+					string cell(int x) { return pal[x % 4]; }
+					var first = parallel_transform(a, lit);
+					var cells = parallel_transform(a, cell);
+					first[3] += "!";
+					cells[5] += "?";
+					var second = parallel_transform(a, lit);
+					var cells2 = parallel_transform(a, cell);
+					string held = first[7];
+					var third = parallel_transform(a, lit);
+					held += "#";
+					return [first[3], first[4], second[3], cells[5], cells[6], cells2[5], held, third[7], pal[1]];
+				)");
+				const auto& out = r.as_array();
+				check_eq(std::string("L!"), out[0].as_string());
+				check_eq(std::string("L"), out[1].as_string());
+				check_eq(std::string("L"), out[2].as_string());
+				check_eq(std::string("p1?"), out[3].as_string());
+				check_eq(std::string("p2"), out[4].as_string());
+				check_eq(std::string("p1"), out[5].as_string());
+				check_eq(std::string("L#"), out[6].as_string());
+				check_eq(std::string("L"), out[7].as_string());
+				check_eq(std::string("p1"), out[8].as_string());
+			}
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

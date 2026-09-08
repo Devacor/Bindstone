@@ -315,17 +315,23 @@ protected:
 public:
     enum class_type { cpp_class, script_class, vm_class };
 
-    // An instance that outlives its definition (a host object holding a script value past
-    // engine teardown, a signal receiver capturing one) must not reach back into it from its
-    // own destructor: orphan every live registrant first (unregister is then a no-op)
-    virtual ~class_definition() {
+    // An instance that outlives its definition or its engine (a host object holding a script
+    // value past engine teardown, a signal receiver capturing one) must not reach back into
+    // either from its own destructor: orphan every live registrant (unregister is then a
+    // no-op) and forget the engine. The definition's destructor does it when it dies first;
+    // engine teardown does it for every definition still alive, since a captured environment
+    // can keep one alive past the engine.
+    void detach_for_teardown() noexcept {
         for (auto& entry : instances_) {
             if (auto live = entry.lock()) {
                 live->class_def_ = nullptr;
                 live->registry_slot_ = SIZE_MAX;
             }
         }
+        instances_.clear();
+        engine_ = nullptr;
     }
+    virtual ~class_definition() { detach_for_teardown(); }
 
     class_definition(std::string_view name, uint64_t type_id, engine* eng)
         : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),

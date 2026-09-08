@@ -276,6 +276,18 @@ public:
 			instance.reset();
 			nested.reset();
 			closure.reset();
+			// Astra's counterexample: an explicit value capture keeps the class definition alive
+			// past the engine through the captured environment, so the definition's destructor
+			// never ran; the instance must still destroy without consulting the dead engine
+			std::optional<script_value> callback, method_capture;
+			{
+				auto eng = make_engine();
+				callback.emplace(eng->execute("class Held { int n = 7; } Held h = Held(); [h]() { return h.n; };"));
+				method_capture.emplace(eng->execute("class Bag { array<Held> hs = [Held(), Held()]; var f() { var self = this; return [self]() { return self.hs.size(); }; } } Bag b = Bag(); b.f();"));
+				check_true(callback->is_function());
+			}
+			callback.reset();
+			method_capture.reset();
 			check_true(true);
 		});
 

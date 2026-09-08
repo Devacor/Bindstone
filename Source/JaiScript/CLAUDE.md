@@ -335,6 +335,13 @@ engine stays usable", not by `check_throws`.
   in every mode and stamps same-type/field proofs on AST nodes; both backends consume them behind
   total runtime guards (`detail/type_proofs.hpp`), so `engine::type_proofs(false)` is
   observationally identical (gates: `proof_differential_gate`, `jaiscript_fuzz --no-proofs`).
+- **Typed scalar instruction set** (`docs/typed_regions_design.md`): the VM lowers a fused binary,
+  compare-jump or scalar move whose operands the checker proved int/int or float/float (and whose
+  operands are frame slots, temps or literals) to one `op_t_*` instruction with the slots in the
+  instruction word; each op guards one tag per operand and falls back to the instruction it replaced
+  (`chunk::typed_sites`), so texts and post-states are the general op's. Lowering follows the
+  type-proofs flag (proofs off = typed ops off). A new opcode that a body may contain must be added
+  to both env safe-lists in `vm_compiler.cpp` and, if it names a slot, to the debugger's locals walk.
 - **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
   declares a name defined outside the program (checker: a declared global, typed -> checked and
   proven; both backends: a no-op, the name resolves dynamically); `[[warn_mode]]` / `[[strict_mode]]`

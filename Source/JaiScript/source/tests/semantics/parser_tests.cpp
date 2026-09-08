@@ -25,7 +25,8 @@ public:
             const std::string code =
                 "function f = 42; auto g = 42; var h = 42; function later;"
                 " void body() { function k = null; int n = 0; }"
-                " class C { function cb = null; int n = 0; }";
+                " class C { function cb = null; int n = 0; static function sf = null; static int sn = 0; }"
+                " namespace N { function nf = 42; int nn = 0; }";
             lexer lex(code, symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             std::unordered_set<std::string> empty_types;
@@ -36,7 +37,7 @@ public:
                 return d && d->get_type() == node_type::variable_decl && static_cast<const variable_decl*>(d.get())->function_spelling;
             };
             auto probe = [&](const std::vector<declaration_ptr>& decls, const char* label) {
-                check_eq((size_t)6, decls.size(), std::string(label) + " declaration count");
+                check_eq((size_t)7, decls.size(), std::string(label) + " declaration count");
                 check_true(decl_flag(decls[0]), std::string(label) + " function f");
                 check_false(decl_flag(decls[1]), std::string(label) + " auto g");
                 check_false(decl_flag(decls[2]), std::string(label) + " var h");
@@ -46,8 +47,13 @@ public:
                 check_true(fn->body && fn->body->declarations.size() == 2 && decl_flag(fn->body->declarations[0]) &&
                            !decl_flag(fn->body->declarations[1]), std::string(label) + " body local");
                 auto* cls = static_cast<const class_decl*>(decls[5].get());
-                check_true(cls->members.size() == 2 && decl_flag(cls->members[0].declaration) &&
+                check_true(cls->members.size() == 4 && decl_flag(cls->members[0].declaration) &&
                            !decl_flag(cls->members[1].declaration), std::string(label) + " field");
+                check_true(cls->members.size() == 4 && decl_flag(cls->members[2].declaration) &&
+                           !decl_flag(cls->members[3].declaration), std::string(label) + " static field after the modifier");
+                auto* ns = static_cast<const namespace_decl*>(decls[6].get());
+                check_true(ns->declarations.size() == 2 && decl_flag(ns->declarations[0]) &&
+                           !decl_flag(ns->declarations[1]), std::string(label) + " namespace variable");
             };
             probe(parsed.value(), "parsed");
             const auto bytes = detail::serialize_jaibite(parsed.value(), *symbolizer, eng->registration_fingerprint());

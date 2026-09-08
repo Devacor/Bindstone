@@ -1454,6 +1454,10 @@ namespace jai::vm {
         // runtime miss (not an array, a non-int operand, an overflowing fold, out of
         // bounds, a kind the lane does not land): the general kernel runs unchanged.
         const script_value* fast_operand(frame& f, const fused_operand& operand, size_t cache_slot);
+        // A reference a lane may read through before it knows it will land: every mode but
+        // the binder-property ones (their deref runs the getter, which a host can observe,
+        // and a lane that misses after reading would run it again on the general path)
+        static bool lane_deref_silent(const script_value& v) noexcept;
         // Typed scalar set (opcode.hpp op_t_*): guarded fast paths over frame slots, the
         // original instruction from chunk::typed_sites on any miss
         const script_value* typed_right(frame& f, uint32_t c) noexcept {

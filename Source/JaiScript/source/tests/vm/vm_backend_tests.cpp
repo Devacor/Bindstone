@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/vm/vm_compiler.hpp>
@@ -4238,6 +4239,40 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("lanes_read_a_getter_backed_reference_once", [this]() {
+			// A binder property with a getter and no setter bound by reference (a var& parameter,
+			// an auto& local): every deref runs the getter, which the host can count. A lane
+			// that reads it and then misses (out of range, a mismatched kind) would run it
+			// again on the general path; the lanes step aside for such references, so the
+			// count is the interpreter's: one per read (Astra's getter-boundary probe)
+			struct probe_box { script_int reads = 0; std::vector<script_int> values{10, 20}; };
+			for (bool proofs : {true, false}) {
+				for (int backend = 0; backend < 2; ++backend) {
+					probe_box box;
+					std::shared_ptr<jai::engine> e = backend == 0 ? jai::engine::make() : vm_engine();
+					e->type_proofs(proofs);
+					jai::stdlib::register_all(*e);
+					jai::dynamic_binder<probe_box>(*e, "probe_box")
+						.property("values", [](probe_box& b) { ++b.reads; return b.values; }, nullptr)
+						.build();
+					e->add_global_ref("box", box);
+					e->add_function("clear_reads", [&box]() { box.reads = 0; });
+					auto run = [&](const char* src) -> std::string {
+						std::string got;
+						try { got = std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+						return got + "|reads=" + std::to_string(box.reads);
+					};
+					const std::string label = std::string(backend ? "vm" : "interp") + (proofs ? " proofs" : " no-proofs");
+					check_eq(std::string("10|reads=1"), run("int read(array<int>& xs, int i) { clear_reads(); int v = xs[i]; return v; } read(box.values, 0);"), label + " decl in range");
+					{ const std::string got = run("int read(array<int>& xs, int i) { clear_reads(); int v = xs[i]; return v; } read(box.values, 2);"); check_true(got.rfind("throw:Array index 2 out of bounds for array of size 2", 0) == 0 && got.find("|reads=1") != std::string::npos, label + " decl out of range: " + got); }
+					check_eq(std::string("20|reads=1"), run("int read(int i) { auto& xs = box.values; clear_reads(); int v = xs[i]; return v; } read(1);"), label + " local ref");
+					{ const std::string got = run("int read(int i) { auto& xs = box.values; clear_reads(); int v = xs[i]; return v; } read(-1);"); check_true(got.rfind("throw:Array index -1 out of bounds for array of size 2", 0) == 0 && got.find("|reads=1") != std::string::npos, label + " local ref out of range: " + got); }
+					check_eq(std::string("1|reads=1"), run("int read(array<int>& xs, int i) { clear_reads(); var y = xs; return 1; } read(box.values, 0);"), label + " move from the reference");
+					check_eq(std::string("1|reads=1"), run("int read(array<int>& xs) { clear_reads(); var a = []; a.push(xs); return 1; } read(box.values);"), label + " push of the reference");
+				}
+			}
+		});
+
 		test("typed_scalar_ops_match_the_interpreter", [this]() {
 			// The typed scalar set (op_t_*): arithmetic into temps, decls and stores, the
 			// compare-jumps, and the four moves, each with its guard misses (overflow, zero

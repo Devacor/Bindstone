@@ -23,9 +23,11 @@ under `Assets` (48 files: creatures, interface, workbench) and `Source/JaiScript
 
 Rules 1, 2 and 3 are one checker change: carry the receiver's declared element type through
 subscript reads, literal elements, `push` arguments and nested stores, and run the existing
-table. The runtime is untouched; every one of the 20 `pending_reject_*` tests in
-`source/tests/semantics/strict_gaps_pending_tests.cpp` flips to green by enabling the
-suite, and their runtime texts stay as the `--check=off` behavior.
+table. The runtime is untouched by rules 1 to 3. Enable the matching element/type-flow
+cases in `source/tests/semantics/strict_gaps_pending_tests.cpp`; the battery also
+contains separate proposals about handles, callable variables and auto inference.
+Those require their own decisions. Existing runtime rejections for the element
+cases remain the `--check=off` behavior.
 
 ## Sentences that promise more than the checker enforces
 
@@ -51,3 +53,31 @@ The last row is a documentation error today regardless of the decision.
    then the two Bindstone gates (`-verifyassets` runs the interface scripts through the
    strict checker).
 3. The sentence list above, in one docs commit, plus `verify_site.py --no-samples`.
+
+## Rulings (Dev, 2026-09-06)
+
+| Rule | Ruling | Consequence |
+|---|---|---|
+| 1 to 3 | Adopt. "That's a failure of the checker." A read that needs a conversion is spelled `cast<int>(a[0])` (or a `to_int()` on a value that has one), never an implicit typed-slot conversion the checker cannot see | `type_checker.cpp` carries the receiver's declared element type through subscript reads, literal elements, `push` arguments and nested stores; out-of-range float literals into int slots are load errors; enable the matching element/type-flow rejection tests; the six sentences above take their "rules land" column |
+| 4 to 6 | Adopt | `weak_ptr<T>`, `T&` and `function` slots run the table on a known static type; the handle row of the rule table splits |
+| 7 | `auto x = null;` IS `var x = null;` | A null initializer makes the declaration dynamic for the variable's whole life: no lock at the first non-null store, no inference downstream. Both backends drop the runtime lock for that shape, the checker treats the name as `var`, and the rule table's `auto` row and guide 02-type-ladder.html "auto locks on first use" change wording. `auto x;` without an initializer is untouched by this ruling |
+| 8 | Keep as policy | Document the flat demotion in the `var` row |
+
+Checker and runtime changes are the perf lane's files; this memo records the ruling.
+
+
+### Battery activation after the rulings
+
+Do not register the entire pending battery unchanged. Its expectations describe
+the earlier proposal, including stronger checks that these rulings do not adopt.
+
+- `pending_reject_auto_null` becomes an acceptance/runtime control: the declaration
+  is now permanently dynamic and the later string assignment must succeed.
+- `pending_reject_auto_no_initializer` remains deferred; the no-initializer form
+  retains its documented checker leniency.
+- `pending_reject_function_call_argument` remains deferred: rule 6 restricts what a
+  function slot stores, while calls through callable variables remain unchecked.
+- The reference-declaration controls and `control_function_slot_any` need rejection
+  expectations under rules 5 and 6.
+- Enable the matching element/type-flow and weak-handle rejection cases individually,
+  and rerun the complete check/strict/off matrix after updating these expectations.

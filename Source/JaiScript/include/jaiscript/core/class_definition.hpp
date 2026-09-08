@@ -2614,6 +2614,10 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_weak_ptr_type:
             if (ri == script_value::TYPEID_NULL) return typed_null();
             return slot_conversion::of(verdict::handle_target);
+        case script_value_type::jai_function_type:
+            // a callable slot resets to null and takes a callable again (a std::function's rule)
+            if (ri == script_value::TYPEID_NULL) return typed_null();
+            return slot_conversion::of(v.type() == target ? verdict::identity : verdict::reject);
         default:
             return slot_conversion::of(v.type() == target ? verdict::identity : verdict::reject);
     }

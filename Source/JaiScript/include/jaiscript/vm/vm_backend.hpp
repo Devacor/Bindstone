@@ -1512,7 +1512,12 @@ namespace jai::vm {
         bool typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv) { return typed_decl_land_float(f, p.decl_slot, p.decl_expect, p.decl_type, fv); }
         bool typed_decl_land_int(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, script_int iv);
         bool typed_decl_land_float(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, script_float fv);
-        bool typed_decl_land_element(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, const script_array& node, size_t at);
+        bool typed_decl_land_element(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, const script_array& node, size_t at, bool borrowed);
+        // The buffer a decl lane may read an element from: an array, or a worker's borrow of a
+        // captured array (its scalar slots read raw like the borrow kernel's; a string slot is
+        // the main thread's handle, which the kernel copies as bytes, so `borrowed` keeps the
+        // string rows off the lane). A map borrow answers nullptr
+        static const script_array* lane_element_source(const script_value& v, bool& borrowed) noexcept;
         op_status exec_typed_load(frame& f, const vm_instruction& ins);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);

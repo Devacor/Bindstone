@@ -436,6 +436,68 @@ public:
 			}
 		});
 
+		test("typed_decls_read_borrowed_tables_like_the_kernel", [this]() {
+			// A worker reads a captured table through the borrow; `T x = tbl[i]` lands through
+			// the decl lanes (op_t_load, the fused decl's lane) on a raw scalar slot exactly as the
+			// borrow kernel would mint it, strings stay the kernel's (bytes, never the main
+			// thread's handle), and every miss (out of range, a mismatched kind) keeps the
+			// kernel's text. The same body serial against the live arrays is the oracle.
+			for (bool proofs : {true, false}) {
+				for (size_t workers : {size_t(1), size_t(8)}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->type_proofs(proofs);
+					e->parallel_thread_count(workers);
+					auto r = e->execute(R"(
+						array<int> ints = [10, 20, 30, 40];
+						array<float> fls = [0.5, 1.5, 2.5, 3.5];
+						var het = [1, 2.5, true, 'c', "s"];
+						array<string> strs = ["a", "b", "c", "d"];
+						var mixed = ["x", 7];
+						var idx = [];
+						for (var i = 0; i < 16; i++) { idx.push(i); }
+						string body(int i) {
+							int a = ints[i % 4];
+							int a2 = ints[(i + 1) % 4];
+							float f = fls[i % 4];
+							float w = ints[i % 4];
+							int h0 = het[0];
+							float h1 = het[1];
+							bool h2 = het[2];
+							char h3 = het[3];
+							string h4 = het[4];
+							string s = strs[i % 4];
+							var v = ints[(i + 2) % 4];
+							return to_string(a) + "," + to_string(a2) + "," + to_string(f) + "," + to_string(w) + "," +
+							       to_string(h0) + "," + to_string(h1) + "," + to_string(h2) + "," + h3 + "," + h4 + "," + s + "," + to_string(v);
+						}
+						int oob(int i) { int a = ints[i + 4]; return a; }
+						int wrong(int i) { int a = mixed[i % 2]; return a; }
+						var serial = [];
+						for (var i = 0; i < 16; i++) { serial.push(body(i)); }
+						var out = parallel_transform(idx, body);
+						bool same = out.size() == serial.size();
+						for (var i = 0; i < 16; i++) { if (out[i] != serial[i]) { same = false; } }
+						string oob_msg = ""; string wrong_msg = ""; string wrong_serial = "";
+						try { parallel_transform(idx, oob); } catch (err) { oob_msg = err; }
+						try { parallel_transform(idx, wrong); } catch (err) { wrong_msg = err; }
+						try { wrong(0); } catch (err) { wrong_serial = err; }
+						return [same, out[1], oob_msg, wrong_msg, wrong_serial, ints[1], het[0]];
+					)");
+					const auto& out = r.as_array();
+					const std::string label = std::string(proofs ? "proofs" : "no-proofs") + " workers=" + std::to_string(workers);
+					check_true(out[0].as<bool>(), label + ": the region matches the serial body");
+					check_eq(std::string("20,30,1.500000,20.000000,1,2.500000,true,c,s,b,40"), out[1].as_string(), label + ": row 1");
+					check_true(out[2].as_string().find("reading a captured array in a parallel body") != std::string::npos, label + ": captured out-of-range text: " + out[2].as_string());
+					check_eq(std::string("Cannot initialize 'a' (declared int) with string"), out[4].as_string(), label + ": the serial mismatch text");
+					// a worker never interns the slot's name, so it raises the slot-less shape of the same text
+					check_true(out[3].as_string().find("Cannot initialize a variable declared int with string") != std::string::npos, label + ": the region's mismatch text is the kernel's slot-less shape: " + out[3].as_string());
+					check_eq((int64_t)20, out[5].as_int(), label + ": the table is untouched");
+					check_eq((int64_t)1, out[6].as_int(), label + ": the hetero table is untouched");
+				}
+			}
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

@@ -1938,20 +1938,26 @@ namespace {
 	// container's element types are store-enforced invariants, so array<int> etc. is
 	// all-primitive by construction - no O(n) content scan needed, ever. Untyped
 	// containers fall back to the dynamic scan below.
-	bool statically_all_primitive(const script_value& v) {
+	// Declared-type predicates. `with_strings` is the BORROW tier's question (a borrowed string
+	// read mints the bytes, never the handle, so a string table reads raw); the element PROOF
+	// asks the scalar question: a string element or key is a refcounted handle that two slots,
+	// or every instance built from one literal, can share, and only the detach walk makes it
+	// exclusive before workers copy it
+	bool statically_primitive_shape(const script_value& v, bool with_strings) {
 		const type_info_ptr t = v.get_type_info();
 		if (!t) {
 			return false;
 		}
-		auto primitive_type = [](const type_info_ptr& p) {
+		auto primitive_type = [with_strings](const type_info_ptr& p) {
 			if (!p) return false;
 			switch (p->base_type) {
 				case script_value_type::jai_int_type:
 				case script_value_type::jai_float_type:
 				case script_value_type::jai_bool_type:
 				case script_value_type::jai_char_type:
-				case script_value_type::jai_string_type:   // a borrowed string read mints the bytes, never the handle
 					return true;
+				case script_value_type::jai_string_type:
+					return with_strings;
 				default:
 					return false;
 			}
@@ -1964,6 +1970,36 @@ namespace {
 		}
 		return false;
 	}
+
+	bool statically_all_primitive(const script_value& v) { return statically_primitive_shape(v, /*with_strings*/ true); }
+	bool statically_all_scalar(const script_value& v) { return statically_primitive_shape(v, /*with_strings*/ false); }
+
+	// A typed string buffer's slots must each own their string before workers copy them: a
+	// handle two slots share (a[1] = a[0], a literal pushed in a loop) would take non-atomic
+	// count traffic from two threads. Main thread, at the barrier.
+	void detach_shared_typed_strings(script_array& node, engine& eng) {
+		if (!node.is_typed() || node.kind() != script_array::kind_t::str) { return; }
+		for (auto& handle : node.strs()) {
+			if (!handle) { handle = make_strong<script_string>(); continue; }
+			if (handle.use_count() > 1) {
+				eng.execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+				handle = make_strong<script_string>(*handle);
+			}
+		}
+	}
+
+	struct element_proof {
+		bool typed_obj = false;
+		std::vector<type_info*> tags;                          // distinct slot tags of an object-kind source
+		std::vector<const class_definition*> element_classes;  // live element classes (method admission, prewarm)
+		size_t failed = SIZE_MAX;                              // first failing element; SIZE_MAX = proven
+		std::string what;                                      // the walk's exception text (empty for a verdict)
+	};
+
+	struct reach_filter;
+	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
+	                             std::vector<script_value>& elements, const reach_filter& reach,
+	                             const char* prefix, std::vector<type_info*>* types = nullptr);
 
 	// In-place element PROOF + NORMALIZATION (parallel_for; Dev rulings 2026-07-09):
 	// after this pass returns true, mutating the element under chunk exclusivity can
@@ -2083,21 +2119,27 @@ namespace {
 			return true;
 		}
 		case script_value::TYPEID_ARRAY: {
-			if (statically_all_primitive(v)) { return true; }
+			if (statically_all_scalar(v)) { return true; }
 			auto& handle = v.unchecked_get_array_storage();
 			if (!handle) { return true; }
 			if (handle.use_count() > 1) {
 				v = v.parallel_detached_copy();
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
-			if (handle->is_typed()) { return true; }   // raw buffer: all-primitive by construction
+			if (handle->is_typed()) {
+				if (handle->kind() == script_array::kind_t::str) { detach_shared_typed_strings(*handle, eng); return true; }
+				if (handle->kind() == script_array::kind_t::obj) {
+					return prove_elements(eng, v, *handle, handle->values(), reach_filter{}, "parallel_for", types).failed == SIZE_MAX;
+				}
+				return true;   // scalar buffer: exclusive by construction
+			}
 			for (auto& elem : handle->values()) {
 				if (!normalize_element_inplace(elem, eng, reach, unreferenced_array, nullptr, types)) { return false; }
 			}
 			return true;
 		}
 		case script_value::TYPEID_MAP: {
-			if (statically_all_primitive(v)) { return true; }
+			if (statically_all_scalar(v)) { return true; }
 			auto& handle = v.unchecked_get_map_storage();
 			if (!handle) { return true; }
 			if (handle.use_count() > 1) {
@@ -2270,19 +2312,11 @@ namespace {
 	// a proven fact about every element) and walks per element only when it fails; every
 	// other source that is not statically all-primitive walks (normalize_element_inplace).
 	// engine::allow_unsafe_parallel skips it all (trusted scripts).
-	struct element_proof {
-		bool typed_obj = false;
-		std::vector<type_info*> tags;                          // distinct slot tags of an object-kind source
-		std::vector<const class_definition*> element_classes;  // live element classes (method admission, prewarm)
-		size_t failed = SIZE_MAX;                              // first failing element; SIZE_MAX = proven
-		std::string what;                                      // the walk's exception text (empty for a verdict)
-	};
-
 	// elements: the boxed view walked for a non-object kind (the node's own vector, or the
 	// caller's materialized copy of a typed primitive/string buffer)
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
 	                             std::vector<script_value>& elements, const reach_filter& reach,
-	                             const char* prefix, std::vector<type_info*>* types = nullptr) {
+	                             const char* prefix, std::vector<type_info*>* types) {
 		element_proof proof;
 		proof.typed_obj = node.is_typed() && node.kind() == script_array::kind_t::obj;
 		auto& slots = node.objs();
@@ -2321,7 +2355,7 @@ namespace {
 #else
 		(void)prefix;
 #endif
-		if (eng.allow_unsafe_parallel() || declared_exclusive || statically_all_primitive(array_value)) {
+		if (eng.allow_unsafe_parallel() || declared_exclusive || statically_all_scalar(array_value)) {
 			return proof;
 		}
 		// An object slot lends its handle to a boxed value for the walk (the count stays 1, so
@@ -2369,11 +2403,14 @@ namespace {
 	// primitive or a string - element reads through the borrow are then raw const reads
 	// minting worker-local values (a string read copies the BYTES, never the handle), safe
 	// against the non-atomic strong counts by construction. Const walk, no handle copies.
-	bool parallel_content_all_primitive(const script_value& v) {
+	// Content walk twin of statically_primitive_shape (untyped containers): with_strings is
+	// the borrow tier's question, the scalar form is the element proof's
+	bool parallel_content_primitive_shape(const script_value& v, bool with_strings) {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_ARRAY: {
 			if (const script_array* node = v.unchecked_array_node(); node->is_typed()) {
-				return node->kind() != script_array::kind_t::obj;   // handles never borrow raw
+				if (node->kind() == script_array::kind_t::obj) { return false; }   // handles never borrow raw
+				return with_strings || node->kind() != script_array::kind_t::str;
 			}
 			for (const auto& elem : v.unchecked_as_array()) {
 				switch (elem.raw_storage_index()) {
@@ -2382,7 +2419,9 @@ namespace {
 				case script_value::TYPEID_FLOAT:
 				case script_value::TYPEID_CHAR:
 				case script_value::TYPEID_BOOL:
+					break;
 				case script_value::TYPEID_STRING:
+					if (!with_strings) { return false; }
 					break;
 				default:
 					return false;
@@ -2394,10 +2433,10 @@ namespace {
 			for (const auto& [key, val] : v.unchecked_as_map()) {
 				const size_t ki = key.raw_storage_index();
 				const size_t vi = val.raw_storage_index();
-				auto primitive = [](size_t idx) {
+				auto primitive = [with_strings](size_t idx) {
 					return idx == script_value::TYPEID_NULL || idx == script_value::TYPEID_INT ||
 					       idx == script_value::TYPEID_FLOAT || idx == script_value::TYPEID_CHAR ||
-					       idx == script_value::TYPEID_BOOL || idx == script_value::TYPEID_STRING;
+					       idx == script_value::TYPEID_BOOL || (with_strings && idx == script_value::TYPEID_STRING);
 				};
 				if (!primitive(ki) || !primitive(vi)) { return false; }
 			}
@@ -2407,6 +2446,9 @@ namespace {
 			return false;
 		}
 	}
+
+	bool parallel_content_all_primitive(const script_value& v) { return parallel_content_primitive_shape(v, /*with_strings*/ true); }
+	bool parallel_content_all_scalar(const script_value& v) { return parallel_content_primitive_shape(v, /*with_strings*/ false); }
 
 	// One captured name, resolved at the barrier from the LIVE global value
 	struct resolved_capture {
@@ -2768,7 +2810,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #endif
 	std::vector<type_info*> value_types;
 	element_proof proof;
-	const bool skip_proof = !plan.inplace && (statically_all_primitive(array_value) || parallel_content_all_primitive(array_value));
+	const bool skip_proof = !plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value));
 	if (!skip_proof) {
 		state.faults.checkpoint("region.element_proof");
 		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types);

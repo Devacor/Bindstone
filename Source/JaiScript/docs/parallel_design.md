@@ -124,6 +124,16 @@ benchmark (vm, us per region, parallel vs serial): N=32 17 vs 7.5 (one context),
 N=2048 280 vs 500 - below a few hundred light elements the per-element host-to-script call on
 the worker still dominates, and that call is the next lever.
 
+**Shared strings detach at the barrier, wherever a worker can copy them.** The only alias a
+value-closed element can still carry is a string node several slots share (a literal every
+instance of a class was built from: a field default, a map key, a `push` in a loop). The element
+walk detaches such a node in place in a string field, a string element or map key of a container
+field (a `map<string, int>` or `array<string>` field is string-bearing, not primitive: the
+borrow tier's all-primitive predicate does not apply to the proof), each slot of a typed string
+buffer, and the elements of a nested object buffer; a source whose declared type reaches a
+string is never exclusive by construction. A worker's by-value parameter clone (the read-only
+elision needs a main-thread verdict) then copies handles no other thread touches.
+
 **The element reference is a cursor.** A by-reference body binds its element to ONE reference
 holder per chunk, minted at the barrier (the array pin and the `live_elem_refs` count are
 main-thread facts) and re-pointed at the next index on the worker before each call; an admitted

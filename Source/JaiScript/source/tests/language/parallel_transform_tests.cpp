@@ -498,6 +498,91 @@ public:
 			}
 		});
 
+		test("shared_literal_strings_inside_elements_detach_before_workers_copy", [this]() {
+			// Every Node built from one class holds the SAME string node for a literal-seeded
+			// map key ("a"), a string field default ("leaf" inside the nested Leaf) and a typed
+			// string buffer pushed from a literal; a worker that copies its element (a by-value
+			// parameter the read-only proof cannot elide: f passes it whole to side) copies those
+			// handles, so the barrier must have detached every one of them first (the counts are
+			// not atomic; the XTHREAD canary build aborts at the racing touch). Pinned by the
+			// post-region counts: each instance owns its strings alone.
+			auto e = make_engine();
+			e->parallel_thread_count(8);
+			auto r = e->execute(R"(
+				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
+				class Node {
+					int id = 0; Leaf leaf = Leaf(0); array<string> names = []; map<string, int> counts = {};
+					Node() {}
+					Node(int n) { id = n; leaf = Leaf(n * 2); names.push("nm"); names.push("nm"); counts["a"] = n * 3; }
+				}
+				array<Node> nodes = [];
+				for (int i = 0; i < 48; i++) { nodes.push(Node(i)); }
+				int side(Node n) { return n.names.size(); }
+				int f(Node n) { return n.id + n.leaf.v + n.counts["a"] + n.leaf.tag.size() + side(n); }
+				var pout = parallel_transform(nodes, f);
+				var sout = [];
+				for (auto x : nodes) { sout.push(f(x)); }
+				return [pout, sout];
+			)");
+			const auto& pair = r.as_array();
+			check_true(arrays_equal(pair[0], pair[1]), "the region matches the serial loop");
+			check_eq((int64_t)(5 + 10 + 15 + 4 + 2), pair[0].as_array()[5].as_int());
+			script_value nodes = e->get_variable("nodes");
+			const script_array* arr = nodes.deref().unchecked_array_node();
+			check_true(arr && arr->is_typed() && arr->kind() == script_array::kind_t::obj, "typed object array");
+			auto cd = e->get_class_registry().find_script_class("Node");
+			auto leaf_cd = e->get_class_registry().find_script_class("Leaf");
+			check_not_null(cd); check_not_null(leaf_cd);
+			const uint32_t counts_slot = cd->field_slot(e->symbolize("counts"));
+			const uint32_t names_slot = cd->field_slot(e->symbolize("names"));
+			const uint32_t leaf_slot = cd->field_slot(e->symbolize("leaf"));
+			const uint32_t tag_slot = leaf_cd->field_slot(e->symbolize("tag"));
+			for (size_t i = 0; i < arr->size(); ++i) {
+				auto* inst = static_cast<class_instance*>(arr->objs()[i].handle->data.get());
+				const script_value* counts = inst->field_slot_value(counts_slot);
+				check_true(counts && counts->is_map() && !counts->unchecked_as_map().empty(), "counts present");
+				const script_value& key = counts->unchecked_as_map().begin()->first;
+				check_eq((long)1, (long)const_cast<script_value&>(key).unchecked_get_string_storage().use_count(), "map key detached for element " + std::to_string(i));
+				const script_value* names = inst->field_slot_value(names_slot);
+				const script_array* nn = names ? names->unchecked_array_node() : nullptr;
+				check_true(nn && nn->is_typed() && nn->kind() == script_array::kind_t::str && nn->size() == 2, "names is a string buffer");
+				check_eq((long)1, (long)nn->strs()[0].use_count(), "string buffer slot 0 detached for element " + std::to_string(i));
+				check_eq((long)1, (long)nn->strs()[1].use_count(), "string buffer slot 1 detached for element " + std::to_string(i));
+				const script_value* leaf = inst->field_slot_value(leaf_slot);
+				auto* leaf_inst = leaf ? static_cast<class_instance*>(leaf->get_object_holder()->data.get()) : nullptr;
+				const script_value* tag = leaf_inst ? leaf_inst->field_slot_value(tag_slot) : nullptr;
+				check_true(tag && tag->is_string(), "tag present");
+				check_eq((long)1, (long)const_cast<script_value*>(tag)->unchecked_get_string_storage().use_count(), "nested string field detached for element " + std::to_string(i));
+			}
+		});
+
+		test("string_input_sharing_one_literal_node_matches_serial", [this]() {
+			// A transform over strings that all share one node (a literal pushed in a loop):
+			// the by-value element copy in each worker touches that node's count, so the source
+			// is never "exclusive by construction" and the barrier detaches the boxed range
+			for (int round = 0; round < 6; ++round) {
+				auto e = make_engine();
+				e->parallel_thread_count(8);
+				auto r = e->execute(R"(
+					array<string> typed = [];
+					var hetero = [];
+					for (int i = 0; i < 400; i++) { typed.push("lit"); hetero.push("lit"); }
+					string f(string s) { return s + "!"; }
+					var p1 = parallel_transform(typed, f);
+					var p2 = parallel_transform(hetero, f);
+					var s1 = []; var s2 = [];
+					for (auto x : typed) { s1.push(f(x)); }
+					for (auto x : hetero) { s2.push(f(x)); }
+					return [p1, s1, p2, s2, typed[7], hetero[7]];
+				)");
+				const auto& out = r.as_array();
+				check_true(arrays_equal(out[0], out[1]), "typed string source");
+				check_true(arrays_equal(out[2], out[3]), "hetero string source");
+				check_eq(std::string("lit"), out[4].as_string());
+				check_eq(std::string("lit"), out[5].as_string());
+			}
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

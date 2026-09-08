@@ -2,35 +2,41 @@
 
 ## Whole-program snapshot: 2026-09-08
 
-Runtime source `e6f84aba`; MSVC 19.51.36252 Release with LTCG;
+Runtime source `605b6520`; MSVC 19.51.36252 Release with LTCG;
 Intel Core Ultra 9 285HX. GLOOM runs 600 measured ticks after 600 warm-up ticks,
 seed 666, 100x40 quad output. JaiDOOM repeats its 3984-tic, 120x78 replay in
 the same warmed engine. Serial configurations use one P core; parallel GLOOM
-uses eight. Three A B A B rounds give six accepted measurements per layout.
+uses eight. Three interleaved rounds give six accepted measurements per layout.
 
 | Runtime | P cores | Unit | Normal median | Padding median | Paired padding band | Normal observed range |
 |---|---:|---|---:|---:|---|---|
-| JaiScript VM serial | 1 | ms/tick | 1.596850 | 1.584708 | -1.31% to -0.44% | 1.593847 to 1.602841 |
-| JaiScript VM 8 workers | 8 | ms/tick | 1.484916 | 1.482467 | -0.82% to +0.17% | 1.482776 to 1.497024 |
-| Lua 5.4.8 | 1 | ms/tick | 0.385846 | 0.387013 | -0.58% to +5.23% | 0.383673 to 0.389556 |
-| Lua 5.5.1 | 1 | ms/tick | 0.391031 | 0.393297 | +0.15% to +1.81% | 0.388688 to 0.394463 |
-| LuaJIT 2.1 JIT | 1 | ms/tick | 0.094626 | 0.099646 | -18.24% to +24.72% | 0.091556 to 0.112211 |
-| JaiDOOM VM timedemo | 1 | ms/tic | 5.019955 | 5.044302 | +0.29% to +0.63% | 5.011797 to 5.033133 |
+| JaiScript VM serial | 1 | ms/tick | 1.401709 | 1.406005 | -0.53% to +1.13% | 1.396208 to 1.408952 |
+| JaiScript VM 8 workers | 8 | ms/tick | 1.342820 | 1.346534 | -0.39% to +1.50% | 1.317954 to 1.351338 |
+| Lua 5.4.8 | 1 | ms/tick | 0.384441 | 0.387128 | -1.03% to +2.10% | 0.383658 to 0.388794 |
+| Lua 5.5.1 | 1 | ms/tick | 0.392995 | 0.392879 | -1.78% to +1.21% | 0.388486 to 0.398593 |
+| LuaJIT 2.1 JIT | 1 | ms/tick | 0.099499 | 0.095005 | -27.32% to +17.20% | 0.088558 to 0.133763 |
+| JaiDOOM VM timedemo | 1 | ms/tic | 4.687123 | 4.697038 | +0.10% to +0.42% | 4.679719 to 4.697038 |
 
 All configurations match their reference hashes. Padding bands are paired
-control-to-normal ranges and include run variation. The fixed desktop CPU
-screen is 1.0 core-equivalent across 24 cores; 27 busy attempts were excluded.
-Checkpoint recovery completed the original ABAB plan without changing inputs,
-pinning or the acceptance threshold.
+control-to-normal ranges and include run variation. The GLOOM/Lua window
+accepted 60 timings and excluded 16 busy attempts. JaiDOOM's row comes from
+the paired JaiScript comparison, which accepted 72 timings across both games
+and excluded five busy attempts. Both windows use the same fixed candidate
+binaries and a 1.0-core desktop background screen across 24 cores.
 
-The serial VM/Lua 5.4.8 ratio is **4.14x** on the normal layout and
-**4.09x** on the padded layout; corresponding padding bands are in the table.
+The serial VM/Lua 5.4.8 ratio is **3.65x** on the normal layout and
+**3.63x** on the padded layout; corresponding padding bands are in the table.
+
+The paired comparison against `e6f84aba` measures lower elapsed time on
+both layouts: GLOOM serial 11.09% to 12.29%, eight workers 9.48% to 10.20%,
+and JaiDOOM 6.47% to 6.87%. Reference and candidate padding bands, along with
+the paired revision-change bands, are recorded in the full results.
 
 Lua 5.4.8 and Lua 5.5.1 have overlapping observed ranges. LuaJIT JIT has a wide
-padding band and is a runtime-code-generation ceiling, outside the Bindstone
+padding band and is a runtime-code-generation ceiling outside the Bindstone
 iOS shipping target.
 
-[Full results, versions, flags, recovery methodology and raw evidence](../examples/gloom/ports/RESULTS_2026-09-08.md).
+[Full results, versions, flags, methodology and raw evidence](../examples/gloom/ports/RESULTS_TYPED_OPS_2026-09-08.md).
 
 ## Microbenchmark snapshot: 2026-07
 

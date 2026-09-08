@@ -150,8 +150,8 @@ older report machine measured the same pair at ~3.7&times;): by-value deep-copie
 recursion level, and that copy is the whole difference.</li>
 <li><strong>Bulk per-element pixel pushing.</strong> Software rendering (tens of thousands of scripted
 element reads and stores per frame) is where any tagged-value VM pays list price against Lua
-(GLOOM serial takes 4.14&times; Lua 5.4.8 time in the matched
-2026-09-08 snapshot at <code>e6f84aba</code>; the padding bands appear below). The
+(GLOOM serial takes 3.65&times; Lua 5.4.8 time in the matched
+2026-09-08 snapshot at <code>605b6520</code>; the padding bands appear below). The
 mitigations, in order: typed arrays for the grids, <code>parallel_transform</code> for the bulk stages
 (it roughly halved GLOOM&#x27;s dominant stage), and binding the one innermost loop to C++ if the budget
 still doesn&#x27;t close. Full game <em>sim</em> is not the problem: DOOM&#x27;s entire playsim ticks in
@@ -236,23 +236,25 @@ and rewriting the enemy brains as coroutines and the movers/weapons as classes m
 <strong>free</strong> (the band did not move)</td></tr>
 <tr><td><strong>DOOM timedemo, 2026-09-08</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
 one full replay warming the same engine before the measured replay; one P core,
-<code>e6f84aba</code></td><td><strong>5.020 ms/tic</strong>,
-padding median <strong>5.044</strong><br>
-Padding band: +0.29% to +0.63%</td><td>Six accepted processes per layout in three interleaved
-rounds. Both replay hashes match 1746772898. The script timer excludes level/demo setup.</td></tr>
+<code>605b6520</code></td><td><strong>4.687 ms/tic</strong>,
+padding median <strong>4.697</strong><br>
+Padding band: +0.10% to +0.42%</td><td>Six accepted processes per layout in three interleaved
+rounds of the paired JaiScript comparison. Both replay hashes match 1746772898.
+The script timer excludes level/demo setup.</td></tr>
 <tr><td><strong>GLOOM, 2026-09-08 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
 seed 666, 100&times;40 quad output. One P core for serial configurations; eight for parallel
-JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX, <code>e6f84aba</code>.</td><td>JaiScript VM serial: <strong>1.597 ms/tick</strong> (padding -1.31% to -0.44%)<br>
-JaiScript VM 8 workers: <strong>1.485 ms/tick</strong> (padding -0.82% to +0.17%)<br>
-Lua 5.4.8: <strong>0.386 ms/tick</strong> (padding -0.58% to +5.23%)<br>
-Lua 5.5.1: <strong>0.391 ms/tick</strong> (padding +0.15% to +1.81%)<br>
-LuaJIT 2.1 JIT: <strong>0.095 ms/tick</strong> (padding -18.24% to +24.72%)</td><td>All frame and state hashes match. Three A B A B rounds give six accepted
-runs per layout. Bands are observed paired padding variation, not confidence intervals.
-The desktop screen stayed at 1.0 background core across 24 cores; busy attempts were
-excluded. Checkpoint recovery preserved the inputs and original accepted order.
+JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX, <code>605b6520</code>.</td><td>
+JaiScript VM serial: <strong>1.402 ms/tick</strong> (padding -0.53% to +1.13%)<br>
+JaiScript VM 8 workers: <strong>1.343 ms/tick</strong> (padding -0.39% to +1.50%)<br>
+Lua 5.4.8: <strong>0.384 ms/tick</strong> (padding -1.03% to +2.10%)<br>
+Lua 5.5.1: <strong>0.393 ms/tick</strong> (padding -1.78% to +1.21%)<br>
+LuaJIT 2.1 JIT: <strong>0.099 ms/tick</strong> (padding -27.32% to +17.20%)</td><td>All frame and state hashes match. Three A B A B rounds give six accepted
+runs per layout. Bands are observed paired padding variation. The separate GLOOM/Lua
+window accepted 60 timings and excluded 16 busy attempts, with a 1.0-core desktop
+background screen across 24 cores.
 Lua 5.4.8 and 5.5.1 have overlapping observed ranges. LuaJIT JIT is a runtime-code-generation
-ceiling with a wide band, outside the iOS shipping target.
-<a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_2026-09-08.md">Full results, control medians, versions and methodology</a>.</td></tr>
+ceiling with a wide band outside the iOS shipping target.
+<a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_TYPED_OPS_2026-09-08.md">Full results, control medians, versions and methodology</a>.</td></tr>
 <tr><td><strong>Demoreel</strong> (<code>examples/demoreel</code>): thirteen truecolor scenes at
 100&times;40 = 4,000 cells per frame, the whole reel including transitions
 (<code>--smoke</code>, 1,700 frames; the example&#x27;s README is the record)</td><td>interpreter

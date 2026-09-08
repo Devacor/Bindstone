@@ -1,6 +1,6 @@
 # GLOOM and JaiDOOM whole-program gates
 
-Measured snapshot: [2026-09-08 results](RESULTS_2026-09-08.md).
+Measured snapshot: [2026-09-08 results](RESULTS_TYPED_OPS_2026-09-08.md).
 
 The ports execute the shared host's deterministic 100x40, quad-pixel workload.
 Lua 5.4.8 and Lua 5.5.1 use the same Lua scripts and the same sol2 adapter.

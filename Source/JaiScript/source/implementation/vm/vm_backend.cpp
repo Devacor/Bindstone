@@ -6416,8 +6416,10 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 		const script_value* cp = site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
 			: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
+		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
+			cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr;   // a getter-backed reference: the kernel reads it exactly once
+		}
 		if (cp) {
-			if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
 			if (cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
 				auto read_int = [&](uint32_t o, script_int& out) -> bool {
 					const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
@@ -6470,6 +6472,11 @@ bool vm_backend::typed_fold_index(frame& f, const fused_index_proto& p, script_i
 }
 
 // ---- typed scalar set (opcode.hpp op_t_*) ----
+
+bool vm_backend::lane_deref_silent(const script_value& v) noexcept {
+	const auto* h = v.get_reference_holder();
+	return h && !h->property;
+}
 
 bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	const uint32_t slot = a & k_typed_slot_mask;
@@ -6638,7 +6645,9 @@ op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
 // `T x = y;` as one op: exec_decl_var's fast path over the slot LOAD would have pushed
 op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
-	if (const script_value* src = frame_slot(f, ins.b)) {
+	const script_value* src = frame_slot(f, ins.b);
+	if (src && src->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*src)) { src = nullptr; }
+	if (src) {
 		const script_value* seen = src;
 		if (seen->raw_storage_index() == script_value::TYPEID_REFERENCE) { seen = &seen->deref(); }   // LOAD pushes the referent
 		const size_t vi = seen->raw_storage_index();
@@ -6683,6 +6692,7 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 	script_value* dst = frame_slot(f, ins.a);
 	const script_value* src = dst ? frame_slot(f, ins.b) : nullptr;
+	if (src && src->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*src)) { src = nullptr; }
 	if (src && !dst->is_reference()) {
 		const script_value& v = src->deref();
 		const size_t vi = v.raw_storage_index();
@@ -6724,7 +6734,10 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	const bool folded = p.index_binary != k_invalid_u32;
 	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
-	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
+		if (!lane_deref_silent(*cp)) return false;   // a getter-backed reference: the kernel reads it exactly once
+		cp = &cp->deref();
+	}
 	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
 	script_int index;
 	if (!typed_fold_index(f, p, index)) return false;
@@ -6745,12 +6758,16 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 		if (stack_.empty()) return false;
 		vp = &stack_.back();
 	}
+	if (vp->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*vp)) return false;
 	const script_value& v = vp->deref();
 	const size_t vi = v.raw_storage_index();
 	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT) return false;
 	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
-	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
+		if (!lane_deref_silent(*cp)) return false;
+		cp = &cp->deref();
+	}
 	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
 	script_int index;
 	if (!typed_fold_index(f, p, index)) return false;
@@ -10191,7 +10208,8 @@ vm_backend::push_append vm_backend::typed_push_append(const script_value& objd, 
 // op_t_push: the append rows over a slot receiver and a slot or literal value; anything
 // else (a non-array receiver, a declined payload) is the original op_push_fused
 op_status vm_backend::exec_typed_push(frame& f, const vm_instruction& ins) {
-	if (const script_value* recv = frame_slot(f, ins.a)) {
+	const script_value* recv = frame_slot(f, ins.a);
+	if (recv && (recv->raw_storage_index() != script_value::TYPEID_REFERENCE || lane_deref_silent(*recv))) {
 		const script_value& objd = recv->deref();
 		if (objd.raw_storage_index() == script_value::TYPEID_ARRAY) {
 			std::optional<script_value> vconst;
@@ -10201,6 +10219,7 @@ op_status vm_backend::exec_typed_push(frame& f, const vm_instruction& ins) {
 				vp = &*vconst;
 			} else {
 				vp = frame_slot(f, ins.b);
+				if (vp && vp->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*vp)) { vp = nullptr; }
 			}
 			if (vp) {
 				const push_append lane = typed_push_append(objd, vp->deref());

@@ -123,7 +123,9 @@ class WindowsMachine:
 		return cpus
 
 def save(path, data):
-	path.write_text(json.dumps(data, indent=2) + "\n")
+	temporary = path.with_suffix(path.suffix + ".tmp")
+	temporary.write_text(json.dumps(data, indent=2) + "\n")
+	os.replace(temporary, path)
 
 def parse_timedemo(text, warmed=True):
 	text = text.replace("\r\n", "\n")
@@ -156,6 +158,86 @@ def selected_configurations(workloads, engines):
 			"backend":"vm","workers":0,"cores":1,"unit":"ms/tic"})
 	return configs
 
+
+def timing_plan(configs, builds, rounds):
+	return [(config, variant, layout, number)
+		for number in range(1, rounds+1)
+		for config in configs
+		for _ in range(2)
+		for layout in ("normal", "padding")
+		for variant in builds]
+
+
+def validate_resume(previous, current, records, configs, builds, out):
+	# Retry budget may change; inputs, topology, screening and execution order may not.
+	for key in ("jai_workload_root", "builds", "binary_sha256", "workload_sha256",
+		"cpu_sets", "performance_cpus", "rounds", "recording", "max_background_cores",
+		"order", "warmup", "units", "padding", "competitor_poll_interval_seconds",
+		"build_input_manifests"):
+		if previous.get(key) != current.get(key):
+			raise RuntimeError("Cannot resume: changed " + key)
+	if [r["sequence"] for r in records] != list(range(1,len(records)+1)):
+		raise RuntimeError("Cannot resume: non-contiguous run sequence")
+	expected_gates=[]
+	for config in configs:
+		for variant in builds:
+			for layout in ("normal","padding"):
+				if config["workload"]=="gloom":
+					expected_gates.append((config["name"],variant,layout,300,0))
+				expected_gates.append((config["name"],variant,layout,600,600))
+	gates=[r for r in records if r["phase"]=="gate"]
+	if len(gates)!=len(expected_gates) or records[:len(gates)]!=gates:
+		raise RuntimeError("Cannot resume: complete conformance gates are required")
+	actual_gates=[]
+	for row in gates:
+		command=row["command"]
+		ticks=int(command[command.index("--ticks")+1]) if row["workload"]=="gloom" else 600
+		warm=int(command[command.index("--warmup")+1]) if row["workload"]=="gloom" else 600
+		actual_gates.append((row["configuration"],row["variant"],row["layout"],ticks,warm))
+	if actual_gates!=expected_gates:
+		raise RuntimeError("Cannot resume: conformance order changed")
+	config_by_name={c["name"]:c for c in configs}
+	for row in records:
+		config=config_by_name.get(row["configuration"])
+		if config is None or row["workload"]!=config["workload"]:
+			raise RuntimeError("Cannot resume: configuration changed")
+		if row["affinity_cpus"]!=current["performance_cpus"][:config["cores"]]:
+			raise RuntimeError("Cannot resume: recorded affinity changed")
+		log=(out/row["log"]).resolve()
+		log.relative_to(out.resolve())
+		output=log.read_text(encoding="utf-8",errors="replace")
+		if row["workload"]=="timedemo":
+			parsed=parse_timedemo(output)
+		else:
+			found=ROW.findall(output)
+			ticks=int(row["command"][row["command"].index("--ticks")+1])
+			expected=next(h for h in HASHES if h[0]==ticks)
+			parsed={"hash_match":len(found)==1 and found[0][3]==expected[1] and int(found[0][4])==expected[2],
+				"metric_ms":float(found[0][2]) if len(found)==1 else None}
+		if parsed["hash_match"]!=row["hash_match"] or parsed["metric_ms"]!=row["metric_ms"]:
+			raise RuntimeError("Cannot resume: recorded result disagrees with log " + row["log"])
+		screened=(row["exit_code"]==0 and row["hash_match"] and
+			row["background_core_equivalents"]<=current["max_background_cores"] and
+			not row["competitors_at_end"] and not row.get("competitors_during_run",[]))
+		if row["accepted"]!=screened:
+			raise RuntimeError("Cannot resume: screening verdict changed")
+	valid=[c for c in configs if all(r["hash_match"] and r["exit_code"]==0
+		for r in gates if r["configuration"]==c["name"])]
+	if any(c not in valid and c["target"] in ("jai_gloom","jaiscript") for c in configs):
+		raise RuntimeError("Cannot resume: a JaiScript conformance gate failed")
+	plan=timing_plan(valid,builds,current["rounds"])
+	completed=0
+	for row in records[len(gates):]:
+		if row["phase"]!="timed" or completed>=len(plan):
+			raise RuntimeError("Cannot resume: unexpected timing record")
+		config,variant,layout,number=plan[completed]
+		if (row["configuration"],row["variant"],row["layout"],row["round"])!=(config["name"],variant,layout,number):
+			raise RuntimeError("Cannot resume: accepted ABAB prefix changed")
+		if row["accepted"]:
+			completed+=1
+	return valid, completed
+
+
 def main():
 	if os.name!="nt":
 		raise SystemExit("This runner records Windows topology and affinity.")
@@ -166,6 +248,8 @@ def main():
 	parser.add_argument("--compare-build",type=pathlib.Path,help="Interleave a candidate build against the baseline.")
 	parser.add_argument("--output",type=pathlib.Path,default=root/"out/astra/whole-program")
 	parser.add_argument("--rounds",type=int,default=3)
+	parser.add_argument("--resume",action="store_true",help="Resume after completed gates, verifying the original inputs and exact accepted ABAB prefix.")
+	parser.add_argument("--max-attempts",type=int,default=10,help="Busy attempts per required timing; acceptance threshold is unchanged.")
 	parser.add_argument("--workloads",default="gloom,timedemo")
 	parser.add_argument("--engines",choices=("all","jai"),default="all")
 	parser.add_argument("--max-background-cores",type=float,default=0.20)
@@ -174,12 +258,16 @@ def main():
 	args=parser.parse_args()
 	workloads=args.workloads.split(",")
 	jai_workload_root=args.jai_workload_root.resolve()
+	if args.resume and args.conformance_only:
+		parser.error("--resume continues timing; it cannot be combined with --conformance-only.")
+	if args.max_attempts<1:
+		parser.error("--max-attempts must be positive.")
 	if args.rounds<3 or not workloads or any(w not in ("gloom","timedemo") for w in workloads):
 		parser.error("Use at least three rounds and workloads gloom,timedemo.")
 	out=args.output.resolve()
 	out.relative_to((root/"out/astra").resolve())
 	out.mkdir(parents=True,exist_ok=True)
-	if (out/"runs.json").exists():
+	if (out/"runs.json").exists() and not args.resume:
 		parser.error("Use a new output directory; existing raw runs are never overwritten.")
 	configs=selected_configurations(workloads,args.engines)
 	builds={"baseline":args.build.resolve()}
@@ -210,8 +298,27 @@ def main():
 	for name,build in builds.items():
 		manifest=build/"build-inputs.json"
 		if manifest.exists():metadata.setdefault("build_input_manifests",{})[name]=json.loads(manifest.read_text())
+	records=[];sequence=0;completed=0;valid=[]
+	if args.resume:
+		previous=json.loads((out/"metadata.json").read_text())
+		records=json.loads((out/"runs.json").read_text())
+		valid,completed=validate_resume(previous,metadata,records,configs,builds,out)
+		sequence=len(records)
+		history=previous.setdefault("resumptions",[])
+		name=f"resume-{len(history)+1:02d}"
+		for suffix in ("metadata.json","runs.json"):
+			backup=out/(name+"-before-"+suffix)
+			if backup.exists():raise RuntimeError("Resume backup exists: "+str(backup))
+			backup.write_bytes((out/suffix).read_bytes())
+		(out/(name+"-runner.py")).write_bytes(pathlib.Path(__file__).read_bytes())
+		history.append({"created_utc":metadata["created_utc"],"runner_sha256":metadata["runner_sha256"],
+			"accepted_before":completed,"records_before":sequence,"max_attempts":args.max_attempts})
+		metadata=previous
+		print(f"Verified checkpoint: {completed} accepted timings; continuing the same ABAB plan.",flush=True)
+	else:
+		metadata["max_attempts"]=args.max_attempts
+		(out/"runner.py").write_bytes(pathlib.Path(__file__).read_bytes())
 	save(out/"metadata.json",metadata)
-	records=[];sequence=0
 
 	def run(config,variant,layout,phase,round_number=0,cold=False,ticks=600):
 		nonlocal sequence
@@ -228,6 +335,7 @@ def main():
 		machine.wait_for_quiet(args.max_background_cores)
 		sequence+=1
 		filename=f"{sequence:03d}-{config['target']}-w{config['workers']}-{variant}-{layout}-{phase}.log"
+		if (out/filename).exists():raise RuntimeError("Existing unrecorded log; use a fresh output directory: "+filename)
 		before,start=machine.busy_seconds(),time.perf_counter()
 		process=subprocess.Popen(command,cwd=out,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 		cpus=machine.pin(process,config["cores"])
@@ -275,30 +383,26 @@ def main():
 		return record
 
 	# GLOOM 300 gate and each warmed full workload establish conformance before timing.
-	valid=[]
-	for config in configs:
-		ok=True
-		for variant in builds:
-			for layout in ("normal","padding"):
-				if config["workload"]=="gloom":
-					row=run(config,variant,layout,"gate",cold=True,ticks=300)
+	if not args.resume:
+		for config in configs:
+			ok=True
+			for variant in builds:
+				for layout in ("normal","padding"):
+					if config["workload"]=="gloom":
+						row=run(config,variant,layout,"gate",cold=True,ticks=300)
+						ok=ok and row["hash_match"] and row["exit_code"]==0
+					row=run(config,variant,layout,"gate")
 					ok=ok and row["hash_match"] and row["exit_code"]==0
-				row=run(config,variant,layout,"gate")
-				ok=ok and row["hash_match"] and row["exit_code"]==0
-		if ok:valid.append(config)
-		elif config["target"] in ("jai_gloom","jaiscript"):raise RuntimeError("A JaiScript whole-program gate failed")
+			if ok:valid.append(config)
+			elif config["target"] in ("jai_gloom","jaiscript"):raise RuntimeError("A JaiScript whole-program gate failed")
 	if not args.conformance_only:
-		for round_number in range(1,args.rounds+1):
-			for config in valid:
-				for _ in range(2):
-					for layout in ("normal","padding"):
-						for variant in builds:
-							for attempt in range(10):
-								row=run(config,variant,layout,"timed",round_number)
-								if row["accepted"]:break
-								if not row["hash_match"] or row["exit_code"]:raise RuntimeError("Conformance changed during timing")
-								time.sleep(2)
-							else:raise RuntimeError("Machine remained busy; the attempts are not credited")
+		for config,variant,layout,round_number in timing_plan(valid,builds,args.rounds)[completed:]:
+			for attempt in range(args.max_attempts):
+				row=run(config,variant,layout,"timed",round_number)
+				if row["accepted"]:break
+				if not row["hash_match"] or row["exit_code"]:raise RuntimeError("Conformance changed during timing")
+				time.sleep(2)
+			else:raise RuntimeError("Machine remained busy; attempts are not credited. Resume with identical inputs when quiet.")
 	for path,digest in binaries.items():
 		if file_hash(pathlib.Path(path))!=digest:raise RuntimeError("A measured executable changed")
 	for path,digest in workload_hashes.items():
@@ -310,6 +414,8 @@ def main():
 				r["variant"]==variant and r["layout"]==layout and r["phase"]=="timed" and r["accepted"]]
 				for layout in ("normal","padding")}
 			a,b=values["normal"],values["padding"]
+			if not args.conformance_only and config in valid and (len(a)!=2*args.rounds or len(b)!=2*args.rounds):
+				raise RuntimeError("Incomplete timing plan; no summary will be published.")
 			row={"configuration":config["name"],"workload":config["workload"],"unit":config["unit"],
 				"variant":variant,"cores":config["cores"],"conforming":config in valid}
 			if a and b:
@@ -332,7 +438,15 @@ def main():
 						"median_delta_percent":100*(statistics.median(b)/statistics.median(a)-1),
 						"paired_delta_band_percent":[min(deltas),max(deltas)]})
 		save(out/"differences.json",differences)
+	metadata["completed_utc"]=time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
+	metadata["accepted_timings"]=sum(r["phase"]=="timed" and r["accepted"] for r in records)
+	metadata["rejected_timings"]=sum(r["phase"]=="timed" and not r["accepted"] for r in records)
+	metadata["protocol_complete"]=not args.conformance_only
+	save(out/"metadata.json",metadata)
 	print(json.dumps(summary,indent=2))
+	if not args.conformance_only:
+		expected=len(timing_plan(valid,builds,args.rounds))
+		print(f"Complete: {metadata['accepted_timings']}/{expected} required timings; {metadata['rejected_timings']} busy attempts rejected.")
 
 if __name__=="__main__":
 	main()

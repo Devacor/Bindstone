@@ -1,5 +1,7 @@
 # GLOOM and JaiDOOM whole-program gates
 
+Measured snapshot: [2026-09-08 results](RESULTS_2026-09-08.md).
+
 The ports execute the shared host's deterministic 100x40, quad-pixel workload.
 Lua 5.4.8 and Lua 5.5.1 use the same Lua scripts and the same sol2 adapter.
 LuaJIT 2.1 JIT uses the same adapter with the overrides in `luajit/scripts`;
@@ -20,7 +22,7 @@ python Source/JaiScript/examples/gloom/ports/run_comparison.py
 
 All downloaded sources, object files, binaries and evidence stay under
 `Source/JaiScript/out/astra`. `build_comparison.ps1 -OutputRoot` accepts another
-directory under `Source/JaiScript/out`. Pass its `release` child to the runner's
+directory under `Source/JaiScript/out/astra`. Pass its `release` child to the runner's
 `--build` option and an ignored evidence directory to `--output`.
 
 `prepare_comparison.py` pins archive SHA256 hashes for Lua 5.4.8, Lua 5.5.1,
@@ -88,6 +90,10 @@ the Lua configurations with:
 python Source/JaiScript/examples/gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build Source/JaiScript/out/astra/release --output Source/JaiScript/out/astra/whole-program-REFERENCE
 ```
 
+Run `examples/jaidoom/bootstrap.bat` once as described in its README to
+provide the git-ignored `examples/jaidoom/wads/doom1.wad`. The timedemo
+requires that WAD and `demo.json` before the runner can hash its inputs.
+
 JaiDOOM uses `examples/jaidoom/scripts/p10_timedemo.jai`, `demo.json` and
 `doom1.wad` at 120x78. Each process first executes the entire timedemo as a
 warm-up, then invokes its existing `main()` again in the same engine with
@@ -150,3 +156,31 @@ that call's level/demo setup; its printed ms/tic still measures only the replay
 loop. Filter samples by PID and marker interval and state which interval was
 used. Provider registration belongs to each execution; normal builds compile
 out the marker code.
+
+
+## Recovering an interrupted timing session
+
+Pass `--resume` with the original build, workload, output, round-count,
+recording and background-limit arguments. Recovery requires complete conformance
+gates. It verifies binary/workload identities, topology, raw logs, screening
+verdicts and the exact accepted ABAB prefix before launching anything else.
+Already accepted runs and every rejected attempt stay in the original order.
+Changes to any measurement input or acceptance limit require a fresh session.
+
+`--max-attempts` sets the busy-retry budget (default 10). Raising that budget
+does not change the acceptance threshold. Short LuaJIT JIT processes can produce
+coarse process/system CPU-accounting diagnostics and need more retries. They
+still receive the same 600-tick workload, warm-up and screening.
+
+Recovery preserves pre-resume metadata/run backups and the new runner source.
+A completed timing run prints its accepted/required count. It never publishes a
+successful partial timing summary. JSON checkpoints are replaced atomically.
+
+The competitor list is `cl.exe`, `link.exe`, `ninja.exe`,
+`msbuild.exe`, `bindstone.exe` and names beginning `jai_gloom`,
+`gloom_lua` or `jaiscript`. Other applications and agent processes are
+covered only by the background CPU screen and the coordinated quiet window.
+
+CPU trace analysis additionally needs Windows Performance Toolkit (`xperf`)
+and matching PDBs. The marked binaries have been built and hash-checked; the
+combined administrative CPU-recording wrapper has not yet been run end to end.

@@ -159,6 +159,10 @@ Measured (i7-6920HQ 4C/8T, Release, 100x40 console, seed 666, quiet machine,
 Single 300-tick runs; treat ±10% as machine noise (a thermal-loaded rerun of
 this table once showed serial interp at 64 ms — measure quiet or measure twice).
 
+The current numbers (Core Ultra 9 285HX, 100x40, 600 warmed ticks, against Lua 5.4,
+5.5 and LuaJIT JIT under the same hashes) are in
+[docs/PERFORMANCE.md](../../docs/PERFORMANCE.md); the tables above are that older laptop.
+
 Stage ablation (VM, quad, W=4, measured by early-returning the pipeline):
 sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
 cost at W=4), wall paint ~6 ms, sprites+particles ~3 ms, **glyph-row building

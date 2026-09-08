@@ -163,6 +163,12 @@ int main(int argc, char** argv) {
     _set_abort_behavior(0, _CALL_REPORTFAULT);
     // Symbolized native stack on abort: an assert in a headless run names its call path
     signal(SIGABRT, [](int) { print_native_backtrace(); });
+    // An access violation names its call path too (the first one prints, the process then
+    // dies as it would have)
+    AddVectoredExceptionHandler(1, [](PEXCEPTION_POINTERS info) -> LONG {
+        if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) { print_native_backtrace(); }
+        return EXCEPTION_CONTINUE_SEARCH;
+    });
 #ifdef JAISCRIPT_DIAG_XTHREAD_RC
     // Canary builds report directly at the racing touch (signals lose concurrent aborts)
     jai::detail::diag_xthread_report = &print_native_backtrace;

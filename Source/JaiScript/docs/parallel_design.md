@@ -134,6 +134,14 @@ buffer, and the elements of a nested object buffer; a source whose declared type
 string is never exclusive by construction. A worker's by-value parameter clone (the read-only
 elision needs a main-thread verdict) then copies handles no other thread touches.
 
+**The interner is frozen in every mode.** `string_symbolizer` is not thread-safe, so a region
+freezes it before the fork whether or not `allow_unsafe_parallel` is set: unsafe mode vouches
+for the script's sharing, never for the runtime's tables. Every name a worker can probe is
+interned at admission, single-threaded: member, getter and setter ids of every chain the body
+names and of every method-call site (both backends probe the user-accessor id of a method name
+before dispatch). A miss on the frozen interner is Debug's assert, the tripwire. A worker that
+finds a pin for a method uses it in unsafe mode too; an unpinned call there is unsafe's business.
+
 **The element reference is a cursor.** A by-reference body binds its element to ONE reference
 holder per chunk, minted at the barrier (the array pin and the `live_elem_refs` count are
 main-thread facts) and re-pointed at the next index on the worker before each call; an admitted

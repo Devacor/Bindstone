@@ -7111,15 +7111,16 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     // no shared count, cache, or IC is ever touched); anything unpinned
                     // keeps the wall error. KEEP the verdict text BYTE-PARALLEL with vm
                     // exec_call_method's twin.
-                    if (parallel_worker_ && cls_raw && !engine_->allow_unsafe_parallel()) [[unlikely]] {
-                        const detail::parallel_method_pin* pin = parallel_method_pins_
-                            ? parallel_method_pins_->find(cls_raw, member->member_id) : nullptr;
-                        if (!pin) {
-                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                                "method '{0}' was not admitted in this parallel body (admitted: single-overload "
-                                "public methods on the element's own class touching only element, local, or "
-                                "captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
-                        }
+                    const detail::parallel_method_pin* worker_pin = (parallel_worker_ && cls_raw && parallel_method_pins_)
+                        ? parallel_method_pins_->find(cls_raw, member->member_id) : nullptr;
+                    if (parallel_worker_ && cls_raw && !worker_pin && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                            "method '{0}' was not admitted in this parallel body (admitted: single-overload "
+                            "public methods on the element's own class touching only element, local, or "
+                            "captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
+                    }
+                    if (worker_pin) [[unlikely]] {
+                        const detail::parallel_method_pin* pin = worker_pin;
                         dispatch = pin->method_value.as_function().target<script_method_dispatch>();
                         def_env = dispatch->definition_env;
                         cls_pin = dispatch->cls;

@@ -1462,6 +1462,11 @@ namespace jai::vm {
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_const(frame& f, const vm_instruction& ins);
+        op_status exec_typed_push(frame& f, const vm_instruction& ins);
+        // The append rows shared by op_push_fused and op_t_push: a payload the buffer takes
+        // as-is lands with the kernel's memory charge; declined = run the slice kernel
+        enum class push_append { appended, declined, failed };
+        push_append typed_push_append(const script_value& objd, const script_value& pv);
         // op_binary_fused_temp's landing: the kernel's result lands RAW in a compiler temp
         // (temps only ever receive kernel mints, so a live temp's tag is null)
         struct temp_lane_sink {

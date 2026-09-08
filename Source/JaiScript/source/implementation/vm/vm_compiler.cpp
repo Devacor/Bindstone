@@ -1972,6 +1972,56 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ins = vm_instruction{t, dst, left, right};
 			break;
 		}
+		case opcode::op_compound_fused: {
+			// `x op= y` (bare rhs, statement position) on a direct slot: the compound lane's int
+			// row in place; kind_flags beyond no_result/incdec keep the general op
+			const compound_fused_proto& cp = c.compound_fused_protos[ins.a];
+			if (cp.rhs_proto != k_invalid_u32 || cp.slot == k_invalid_u32 || cp.slot >= k_typed_slot_mask) break;
+			if ((cp.kind_flags & ~(compound_kind_mask | compound_flag_no_result | compound_flag_incdec)) != 0) break;
+			if (!(cp.kind_flags & compound_flag_no_result)) break;
+			opcode t;
+			switch (cp.kind_flags & compound_kind_mask) {
+			case compound_plus: t = opcode::op_t_add_ii; break;
+			case compound_minus: t = opcode::op_t_sub_ii; break;
+			case compound_star: t = opcode::op_t_mul_ii; break;
+			case compound_slash: t = opcode::op_t_div_ii; break;
+			default: t = opcode::op_halt; break;
+			}
+			if (t == opcode::op_halt) break;
+			uint32_t right;
+			if (cp.rhs.const_index != k_invalid_u32) {
+				if (cp.rhs.const_index >= k_typed_slot_mask || c.constants[cp.rhs.const_index].raw_storage_index() != script_value::TYPEID_INT) break;
+				right = k_typed_const_bit | cp.rhs.const_index;
+			} else if (cp.rhs.slot != k_invalid_u32 && cp.rhs.load_flags == 0 && cp.rhs.slot < k_typed_slot_mask) {
+				right = cp.rhs.slot;
+			} else {
+				break;
+			}
+			chunk_ = &c;
+			typed_site_at(ip).orig = ins;
+			ins = vm_instruction{t, cp.slot | (k_typed_dst_compound << k_typed_dst_shift), cp.slot, right};
+			break;
+		}
+		case opcode::op_push_fused: {
+			// a slot receiver and a slot or literal value on a site the builtin index knows:
+			// the append rows of exec_push_fused with nothing to decode
+			const push_proto& pp = c.push_protos[ins.a];
+			if (!c.builtin_indexed || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) break;
+			if (!pp.receiver.direct || pp.receiver.slot == k_invalid_u32 || pp.receiver.slot >= k_typed_slot_mask || pp.receiver.const_index != k_invalid_u32) break;
+			uint32_t value;
+			if (pp.value.const_index != k_invalid_u32) {
+				if (pp.value.const_index >= k_typed_slot_mask) break;
+				value = k_typed_const_bit | pp.value.const_index;
+			} else if (!pp.value_is_subscript && pp.value.direct && pp.value.slot != k_invalid_u32 && pp.value.slot < k_typed_slot_mask) {
+				value = pp.value.slot;
+			} else {
+				break;
+			}
+			chunk_ = &c;
+			typed_site_at(ip).orig = ins;
+			ins = vm_instruction{opcode::op_t_push, pp.receiver.slot, value, ins.a};
+			break;
+		}
 		case opcode::op_fused_cmp_jump: {
 			const fused_binary_proto& bp = c.fused_binary_protos[ins.b];
 			if (bp.typed_class == 0) break;

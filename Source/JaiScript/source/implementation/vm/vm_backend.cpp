@@ -13100,6 +13100,19 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 checked_result<void> vm_backend::run(frame& entry) {
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	// host-entered frames (execute, execute_callable, a fiber's body) never go through the
+	// in-loop push and pop, so their inclusive span is taken here
+	struct entry_inclusive {
+		vm_backend* vm; const chunk* code; uint64_t t0;
+		~entry_inclusive() {
+			if (vm->parallel_worker_ || !code) return;
+			auto& st = vm->profile_stats_for(*code);
+			st.inclusive_cycles += __rdtsc() - t0;
+			++st.entries;
+		}
+	} entry_span{this, entry.code, __rdtsc()};
+#endif
 	for (;;) {
 		try {
 			if (run_dispatch(fp, records_base) == op_status::failed) {
@@ -13491,7 +13504,17 @@ void vm_backend::dump_opcode_profile() const {
 }
 #endif
 
+#ifdef JAISCRIPT_VM_PROFILE
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
+	const uint64_t span_start = __rdtsc();
+	const op_status st = run_dispatch_profiled(fp, records_base);
+	profile_nested_cycles_ += __rdtsc() - span_start;
+	return st;
+}
+op_status vm_backend::run_dispatch_profiled(frame*& fp, const size_t records_base) {
+#else
+op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
+#endif
 	checked_result<void> shared_op_result_;
 #ifdef JAISCRIPT_VM_PROFILE
 	// Self-time opcode histogram (diagnostic builds only; dumped by ~vm_backend).
@@ -13502,6 +13525,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	const chunk* prof_chunk = nullptr;
 	profile_chunk_stats* prof_stats = nullptr;
 	size_t prof_ip = 0;
+	uint64_t prof_nested_mark = profile_nested_cycles_;
 #endif
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
@@ -13516,7 +13540,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		{
 			const uint64_t prof_now = __rdtsc();
 			if (prof_prev < 256) {
-				const uint64_t dt = prof_now - prof_t0;
+				// the previous opcode's own span, less any dispatch loop that ran inside it
+				const uint64_t nested = profile_nested_cycles_ - prof_nested_mark;
+				const uint64_t raw = prof_now - prof_t0;
+				const uint64_t dt = raw > nested ? raw - nested : 0;
 				profile_cycles_[prof_prev] += dt;
 				++profile_counts_[prof_prev];
 				if (prof_stats && prof_ip < prof_stats->ip_cycles.size()) {
@@ -13525,6 +13552,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 			}
 			prof_t0 = prof_now;
+			prof_nested_mark = profile_nested_cycles_;
 			prof_prev = static_cast<unsigned>(ins.op);
 			prof_ip = f.ip;
 			if (f.code != prof_chunk) {

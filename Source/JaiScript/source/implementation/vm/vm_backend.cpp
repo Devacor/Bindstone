@@ -6416,6 +6416,12 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 		frame_slot_set(f, slot, std::move(nv));
 		return true;
 	}
+	case k_typed_dst_compound:
+		// exec_compound_fused's int row: the slot already holds an int (the operand read
+		// proved it), the payload updates in place, tag untouched
+		if (!s || s->raw_storage_index() != script_value::TYPEID_INT) return false;
+		s->unchecked_set_int_payload(v);
+		return true;
 	default:
 		return false;
 	}
@@ -6461,6 +6467,7 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 	case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, orig);
 	case opcode::op_binary_fused_store: return exec_binary_fused_store(f, orig);
 	case opcode::op_fused_cmp_jump: return exec_fused_cmp_jump(f, orig);
+	case opcode::op_compound_fused: return exec_compound_fused(f, orig);
 	default:
 		return raise_(make_error_code(runtime_error_code::unsupported_operation), "typed op without an origin (internal)");
 	}
@@ -10087,6 +10094,78 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	return {};
 }
 
+// Payloads the buffer takes as-is (the slice kernel's compat + convert + push collapse to
+// one append): a null/scalar/string into a var array is its own shared copy; an int into an
+// int buffer, an int or float into a float buffer, a string into a string buffer. The memory
+// charge is the kernel's exact formula, so the cap trips at the same push. Everything else
+// (typed classes, nested containers, a float into an int buffer) is declined to the kernel.
+vm_backend::push_append vm_backend::typed_push_append(const script_value& objd, const script_value& pv) {
+	const size_t vi = pv.raw_storage_index();
+	script_array* node = const_cast<script_value&>(objd).unchecked_get_array_storage().get();
+	if (!node) return push_append::declined;
+	auto charge = [&](size_t bytes) -> bool { return limits_->memory_charge(bytes); };
+	switch (node->kind()) {
+	case script_array::kind_t::hetero: {
+		const type_info* ti = objd.get_type_info().get();
+		const type_info* et = ti ? ti->element_type().get() : nullptr;
+		if ((et && et->base_type != script_value_type::jai_any_type) ||
+		    !(vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+		      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
+			return push_append::declined;
+		}
+		const size_t bytes = sizeof(script_value) + (vi == script_value::TYPEID_STRING ? pv.unchecked_as_string().size() : 0);
+		if (!charge(bytes)) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
+		node->values().push_back(pv);
+		return push_append::appended;
+	}
+	case script_array::kind_t::i64:
+		if (vi != script_value::TYPEID_INT) return push_append::declined;
+		if (!charge(sizeof(script_value))) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
+		node->ints().push_back(pv.unchecked_as_int());
+		return push_append::appended;
+	case script_array::kind_t::f64:
+		if (vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_INT) return push_append::declined;
+		if (!charge(sizeof(script_value))) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
+		node->floats().push_back(vi == script_value::TYPEID_FLOAT ? pv.unchecked_as_float() : static_cast<script_float>(pv.unchecked_as_int()));
+		return push_append::appended;
+	case script_array::kind_t::str:
+		if (vi != script_value::TYPEID_STRING) return push_append::declined;
+		if (!charge(sizeof(script_value) + pv.unchecked_as_string().size())) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
+		node->strs().push_back(pv.unchecked_string_handle());
+		return push_append::appended;
+	default:
+		return push_append::declined;
+	}
+}
+
+// op_t_push: the append rows over a slot receiver and a slot or literal value; anything
+// else (a non-array receiver, a declined payload) is the original op_push_fused
+op_status vm_backend::exec_typed_push(frame& f, const vm_instruction& ins) {
+	if (const script_value* recv = frame_slot(f, ins.a)) {
+		const script_value& objd = recv->deref();
+		if (objd.raw_storage_index() == script_value::TYPEID_ARRAY) {
+			std::optional<script_value> vconst;
+			const script_value* vp;
+			if (ins.b & k_typed_const_bit) {
+				vconst.emplace(materialize_constant(*f.code, ins.b & ~k_typed_const_bit));
+				vp = &*vconst;
+			} else {
+				vp = frame_slot(f, ins.b);
+			}
+			if (vp) {
+				const push_append lane = typed_push_append(objd, vp->deref());
+				if (lane == push_append::failed) return op_status::failed;
+				if (lane == push_append::appended) {
+					if (next_op_discards_result(f)) { ++f.ip; }
+					else { stack_.push_back(make_null()); }
+					return {};
+				}
+			}
+		}
+	}
+	return exec_push_fused(f, f.code->typed_sites[f.ip].orig);
+}
+
 // `recv.push(v);` fused (op_push_fused): the receiver resolves first, then the value, both
 // through the LOAD-identical operand ladders; an array receiver with the builtin push runs
 // the sliced push kernel VERBATIM (compat text, element conversion, memory charge, append)
@@ -10134,50 +10213,9 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 		// array, so the builtin is push: no member-node walk, no id compare
 		if (!resolve_value()) return op_status::failed;
 		{
-			// Payloads the buffer takes as-is (the slice kernel's compat + convert + push
-			// collapse to one append): a null/scalar/string into a var array is its own
-			// shared copy; an int into an int buffer, an int or float into a float buffer,
-			// a string into a string buffer. The memory charge is the kernel's exact
-			// formula, so the cap trips at the same push. Everything else (typed classes,
-			// nested containers, a float into an int buffer) runs the kernel below.
-			const script_value& pv = val->deref();
-			const size_t vi = pv.raw_storage_index();
-			script_array* node = const_cast<script_value&>(objd).unchecked_get_array_storage().get();
-			const script_array::kind_t kind = node->kind();
-			bool appended = false;
-			auto charge = [&](size_t bytes) -> bool { return limits_->memory_charge(bytes); };
-			if (kind == script_array::kind_t::hetero) {
-				const type_info* ti = objd.get_type_info().get();
-				const type_info* et = ti ? ti->element_type().get() : nullptr;
-				if ((!et || et->base_type == script_value_type::jai_any_type) &&
-				    (vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-				     vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
-					const size_t bytes = sizeof(script_value) + (vi == script_value::TYPEID_STRING ? pv.unchecked_as_string().size() : 0);
-					if (!charge(bytes)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
-					node->values().push_back(pv);
-					appended = true;
-				}
-			} else if (kind == script_array::kind_t::i64) {
-				if (vi == script_value::TYPEID_INT) {
-					if (!charge(sizeof(script_value))) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
-					node->ints().push_back(pv.unchecked_as_int());
-					appended = true;
-				}
-			} else if (kind == script_array::kind_t::f64) {
-				if (vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_INT) {
-					if (!charge(sizeof(script_value))) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
-					node->floats().push_back(vi == script_value::TYPEID_FLOAT ? pv.unchecked_as_float()
-					                                                          : static_cast<script_float>(pv.unchecked_as_int()));
-					appended = true;
-				}
-			} else if (kind == script_array::kind_t::str) {
-				if (vi == script_value::TYPEID_STRING) {
-					if (!charge(sizeof(script_value) + pv.unchecked_as_string().size())) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
-					node->strs().push_back(pv.unchecked_string_handle());
-					appended = true;
-				}
-			}
-			if (appended) {
+			const push_append lane = typed_push_append(objd, val->deref());
+			if (lane == push_append::failed) return op_status::failed;
+			if (lane == push_append::appended) {
 #ifdef JAISCRIPT_VM_PROFILE
 				++profile_push_fused_lane_[0];
 #endif
@@ -13709,6 +13747,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_push_fused:
 				VM_TRY_OP_SHARED(exec_push_fused(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_t_push:
+				VM_TRY_OP_SHARED(exec_typed_push(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 

@@ -4265,6 +4265,18 @@ public:
 				"int g = 10; string run() { int x = g; int y = x + g; g = y; return to_string(g) + to_string(x); } run();",
 				"string run() { int x = 1; var f = [&]() { x = x + 5; }; f(); int y = x * 2; return to_string(x) + to_string(y); } run();",
 				"string run() { int i = 0; int acc = 0; for (i = 0; i < 6; i = i + 2) { acc = acc + i; } return to_string(acc) + to_string(i); } run();",
+				// compound rows: in-place int updates, overflow, zero divisor, %= and floats stay general, ++/-- desugar, a boxed target
+				"string run() { int acc = 0; int k = 3; for (int i = 0; i < 10; ++i) { acc += k; acc -= 1; acc *= 2; acc /= 3; ++acc; acc++; --acc; } return to_string(acc); } run();",
+				"string run() { int x = 0x7fffffffffffffff; int one = 1; string m = \"ok\"; try { x += one; } catch (e) { m = e; } int y = 5; int z = 0; try { y /= z; } catch (e) { m += \"|\" + e; } return m + to_string(x) + to_string(y); } run();",
+				"string run() { int x = 17; int m3 = 3; x %= m3; float f = 1.5; f += 2.5; f *= 2.0; var v = 4; v += 3; v *= 2; return to_string(x) + to_string(f) + to_string(v) + type_of(v); } run();",
+				"string run() { int x = 1; int& r = x; int d = 4; x += d; r += 1; x *= 2; return to_string(x) + to_string(r); } run();",
+				"string run() { int x = 2; var s = \"a\"; string m = \"ok\"; try { x += s; } catch (e) { m = e; } var w = \"b\"; w += \"c\"; return m + to_string(x) + w; } run();",
+				// typed push rows: slot receiver with literal and slot values, every buffer kind, a declined payload, a null receiver
+				"string run() { var parts = []; string s = \"x\"; int k = 3; float f = 1.5; for (int i = 0; i < 4; ++i) { parts.push(\" \"); parts.push(s); parts.push(k); parts.push(f); parts.push(true); parts.push(null); } return to_string(parts.size()) + parts.join(\"|\"); } run();",
+				"string run() { array<int> a = []; array<float> b = []; array<string> c = []; int k = 4; float g = 2.5; string t = \"t\"; a.push(k); a.push(7); b.push(k); b.push(g); c.push(t); c.push(\"u\"); string m = \"ok\"; try { a.push(g); } catch (e) { m = e; } try { c.push(k); } catch (e) { m += \"|\" + e; } return to_string(a[0] + a[1]) + to_string(b[0] + b[1]) + c[0] + c[1] + m; } run();",
+				"class N { int v = 1; } string run() { array<N> ns = []; N one = N(); ns.push(one); one.v = 9; var xs = []; var row = [1]; xs.push(row); row.push(2); return to_string(ns[0].v) + to_string(xs[0].size()); } run();",
+				"string run() { var d; string m = \"ok\"; try { d.push(1); } catch (e) { m = e; } var s = \"str\"; try { s.push(1); } catch (e) { m += \"|\" + e; } return m; } run();",
+				"string run() { var a = []; string lit = \"k\"; a.push(lit); a.push(\"k\"); a[0] += \"1\"; a[1] += \"2\"; return lit + a[0] + a[1] + \"k\"; } run();",
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {

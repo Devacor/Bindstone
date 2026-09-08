@@ -193,6 +193,8 @@ namespace jai::vm {
         op_t_decl_const,    // a = dst slot, b = constant index, c = decl node
         op_t_store_mov,     // a = dst slot, b = src slot, c = store flags
         op_t_store_const,   // a = dst slot, b = constant index, c = store flags
+        op_t_push,          // `recv.push(v);` with a slot receiver and a slot or constant value:
+                            // a = receiver slot, b = value slot or const bit | index, c = push_protos index
         op_halt,
     };
 
@@ -202,6 +204,7 @@ namespace jai::vm {
     inline constexpr uint32_t k_typed_dst_temp = 0;
     inline constexpr uint32_t k_typed_dst_decl = 1;
     inline constexpr uint32_t k_typed_dst_store = 2;
+    inline constexpr uint32_t k_typed_dst_compound = 3;   // `x op= y` on an int-holding slot: in place, int rows only
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
@@ -391,6 +394,7 @@ namespace jai::vm {
             case opcode::op_t_decl_const: return "T_DECL_CONST";
             case opcode::op_t_store_mov: return "T_STORE_MOV";
             case opcode::op_t_store_const: return "T_STORE_CONST";
+            case opcode::op_t_push: return "T_PUSH";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

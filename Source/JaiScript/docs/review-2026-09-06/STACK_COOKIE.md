@@ -136,6 +136,11 @@ report, not the form the ruling admits: the adoption question is which VM functi
 the cost (the run loop, the operand resolvers and the fused kernels have no fixed-size
 stack buffers) and whether the per-function marks recover the same delta.
 
+Decision (2026-09-06): Dev deferred to the reviewer's judgment; the per-function form
+stands. The blanket flag is not adopted. The follow-up is an audit of `vm_backend.cpp`'s hot
+functions for writable fixed-size locals, `safebuffers` marks behind one portable macro on the
+functions the audit clears, and the same two whole-program gates on the marked build.
+
 The earlier 2.8% serial CPU share of `__security_check_cookie` is an exclusive
 sampled-function share from the older C7EF13D9 binary. It excludes some caller
 prolog/epilog work and is not a speedup prediction for this newer source snapshot.

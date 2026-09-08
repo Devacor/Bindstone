@@ -91,6 +91,7 @@ private:
 
 	void handleInput();
 	
+	std::shared_ptr<jai::engine> engineKeepAlive_;   // first: the engine outlives managers' script receivers
 	MV::TapDevice mouse;
 	Managers managers;
 

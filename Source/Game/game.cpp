@@ -42,11 +42,11 @@ void sdl_quit(void){
 }
 
 Game::Game(Managers& a_managers) :
+	jaiEngine_(MV::makeScriptEngine(a_managers.services)),
 	gameData(a_managers, false),
-	done(false),
-	jaiEngine_(MV::makeScriptEngine(a_managers.services)) {
+	done(false) {
 
-	// Script globals (non-owning: this/messages outlive the engine)
+	// Non-owning script globals; host owners control their lifetime.
 	jaiEngine_->add_global("game", jaiEngine_->make_object(std::shared_ptr<Game>(this, [](Game*) {})));
 	jaiEngine_->add_global("messages", jaiEngine_->make_object(std::shared_ptr<StandardMessages>(&a_managers.messages, [](StandardMessages*) {})));
 	jaiEngine_->add_global("DefaultLoginId", jai::script_value(a_managers.defaultLogin.id, jaiEngine_.get()));

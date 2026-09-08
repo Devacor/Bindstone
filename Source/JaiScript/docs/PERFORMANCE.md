@@ -2,41 +2,37 @@
 
 ## Whole-program snapshot: 2026-09-08
 
-Runtime source `605b6520`; MSVC 19.51.36252 Release with LTCG;
+Runtime source `c85ea0dd`; MSVC 19.51.36252 Release with LTCG;
 Intel Core Ultra 9 285HX. GLOOM runs 600 measured ticks after 600 warm-up ticks,
 seed 666, 100x40 quad output. JaiDOOM repeats its 3984-tic, 120x78 replay in
 the same warmed engine. Serial configurations use one P core; parallel GLOOM
 uses eight. Three interleaved rounds give six accepted measurements per layout.
 
-| Runtime | P cores | Unit | Normal median | Padding median | Paired padding band | Normal observed range |
-|---|---:|---|---:|---:|---|---|
-| JaiScript VM serial | 1 | ms/tick | 1.401709 | 1.406005 | -0.53% to +1.13% | 1.396208 to 1.408952 |
-| JaiScript VM 8 workers | 8 | ms/tick | 1.342820 | 1.346534 | -0.39% to +1.50% | 1.317954 to 1.351338 |
-| Lua 5.4.8 | 1 | ms/tick | 0.384441 | 0.387128 | -1.03% to +2.10% | 0.383658 to 0.388794 |
-| Lua 5.5.1 | 1 | ms/tick | 0.392995 | 0.392879 | -1.78% to +1.21% | 0.388486 to 0.398593 |
-| LuaJIT 2.1 JIT | 1 | ms/tick | 0.099499 | 0.095005 | -27.32% to +17.20% | 0.088558 to 0.133763 |
-| JaiDOOM VM timedemo | 1 | ms/tic | 4.687123 | 4.697038 | +0.10% to +0.42% | 4.679719 to 4.697038 |
+| Runtime | Source | P cores | Unit | Normal median | Padding median | Paired padding band |
+|---|---|---:|---|---:|---:|---|
+| JaiScript VM serial | c85ea0dd | 1 | ms/tick | 1.366639 | 1.371563 | -0.46% to +0.69% |
+| JaiScript VM 8 workers | c85ea0dd | 8 | ms/tick | 1.377145 | 1.380521 | -0.50% to +20.56% |
+| Lua 5.4.8 | pinned reference binary | 1 | ms/tick | 0.385276 | 0.385729 | -1.28% to +1.14% |
+| Lua 5.5.1 | pinned reference binary | 1 | ms/tick | 0.390491 | 0.392748 | -1.98% to +1.26% |
+| LuaJIT 2.1 JIT | pinned reference binary | 1 | ms/tick | 0.100875 | 0.095740 | -14.67% to +14.49% |
+| JaiDOOM VM timedemo | c85ea0dd | 1 | ms/tic | 4.680723 | 4.648469 | -0.99% to -0.26% |
 
-All configurations match their reference hashes. Padding bands are paired
-control-to-normal ranges and include run variation. The GLOOM/Lua window
-accepted 60 timings and excluded 16 busy attempts. JaiDOOM's row comes from
-the paired JaiScript comparison, which accepted 72 timings across both games
-and excluded five busy attempts. Both windows use the same fixed candidate
-binaries and a 1.0-core desktop background screen across 24 cores.
+All configurations match their reference hashes. Padding bands are observed
+paired control-to-normal ranges. The GLOOM/Lua window accepted 60 timings and
+excluded 64 busy attempts. JaiDOOM's row comes from the paired JaiScript
+comparison, which accepted 72 timings across both games and excluded 22 busy
+attempts. The fixed desktop screen is 1.0 core-equivalent across 24 cores.
 
-The serial VM/Lua 5.4.8 ratio is **3.65x** on the normal layout and
-**3.63x** on the padded layout; corresponding padding bands are in the table.
+The serial VM/Lua 5.4.8 ratio is **3.55x** on the normal layout and
+**3.56x** on the padded layout; corresponding padding bands are in the table.
 
-The paired comparison against `e6f84aba` measures lower elapsed time on
-both layouts: GLOOM serial 11.09% to 12.29%, eight workers 9.48% to 10.20%,
-and JaiDOOM 6.47% to 6.87%. Reference and candidate padding bands, along with
-the paired revision-change bands, are recorded in the full results.
+An accepted eight-worker padding outlier widens that configuration's band.
+LuaJIT JIT also has a wide band and coarse short-process CPU diagnostics.
+Small deltas for either are unresolved. Lua 5.4.8 and 5.5.1 have overlapping
+observed ranges. LuaJIT JIT is a runtime-code-generation ceiling outside the
+Bindstone iOS shipping target.
 
-Lua 5.4.8 and Lua 5.5.1 have overlapping observed ranges. LuaJIT JIT has a wide
-padding band and is a runtime-code-generation ceiling outside the Bindstone
-iOS shipping target.
-
-[Full results, versions, flags, methodology and raw evidence](../examples/gloom/ports/RESULTS_TYPED_OPS_2026-09-08.md).
+[Full paired results, versions, flags, controls and raw evidence](../examples/gloom/ports/RESULTS_2026-09-08_FINAL.md).
 
 ## Microbenchmark snapshot: 2026-07
 

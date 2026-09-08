@@ -715,6 +715,10 @@ namespace jai {
         uint64_t name_id = UINT64_MAX;  // Interned name for fast lookup (UINT64_MAX = not interned)
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
+        // Declared with the `function` keyword (`function f = expr;`). The slot itself stays
+        // auto (parse_type maps `function` to auto, the same as a function-typed parameter);
+        // the checker reads this to hold the slot to callables and null
+        bool function_spelling = false;
         // Parser escape analysis: the variable may be bound by reference, so its
         // declaration boxes the value into a cell (storage IS the cell from birth)
         bool ref_escaping = false;

@@ -348,6 +348,11 @@ engine stays usable", not by `check_throws`.
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.
+- **Declaration spellings the parser keeps for the checker**: `function f = expr;` / `function f;` (top level, body, field)
+  is an auto slot at runtime (the same as a function-typed parameter) that carries `variable_decl::function_spelling`,
+  so the strict checker can hold the slot to callables and null without the runtime changing; `ClassName& name = expr;` and
+  `ClassName& name;` at statement level are reference declarations (the same lookahead that reads `ClassName& name(` as a
+  reference-return function; C++: whatever can be a declaration is one). `.jaibite` version 15.
 - **Catch variable = block-scoped local** (`docs/EXCEPTION_DESIGN.md` addendum): `catch (e)`
   binds `e` as a frame-slot local of the catch body (scope env at top level) - C++ `catch`
   semantics: shadows for the block only, invisible to callees and after the block, captured

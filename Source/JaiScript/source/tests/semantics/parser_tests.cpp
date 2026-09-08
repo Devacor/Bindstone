@@ -4,6 +4,7 @@
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/interpreter.hpp>  // For string_symbolizer
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
 
 using namespace jai::foundry;
 
@@ -14,6 +15,70 @@ public:
     parser_tests() : suite("Parser Tests") {}
     
     void forge_tests() override {
+        test("function_spelling_is_kept_for_the_checker", [this]() {
+            // `function f = expr;` parses as an auto slot (the runtime slot is dynamic, like a
+            // function-typed parameter) that remembers its spelling at top level, in a body and
+            // as a field; the flag rides the jaibite so a re-check of a loaded bite sees it;
+            // `auto` and `var` declarations do not carry it
+            auto eng = make_engine();
+            auto* symbolizer = eng->get_symbolizer();
+            const std::string code =
+                "function f = 42; auto g = 42; var h = 42; function later;"
+                " void body() { function k = null; int n = 0; }"
+                " class C { function cb = null; int n = 0; }";
+            lexer lex(code, symbolizer, "test.jai");
+            auto tokens = lex.tokenize();
+            std::unordered_set<std::string> empty_types;
+            parser p(tokens, symbolizer, eng.get(), empty_types, "test.jai");
+            auto parsed = p.parse();
+            check(!p.has_errors() && parsed.has_value(), "parses");
+            auto decl_flag = [](const declaration_ptr& d) {
+                return d && d->get_type() == node_type::variable_decl && static_cast<const variable_decl*>(d.get())->function_spelling;
+            };
+            auto probe = [&](const std::vector<declaration_ptr>& decls, const char* label) {
+                check_eq((size_t)6, decls.size(), std::string(label) + " declaration count");
+                check_true(decl_flag(decls[0]), std::string(label) + " function f");
+                check_false(decl_flag(decls[1]), std::string(label) + " auto g");
+                check_false(decl_flag(decls[2]), std::string(label) + " var h");
+                check_true(decl_flag(decls[3]), std::string(label) + " function later;");
+                check_true(!static_cast<const variable_decl*>(decls[0].get())->type, std::string(label) + " the slot stays auto");
+                auto* fn = static_cast<const function_decl*>(decls[4].get());
+                check_true(fn->body && fn->body->declarations.size() == 2 && decl_flag(fn->body->declarations[0]) &&
+                           !decl_flag(fn->body->declarations[1]), std::string(label) + " body local");
+                auto* cls = static_cast<const class_decl*>(decls[5].get());
+                check_true(cls->members.size() == 2 && decl_flag(cls->members[0].declaration) &&
+                           !decl_flag(cls->members[1].declaration), std::string(label) + " field");
+            };
+            probe(parsed.value(), "parsed");
+            const auto bytes = detail::serialize_jaibite(parsed.value(), *symbolizer, eng->registration_fingerprint());
+            uint64_t fingerprint = 0;
+            auto loaded = detail::deserialize_jaibite(bytes.data(), bytes.size(), eng.get(), fingerprint);
+            probe(loaded, "loaded");
+        });
+
+        test("class_typed_reference_declaration_parses_as_a_declaration", [this]() {
+            // `Base& b = derived;` and `Base& b;` at statement level are reference
+            // declarations (they read as bitwise-and plus assignment before); `Box& get(`
+            // stays the reference-return function; a bitwise-and statement keeps its meaning
+            check_parse_succeeds("class A { int x = 1; } class B : A {} B b = B(); A& a = b; a.x = 5;");
+            check_parse_succeeds("class A {} A& r;");
+            check_parse_succeeds("class Box { int v = 0; } Box b = Box(); Box& get() { return b; }");
+            auto eng = make_engine();
+            auto* symbolizer = eng->get_symbolizer();
+            lexer lex("class A { int x = 1; } class B : A {} B b = B(); A& a = b;", symbolizer, "test.jai");
+            auto tokens = lex.tokenize();
+            std::unordered_set<std::string> empty_types;
+            parser p(tokens, symbolizer, eng.get(), empty_types, "test.jai");
+            auto parsed = p.parse();
+            check(!p.has_errors() && parsed.has_value(), "parses");
+            const auto& decls = parsed.value();
+            check_eq((size_t)4, decls.size());
+            check_true(decls[3]->get_type() == node_type::variable_decl, "a declaration, not an expression");
+            auto* ref = static_cast<const variable_decl*>(decls[3].get());
+            check_true(ref->type && ref->type->base_type == script_value_type::jai_reference_type, "a reference type");
+            check_eq(std::string("A&"), ref->type->type_name);
+        });
+
         test("expression_literals", [this]() {
             check_parse_succeeds("42;");
             check_parse_succeeds("3.14;");

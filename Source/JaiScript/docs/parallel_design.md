@@ -97,8 +97,12 @@ real cost center of the whole feature:
 
 ## 3. RULED: scheduling is static chunks (determinism)
 
-Iterations are pre-partitioned into **contiguous per-thread chunks** before the fork — exactly
-`n / thread_count()` by default, boundary-shifted by the optional weight hint (RULED, §11 Q1).
+Iterations are pre-partitioned before the fork into a fixed per-thread set: without a weight
+hint, blocks of `max(1, n / 4W)` consecutive elements dealt round-robin over the W threads
+(block-cyclic: a cost that varies along the range spreads over every thread; small n means
+expensive elements, large n means blocks of hundreds so no two threads write neighbouring
+scalars); with the optional weight hint (RULED, §11 Q1), contiguous chunks split by cumulative
+weight. `engine::last_parallel_chunk_bounds()` publishes the cumulative element counts per chunk.
 Same input + seed ⇒ byte-identical `thread_storage` contents — replayable, smoke-hashable. This is
 the point: **deterministic pads** replace the old sequential-equivalence contract as the
 testable guarantee (§8 Testing).

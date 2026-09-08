@@ -2391,11 +2391,16 @@ namespace jai {
         // shares with the body call, re-pointed at the next slot after each element. Unlike
         // element_cursor_holder this ignores sharing - the wrapper and the body hold copies
         // by design; an admitted body cannot retain one past its iteration.
-        bool element_cursor_advance() noexcept {
+        bool element_cursor_advance() noexcept { return element_cursor_advance(0, 1); }
+        // The chunk's step: blocks of `block` consecutive elements, every stride_blocks-th block
+        // belonging to this cursor (block 0 = the contiguous chunk)
+        bool element_cursor_advance(size_t block, size_t stride_blocks) noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return false; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
             if (!holder || !holder->container || holder->has_map_key) { return false; }
-            ++holder->container_index;
+            size_t next = holder->container_index + 1;
+            if (block && stride_blocks > 1 && next % block == 0) { next += (stride_blocks - 1) * block; }
+            holder->container_index = next;
             return true;
         }
         size_t element_cursor_index() const noexcept {

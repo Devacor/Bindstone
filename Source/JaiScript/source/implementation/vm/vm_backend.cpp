@@ -6474,7 +6474,9 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 }
 
 op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
-	const script_value* lp = frame_slot(f, ins.b);
+	// a registered global numeric operator turns every numeric row over to the general
+	// path, which consults the operator table (the fused kernels' gate, kept here)
+	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.b);
 	const script_value* rp = lp ? typed_right(f, ins.c) : nullptr;
 	if (rp) {
 		if (ins.op <= opcode::op_t_shr_ii) {
@@ -6516,7 +6518,7 @@ op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
-	const script_value* lp = frame_slot(f, ins.a);
+	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.a);
 	const script_value* rp = lp ? typed_right(f, ins.b) : nullptr;
 	if (rp) {
 		bool truthy;

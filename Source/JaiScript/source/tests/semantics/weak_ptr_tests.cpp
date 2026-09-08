@@ -713,56 +713,56 @@ public:
             }
         });
 
-        test("weak_ptr_rejects_value_initialization", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
+		test("weak_ptr_rejects_value_initialization", [this]() {
+			auto eng = make_engine();
+			register_lifetime_tracker(*eng);
 
-            // Test that weak_ptr variable initialization rejects value-semantic objects
-            try {
-                eng->execute(R"(
-                    auto obj = LifetimeTracker(42);
-                    weak_ptr<LifetimeTracker> weak = obj;
-                )");
+			// Test that weak_ptr variable initialization rejects value-semantic objects
+			try {
+				eng->execute(R"(
+					var obj = LifetimeTracker(42); // Keep this runtime-diagnostic test behind the dynamic hatch.
+					weak_ptr<LifetimeTracker> weak = obj;
+				)");
 
-                throw test_failure("Expected error when initializing weak_ptr with value-semantic object");
-            } catch (const test_failure&) {
-                throw;  // Re-throw test failures
-            } catch (const std::exception& e) {
-                std::string error_msg = e.what();
+				throw test_failure("Expected error when initializing weak_ptr with value-semantic object");
+			} catch (const test_failure&) {
+				throw;  // Re-throw test failures
+			} catch (const std::exception& e) {
+				std::string error_msg = e.what();
 
-                // Family D's declaration shape (docs/diagnostics.md): the slot and its declared type
-                check(error_msg.find("Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker") != std::string::npos,
-                      "weak_ptr declaration from a value names the slot (got: " + error_msg + ")");
+				// Family D's declaration shape (docs/diagnostics.md): the slot and its declared type
+				check(error_msg.find("Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker") != std::string::npos,
+					  "weak_ptr declaration from a value names the slot (got: " + error_msg + ")");
 
-                std::cout << "  Error message: " << error_msg << std::endl;
-            }
-        });
+				std::cout << "  Error message: " << error_msg << std::endl;
+			}
+		});
 
-        test("weak_ptr_rejects_value_assignment", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
+		test("weak_ptr_rejects_value_assignment", [this]() {
+			auto eng = make_engine();
+			register_lifetime_tracker(*eng);
 
-            // Test that weak_ptr assignment rejects value-semantic objects
-            try {
-                eng->execute(R"(
-                    weak_ptr<LifetimeTracker> weak;
-                    auto obj = LifetimeTracker(42);
-                    weak = obj;
-                )");
+			// Test that weak_ptr assignment rejects value-semantic objects
+			try {
+				eng->execute(R"(
+					weak_ptr<LifetimeTracker> weak;
+					var obj = LifetimeTracker(42); // Keep this runtime-diagnostic test behind the dynamic hatch.
+					weak = obj;
+				)");
 
-                throw test_failure("Expected error when assigning value-semantic object to weak_ptr");
-            } catch (const test_failure&) {
-                throw;  // Re-throw test failures
-            } catch (const std::exception& e) {
-                std::string error_msg = e.what();
+				throw test_failure("Expected error when assigning value-semantic object to weak_ptr");
+			} catch (const test_failure&) {
+				throw;  // Re-throw test failures
+			} catch (const std::exception& e) {
+				std::string error_msg = e.what();
 
-                // Family D's assignment shape (docs/diagnostics.md): the slot and its declared type
-                check(error_msg.find("Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)") != std::string::npos,
-                      "weak_ptr assignment from a value names the slot (got: " + error_msg + ")");
+				// Family D's assignment shape (docs/diagnostics.md): the slot and its declared type
+				check(error_msg.find("Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)") != std::string::npos,
+					  "weak_ptr assignment from a value names the slot (got: " + error_msg + ")");
 
-                std::cout << "  Error message: " << error_msg << std::endl;
-            }
-        });
+				std::cout << "  Error message: " << error_msg << std::endl;
+			}
+		});
 
         test("weak_ptr_accepts_shared_ptr", [this]() {
             auto eng = make_engine();

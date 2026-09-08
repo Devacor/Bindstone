@@ -315,7 +315,13 @@ namespace jai::vm {
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
         std::vector<script_value>* parallel_cursors_ = nullptr;   // [0] = the range, then the zip's arrays
-        void set_parallel_cursors(std::vector<script_value>* cursors) noexcept { parallel_cursors_ = cursors; }
+        void set_parallel_cursors(std::vector<script_value>* cursors, size_t block = 0, size_t stride_blocks = 1) noexcept {
+            parallel_cursors_ = cursors;
+            parallel_block_ = block;
+            parallel_stride_blocks_ = stride_blocks;
+        }
+        size_t parallel_block_ = 0;           // the chunk's block-cyclic step (0 = contiguous)
+        size_t parallel_stride_blocks_ = 1;
         // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
         // Worker-private env-lookup cache (workers may not touch the SHARED

@@ -105,8 +105,11 @@ namespace jai::detail {
 		// Minted single-threaded at the barrier (each holder pins the container handle);
 		// cleared at the join - a dormant slot must never pin the caller's array.
 		std::vector<script_value> element_refs;
-		size_t begin = 0;
-		size_t end = 0;
+		size_t begin = 0;          // the chunk's first element
+		size_t end = 0;            // the range's length (the failing-index clamp)
+		size_t count = 0;          // elements this chunk owns
+		size_t block = 0;          // block-cyclic step: blocks of `block`, every stride_blocks-th one (0 = contiguous)
+		size_t stride_blocks = 1;
 		std::optional<parallel_worker_error> error;
 
 		// Captured-read provisioning for THIS call: name ids defined into root_env
@@ -176,6 +179,8 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.wake_lat_sum / p.wake_samples : 0.0,
 				(unsigned long long)p.wake_lat_max, (unsigned long long)p.wake_samples,
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
+			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
+				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
 			fprintf(stderr, "  setup split per region: admit %.0f | slots %.0f | captures %.0f | pins %.0f | prewarm %.0f | rest %.0f cyc\n",
 				(double)p.setup_admit_cyc / p.regions, (double)p.setup_slots_cyc / p.regions, (double)p.setup_caps_cyc / p.regions,
 				(double)p.setup_pins_cyc / p.regions, (double)p.setup_prewarm_cyc / p.regions, (double)p.setup_rest_cyc / p.regions);
@@ -1809,7 +1814,7 @@ namespace {
 			// The interpreter calls these natives; the vm compiles the names to opcodes
 			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-					for (auto& cursor : slot->cursors) { cursor.element_cursor_advance(); }
+					for (auto& cursor : slot->cursors) { cursor.element_cursor_advance(slot->block, slot->stride_blocks); }
 					const script_int k = args.empty() ? 0 : args[0].deref().as_int();
 					return script_value(k + 1, eng_ptr);
 				}, &eng));
@@ -1836,13 +1841,13 @@ namespace {
 	// output, results discarded. Every refcount touched is element-internal
 	// (normalization made elements exclusive) or worker-private: single-threaded.
 	void run_worker_chunk(parallel_worker_slot& ctx, engine& eng) {
-		if (ctx.end <= ctx.begin || ctx.element_refs.empty()) { return; }
+		if (ctx.count == 0 || ctx.element_refs.empty()) { return; }
 		// ONE script entry per chunk: the wrapper loops in-script, calling the body per element
 		// with the chunk's cursor reference and advancing it through the worker's intrinsic. The
 		// failing element, when any, is the cursor's index (the advance runs after a body call).
 		ctx.cursors = std::move(ctx.element_refs);   // [0] = the range, then the zip's arrays
 		ctx.element_refs.clear();
-		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors); }
+		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors, ctx.block, ctx.stride_blocks); }
 		struct cursor_reset {
 			parallel_worker_slot& c;
 			~cursor_reset() {
@@ -2921,13 +2926,37 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	state.faults.checkpoint("region.pool_storage");
 	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
 	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
+	// THE PARTITION (static, so results never depend on it): without a weight hint the
+	// elements go to the workers block-cyclically, blocks of max(1, n / 4W) consecutive elements
+	// dealt round-robin, so a cost that varies along the range (a wall-heavy band of screen rows)
+	// spreads over every worker instead of landing on one; small n means expensive elements (the
+	// cost cap keeps cheap small ranges on one thread), large n means blocks of hundreds, so no
+	// two workers write neighbouring scalars. A weight hint keeps its contiguous cumulative split.
+	// `bounds` publishes the cumulative element counts per chunk either way.
 	std::vector<size_t> bounds;
+	std::vector<size_t> chunk_begin, chunk_count;
+	size_t chunk_block = 0, chunk_stride = 1;
 	state.faults.checkpoint("region.bounds");
 	if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
 		bounds = plan.bounds;                       // the caller's weighted partition
 		worker_count = bounds.size() - 1;
+		for (size_t k = 0; k < worker_count; ++k) { chunk_begin.push_back(bounds[k]); chunk_count.push_back(bounds[k + 1] - bounds[k]); }
+	} else if (worker_count > 1) {
+		chunk_block = std::max<size_t>(1, n / (4 * worker_count));
+		chunk_stride = worker_count;
+		bounds.assign(worker_count + 1, 0);
+		for (size_t k = 0; k < worker_count; ++k) {
+			size_t count = 0;
+			for (size_t first = k * chunk_block; first < n; first += chunk_stride * chunk_block) {
+				count += std::min(chunk_block, n - first);
+			}
+			chunk_begin.push_back(std::min(k * chunk_block, n));
+			chunk_count.push_back(count);
+			bounds[k + 1] = bounds[k] + count;
+		}
 	} else {
 		bounds = partition_flat(n, worker_count);
+		chunk_begin.push_back(0); chunk_count.push_back(n);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	fprintf(stderr, "[region-profile] %s n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", plan.prefix, n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
@@ -3036,8 +3065,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
 		}
 		restamp_alias_proofs(eng, *slot);
-		slot->begin = bounds[k];
-		slot->end = bounds[k + 1];
+		slot->begin = chunk_begin[k];
+		slot->end = n;
+		slot->count = chunk_count[k];
+		slot->block = chunk_block;
+		slot->stride_blocks = chunk_stride;
 		slot->element_refs.clear();
 		slot->raw_input = nullptr;
 		slot->typed_input = nullptr;
@@ -3048,7 +3080,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		// touch no cross-thread counts). An admitted body cannot retain it past its iteration
 		// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
 		state.faults.checkpoint("region.cursor_storage", k);
-		if (slot->end > slot->begin) {
+		if (slot->count > 0) {
 			slot->element_refs.push_back(script_value::make_element_reference(range_handle, slot->begin, &eng, element_type));
 			for (size_t j = 0; j < zip_nodes.size(); ++j) {
 				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
@@ -3063,7 +3095,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		state.faults.checkpoint("region.worker_arguments", slot->begin);
 		slot->call_args.reserve(slot->element_refs.size() + 1);
 		for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
-		slot->call_args.emplace_back(static_cast<script_int>(slot->end - slot->begin), &eng);
+		slot->call_args.emplace_back(static_cast<script_int>(slot->count), &eng);
 
 		// Provision the captured reads into THIS worker's root env (single-threaded, charged
 		// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
@@ -3233,15 +3265,20 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		p.submit_cyc += prof_t2 - prof_t1;
 		p.main_chunk_cyc += prof_t3 - prof_t2;
 		p.wait_cyc += prof_t4 - prof_t3;
+		uint64_t span_max = 0, span_min = UINT64_MAX;
 		for (size_t k = 1; k < worker_count; ++k) {
 			const parallel_worker_slot* ctx = contexts[k];
 			if (!ctx->prof_start_tsc) continue;
 			p.wake_lat_sum += ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0;
 			p.wake_lat_max = std::max(p.wake_lat_max,
 				ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0);
-			p.worker_span_sum += ctx->prof_end_tsc - ctx->prof_start_tsc;
+			const uint64_t span = ctx->prof_end_tsc - ctx->prof_start_tsc;
+			p.worker_span_sum += span;
+			span_max = std::max(span_max, span);
+			span_min = std::min(span_min, span);
 			++p.wake_samples;
 		}
+		if (span_max) { p.region_span_max_sum += span_max; p.region_span_min_sum += span_min; }
 	}
 #endif
 	region_guard.restore();   // registration below can allocate or throw

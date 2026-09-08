@@ -618,6 +618,51 @@ public:
 			for (const auto& o : outs) { check_eq(serial, o); }
 		});
 
+		test("block_cyclic_partition_covers_every_element_once", [this]() {
+			// Without a weight hint the elements go to the workers block-cyclically (blocks of
+			// max(1, n / 4W) dealt round-robin). Every element is visited exactly once, the zip's
+			// arrays step together, a by-value transform lands every result at its own index,
+			// the first failing element is still the lowest index, and the published chunk counts
+			// are the policy's
+			for (size_t workers : {size_t(1), size_t(2), size_t(3), size_t(7), size_t(8)}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					array<int> xs = []; array<int> ys = []; var seen = [];
+					for (int i = 0; i < 37; i++) { xs.push(i); ys.push(100 + i); seen.push(0); }
+					parallel_for (auto& x : xs) { x = x * 3 + 1; }
+					parallel_for (auto& x, auto& y : xs, ys) { y = y + x; }
+					int f(int v) { return v - 1; }
+					var t = parallel_transform(xs, f);
+					var sx = []; var sy = []; var st = [];
+					for (int i = 0; i < 37; i++) { sx.push(i * 3 + 1); sy.push(100 + i + i * 3 + 1); st.push(i * 3); }
+					string msg = "";
+					array<int> bad = []; for (int i = 0; i < 37; i++) { bad.push(i); }
+					try { parallel_for (auto& b : bad) { if (b >= 5 && b % 2 == 1) { throw "odd " + to_string(b); } } } catch (err) { msg = err; }
+					return [xs == sx, ys == sy, t == st, msg];
+				)");
+				const auto& out = r.as_array();
+				const std::string label = "workers=" + std::to_string(workers);
+				check_true(out[0].as<bool>(), label + " in-place range");
+				check_true(out[1].as<bool>(), label + " zip");
+				check_true(out[2].as<bool>(), label + " transform");
+				check_eq(std::string("odd 5"), out[3].as_string(), label + " lowest failing element wins");
+				const auto& b = e->last_parallel_chunk_bounds();
+				check_eq(workers + 1, b.size(), label + " chunk count");
+				check_eq((size_t)37, b.back(), label + " counts sum to n");
+			}
+			// the policy's counts: n = 34 over 8 workers = blocks of 1, five for the first two workers
+			auto e = make_engine();
+			e->parallel_thread_count(8);
+			e->execute("array<int> a = []; for (int i = 0; i < 34; i++) { a.push(i); } parallel_for (auto& x : a) { x += 1; }");
+			check_eq(std::vector<size_t>{0, 5, 10, 14, 18, 22, 26, 30, 34}, e->last_parallel_chunk_bounds());
+			// n = 64 over 4 workers = blocks of 4, sixteen elements each
+			e->parallel_thread_count(4);
+			e->execute("array<int> c = []; for (int i = 0; i < 64; i++) { c.push(i); } parallel_for (auto& x : c) { x += 1; }");
+			check_eq(std::vector<size_t>{0, 16, 32, 48, 64}, e->last_parallel_chunk_bounds());
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

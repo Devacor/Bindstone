@@ -246,6 +246,8 @@ namespace jai::detail {
             uint64_t wake_lat_max = 0;
             uint64_t wake_samples = 0;
             uint64_t worker_span_sum = 0;  // pool-worker compute spans
+            uint64_t region_span_max_sum = 0;   // per region: the slowest pool worker's span (the critical path), summed
+            uint64_t region_span_min_sum = 0;   // per region: the fastest pool worker's span, summed
             uint64_t capture_cyc = 0;      // slice of setup: capture provisioning (all slots)
             uint64_t capture_count = 0;    // captures provisioned
             uint64_t setup_admit_cyc = 0;    // setup slice: method admission (after normalize)

@@ -120,6 +120,9 @@ public:
 	jai::engine& script() {
 		return *jaiEngine_;
 	}
+	std::shared_ptr<jai::engine> scriptShared() const {
+		return jaiEngine_;
+	}
 
 	static void jai_auto_bind(jai::dynamic_binder<Game>& builder);
 private:
@@ -131,13 +134,13 @@ private:
 
 	void initializeClientConnection();
 
+	std::shared_ptr<jai::engine> jaiEngine_;   // first: destroyed after every member holding a script value
+
 	GameData gameData;
 	std::unique_ptr<MV::InterfaceManager> ourGui;
 	std::unique_ptr<GameInstance> ourInstance;
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
-
-	std::shared_ptr<jai::engine> jaiEngine_;
 
 	std::shared_ptr<LocalPlayer> localPlayer;
 

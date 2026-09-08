@@ -68,8 +68,9 @@ GameEditor::GameEditor(std::string a_username, std::string a_password, bool a_au
 	game(managers),
 	autoStartGame(a_autoStart && !a_username.empty() && !a_password.empty()),
 	editor(managers),
-	limbo(MV::Scene::Node::make(managers.renderer))
-{
+	limbo(MV::Scene::Node::make(managers.renderer)) {
+
+	engineKeepAlive_ = game.scriptShared();
 	//managers.audio.loadMusic("Audio/TitleTheme.ogg", "title");
 	//managers.audio.loadMusic("Audio/FieldIntro.ogg", "gameintro");
 	//managers.audio.loadMusic("Audio/FieldLoopNeutral.ogg", "gameloop");

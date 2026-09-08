@@ -256,6 +256,11 @@ namespace jai::detail {
             uint64_t setup_pins_cyc = 0;     // setup slice: method pins
             uint64_t setup_prewarm_cyc = 0;  // setup slice: type prewarm
             uint64_t setup_rest_cyc = 0;     // setup slice: table, pool, activation
+            uint64_t slot_reset_cyc = 0;     // slots slice: slot_matches + reset_worker_slot / provision_worker
+            uint64_t slot_restamp_cyc = 0;   // slots slice: restamp_alias_proofs
+            uint64_t slot_cursor_cyc = 0;    // slots slice: cursor mint + call_args
+            uint64_t admit_pool_cyc = 0;     // admit slice: thread count, pool acquire, cost cap, partition
+            uint64_t admit_guard_cyc = 0;    // admit slice: region guard, type metadata
             uint64_t cache_hits = 0;       // snapshot cache: content-matched reuses
             uint64_t cache_stores = 0;     // snapshot cache: records (re)stored
             uint64_t cache_misses = 0;     // snapshot cache: validate failed or no record

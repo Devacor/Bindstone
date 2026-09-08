@@ -3482,6 +3482,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             // Regular member (variable or function)
             bool is_static = leading_static || match(token_type::static_keyword);
             bool is_override = leading_override || match(token_type::override_keyword);
+            const bool function_spelling = check(token_type::function_keyword);
 
             auto type_result = parse_type();
             if (!type_result) {
@@ -3629,6 +3630,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
 
                     auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                     var_decl->is_static = is_static;
+                    var_decl->function_spelling = function_spelling;
                     member = var_decl;
                 }
             } else {
@@ -3761,6 +3763,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             member_decl = std::move(namespace_result.value());
         } else {
             // Function or variable declaration
+            const bool function_spelling = check(token_type::function_keyword);
             auto type_result = parse_type();
             if (!type_result) {
                 synchronize();
@@ -3865,6 +3868,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 }
 
                 auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
+                var_decl->function_spelling = function_spelling;
                 member_decl = var_decl;
             }
         }

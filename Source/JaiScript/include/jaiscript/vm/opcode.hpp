@@ -174,8 +174,34 @@ namespace jai::vm {
                                // resolved as operands; an array receiver appends through the builtin's
                                // exact kernel and pushes the call result (null), anything else replays
                                // the unfused LOAD, LOAD, CALL_METHOD sequence through its call site
+        // Typed scalar set (docs/typed_regions_design.md, stage 1): lowered from a fused
+        // binary, compare-jump or scalar move whose operands the checker proved int/int or
+        // float/float and the compiler addresses directly. Each op keeps ONE tag guard per
+        // operand and lands the way the general op would; any miss (a boxed slot, an
+        // overflow, a zero divisor, a shift out of range) runs the original instruction
+        // from chunk::typed_sites, so texts and post-states are the general op's.
+        // arithmetic: a = dst slot | dst kind << k_typed_dst_shift, b = left slot,
+        // c = right slot or k_typed_const_bit | constant index
+        op_t_add_ii, op_t_sub_ii, op_t_mul_ii, op_t_div_ii, op_t_mod_ii,
+        op_t_and_ii, op_t_or_ii, op_t_xor_ii, op_t_shl_ii, op_t_shr_ii,
+        op_t_add_ff, op_t_sub_ff, op_t_mul_ff, op_t_div_ff, op_t_mod_ff,
+        // compare and jump-if-false: a = left slot, b = right (as above), c = target
+        op_t_jlt_ii, op_t_jle_ii, op_t_jgt_ii, op_t_jge_ii, op_t_jeq_ii, op_t_jne_ii,
+        op_t_jlt_ff, op_t_jle_ff, op_t_jgt_ff, op_t_jge_ff, op_t_jeq_ff, op_t_jne_ff,
+        // scalar moves: LOAD/CONST + DECL_VAR or STORE as one instruction
+        op_t_decl_mov,      // a = dst slot, b = src slot, c = decl node
+        op_t_decl_const,    // a = dst slot, b = constant index, c = decl node
+        op_t_store_mov,     // a = dst slot, b = src slot, c = store flags
+        op_t_store_const,   // a = dst slot, b = constant index, c = store flags
         op_halt,
     };
+
+    inline constexpr uint32_t k_typed_const_bit = 0x80000000u;
+    inline constexpr uint32_t k_typed_dst_shift = 30;
+    inline constexpr uint32_t k_typed_slot_mask = (1u << k_typed_dst_shift) - 1;
+    inline constexpr uint32_t k_typed_dst_temp = 0;
+    inline constexpr uint32_t k_typed_dst_decl = 1;
+    inline constexpr uint32_t k_typed_dst_store = 2;
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
@@ -334,6 +360,37 @@ namespace jai::vm {
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";
             case opcode::op_push_fused: return "PUSH_FUSED";
+            case opcode::op_t_add_ii: return "T_ADD_II";
+            case opcode::op_t_sub_ii: return "T_SUB_II";
+            case opcode::op_t_mul_ii: return "T_MUL_II";
+            case opcode::op_t_div_ii: return "T_DIV_II";
+            case opcode::op_t_mod_ii: return "T_MOD_II";
+            case opcode::op_t_and_ii: return "T_AND_II";
+            case opcode::op_t_or_ii: return "T_OR_II";
+            case opcode::op_t_xor_ii: return "T_XOR_II";
+            case opcode::op_t_shl_ii: return "T_SHL_II";
+            case opcode::op_t_shr_ii: return "T_SHR_II";
+            case opcode::op_t_add_ff: return "T_ADD_FF";
+            case opcode::op_t_sub_ff: return "T_SUB_FF";
+            case opcode::op_t_mul_ff: return "T_MUL_FF";
+            case opcode::op_t_div_ff: return "T_DIV_FF";
+            case opcode::op_t_mod_ff: return "T_MOD_FF";
+            case opcode::op_t_jlt_ii: return "T_JLT_II";
+            case opcode::op_t_jle_ii: return "T_JLE_II";
+            case opcode::op_t_jgt_ii: return "T_JGT_II";
+            case opcode::op_t_jge_ii: return "T_JGE_II";
+            case opcode::op_t_jeq_ii: return "T_JEQ_II";
+            case opcode::op_t_jne_ii: return "T_JNE_II";
+            case opcode::op_t_jlt_ff: return "T_JLT_FF";
+            case opcode::op_t_jle_ff: return "T_JLE_FF";
+            case opcode::op_t_jgt_ff: return "T_JGT_FF";
+            case opcode::op_t_jge_ff: return "T_JGE_FF";
+            case opcode::op_t_jeq_ff: return "T_JEQ_FF";
+            case opcode::op_t_jne_ff: return "T_JNE_FF";
+            case opcode::op_t_decl_mov: return "T_DECL_MOV";
+            case opcode::op_t_decl_const: return "T_DECL_CONST";
+            case opcode::op_t_store_mov: return "T_STORE_MOV";
+            case opcode::op_t_store_const: return "T_STORE_CONST";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

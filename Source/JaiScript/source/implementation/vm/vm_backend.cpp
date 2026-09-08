@@ -503,13 +503,36 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 	// (exact name + slot); load/store/incdec name any slot the body touches (parameters
 	// included — a parameter the body never reads is invisible here, documented).
 	std::vector<std::pair<size_t, std::string_view>> slot_names;
-	for (const auto& ins : f->code->code) {
+	for (size_t ip = 0; ip < f->code->code.size(); ++ip) {
+		const vm_instruction& ins = f->code->code[ip];
 		switch (ins.op) {
 		case opcode::op_decl_var:
 		case opcode::op_decl_ref_ident:
 		case opcode::op_decl_ref_value: {
 			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.a].get());
 			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+			break;
+		}
+		// typed moves replaced a LOAD/CONST + DECL_VAR/STORE pair: name what the pair named
+		case opcode::op_t_decl_mov:
+		case opcode::op_t_decl_const: {
+			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.c].get());
+			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+			if (ins.op == opcode::op_t_decl_mov && ip < f->code->typed_sites.size()) {
+				const vm_instruction& load = f->code->typed_sites[ip].orig;
+				if (load.a != k_invalid_u32 && load.b < f->code->symbols.size()) { slot_names.emplace_back(load.a, symbolizer_->get_string(f->code->symbols[load.b])); }
+			}
+			break;
+		}
+		case opcode::op_t_store_mov:
+		case opcode::op_t_store_const: {
+			if (ip < f->code->typed_sites.size()) {
+				const auto& site = f->code->typed_sites[ip];
+				if (site.orig2.a < f->code->symbols.size()) { slot_names.emplace_back(ins.a, symbolizer_->get_string(f->code->symbols[site.orig2.a])); }
+				if (ins.op == opcode::op_t_store_mov && site.orig.a != k_invalid_u32 && site.orig.b < f->code->symbols.size()) {
+					slot_names.emplace_back(site.orig.a, symbolizer_->get_string(f->code->symbols[site.orig.b]));
+				}
+			}
 			break;
 		}
 		case opcode::op_index_fused_decl: {
@@ -1090,6 +1113,7 @@ void vm_backend::exec_yield(frame& f, const vm_instruction& ins) {
 }
 
 std::shared_ptr<chunk> vm_backend::compile_only(const std::vector<declaration_ptr>& declarations) {
+	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	return compiler_.compile_program(declarations);
 }
 
@@ -6363,6 +6387,245 @@ bool vm_backend::typed_fold_index(frame& f, const fused_index_proto& p, script_i
 	return true;
 }
 
+// ---- typed scalar set (opcode.hpp op_t_*) ----
+
+bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
+	const uint32_t slot = a & k_typed_slot_mask;
+	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
+	switch (a >> k_typed_dst_shift) {
+	case k_typed_dst_temp:
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) { s->unchecked_set_int_payload(v); return true; }
+		frame_slot_set(f, slot, script_value(v, engine_));
+		return true;
+	case k_typed_dst_decl: {
+		type_info* stamp = f.code->typed_sites[f.ip].stamp;
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_type_info().get() == stamp) { s->unchecked_set_int_payload(v); return true; }
+		script_value nv(v, engine_);
+		if (stamp) { nv.set_type_info(type_info_ptr{stamp}); }
+		frame_slot_set(f, slot, std::move(nv));
+		return true;
+	}
+	case k_typed_dst_store: {
+		// store_popped_value's proven-identity slot store: no reference in the slot, the
+		// slot's declared class agrees (the same-type proof), then `*slot = value`
+		if (!s || s->is_reference()) return false;
+		const type_info* slot_type = s->get_type_info().get();
+		if (slot_type && slot_type->base_type != script_value_type::jai_int_type) return false;
+		script_value nv(v, engine_);
+		if (s->raw_storage_index() == script_value::TYPEID_INT) { s->unchecked_set_int_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		frame_slot_set(f, slot, std::move(nv));
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
+	const uint32_t slot = a & k_typed_slot_mask;
+	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
+	switch (a >> k_typed_dst_shift) {
+	case k_typed_dst_temp:
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) { s->unchecked_set_float_payload(v); return true; }
+		frame_slot_set(f, slot, script_value(v, engine_));
+		return true;
+	case k_typed_dst_decl: {
+		type_info* stamp = f.code->typed_sites[f.ip].stamp;
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_type_info().get() == stamp) { s->unchecked_set_float_payload(v); return true; }
+		script_value nv(v, engine_);
+		if (stamp) { nv.set_type_info(type_info_ptr{stamp}); }
+		frame_slot_set(f, slot, std::move(nv));
+		return true;
+	}
+	case k_typed_dst_store: {
+		if (!s || s->is_reference()) return false;
+		const type_info* slot_type = s->get_type_info().get();
+		if (slot_type && slot_type->base_type != script_value_type::jai_float_type) return false;
+		script_value nv(v, engine_);
+		if (s->raw_storage_index() == script_value::TYPEID_FLOAT) { s->unchecked_set_float_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		frame_slot_set(f, slot, std::move(nv));
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+// The instruction a typed op was lowered from, run as the dispatcher would run it
+op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) {
+	switch (orig.op) {
+	case opcode::op_binary_fused_temp: {
+		temp_lane_sink lane{this, f, orig.b};
+		return binary_fused_compute(f, orig.a, lane);
+	}
+	case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, orig);
+	case opcode::op_binary_fused_store: return exec_binary_fused_store(f, orig);
+	case opcode::op_fused_cmp_jump: return exec_fused_cmp_jump(f, orig);
+	default:
+		return raise_(make_error_code(runtime_error_code::unsupported_operation), "typed op without an origin (internal)");
+	}
+}
+
+op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
+	const script_value* lp = frame_slot(f, ins.b);
+	const script_value* rp = lp ? typed_right(f, ins.c) : nullptr;
+	if (rp) {
+		if (ins.op <= opcode::op_t_shr_ii) {
+			if (lp->raw_storage_index() == script_value::TYPEID_INT && rp->raw_storage_index() == script_value::TYPEID_INT) {
+				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+				script_int r;
+				bool ok = true;
+				switch (ins.op) {
+				case opcode::op_t_add_ii: ok = ints::try_add(a, b, r); break;
+				case opcode::op_t_sub_ii: ok = ints::try_sub(a, b, r); break;
+				case opcode::op_t_mul_ii: ok = ints::try_mul(a, b, r); break;
+				case opcode::op_t_div_ii: ok = b != 0 && ints::try_div(a, b, r); break;
+				case opcode::op_t_mod_ii: ok = b != 0; if (ok) { r = ints::mod(a, b); } break;
+				case opcode::op_t_and_ii: r = a & b; break;
+				case opcode::op_t_or_ii: r = a | b; break;
+				case opcode::op_t_xor_ii: r = a ^ b; break;
+				case opcode::op_t_shl_ii: ok = b >= 0 && b <= 63; if (ok) { r = a << b; } break;
+				case opcode::op_t_shr_ii: ok = b >= 0 && b <= 63; if (ok) { r = a >> b; } break;
+				default: ok = false; break;
+				}
+				if (ok && typed_land_int(f, ins.a, r)) return {};
+			}
+		} else if (lp->raw_storage_index() == script_value::TYPEID_FLOAT && rp->raw_storage_index() == script_value::TYPEID_FLOAT) {
+			const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
+			script_float r;
+			bool ok = true;
+			switch (ins.op) {
+			case opcode::op_t_add_ff: r = a + b; break;
+			case opcode::op_t_sub_ff: r = a - b; break;
+			case opcode::op_t_mul_ff: r = a * b; break;
+			case opcode::op_t_div_ff: ok = b != 0.0; if (ok) { r = a / b; } break;
+			case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+			default: ok = false; break;
+			}
+			if (ok && typed_land_float(f, ins.a, r)) return {};
+		}
+	}
+	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
+}
+
+op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
+	const script_value* lp = frame_slot(f, ins.a);
+	const script_value* rp = lp ? typed_right(f, ins.b) : nullptr;
+	if (rp) {
+		bool truthy;
+		if (ins.op <= opcode::op_t_jne_ii) {
+			if (lp->raw_storage_index() == script_value::TYPEID_INT && rp->raw_storage_index() == script_value::TYPEID_INT) {
+				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+				switch (ins.op) {
+				case opcode::op_t_jlt_ii: truthy = a < b; break;
+				case opcode::op_t_jle_ii: truthy = a <= b; break;
+				case opcode::op_t_jgt_ii: truthy = a > b; break;
+				case opcode::op_t_jge_ii: truthy = a >= b; break;
+				case opcode::op_t_jeq_ii: truthy = a == b; break;
+				default: truthy = a != b; break;
+				}
+				f.ip = truthy ? f.ip + 1 : ins.c;
+				return {};
+			}
+		} else if (lp->raw_storage_index() == script_value::TYPEID_FLOAT && rp->raw_storage_index() == script_value::TYPEID_FLOAT) {
+			const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
+			switch (ins.op) {
+			case opcode::op_t_jlt_ff: truthy = a < b; break;
+			case opcode::op_t_jle_ff: truthy = a <= b; break;
+			case opcode::op_t_jgt_ff: truthy = a > b; break;
+			case opcode::op_t_jge_ff: truthy = a >= b; break;
+			case opcode::op_t_jeq_ff: truthy = a == b; break;
+			default: truthy = a != b; break;
+			}
+			f.ip = truthy ? f.ip + 1 : ins.c;
+			return {};
+		}
+	}
+	return exec_fused_cmp_jump(f, f.code->typed_sites[f.ip].orig);
+}
+
+// `T x = y;` as one op: exec_decl_var's fast path over the slot LOAD would have pushed
+op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	if (const script_value* src = frame_slot(f, ins.b)) {
+		const script_value* seen = src;
+		if (seen->raw_storage_index() == script_value::TYPEID_REFERENCE) { seen = &seen->deref(); }   // LOAD pushes the referent
+		const size_t vi = seen->raw_storage_index();
+		if (variable_decl::identity_payload(vi, site.stamp)) {
+			script_value v(*seen);
+			if (site.stamp) { v.set_type_info(type_info_ptr{site.stamp}); }
+			frame_slot_set(f, ins.a, std::move(v));
+			return {};
+		}
+		if (variable_decl::widening_payload(vi, site.stamp)) {
+			script_value w(static_cast<script_float>(seen->unchecked_as_int()), engine_);
+			w.set_type_info(type_info_ptr{site.stamp});
+			frame_slot_set(f, ins.a, std::move(w));
+			return {};
+		}
+	}
+	VM_TRY(exec_load(f, site.orig));
+	return exec_decl_var(f, site.orig2);
+}
+
+op_status vm_backend::exec_typed_decl_const(frame& f, const vm_instruction& ins) {
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	script_value v = materialize_constant(*f.code, ins.b);
+	const size_t vi = v.raw_storage_index();
+	if (variable_decl::identity_payload(vi, site.stamp)) {
+		if (site.stamp) { v.set_type_info(type_info_ptr{site.stamp}); }
+		frame_slot_set(f, ins.a, std::move(v));
+		return {};
+	}
+	if (variable_decl::widening_payload(vi, site.stamp)) {
+		script_value w(static_cast<script_float>(v.unchecked_as_int()), engine_);
+		w.set_type_info(type_info_ptr{site.stamp});
+		frame_slot_set(f, ins.a, std::move(w));
+		return {};
+	}
+	stack_.push_back(std::move(v));
+	return exec_decl_var(f, site.orig2);
+}
+
+// `x = y;` as one op: store_popped_value's proven-identity slot store over the LOAD's value
+op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) {
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	script_value* dst = frame_slot(f, ins.a);
+	const script_value* src = dst ? frame_slot(f, ins.b) : nullptr;
+	if (src && !dst->is_reference()) {
+		const script_value& v = src->deref();
+		const size_t vi = v.raw_storage_index();
+		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
+		    vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) {
+			const type_info* slot_type = dst->get_type_info().get();
+			if (!slot_type || detail::same_type_payload(v, slot_type)) {
+				*dst = v;
+				return {};
+			}
+		}
+	}
+	VM_TRY(exec_load(f, site.orig));
+	VM_TRY(exec_store(f, site.orig2));
+	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }
+	return {};
+}
+
+op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins) {
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	script_value v = materialize_constant(*f.code, ins.b);
+	if (script_value* dst = frame_slot(f, ins.a); dst && !dst->is_reference()) {
+		const type_info* slot_type = dst->get_type_info().get();
+		if (!slot_type || detail::same_type_payload(v, slot_type)) {
+			*dst = std::move(v);
+			return {};
+		}
+	}
+	stack_.push_back(std::move(v));
+	VM_TRY(exec_store(f, site.orig2));
+	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }
+	return {};
+}
+
 bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
 	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
 	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
@@ -7899,6 +8162,9 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	if (function.backend_return_conv == 0) {
@@ -12828,7 +13094,85 @@ checked_result<void> vm_backend::run(frame& entry) {
 #ifdef JAISCRIPT_VM_PROFILE
 // Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
 // self-time histogram on backend teardown. Percentages are of total dispatched cycles.
+vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code) {
+	auto& st = profile_chunks_[&code];
+	// a recycled chunk address with a different body starts a fresh row
+	if (st.lines.size() != code.code.size() || st.name != code.function_name) {
+		st = profile_chunk_stats{};
+		st.name = code.function_name;
+		st.lines.assign(code.code.size(), 0);
+		for (size_t ip = 0; ip < code.code.size(); ++ip) {
+			const ast_node* stmt = ip < code.stmt_nodes.size() ? code.stmt_nodes[ip] : nullptr;
+			if (stmt) {
+				st.lines[ip] = static_cast<uint32_t>(stmt->location.line);
+				if (st.file.empty()) { st.file = stmt->location.filename; }
+			}
+		}
+		st.ip_cycles.assign(code.code.size(), 0);
+		st.ip_counts.assign(code.code.size(), 0);
+	}
+	return st;
+}
+
+void vm_backend::profile_reset() {
+	std::fill(std::begin(profile_cycles_), std::end(profile_cycles_), 0ull);
+	std::fill(std::begin(profile_counts_), std::end(profile_counts_), 0ull);
+	for (auto& [code, st] : profile_chunks_) {
+		std::fill(st.ip_cycles.begin(), st.ip_cycles.end(), 0ull);
+		std::fill(st.ip_counts.begin(), st.ip_counts.end(), 0ull);
+		st.inclusive_cycles = 0;
+		st.entries = 0;
+	}
+}
+
 void vm_backend::dump_opcode_profile() const {
+	{
+		// Script functions by exclusive opcode self time, then the hot lines of the top rows
+		struct row { const profile_chunk_stats* st; uint64_t excl; uint64_t ops; };
+		std::vector<row> rows;
+		uint64_t total = 0;
+		for (const auto& [code, st] : profile_chunks_) {
+			uint64_t excl = 0, ops = 0;
+			for (size_t i = 0; i < st.ip_cycles.size(); ++i) { excl += st.ip_cycles[i]; ops += st.ip_counts[i]; }
+			if (excl) { rows.push_back({&st, excl, ops}); total += excl; }
+		}
+		if (!rows.empty()) {
+			std::sort(rows.begin(), rows.end(), [](const row& a, const row& b) { return a.excl > b.excl; });
+			fprintf(stderr, "\n[vm-profile] script functions (main engine; exclusive = opcode self time in rdtsc cycles, callee bodies excluded, call/return machinery included; inclusive = frame entry to exit, recursion counts inner activations again; total exclusive %llu Mcycles)\n",
+				(unsigned long long)(total / 1000000));
+			fprintf(stderr, "%-32s %-28s %12s %7s %12s %12s %10s\n", "function", "file", "excl Mcyc", "pct", "ops", "incl Mcyc", "entries");
+			size_t shown = 0;
+			for (const row& r : rows) {
+				std::string file = r.st->file;
+				if (const size_t cut = file.find_last_of("/\\"); cut != std::string::npos) { file = file.substr(cut + 1); }
+				fprintf(stderr, "%-32.32s %-28.28s %12.1f %6.2f%% %12llu %12.1f %10llu\n",
+					r.st->name.empty() ? "<top level>" : r.st->name.c_str(), file.c_str(),
+					r.excl / 1e6, 100.0 * r.excl / total, (unsigned long long)r.ops,
+					r.st->inclusive_cycles / 1e6, (unsigned long long)r.st->entries);
+				if (++shown >= 30) break;
+			}
+			fprintf(stderr, "[vm-profile] hot lines of the top functions (exclusive Mcyc, ops):\n");
+			shown = 0;
+			for (const row& r : rows) {
+				std::map<uint32_t, std::pair<uint64_t, uint64_t>> by_line;
+				for (size_t i = 0; i < r.st->ip_cycles.size(); ++i) {
+					if (!r.st->ip_cycles[i]) continue;
+					auto& e = by_line[r.st->lines[i]];
+					e.first += r.st->ip_cycles[i];
+					e.second += r.st->ip_counts[i];
+				}
+				std::vector<std::pair<uint32_t, std::pair<uint64_t, uint64_t>>> lines(by_line.begin(), by_line.end());
+				std::sort(lines.begin(), lines.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+				fprintf(stderr, "  %s\n", r.st->name.empty() ? "<top level>" : r.st->name.c_str());
+				size_t ln = 0;
+				for (const auto& [line, e] : lines) {
+					fprintf(stderr, "    line %-6u %10.1f %12llu\n", line, e.first / 1e6, (unsigned long long)e.second);
+					if (++ln >= 6) break;
+				}
+				if (++shown >= 12) break;
+			}
+		}
+	}
 	fprintf(stderr, "[vm-profile] scope kinds: iter %llu | scope_push %llu | call_closure %llu | call_plain %llu\n", (unsigned long long)profile_scope_kinds_[0], (unsigned long long)profile_scope_kinds_[1], (unsigned long long)profile_scope_kinds_[2], (unsigned long long)profile_scope_kinds_[3]);
 	fprintf(stderr, "[vm-profile] env births: scope %llu | method %llu | static %llu | coroutine %llu | capture %llu\n", (unsigned long long)profile_env_births_[0], (unsigned long long)profile_env_births_[1], (unsigned long long)profile_env_births_[2], (unsigned long long)profile_env_births_[3], (unsigned long long)profile_env_births_[4]);
 	const uint64_t cm_total = profile_call_method_paths_[0] + profile_call_method_paths_[1] + profile_call_method_paths_[2] +
@@ -13115,6 +13459,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	// charge only their own machinery, not their callee's body.
 	uint64_t prof_t0 = __rdtsc();
 	unsigned prof_prev = 256;
+	const chunk* prof_chunk = nullptr;
+	profile_chunk_stats* prof_stats = nullptr;
+	size_t prof_ip = 0;
 #endif
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
@@ -13129,11 +13476,21 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		{
 			const uint64_t prof_now = __rdtsc();
 			if (prof_prev < 256) {
-				profile_cycles_[prof_prev] += prof_now - prof_t0;
+				const uint64_t dt = prof_now - prof_t0;
+				profile_cycles_[prof_prev] += dt;
 				++profile_counts_[prof_prev];
+				if (prof_stats && prof_ip < prof_stats->ip_cycles.size()) {
+					prof_stats->ip_cycles[prof_ip] += dt;
+					++prof_stats->ip_counts[prof_ip];
+				}
 			}
 			prof_t0 = prof_now;
 			prof_prev = static_cast<unsigned>(ins.op);
+			prof_ip = f.ip;
+			if (f.code != prof_chunk) {
+				prof_chunk = f.code;
+				prof_stats = parallel_worker_ ? nullptr : &profile_stats_for(*f.code);
+			}
 		}
 #endif
 		switch (ins.op) {
@@ -13224,34 +13581,33 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_binary_fused_temp: {
 				// Register-file producer: the fused kernel's result lands RAW in a
 				// compiler temp slot (inside the window; no store enforcement - temps
-				// are compiler-owned and consumed by the next fused operand read).
-				// Scalar results write a live same-kind temp's payload in place —
-				// temps only ever receive kernel mints, so a live temp's tag is null.
-				struct temp_lane_sink {
-					vm_backend* vm;
-					frame& fr;
-					uint32_t slot;
-					void operator()(script_value&& v) { vm->frame_slot_set(fr, slot, std::move(v)); }
-					void raw_int(script_int iv) {
-						if (script_value* s = vm->frame_slot(fr, slot);
-						    s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) {
-							s->unchecked_set_int_payload(iv);
-							return;
-						}
-						(*this)(script_value(iv, vm->engine_));
-					}
-					void raw_float(script_float fv) {
-						if (script_value* s = vm->frame_slot(fr, slot);
-						    s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) {
-							s->unchecked_set_float_payload(fv);
-							return;
-						}
-						(*this)(script_value(fv, vm->engine_));
-					}
-				} lane{this, f, ins.b};
+				// are compiler-owned and consumed by the next fused operand read)
+				temp_lane_sink lane{this, f, ins.b};
 				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, lane));
 				break;
 			}
+			// Typed scalar set: arithmetic lands in a temp, decl or store slot and may run
+			// the general kernel on a miss (which can enter a script frame: operator
+			// overloads), compare-jumps retarget ip, moves land or replay their pair
+			case opcode::op_t_add_ii: case opcode::op_t_sub_ii: case opcode::op_t_mul_ii: case opcode::op_t_div_ii: case opcode::op_t_mod_ii:
+			case opcode::op_t_and_ii: case opcode::op_t_or_ii: case opcode::op_t_xor_ii: case opcode::op_t_shl_ii: case opcode::op_t_shr_ii:
+			case opcode::op_t_add_ff: case opcode::op_t_sub_ff: case opcode::op_t_mul_ff: case opcode::op_t_div_ff: case opcode::op_t_mod_ff:
+				VM_TRY_OP_SHARED(exec_typed_arith(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_t_jlt_ii: case opcode::op_t_jle_ii: case opcode::op_t_jgt_ii: case opcode::op_t_jge_ii: case opcode::op_t_jeq_ii: case opcode::op_t_jne_ii:
+			case opcode::op_t_jlt_ff: case opcode::op_t_jle_ff: case opcode::op_t_jgt_ff: case opcode::op_t_jge_ff: case opcode::op_t_jeq_ff: case opcode::op_t_jne_ff:
+				VM_TRY_OP_SHARED(exec_typed_cmp_jump(f, ins));
+				if (is_unwinding_) [[unlikely]] {
+					if (!handle_throw_unwind(fp, records_base)) {
+						return {};
+					}
+				}
+				continue;
+			case opcode::op_t_decl_mov: VM_TRY_OP_SHARED(exec_typed_decl_mov(f, ins)); break;
+			case opcode::op_t_decl_const: VM_TRY_OP_SHARED(exec_typed_decl_const(f, ins)); break;
+			case opcode::op_t_store_mov: VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); break;
+			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
 
 			// Both always retarget f.ip
@@ -13545,12 +13901,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 // ============================================================
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
+	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	return run_program(compiler_.compile_program(declarations));
 }
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
 	auto program = std::static_pointer_cast<chunk>(compiled_slot);
 	if (!program) {
+		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		program = compiler_.compile_program(declarations);
 		compiled_slot = program;
 	}
@@ -13693,6 +14051,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
 		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 	}
+	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
 	chunk_cache_.emplace(body.get(), chunk_cache_entry{compiled, body});
 	return compiled;
@@ -13770,6 +14129,9 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	if (function.backend_return_conv == 0) {
@@ -13967,6 +14329,9 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	if (ast->backend_return_conv == 0) {
@@ -14122,6 +14487,9 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	if (ast->backend_return_conv == 0) {
@@ -14263,6 +14631,11 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_pc0 = __rdtsc();
 	++profile_pop_sub_count_;
+	if (!parallel_worker_ && rec.f.code && rec.profile_entry_tsc) {
+		auto& st = profile_stats_for(*rec.f.code);
+		st.inclusive_cycles += prof_pc0 - rec.profile_entry_tsc;
+		++st.entries;
+	}
 #define JAI_POP_SUB(idx) { const uint64_t prof_pc1 = __rdtsc(); profile_pop_sub_[idx] += prof_pc1 - prof_pc0; prof_pc0 = prof_pc1; }
 #else
 #define JAI_POP_SUB(idx)

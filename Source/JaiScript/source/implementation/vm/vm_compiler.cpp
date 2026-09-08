@@ -113,6 +113,10 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_t_decl_mov:
+			case opcode::op_t_decl_const:
+			case opcode::op_t_store_mov:
+			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
@@ -231,6 +235,10 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_t_decl_mov:
+			case opcode::op_t_decl_const:
+			case opcode::op_t_store_mov:
+			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
@@ -619,6 +627,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	if (temp_high_ > result->local_count) {
 		result->local_count = temp_high_;
 	}
+	lower_typed_ops(*result);
 	temps_active_ = false;
 	chunk_ = nullptr;
 	return result;
@@ -1481,6 +1490,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 					note_ident_node(code.size() - 1, assign->target);
 					return true;
 				}
+				if (try_lower_store_move(ident, assign->value, flags)) return true;
 				const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 				note_ident_node(store_ip, assign->target);
 			} else {
@@ -1740,6 +1750,246 @@ static void stamp_typed_class(fused_binary_proto& p, const binary_expr* node) {
 	}
 	if (node->static_operand_class == operand_class_int_int) { p.typed_class = 1; }
 	else if (node->static_operand_class == operand_class_float_float) { p.typed_class = 2; }
+}
+
+chunk::typed_site& vm_compiler::typed_site_at(size_t ip) {
+	auto& sites = chunk_->typed_sites;
+	if (sites.size() <= ip) { sites.resize(ip + 1); }
+	return sites[ip];
+}
+
+// A scalar-store decl (int/float/bool/char/string/var/auto in a frame slot, not escape-boxed)
+// initialized from a plain slot identifier or a scalar literal: the LOAD or CONST just
+// emitted becomes one typed move and no DECL_VAR follows. The op's guard is the decl fast
+// path's admission; its fallback is the pair it replaced.
+bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl) {
+	if (!typed_lowering_ || !callable_.active) return false;
+	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
+	    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) return false;
+	auto& code = chunk_->code;
+	if (code.empty()) return false;
+	vm_instruction& last = code.back();
+	const size_t ip = code.size() - 1;
+	if (decl->initializer->get_type() == node_type::identifier_expr && last.op == opcode::op_load &&
+	    last.a != k_invalid_u32 && last.c == 0) {
+		const vm_instruction orig = last;
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = orig;
+		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 1};
+		site.stamp = decl->type.get();
+		last = vm_instruction{opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), orig.a, site.orig2.a};
+		return true;
+	}
+	if (decl->initializer->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
+		const size_t ci = chunk_->constants[last.a].raw_storage_index();
+		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL &&
+		    ci != script_value::TYPEID_CHAR && ci != script_value::TYPEID_STRING) return false;
+		const vm_instruction orig = last;
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = orig;
+		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 0};
+		site.stamp = decl->type.get();
+		last = vm_instruction{opcode::op_t_decl_const, static_cast<uint32_t>(decl->slot_index), orig.a, site.orig2.a};
+		return true;
+	}
+	return false;
+}
+
+// `x = y;` / `x = 5;` in statement position onto a parse-proven typed value slot with a
+// same-type proof: the LOAD or CONST becomes one typed move and no STORE follows
+bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags) {
+	if (!typed_lowering_ || !callable_.active) return false;
+	const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
+	if ((flags & need) != need || (flags & (store_flag_ref_alias | store_flag_global_only))) return false;
+	const uint32_t dst = identifier_slot_operand(ident);
+	if (dst == k_invalid_u32 || dst >= k_typed_slot_mask) return false;
+	auto& code = chunk_->code;
+	if (code.empty()) return false;
+	vm_instruction& last = code.back();
+	const size_t ip = code.size() - 1;
+	if (value->get_type() == node_type::identifier_expr && last.op == opcode::op_load &&
+	    last.a != k_invalid_u32 && last.c == 0) {
+		const vm_instruction orig = last;
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = orig;
+		site.orig2 = vm_instruction{opcode::op_store, add_symbol(ident->symbol_id), dst, flags};
+		last = vm_instruction{opcode::op_t_store_mov, dst, orig.a, flags};
+		return true;
+	}
+	if (value->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
+		const size_t ci = chunk_->constants[last.a].raw_storage_index();
+		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL &&
+		    ci != script_value::TYPEID_CHAR && ci != script_value::TYPEID_STRING) return false;
+		const vm_instruction orig = last;
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = orig;
+		site.orig2 = vm_instruction{opcode::op_store, add_symbol(ident->symbol_id), dst, flags};
+		last = vm_instruction{opcode::op_t_store_const, dst, orig.a, flags};
+		return true;
+	}
+	return false;
+}
+
+// The typed scalar lowering (docs/typed_regions_design.md, stage 1): a fused binary or
+// compare-jump whose proto carries the checker's int/int or float/float class and whose
+// operands are direct slots, temps or literals becomes one op_t_* with the slots in the
+// instruction word; the original instruction waits in typed_sites for any guard miss.
+// In place, after every jump target is final, so nothing shifts.
+void vm_compiler::lower_typed_ops(chunk& c) {
+	if (!typed_lowering_) return;
+	auto arith_op = [](token_type t, uint8_t cls) -> opcode {
+		if (cls == 1) {
+			switch (t) {
+			case token_type::plus: return opcode::op_t_add_ii;
+			case token_type::minus: return opcode::op_t_sub_ii;
+			case token_type::star: return opcode::op_t_mul_ii;
+			case token_type::slash: return opcode::op_t_div_ii;
+			case token_type::percent: return opcode::op_t_mod_ii;
+			case token_type::ampersand: return opcode::op_t_and_ii;
+			case token_type::pipe: return opcode::op_t_or_ii;
+			case token_type::caret: return opcode::op_t_xor_ii;
+			case token_type::left_shift: return opcode::op_t_shl_ii;
+			case token_type::right_shift: return opcode::op_t_shr_ii;
+			default: return opcode::op_halt;
+			}
+		}
+		switch (t) {
+		case token_type::plus: return opcode::op_t_add_ff;
+		case token_type::minus: return opcode::op_t_sub_ff;
+		case token_type::star: return opcode::op_t_mul_ff;
+		case token_type::slash: return opcode::op_t_div_ff;
+		case token_type::percent: return opcode::op_t_mod_ff;
+		default: return opcode::op_halt;
+		}
+	};
+	auto cmp_op = [](token_type t, uint8_t cls) -> opcode {
+		if (cls == 1) {
+			switch (t) {
+			case token_type::less: return opcode::op_t_jlt_ii;
+			case token_type::less_equal: return opcode::op_t_jle_ii;
+			case token_type::greater: return opcode::op_t_jgt_ii;
+			case token_type::greater_equal: return opcode::op_t_jge_ii;
+			case token_type::equal_equal: return opcode::op_t_jeq_ii;
+			case token_type::bang_equal: return opcode::op_t_jne_ii;
+			default: return opcode::op_halt;
+			}
+		}
+		switch (t) {
+		case token_type::less: return opcode::op_t_jlt_ff;
+		case token_type::less_equal: return opcode::op_t_jle_ff;
+		case token_type::greater: return opcode::op_t_jgt_ff;
+		case token_type::greater_equal: return opcode::op_t_jge_ff;
+		case token_type::equal_equal: return opcode::op_t_jeq_ff;
+		case token_type::bang_equal: return opcode::op_t_jne_ff;
+		default: return opcode::op_halt;
+		}
+	};
+	auto mirrored = [](token_type t) -> token_type {
+		switch (t) {
+		case token_type::less: return token_type::greater;
+		case token_type::less_equal: return token_type::greater_equal;
+		case token_type::greater: return token_type::less;
+		case token_type::greater_equal: return token_type::less_equal;
+		default: return t;   // + * & | ^ == != commute
+		}
+	};
+	auto commutes = [](token_type t) {
+		switch (t) {
+		case token_type::plus: case token_type::star: case token_type::ampersand: case token_type::pipe: case token_type::caret:
+		case token_type::equal_equal: case token_type::bang_equal:
+		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
+			return true;
+		default: return false;
+		}
+	};
+	// left slot + right (slot or constant of the class); a literal left swaps when the op allows
+	auto operands = [&](const fused_binary_proto& bp, token_type& op, uint32_t& left, uint32_t& right) -> bool {
+		const size_t want = bp.typed_class == 1 ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT;
+		auto direct_slot = [&](const fused_operand& o, uint32_t& out) {
+			if (!o.direct || o.slot == k_invalid_u32 || o.slot >= k_typed_slot_mask || o.const_index != k_invalid_u32) return false;
+			out = o.slot; return true;
+		};
+		auto constant = [&](const fused_operand& o, uint32_t& out) {
+			if (o.const_index == k_invalid_u32 || o.const_index >= k_typed_slot_mask) return false;
+			if (c.constants[o.const_index].raw_storage_index() != want) return false;
+			out = k_typed_const_bit | o.const_index; return true;
+		};
+		uint32_t l = 0, r = 0;
+		if (direct_slot(bp.left, l) && (direct_slot(bp.right, r) || constant(bp.right, r))) { left = l; right = r; return true; }
+		if (constant(bp.left, r) && direct_slot(bp.right, l) && commutes(op)) { op = mirrored(op); left = l; right = r; return true; }
+		return false;
+	};
+	auto& code = c.code;
+	for (size_t ip = 0; ip < code.size(); ++ip) {
+		vm_instruction& ins = code[ip];
+		switch (ins.op) {
+		case opcode::op_binary_fused_temp: {
+			const fused_binary_proto& bp = c.fused_binary_protos[ins.a];
+			if (bp.typed_class == 0 || ins.b >= k_typed_slot_mask) break;
+			token_type op = static_cast<token_type>(bp.op);
+			uint32_t left, right;
+			if (!operands(bp, op, left, right)) break;
+			const opcode t = arith_op(op, bp.typed_class);
+			if (t == opcode::op_halt) break;
+			chunk_ = &c;
+			typed_site_at(ip).orig = ins;
+			ins = vm_instruction{t, ins.b | (k_typed_dst_temp << k_typed_dst_shift), left, right};
+			break;
+		}
+		case opcode::op_binary_fused_decl:
+		case opcode::op_binary_fused_store: {
+			const fused_binary_dst_proto& dp = c.fused_binary_dst_protos[ins.a];
+			const fused_binary_proto& bp = c.fused_binary_protos[dp.binary_proto];
+			if (bp.typed_class == 0) break;
+			token_type op = static_cast<token_type>(bp.op);
+			uint32_t left, right;
+			if (!operands(bp, op, left, right)) break;
+			const opcode t = arith_op(op, bp.typed_class);
+			if (t == opcode::op_halt) break;
+			uint32_t dst;
+			type_info* stamp = nullptr;
+			if (ins.op == opcode::op_binary_fused_decl) {
+				const auto* decl = static_cast<const variable_decl*>(c.nodes[dp.node_index].get());
+				if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
+				    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) break;
+				const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+				const bool fits = bt == script_value_type::jai_any_type ||
+				                  (bp.typed_class == 1 && bt == script_value_type::jai_int_type) ||
+				                  (bp.typed_class == 2 && bt == script_value_type::jai_float_type);
+				if (!fits) break;
+				dst = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
+				stamp = decl->type.get();
+			} else {
+				const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
+				if ((dp.flags & need) != need || (dp.flags & (store_flag_ref_alias | store_flag_global_only))) break;
+				if (dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) break;
+				dst = dp.slot | (k_typed_dst_store << k_typed_dst_shift);
+			}
+			chunk_ = &c;
+			chunk::typed_site& site = typed_site_at(ip);
+			site.orig = ins;
+			site.stamp = stamp;
+			ins = vm_instruction{t, dst, left, right};
+			break;
+		}
+		case opcode::op_fused_cmp_jump: {
+			const fused_binary_proto& bp = c.fused_binary_protos[ins.b];
+			if (bp.typed_class == 0) break;
+			token_type op = static_cast<token_type>(bp.op);
+			uint32_t left, right;
+			if (!operands(bp, op, left, right)) break;
+			const opcode t = cmp_op(op, bp.typed_class);
+			if (t == opcode::op_halt) break;
+			chunk_ = &c;
+			typed_site_at(ip).orig = ins;
+			ins = vm_instruction{t, left, right, ins.a};
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
 }
 
 // An index-chain STEP's proto keeps an empty left (the accumulator stands in): the step is
@@ -2140,6 +2390,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				note_ident_node(code.size() - 1, expr->target);
 				return;
 			}
+			if (try_lower_store_move(ident, expr->value, flags)) return;
 			const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 			note_ident_node(store_ip, expr->target);
 		} else {
@@ -2588,6 +2839,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 
 	{
 		vm_compiler body_compiler(symbolizer_, builtins_);
+		body_compiler.typed_lowering(typed_lowering_);
 		proto.body_chunk = body_compiler.compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
 	}
 
@@ -2622,6 +2874,7 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		compile_expression(decl->initializer);
 		has_init = 1;
 		lvalue_init = is_lvalue_shaped(decl->initializer.get()) ? 1u : 0u;
+		if (try_lower_decl_move(decl)) return;
 		// Dest-addressed peephole (flatstack stage 6, same in-place rewrite shape as
 		// emit_compound_store): a fused-binary init lands straight in the decl - one
 		// dispatch, no push. The exec falls back to op_decl_var verbatim for every

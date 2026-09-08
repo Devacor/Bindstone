@@ -342,6 +342,15 @@ namespace jai::vm {
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
+        // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
+        // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
+        // decl's type stamp. Indexed by ip; rows for other instructions are empty.
+        struct typed_site {
+            vm_instruction orig{opcode::op_halt, 0, 0, 0};
+            vm_instruction orig2{opcode::op_halt, 0, 0, 0};
+            type_info* stamp = nullptr;
+        };
+        std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

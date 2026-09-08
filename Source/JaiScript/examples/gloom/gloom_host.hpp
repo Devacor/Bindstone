@@ -30,6 +30,7 @@ struct host_options {
 	std::string scripts_dir;
 	int64_t bench = 0;               // run N frames of the real loop headless-input, report sim/draw split
 	int64_t dump_frame = -1;         // smoke: write frame N to gloom_frame_<backend>.txt
+	int64_t profile_reset_tick = -1; // smoke: restart the VM's profile accounting at tick N (diagnostic builds; hashes unchanged)
 	bool god = false;
 	std::string pix = "quad";        // sub-cell pixel mode: half (1x2) | quad (2x2) | sext (2x3)
 	const char* argv0 = "";
@@ -107,6 +108,7 @@ public:
 	virtual bool wants_quit() = 0;                      // gloom_wants_quit()
 	virtual void summary() = 0;                         // gloom_summary()
 	virtual std::string stack_trace() { return ""; }    // script backtrace of the last error, "" if none
+	virtual void profile_reset() {}                     // diagnostic builds: restart the VM's per-function accounting
 };
 
 class script_adapter {

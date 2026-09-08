@@ -1,5 +1,7 @@
 # Script opcode profiles and accounting audit, 2026-09-08
 
+Corrected captures and accounting controls: [2026-09-08 refresh](SCRIPT_PROFILE_REFRESH.md).
+
 Three captures of each workload identify stable rendering hotspots. The initial
 per-function profiler does not yet provide disjoint script self time: coroutine
 reentry is charged twice, and host/coroutine entry accounting is incomplete.

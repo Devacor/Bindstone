@@ -1,5 +1,8 @@
 # GLOOM CPU profile: 2026-09-06
 
+For the c85ea0dd script-function attribution and accounting controls, see the
+[corrected script profile](review-2026-09-08/SCRIPT_PROFILE_REFRESH.md).
+
 Identified element reads account for **23.93% of serial CPU samples** and
 **29.41% with eight workers**. Script-value construction/destruction accounts
 for **13.99%** and **16.96%**. The union of element reads, writes, array push

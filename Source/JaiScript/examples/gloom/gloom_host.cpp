@@ -258,6 +258,7 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 				throw std::runtime_error("tick " + std::to_string(i) + " [" + names[b] + "]: " +
 					ex.what() + (trace.empty() ? "" : "\n" + trace));
 			}
+			if (i == opt.profile_reset_tick) { session->profile_reset(); }
 			if (i == opt.dump_frame) {
 				std::ofstream out(std::string("gloom_frame_") + names[b] + ".txt",
 					std::ios::binary | std::ios::trunc);
@@ -355,6 +356,7 @@ void print_usage(script_adapter& adapter) {
 		"  --warmup N      untimed smoke ticks before reboot (default 0)\n"
 		"  --workers N     parallel workers (0 = serial loop; default engine; ports: serial)\n"
 		"  --dump-frame N  smoke: dump frame N per backend to gloom_frame_<backend>.txt\n"
+		"  --profile-reset-tick N  smoke: restart the VM profile accounting at tick N (diagnostic builds)\n"
 		"  --bench N       run N frames autopilot with live rendering, report sim/draw split\n"
 		"  --fps N         frame pacing target (default 30)\n"
 		"  --w N / --h N   force console dimensions\n"
@@ -384,6 +386,7 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		if (a == "--seed") { opt.seed = std::stoll(next_arg("--seed")); }
 		else if (a == "--backend") { opt.backend = next_arg("--backend"); opt.backend_selected = true; }
 		else if (a == "--smoke") { opt.smoke = true; }
+		else if (a == "--profile-reset-tick") { opt.profile_reset_tick = std::stoll(next_arg("--profile-reset-tick")); }
 		else if (a == "--ticks") { opt.ticks = std::stoll(next_arg("--ticks")); }
 		else if (a == "--warmup") { opt.warmup_ticks = std::stoll(next_arg("--warmup")); }
 		else if (a == "--workers") { opt.workers = std::stoll(next_arg("--workers")); }

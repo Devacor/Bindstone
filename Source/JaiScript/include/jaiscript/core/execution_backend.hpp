@@ -94,6 +94,9 @@ public:
     // Debugger hook: engine::debugger() wires the controller here. Default no-op, so the
     // vm backend inherits it unchanged until phase 5 adds its statement-boundary hook.
     virtual void set_debug_controller(debug::controller*) {}
+    // Diagnostic builds (JAISCRIPT_VM_PROFILE): zero the per-opcode and per-script-function
+    // tables so a warm-up phase drops out of the report; a no-op everywhere else
+    virtual void profile_reset() {}
 
     // Innermost active environment during execution — the debugger enumerates in-scope
     // locals from it while parked. Default null (vm until phase 5); the interpreter

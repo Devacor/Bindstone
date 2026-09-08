@@ -274,6 +274,10 @@ namespace jai {
         // execute). Proofs are never serialized - a loaded jaibite re-derives them.
         void type_proofs(bool on);
         bool type_proofs() const;
+        // Diagnostic builds only (JAISCRIPT_VM_PROFILE): restart the VM's opcode and
+        // per-script-function accounting here, so what the process prints at exit covers
+        // the window from this call on. No effect in ordinary builds.
+        void vm_profile_reset();
         // Stamp counters from the most recent proof pass (tests assert proofs happened).
         const proof_stats& last_proof_stats() const;
 

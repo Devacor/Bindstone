@@ -59,8 +59,27 @@ namespace jai::vm {
 #ifdef JAISCRIPT_VM_PROFILE
         ~vm_backend() override { dump_opcode_profile(); }
         void dump_opcode_profile() const;
+        void profile_reset() override;
         uint64_t profile_cycles_[256] = {};
         uint64_t profile_counts_[256] = {};
+        // Per-script-function accounting (the sampling interface Astra asked for; main
+        // engine only, workers are not attributed). Exclusive = the opcode self time of the
+        // function's own instructions (the same rdtsc pairs as the opcode table: callee
+        // bodies excluded, the call and return machinery included); inclusive = frame entry
+        // to frame exit for in-loop script frames (a recursive activation counts its inner
+        // activations again). Names, files and lines are copied when a chunk is first seen,
+        // so the report does not depend on chunk lifetime.
+        struct profile_chunk_stats {
+            std::string name;
+            std::string file;
+            std::vector<uint32_t> lines;
+            std::vector<uint64_t> ip_cycles;
+            std::vector<uint64_t> ip_counts;
+            uint64_t inclusive_cycles = 0;
+            uint64_t entries = 0;
+        };
+        std::unordered_map<const chunk*, profile_chunk_stats> profile_chunks_;
+        profile_chunk_stats& profile_stats_for(const chunk& code);
         std::map<std::string, uint64_t> profile_native_callees_;   // in-loop fast-path misses by name
         // exec_decl_var / exec_store fast-path miss taxonomy (why the hot rows average
         // hundreds of cycles): [0]=hit [1]=flags/slot gate [2]=reference top [3]=storage
@@ -550,6 +569,9 @@ namespace jai::vm {
         // hold raw frame*).
         struct call_record {
             frame f;                                   // frames_ gets &f; f.locals = &locals
+#ifdef JAISCRIPT_VM_PROFILE
+            uint64_t profile_entry_tsc = 0;            // inclusive per-function accounting
+#endif
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
             strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
@@ -1425,6 +1447,45 @@ namespace jai::vm {
         // runtime miss (not an array, a non-int operand, an overflowing fold, out of
         // bounds, a kind the lane does not land): the general kernel runs unchanged.
         const script_value* fast_operand(frame& f, const fused_operand& operand, size_t cache_slot);
+        // Typed scalar set (opcode.hpp op_t_*): guarded fast paths over frame slots, the
+        // original instruction from chunk::typed_sites on any miss
+        const script_value* typed_right(frame& f, uint32_t c) noexcept {
+            if (c & k_typed_const_bit) { return &f.code->constants[c & ~k_typed_const_bit]; }
+            return frame_slot(f, c);
+        }
+        bool typed_land_int(frame& f, uint32_t a, script_int v);
+        bool typed_land_float(frame& f, uint32_t a, script_float v);
+        op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
+        op_status exec_typed_arith(frame& f, const vm_instruction& ins);
+        op_status exec_typed_cmp_jump(frame& f, const vm_instruction& ins);
+        op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
+        op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
+        op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
+        op_status exec_typed_store_const(frame& f, const vm_instruction& ins);
+        // op_binary_fused_temp's landing: the kernel's result lands RAW in a compiler temp
+        // (temps only ever receive kernel mints, so a live temp's tag is null)
+        struct temp_lane_sink {
+            vm_backend* vm;
+            frame& fr;
+            uint32_t slot;
+            void operator()(script_value&& v) { vm->frame_slot_set(fr, slot, std::move(v)); }
+            void raw_int(script_int iv) {
+                if (script_value* s = vm->frame_slot(fr, slot);
+                    s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) {
+                    s->unchecked_set_int_payload(iv);
+                    return;
+                }
+                (*this)(script_value(iv, vm->engine_));
+            }
+            void raw_float(script_float fv) {
+                if (script_value* s = vm->frame_slot(fr, slot);
+                    s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) {
+                    s->unchecked_set_float_payload(fv);
+                    return;
+                }
+                (*this)(script_value(fv, vm->engine_));
+            }
+        };
         bool typed_fold_index(frame& f, const fused_index_proto& p, script_int& index);
         bool typed_decl_read(frame& f, const fused_index_proto& p, uint32_t flags);
         // Typed element-store lane for the proven shape: a numeric value (operand or the

@@ -1944,6 +1944,10 @@ bool engine::type_proofs() const {
     return impl->type_proofs_;
 }
 
+void engine::vm_profile_reset() {
+    if (impl && impl->backend) { impl->backend->profile_reset(); }
+}
+
 const proof_stats& engine::last_proof_stats() const {
     return impl->last_proof_stats_;
 }

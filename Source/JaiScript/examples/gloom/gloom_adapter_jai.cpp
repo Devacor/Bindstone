@@ -109,6 +109,7 @@ public:
 	void summary() override { call_script(*eng_, "gloom_summary", {}); }
 
 	std::string stack_trace() override { return eng_->format_stack_trace(); }
+	void profile_reset() override { eng_->vm_profile_reset(); }
 
 private:
 	gloom::host_options opt_;

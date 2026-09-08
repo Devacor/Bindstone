@@ -4238,6 +4238,67 @@ public:
 			           "slotted param/local leave no entry");
 			check_true(pinned_call(*body), "body call site pins its call_expr");
 		});
+		test("typed_scalar_ops_match_the_interpreter", [this]() {
+			// The typed scalar set (op_t_*): arithmetic into temps, decls and stores, the
+			// compare-jumps, and the four moves, each with its guard misses (overflow, zero
+			// divisor, shift range, a boxed slot behind a reference, a var slot, widening,
+			// strings through the moves) against the interpreter with proofs on and off
+			const char* cases[] = {
+				"string run() { int acc = 0; for (int i = 0; i < 40; ++i) { int xx = i & 7; int t = xx * 3 + 1; int u = t - i; int v = u / 2; int w = v % 5; int b = (w ^ 3) | (i & 1); int sh = b << 2; int sr = sh >> 1; acc = acc + sr; } return to_string(acc); } run();",
+				"string run() { float acc = 0.0; float k = 0.5; for (int i = 0; i < 40; ++i) { float f = k * 2.0; float g = f - 0.25; float h = g / 4.0; float m = h % 0.3; acc = acc + m; } return to_string(acc); } run();",
+				"string run() { int x = 0x7fffffffffffffff; int one = 1; string m = \"ok\"; try { int y = x + one; } catch (e) { m = e; } return m; } run();",
+				"string run() { int x = 0x7fffffffffffffff; int two = 2; int y = 0; string m = \"ok\"; try { y = x * two; } catch (e) { m = e; } return m + to_string(y); } run();",
+				"string run() { int x = 5; int z = 0; string m = \"ok\"; try { int y = x / z; } catch (e) { m = e; } try { int q = x % z; } catch (e) { m += e; } return m; } run();",
+				"string run() { int x = 5; int n = 70; int k = -1; string m = \"ok\"; try { int y = x << n; } catch (e) { m = e; } try { int q = x >> k; } catch (e) { m += e; } return m; } run();",
+				"string run() { float x = 1.5; float z = 0.0; string m = \"ok\"; try { float y = x / z; } catch (e) { m = e; } try { float q = x % z; } catch (e) { m += e; } return m; } run();",
+				"string run() { int x = 1; int& r = x; int a = 2; int b = 3; x = a + b; int c = x * a; r = c - 1; return to_string(x) + to_string(r) + to_string(c); } run();",
+				"string run() { int x = 4; var v = x + 1; var w = v; var f = 2.5; var g = f * 2.0; return type_of(v) + to_string(v) + type_of(w) + type_of(g) + to_string(g); } run();",
+				"string run() { int k = 3; float f = k; float g = 7; auto a = k; auto b = f; return type_of(f) + to_string(f) + to_string(g) + type_of(a) + type_of(b); } run();",
+				"string run() { string s = \"a\"; string t = s; t += \"b\"; string u = \"lit\"; string w = u; s = t; u = \"x\"; return s + t + u + w; } run();",
+				"string run() { bool b = true; bool c = b; char ch = 'q'; char d = ch; int i = 7; int j = i; j = 9; i = j; return to_string(b) + to_string(c) + ch + d + to_string(i) + to_string(j); } run();",
+				"string run() { int n = 0; int acc = 0; while (n < 10) { acc = acc + n; n = n + 1; } int m = 10; while (m > 0) { m = m - 3; acc = acc + m; } return to_string(acc); } run();",
+				"string run() { float x = 0.0; int hits = 0; while (x < 5.0) { x = x + 0.75; if (x >= 2.0) { hits = hits + 1; } if (x <= 1.0) { hits = hits + 10; } if (x == 3.0) { hits = hits + 100; } if (x != 3.75) { hits = hits + 1000; } } return to_string(hits) + to_string(x); } run();",
+				"string run() { int a = 3; int b = 3; int r = 0; if (a == b) { r = r + 1; } if (a != b) { r = r + 2; } if (a >= b) { r = r + 4; } if (a <= b) { r = r + 8; } if (2 < a) { r = r + 16; } if (5 > a) { r = r + 32; } int c = 2 * a; int d = 10 - a; return to_string(r) + to_string(c) + to_string(d); } run();",
+				"string run() { int x = 5; int y = 0; y = x; y = 7; int z = y; float f = 1.5; float g = 0.0; g = f; g = 2.5; return to_string(x) + to_string(y) + to_string(z) + to_string(f) + to_string(g); } run();",
+				"class P { int n = 0; } string run() { P p = P(); var h = p; int k = 2; var q = k; q = k + 1; return to_string(q) + type_of(h); } run();",
+				"string run() { int total = 0; for (int i = 0; i < 3; ++i) { int s = 0; for (int j = 0; j < 4; ++j) { int t = i * j; s = s + t; } total = total + s; } return to_string(total); } run();",
+				"int g = 10; string run() { int x = g; int y = x + g; g = y; return to_string(g) + to_string(x); } run();",
+				"string run() { int x = 1; var f = [&]() { x = x + 5; }; f(); int y = x * 2; return to_string(x) + to_string(y); } run();",
+				"string run() { int i = 0; int acc = 0; for (i = 0; i < 6; i = i + 2) { acc = acc + i; } return to_string(acc) + to_string(i); } run();",
+			};
+			for (bool proofs : {true, false}) {
+				for (const char* program : cases) {
+					auto interp = jai::engine::make();
+					jai::stdlib::register_all(*interp);
+					interp->type_proofs(proofs);
+					auto vmx = vm_engine();
+					jai::stdlib::register_all(*vmx);
+					vmx->type_proofs(proofs);
+					std::string want, got;
+					try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+					try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+					check_eq(want, got, program);
+				}
+			}
+			// the lowering happens: a closure body with typed slots lists the typed ops (closure
+			// bodies compile with the program; the checker's stamps come from a checked parse)
+			{
+				auto vm = vm_engine();
+				jai::stdlib::register_all(*vm);
+				auto* symbolizer = vm->get_symbolizer();
+				const char* script = "var f = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 2; acc = acc + t; int c = 5; int d = c; } return acc; }; var z = 0;";
+				auto templates = vm->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, vm.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				jai::vm::vm_compiler compiler(symbolizer);
+				const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+				check_true(listing.find("T_DECL_CONST") != std::string::npos && listing.find("T_DECL_MOV") != std::string::npos, listing);
+			}
+		});
+
 		test("member_compound_lands_through_the_field_write_cache", [this]() {
 			// `obj.f op= v` and `this.f op= v` write back through the same proven-field and
 			// site-IC landing op_set_member uses; accessors, non-public chains, statics,

@@ -4292,6 +4292,24 @@ public:
 					check_eq(want, got, program);
 				}
 			}
+			// a registered global numeric operator reaches typed slots too: every typed row
+			// steps aside for the operator table, exactly as the fused kernels do
+			for (bool proofs : {true, false}) {
+				const char* program = "string run() { int a = 3; int b = 4; int c = a + b; int d = 0; d = a * b; d += a; int acc = 0; for (int i = 0; i < 3; ++i) { acc = acc + i; } return to_string(c) + \",\" + to_string(d) + \",\" + to_string(acc); } run();";
+				auto interp = jai::engine::make();
+				jai::stdlib::register_all(*interp);
+				interp->type_proofs(proofs);
+				interp->add_function("+", [](script_int x, script_int y) { return x * 10 + y; });
+				auto vmx = vm_engine();
+				jai::stdlib::register_all(*vmx);
+				vmx->type_proofs(proofs);
+				vmx->add_function("+", [](script_int x, script_int y) { return x * 10 + y; });
+				std::string want, got;
+				try { want = interp->execute(program).as_string(); } catch (const std::exception& e) { want = std::string("throw:") + e.what(); }
+				try { got = vmx->execute(program).as_string(); } catch (const std::exception& e) { got = std::string("throw:") + e.what(); }
+				check_eq(want, got, program);
+				check_true(got.rfind("7,", 0) != 0, "the typed decl did not bypass the operator table: " + got);   // the general path answers here (today: a resolution error on both backends), never the raw sum
+			}
 			// the lowering happens: a closure body with typed slots lists the typed ops (closure
 			// bodies compile with the program; the checker's stamps come from a checked parse)
 			{

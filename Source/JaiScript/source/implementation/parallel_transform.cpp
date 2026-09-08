@@ -176,6 +176,9 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.wake_lat_sum / p.wake_samples : 0.0,
 				(unsigned long long)p.wake_lat_max, (unsigned long long)p.wake_samples,
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
+			fprintf(stderr, "  setup split per region: admit %.0f | slots %.0f | captures %.0f | pins %.0f | prewarm %.0f | rest %.0f cyc\n",
+				(double)p.setup_admit_cyc / p.regions, (double)p.setup_slots_cyc / p.regions, (double)p.setup_caps_cyc / p.regions,
+				(double)p.setup_pins_cyc / p.regions, (double)p.setup_prewarm_cyc / p.regions, (double)p.setup_rest_cyc / p.regions);
 			if (p.cache_hits + p.cache_misses + p.cache_unprovable) {
 				fprintf(stderr, "  snapshot cache: hits %llu | misses %llu | stores %llu | unprovable %llu\n",
 					(unsigned long long)p.cache_hits, (unsigned long long)p.cache_misses,
@@ -3020,6 +3023,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
 		if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t pf_loop0 = __rdtsc();
+	uint64_t pf_a = pf_loop0, pf_slots = 0, pf_caps = 0, pf_pins = 0;
+#endif
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = pool->worker_slots[k];
 		state.faults.checkpoint("region.worker_slot", k);
@@ -3065,6 +3072,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		slot->capture_name_ids.clear();
 		bool any_snapshot_miss = false;
 		std::vector<const void*> fresh_nodes;
+#ifdef JAISCRIPT_VM_PROFILE
+		{ const uint64_t now = __rdtsc(); pf_slots += now - pf_a; pf_a = now; }
+#endif
 		for (const auto& cap : captures) {
 			state.faults.checkpoint("region.capture_value", k);
 			script_value provisioned(std::monostate{}, &eng);
@@ -3099,6 +3109,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		state.faults.checkpoint("region.snapshot_metadata", k);
 		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
+#ifdef JAISCRIPT_VM_PROFILE
+		{ const uint64_t now = __rdtsc(); pf_caps += now - pf_a; pf_a = now; }
+#endif
 		// Method pins: each worker gets a dispatcher copy per admitted element method
 		slot->method_pins.entries.clear();
 		for (const auto& am : method_adm.admitted_methods) {
@@ -3122,6 +3135,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		slot->backend->set_parallel_method_pins(slot->method_pins.entries.empty() ? nullptr : &slot->method_pins);
 		contexts.push_back(slot.get());
+#ifdef JAISCRIPT_VM_PROFILE
+		{ const uint64_t now = __rdtsc(); pf_pins += now - pf_a; pf_a = now; }
+#endif
 	}
 
 	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze
@@ -3137,6 +3153,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
 		return seed;
 	}());
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t pf_prewarm1 = __rdtsc();
+#endif
 
 	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
 	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
@@ -3150,6 +3169,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.pool_create");
 			state.pool = std::make_unique<jai::thread_pool>(
 				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults);
+			state.pool->spin_budget(std::chrono::microseconds(state.spin_wait_us));
 			region_guard.pending_pool = state.pool.get();
 			calibrate_pool_overhead(state);
 			region_guard.pending_pool = nullptr;   // calibration joined each completed batch
@@ -3204,6 +3224,12 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		auto& p = *plan.prof;
 		++p.regions;
 		p.setup_cyc += prof_t1 - prof_t0;
+		p.setup_admit_cyc += pf_loop0 - prof_norm1;
+		p.setup_slots_cyc += pf_slots;
+		p.setup_caps_cyc += pf_caps;
+		p.setup_pins_cyc += pf_pins;
+		p.setup_prewarm_cyc += pf_prewarm1 - pf_a;
+		p.setup_rest_cyc += prof_t1 - pf_prewarm1;
 		p.submit_cyc += prof_t2 - prof_t1;
 		p.main_chunk_cyc += prof_t3 - prof_t2;
 		p.wait_cyc += prof_t4 - prof_t3;

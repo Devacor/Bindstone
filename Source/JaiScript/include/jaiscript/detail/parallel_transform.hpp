@@ -184,6 +184,7 @@ namespace jai::detail {
         fault_injection faults;                            // host/test checkpoints; disabled by default
         bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
+        size_t spin_wait_us = 1000;                        // engine::parallel_spin_wait_us(us): the pool's spin-before-park budget
         std::unordered_map<const void*, parallel_admission> admission_cache;
         // parallel_transform's chunk loop (k_parallel_chunk_transform), parsed once per engine
         // and provisioned per worker: one script entry per chunk, fn called in-loop per element,
@@ -247,6 +248,12 @@ namespace jai::detail {
             uint64_t worker_span_sum = 0;  // pool-worker compute spans
             uint64_t capture_cyc = 0;      // slice of setup: capture provisioning (all slots)
             uint64_t capture_count = 0;    // captures provisioned
+            uint64_t setup_admit_cyc = 0;    // setup slice: method admission (after normalize)
+            uint64_t setup_slots_cyc = 0;    // setup slice: slot reset/provision, alias restamp, cursors
+            uint64_t setup_caps_cyc = 0;     // setup slice: capture provisioning + node rebuild
+            uint64_t setup_pins_cyc = 0;     // setup slice: method pins
+            uint64_t setup_prewarm_cyc = 0;  // setup slice: type prewarm
+            uint64_t setup_rest_cyc = 0;     // setup slice: table, pool, activation
             uint64_t cache_hits = 0;       // snapshot cache: content-matched reuses
             uint64_t cache_stores = 0;     // snapshot cache: records (re)stored
             uint64_t cache_misses = 0;     // snapshot cache: validate failed or no record

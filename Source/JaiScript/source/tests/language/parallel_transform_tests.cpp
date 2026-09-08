@@ -583,6 +583,41 @@ public:
 			}
 		});
 
+		test("spin_wait_budget_changes_no_result", [this]() {
+			// The pool's spin-before-park budget is a wake-latency knob: dense regions with the
+			// default budget, the same regions with every wake through the kernel (0), and a
+			// budget flipped between regions all produce the serial loop's results at 8 workers
+			const char* src = R"(
+				class P { int v = 0; float w = 0.0; }
+				array<P> ps = [];
+				for (int i = 0; i < 64; i++) { P p = P(); p.v = i; ps.push(p); }
+				var acc = [];
+				for (int round = 0; round < 12; round++) {
+					parallel_for (auto& p : ps) { p.v = p.v * 3 + round; p.w = p.w + p.v * 0.5; }
+					int f(P p) { return p.v * 2; }
+					var t = parallel_transform(ps, f);
+					acc.push(t[63]);
+				}
+				to_json([acc, ps[63].v, ps[63].w]);
+			)";
+			std::vector<std::string> outs;
+			for (size_t budget : {size_t(1000), size_t(0), size_t(50)}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->parallel_thread_count(8);
+				check_eq((size_t)1000, e->parallel_spin_wait_us(), "default budget");
+				e->parallel_spin_wait_us(budget);
+				check_eq(budget, e->parallel_spin_wait_us());
+				outs.push_back(e->execute(src).as_string());
+				if (budget == 50) { e->parallel_spin_wait_us(1000); check_eq(outs.back(), e->execute(src).as_string(), "budget flipped on a live pool"); }
+			}
+			auto s = make_engine();
+			jai::stdlib::register_all(*s);
+			s->parallel_thread_count(1);
+			const std::string serial = s->execute(src).as_string();
+			for (const auto& o : outs) { check_eq(serial, o); }
+		});
+
 		test("captured_map_reads", [this]() {
 			auto e = make_engine();
 			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot

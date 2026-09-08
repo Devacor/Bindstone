@@ -142,6 +142,16 @@ names and of every method-call site (both backends probe the user-accessor id of
 before dispatch). A miss on the frozen interner is Debug's assert, the tripwire. A worker that
 finds a pin for a method uses it in unsafe mode too; an unpinned call there is unsafe's business.
 
+**Wake protocol.** A pool worker that finishes its chunk spins on its own flag for up to
+`engine::parallel_spin_wait_us` (default 1000) before parking on the condition variable, and
+only when the pool's last two batches arrived within that budget; the joining thread spins the
+same way on the outstanding count. Dense regions (a frame's worth of fork-joins) therefore
+wake without a kernel transition on either side, while a program whose regions come one per
+frame parks at once and burns nothing between them; 0 always parks. The submitter asks the
+kernel only for parked targets and a worker pings the joiner only while it is parked, both
+decided under the mutex the waiter sets its flag under, so no wake is lost. Placement and order
+never change, so results do not.
+
 **The element reference is a cursor.** A by-reference body binds its element to ONE reference
 holder per chunk, minted at the barrier (the array pin and the `live_elem_refs` count are
 main-thread facts) and re-pointed at the next index on the worker before each call; an admitted

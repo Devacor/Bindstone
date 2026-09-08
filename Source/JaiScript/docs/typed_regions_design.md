@@ -121,6 +121,45 @@ representation for its instances, which the migration path already knows how to 
 - Both backends must raise the same texts for the same inputs on every typed opcode; the
   catalog tests extend to each new opcode.
 
+## The typed scalar set (stage 1 as it stands)
+
+The first set runs on the existing `script_value` frame slots, not on a separate raw-cell
+area: the guard is one tag compare per operand, and what the instruction removes is the
+proto decode, the generic operand ladders, the push and pop round trips and the second
+dispatch of the fused forms. Thirty-one opcodes, `op_t_*` in `vm/opcode.hpp`:
+
+- arithmetic: `add sub mul div mod and or xor shl shr` on int/int, `add sub mul div mod` on
+  float/float; `a` is the destination slot with its kind in the top bits (temp, decl, store,
+  compound), `b` the left slot, `c` the right slot or a constant index behind
+  `k_typed_const_bit`;
+- compare-and-jump-if-false: the six comparisons on int/int and on float/float; `a` left,
+  `b` right, `c` target;
+- moves: `T x = y`, `T x = lit`, `x = y;`, `x = lit;` as one instruction each.
+
+The compiler lowers in place after a callable's body is complete
+(`vm_compiler::lower_typed_ops`; the moves lower at emission, where the LOAD or CONST just
+emitted is rewritten and no DECL_VAR or STORE follows). A fused binary or compare-jump lowers
+when the checker's operand class on the node is int/int or float/float and both operands are
+direct frame slots, compiler temps or literals (a literal on the left swaps for the
+commutative and mirrored operators); a decl landing needs the decl fast path's static
+admission and a declared type the class fits; a store landing needs the same-type proof, the
+provable-slot flag and statement position; a compound needs a bare right operand and
+statement position, int rows only. Lowering follows the type-proofs flag, so a proofs-off run
+is a typed-ops-off run and the differential fuzz gate's second pass covers both.
+
+Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
+own ip (two for a move). The fast path lands exactly as the general op lands: a payload
+write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as
+the proven-identity slot store; a compound in place. Any guard miss (a slot boxed behind a
+reference, a var slot, an overflow, a zero divisor, a shift out of range) runs the original
+instruction, so error texts, evaluation order and post-states are the general kernel's by
+construction and the interpreter stays the oracle unchanged.
+
+What this set does not yet do, in the order the rest of this document gives it: raw cells
+(the slot is still 32 bytes with a tag), regions with boundary boxing, typed element
+instructions in the same encoding (element reads and stores run through the proven lanes of
+the fused index ops), typed calls, flat records.
+
 ## Order of work
 
 1. Typed slots and the scalar arithmetic set, with boxing at boundaries. Measured on GLOOM's

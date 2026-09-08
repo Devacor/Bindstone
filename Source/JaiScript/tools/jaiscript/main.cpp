@@ -1251,6 +1251,11 @@ int run_file_mode(const options& opt, const console_state& con) {
 	if (r.ok && r.exit_code == 0 && opt.benchmark_main > 0) {
 		for (int repetition = 1; repetition <= opt.benchmark_main; ++repetition) {
 			std::cout << "JAI_BENCHMARK_PHASE measured " << repetition << "\n";
+#ifdef JAISCRIPT_VM_PROFILE
+			// The warm-up has returned; reset outside active VM execution so the
+			// diagnostic report describes this replay, including its main() setup.
+			eng->vm_profile_reset();
+#endif
 			try {
 #ifdef GLOOM_PROFILE_CAPTURE
 				gloom::profile_capture capture(L"JaiDOOM measured main");

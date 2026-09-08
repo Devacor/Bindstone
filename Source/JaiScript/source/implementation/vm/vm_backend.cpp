@@ -6372,13 +6372,21 @@ bool vm_backend::typed_decl_land_float(frame& f, uint32_t dslot, uint8_t expect,
 	return true;
 }
 
+const script_array* vm_backend::lane_element_source(const script_value& v, bool& borrowed) noexcept {
+	const size_t idx = v.raw_storage_index();
+	if (idx == script_value::TYPEID_ARRAY) { borrowed = false; return v.unchecked_array_node(); }
+	if (idx == script_value::TYPEID_PARALLEL_BORROW) { borrowed = true; return v.parallel_borrow_array(); }
+	return nullptr;
+}
+
 // The element at `at` into the decl slot, by the decl lane's rules for each buffer kind
 // (typed_decl_read's landing, shared with op_t_load); false = the kernel's business
-bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, const script_array& node, size_t at) {
+bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, const script_array& node, size_t at, bool borrowed) {
 	switch (node.kind()) {
 	case script_array::kind_t::i64: return typed_decl_land_int(f, dslot, expect, stamp, node.ints()[at]);
 	case script_array::kind_t::f64: return typed_decl_land_float(f, dslot, expect, stamp, node.floats()[at]);
 	case script_array::kind_t::str: {
+		if (borrowed) return false;   // the kernel copies the bytes of a captured string
 		if (expect != static_cast<uint8_t>(script_value::TYPEID_STRING) && expect != 0xFF) return false;
 		script_value v(node.strs()[at], engine_);   // the buffer's node, shared like every string copy
 		if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
@@ -6392,6 +6400,7 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 			if (ei == script_value::TYPEID_INT) return typed_decl_land_int(f, dslot, expect, stamp, el.unchecked_as_int());
 			if (ei == script_value::TYPEID_FLOAT) return typed_decl_land_float(f, dslot, expect, stamp, el.unchecked_as_float());
 		}
+		if (borrowed && ei == script_value::TYPEID_STRING) return false;
 		if (ei == expect ||
 		    (expect == 0xFF &&
 		     (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT || ei == script_value::TYPEID_BOOL ||
@@ -6419,29 +6428,25 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
 			cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr;   // a getter-backed reference: the kernel reads it exactly once
 		}
-		if (cp) {
-			if (cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
-				auto read_int = [&](uint32_t o, script_int& out) -> bool {
-					const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
-					if (!v || v->raw_storage_index() != script_value::TYPEID_INT) return false;
-					out = v->unchecked_as_int();
-					return true;
-				};
-				script_int index = 0, r = 0;
-				bool ok = read_int(site.operands[0], index);
-				if (ok && site.fold_count) {
-					ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
-					for (uint8_t k = 1; ok && k < site.fold_count; ++k) {
-						ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
-					}
+		bool borrowed = false;
+		if (const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr) {
+			auto read_int = [&](uint32_t o, script_int& out) -> bool {
+				const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
+				if (!v || v->raw_storage_index() != script_value::TYPEID_INT) return false;
+				out = v->unchecked_as_int();
+				return true;
+			};
+			script_int index = 0, r = 0;
+			bool ok = read_int(site.operands[0], index);
+			if (ok && site.fold_count) {
+				ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
+				for (uint8_t k = 1; ok && k < site.fold_count; ++k) {
+					ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
 				}
-				if (ok) {
-					const script_array* node = cp->unchecked_array_node();
-					if (index >= 0 && static_cast<size_t>(index) < node->size() &&
-					    typed_decl_land_element(f, ins.a, site.decl_expect, site.stamp, *node, static_cast<size_t>(index))) {
-						return {};
-					}
-				}
+			}
+			if (ok && index >= 0 && static_cast<size_t>(index) < node->size() &&
+			    typed_decl_land_element(f, ins.a, site.decl_expect, site.stamp, *node, static_cast<size_t>(index), borrowed)) {
+				return {};
 			}
 		}
 	}
@@ -6738,12 +6743,13 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 		if (!lane_deref_silent(*cp)) return false;   // a getter-backed reference: the kernel reads it exactly once
 		cp = &cp->deref();
 	}
-	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+	bool borrowed = false;
+	const script_array* node = lane_element_source(*cp, borrowed);
+	if (!node) return false;
 	script_int index;
 	if (!typed_fold_index(f, p, index)) return false;
-	const script_array* node = cp->unchecked_array_node();
 	if (index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
-	return typed_decl_land_element(f, p.decl_slot, p.decl_expect, p.decl_type, *node, static_cast<size_t>(index));
+	return typed_decl_land_element(f, p.decl_slot, p.decl_expect, p.decl_type, *node, static_cast<size_t>(index), borrowed);
 }
 
 bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {

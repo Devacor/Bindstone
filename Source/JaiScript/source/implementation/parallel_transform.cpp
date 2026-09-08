@@ -181,6 +181,9 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
 			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
 				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
+			fprintf(stderr, "  slots split per region: reset %.0f | restamp %.0f | cursors %.0f cyc; admit split: pool %.0f | guard %.0f cyc\n",
+				(double)p.slot_reset_cyc / p.regions, (double)p.slot_restamp_cyc / p.regions, (double)p.slot_cursor_cyc / p.regions,
+				(double)p.admit_pool_cyc / p.regions, (double)p.admit_guard_cyc / p.regions);
 			fprintf(stderr, "  setup split per region: admit %.0f | slots %.0f | captures %.0f | pins %.0f | prewarm %.0f | rest %.0f cyc\n",
 				(double)p.setup_admit_cyc / p.regions, (double)p.setup_slots_cyc / p.regions, (double)p.setup_caps_cyc / p.regions,
 				(double)p.setup_pins_cyc / p.regions, (double)p.setup_prewarm_cyc / p.regions, (double)p.setup_rest_cyc / p.regions);
@@ -2910,6 +2913,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t pf_adm1 = __rdtsc();
+#endif
 	// THREAD COUNT: the override or min(hardware_concurrency - 1, 6), one context below
 	// k_parallel_small_n, then the measured-cost cap (parallel_design.md section 3)
 	size_t worker_count = eng.parallel_thread_count();
@@ -2967,6 +2973,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		state.faults.checkpoint("region.worker_storage");
 		pool->worker_slots.resize(worker_count);
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t pf_adm2 = __rdtsc();
+#endif
 	std::vector<parallel_worker_slot*> contexts;
 	state.faults.checkpoint("region.context_storage");
 	contexts.reserve(worker_count);
@@ -3054,17 +3063,27 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t pf_loop0 = __rdtsc();
-	uint64_t pf_a = pf_loop0, pf_slots = 0, pf_caps = 0, pf_pins = 0;
+	uint64_t pf_a = pf_loop0, pf_slots = 0, pf_caps = 0, pf_pins = 0, pf_reset = 0, pf_restamp = 0, pf_cursor = 0;
 #endif
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = pool->worker_slots[k];
 		state.faults.checkpoint("region.worker_slot", k);
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t pf_s0 = __rdtsc();
+#endif
 		if (slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
 		} else {
 			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
 		}
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t pf_s1 = __rdtsc();
+#endif
 		restamp_alias_proofs(eng, *slot);
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t pf_s2 = __rdtsc();
+		pf_reset += pf_s1 - pf_s0; pf_restamp += pf_s2 - pf_s1;
+#endif
 		slot->begin = chunk_begin[k];
 		slot->end = n;
 		slot->count = chunk_count[k];
@@ -3096,6 +3115,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		slot->call_args.reserve(slot->element_refs.size() + 1);
 		for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
 		slot->call_args.emplace_back(static_cast<script_int>(slot->count), &eng);
+#ifdef JAISCRIPT_VM_PROFILE
+		pf_cursor += __rdtsc() - pf_s2;
+#endif
 
 		// Provision the captured reads into THIS worker's root env (single-threaded, charged
 		// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
@@ -3174,7 +3196,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 
 	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze
 	state.faults.checkpoint("region.prewarm");
-	prewarm_region_types(eng, [&] {
+	{
 		std::vector<type_info*> seed = adm->referenced_types;
 		if (plan.extra_seed_adm) { seed.insert(seed.end(), plan.extra_seed_adm->referenced_types.begin(), plan.extra_seed_adm->referenced_types.end()); }
 		seed.insert(seed.end(), value_types.begin(), value_types.end());
@@ -3183,8 +3205,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		for (const class_definition* cd : element_classes) { seed.push_back(cd->get_type_info().get()); }
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
 		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
-		return seed;
-	}());
+		prewarm_region_types(eng, seed);
+	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t pf_prewarm1 = __rdtsc();
 #endif
@@ -3262,6 +3284,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		p.setup_pins_cyc += pf_pins;
 		p.setup_prewarm_cyc += pf_prewarm1 - pf_a;
 		p.setup_rest_cyc += prof_t1 - pf_prewarm1;
+		p.slot_reset_cyc += pf_reset;
+		p.slot_restamp_cyc += pf_restamp;
+		p.slot_cursor_cyc += pf_cursor;
+		p.admit_pool_cyc += pf_adm2 - pf_adm1;
+		p.admit_guard_cyc += pf_loop0 - pf_adm2;
 		p.submit_cyc += prof_t2 - prof_t1;
 		p.main_chunk_cyc += prof_t3 - prof_t2;
 		p.wait_cyc += prof_t4 - prof_t3;

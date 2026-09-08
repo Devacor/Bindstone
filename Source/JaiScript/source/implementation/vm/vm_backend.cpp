@@ -524,6 +524,14 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 			}
 			break;
 		}
+		case opcode::op_t_load: {
+			if (ip < f->code->typed_sites.size()) {
+				const vm_instruction& orig = f->code->typed_sites[ip].orig;
+				const auto* vd = static_cast<const variable_decl*>(f->code->nodes[orig.c].get());
+				if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+			}
+			break;
+		}
 		case opcode::op_t_store_mov:
 		case opcode::op_t_store_const: {
 			if (ip < f->code->typed_sites.size()) {
@@ -6333,35 +6341,109 @@ static bool typed_int_index_row(token_type op, script_int a, script_int b, scrip
 	}
 }
 
-bool vm_backend::typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv) {
-	if (p.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
-		return typed_decl_land_float(f, p, static_cast<script_float>(iv));   // the decl's int -> float row
+bool vm_backend::typed_decl_land_int(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, script_int iv) {
+	if (expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+		return typed_decl_land_float(f, dslot, expect, stamp, static_cast<script_float>(iv));   // the decl's int -> float row
 	}
-	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && p.decl_expect != 0xFF) return false;
-	if (script_value* slot = frame_slot(f, p.decl_slot)) {
-		if (slot->raw_storage_index() == script_value::TYPEID_INT && slot->get_type_info().get() == p.decl_type) {
+	if (expect != static_cast<uint8_t>(script_value::TYPEID_INT) && expect != 0xFF) return false;
+	if (script_value* slot = frame_slot(f, dslot)) {
+		if (slot->raw_storage_index() == script_value::TYPEID_INT && slot->get_type_info().get() == stamp) {
 			slot->unchecked_set_int_payload(iv);
 			return true;
 		}
 	}
 	script_value v(iv, engine_);
-	if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
-	frame_slot_set(f, p.decl_slot, std::move(v));
+	if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
+	frame_slot_set(f, dslot, std::move(v));
 	return true;
 }
 
-bool vm_backend::typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv) {
-	if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && p.decl_expect != 0xFF) return false;
-	if (script_value* slot = frame_slot(f, p.decl_slot)) {
-		if (slot->raw_storage_index() == script_value::TYPEID_FLOAT && slot->get_type_info().get() == p.decl_type) {
+bool vm_backend::typed_decl_land_float(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, script_float fv) {
+	if (expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && expect != 0xFF) return false;
+	if (script_value* slot = frame_slot(f, dslot)) {
+		if (slot->raw_storage_index() == script_value::TYPEID_FLOAT && slot->get_type_info().get() == stamp) {
 			slot->unchecked_set_float_payload(fv);
 			return true;
 		}
 	}
 	script_value v(fv, engine_);
-	if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
-	frame_slot_set(f, p.decl_slot, std::move(v));
+	if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
+	frame_slot_set(f, dslot, std::move(v));
 	return true;
+}
+
+// The element at `at` into the decl slot, by the decl lane's rules for each buffer kind
+// (typed_decl_read's landing, shared with op_t_load); false = the kernel's business
+bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, const script_array& node, size_t at) {
+	switch (node.kind()) {
+	case script_array::kind_t::i64: return typed_decl_land_int(f, dslot, expect, stamp, node.ints()[at]);
+	case script_array::kind_t::f64: return typed_decl_land_float(f, dslot, expect, stamp, node.floats()[at]);
+	case script_array::kind_t::str: {
+		if (expect != static_cast<uint8_t>(script_value::TYPEID_STRING) && expect != 0xFF) return false;
+		script_value v(node.strs()[at], engine_);   // the buffer's node, shared like every string copy
+		if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
+		frame_slot_set(f, dslot, std::move(v));
+		return true;
+	}
+	case script_array::kind_t::hetero: {
+		const script_value& el = node.values()[at];
+		const size_t ei = el.raw_storage_index();
+		if (stamp) {
+			if (ei == script_value::TYPEID_INT) return typed_decl_land_int(f, dslot, expect, stamp, el.unchecked_as_int());
+			if (ei == script_value::TYPEID_FLOAT) return typed_decl_land_float(f, dslot, expect, stamp, el.unchecked_as_float());
+		}
+		if (ei == expect ||
+		    (expect == 0xFF &&
+		     (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT || ei == script_value::TYPEID_BOOL ||
+		      ei == script_value::TYPEID_CHAR || ei == script_value::TYPEID_STRING))) {
+			script_value v(el);
+			if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
+			frame_slot_set(f, dslot, std::move(v));
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+// op_t_load: typed_decl_read over the flattened site row (one line of memory instead of
+// the proto, its operands, the fold proto and the chain vector)
+op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	if (!has_custom_numeric_ops_) {
+		const script_value* cp = site.cont_slot != k_invalid_u32
+			? frame_slot(f, site.cont_slot)
+			: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
+		if (cp) {
+			if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }   // a var& parameter
+			if (cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
+				auto read_int = [&](uint32_t o, script_int& out) -> bool {
+					const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
+					if (!v || v->raw_storage_index() != script_value::TYPEID_INT) return false;
+					out = v->unchecked_as_int();
+					return true;
+				};
+				script_int index = 0, r = 0;
+				bool ok = read_int(site.operands[0], index);
+				if (ok && site.fold_count) {
+					ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
+					for (uint8_t k = 1; ok && k < site.fold_count; ++k) {
+						ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
+					}
+				}
+				if (ok) {
+					const script_array* node = cp->unchecked_array_node();
+					if (index >= 0 && static_cast<size_t>(index) < node->size() &&
+					    typed_decl_land_element(f, ins.a, site.decl_expect, site.stamp, *node, static_cast<size_t>(index))) {
+						return {};
+					}
+				}
+			}
+		}
+	}
+	return exec_index_fused_decl(f, site.orig);
 }
 
 // The proven index: a direct slot or literal, or the int fold with its chain steps (the
@@ -6648,41 +6730,7 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	if (!typed_fold_index(f, p, index)) return false;
 	const script_array* node = cp->unchecked_array_node();
 	if (index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
-	const size_t at = static_cast<size_t>(index);
-	switch (node->kind()) {
-	case script_array::kind_t::i64: return typed_decl_land_int(f, p, node->ints()[at]);
-	case script_array::kind_t::f64: return typed_decl_land_float(f, p, node->floats()[at]);
-	case script_array::kind_t::str: {
-		if (p.decl_expect != static_cast<uint8_t>(script_value::TYPEID_STRING) && p.decl_expect != 0xFF) return false;
-		script_value v(node->strs()[at], engine_);   // the buffer's node, shared like every string copy
-		if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
-		frame_slot_set(f, p.decl_slot, std::move(v));
-		return true;
-	}
-	case script_array::kind_t::hetero: {
-		// the kernel's untyped rows: a raw int/float lands raw only when the decl stamps its
-		// own tag (decl_type set); every other element keeps the full copy and the sink's
-		// expect check
-		const script_value& el = node->values()[at];
-		const size_t ei = el.raw_storage_index();
-		if (p.decl_type) {
-			if (ei == script_value::TYPEID_INT) return typed_decl_land_int(f, p, el.unchecked_as_int());
-			if (ei == script_value::TYPEID_FLOAT) return typed_decl_land_float(f, p, el.unchecked_as_float());
-		}
-		if (ei == p.decl_expect ||
-		    (p.decl_expect == 0xFF &&
-		     (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT || ei == script_value::TYPEID_BOOL ||
-		      ei == script_value::TYPEID_CHAR || ei == script_value::TYPEID_STRING))) {
-			script_value v(el);
-			if (p.decl_type) { v.set_type_info(type_info_ptr{p.decl_type}); }
-			frame_slot_set(f, p.decl_slot, std::move(v));
-			return true;
-		}
-		return false;
-	}
-	default:
-		return false;
-	}
+	return typed_decl_land_element(f, p.decl_slot, p.decl_expect, p.decl_type, *node, static_cast<size_t>(index));
 }
 
 bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {
@@ -13781,6 +13829,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_t_push:
 				VM_TRY_OP_SHARED(exec_typed_push(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_t_load:
+				VM_TRY_OP_SHARED(exec_typed_load(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 

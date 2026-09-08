@@ -4335,6 +4335,23 @@ public:
 				check_eq(run(interp, "calc(1, 1);"), run(vmx, "calc(1, 1);"), "after the install, a later execute");
 				check_true(run(vmx, "calc(1, 1);") != "2020", "the typed slots see the installed operator: " + run(vmx, "calc(1, 1);"));
 			}
+			// op_t_load: the decl read battery's shapes again through the flattened site, and the
+			// lowering probe (a closure body with a proven element read lists T_LOAD)
+			{
+				auto vm = vm_engine();
+				jai::stdlib::register_all(*vm);
+				auto* symbolizer = vm->get_symbolizer();
+				const char* script = "array<int> G = [1, 2, 3, 4]; var f = function(int w) { int y = 1; int x = 0; int v = G[y * w + x]; int q = G[x]; return v + q; }; var z = 0;";
+				auto templates = vm->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, vm.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				jai::vm::vm_compiler compiler(symbolizer);
+				const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+				check_true(listing.find("T_LOAD") != std::string::npos, listing);
+			}
 			// the lowering happens: a closure body with typed slots lists the typed ops (closure
 			// bodies compile with the program; the checker's stamps come from a checked parse)
 			{

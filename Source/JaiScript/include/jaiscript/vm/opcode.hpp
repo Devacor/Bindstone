@@ -195,6 +195,8 @@ namespace jai::vm {
         op_t_store_const,   // a = dst slot, b = constant index, c = store flags
         op_t_push,          // `recv.push(v);` with a slot receiver and a slot or constant value:
                             // a = receiver slot, b = value slot or const bit | index, c = push_protos index
+        op_t_load,          // `T x = arr[index]` on the proven shape: a = decl slot; the container, the
+                            // index fold and the landing facts sit in chunk::typed_sites[ip]
         op_halt,
     };
 
@@ -395,6 +397,7 @@ namespace jai::vm {
             case opcode::op_t_store_mov: return "T_STORE_MOV";
             case opcode::op_t_store_const: return "T_STORE_CONST";
             case opcode::op_t_push: return "T_PUSH";
+            case opcode::op_t_load: return "T_LOAD";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

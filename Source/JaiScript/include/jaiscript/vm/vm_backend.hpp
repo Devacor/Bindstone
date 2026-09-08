@@ -1504,8 +1504,12 @@ namespace jai::vm {
         // stack top) into an int/float buffer or an untyped array's same-kind element,
         // exactly the kernel's raw and in-place lanes with the operands off the frame.
         bool typed_index_store(frame& f, const fused_index_proto& p, bool no_result);
-        bool typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv);
-        bool typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv);
+        bool typed_decl_land_int(frame& f, const fused_index_proto& p, script_int iv) { return typed_decl_land_int(f, p.decl_slot, p.decl_expect, p.decl_type, iv); }
+        bool typed_decl_land_float(frame& f, const fused_index_proto& p, script_float fv) { return typed_decl_land_float(f, p.decl_slot, p.decl_expect, p.decl_type, fv); }
+        bool typed_decl_land_int(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, script_int iv);
+        bool typed_decl_land_float(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, script_float fv);
+        bool typed_decl_land_element(frame& f, uint32_t slot, uint8_t expect, type_info* stamp, const script_array& node, size_t at);
+        op_status exec_typed_load(frame& f, const vm_instruction& ins);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);

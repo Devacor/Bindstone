@@ -3534,6 +3534,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
         if (!parked<Replaying>(rs, 0)) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            if (is_unwinding_) { return {}; }   // the left operand raised: no short-circuit decision, no right operand
         }
         script_value left = parked<Replaying>(rs, 0) ? *pre_fetched_left : pop_value();
 
@@ -3546,6 +3547,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             }
             // Left is truthy, evaluate right and return its boolean value
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{left}));
+            if (is_unwinding_) { return {}; }
             script_value right = pop_value();
             push_value(make_value(is_truthy(right)));
             return {};
@@ -3556,6 +3558,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             }
             // Left is falsy, evaluate right and return its boolean value
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{left}));
+            if (is_unwinding_) { return {}; }
             script_value right = pop_value();
             push_value(make_value(is_truthy(right)));
             return {};
@@ -3582,6 +3585,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             left_raw_opt = *pre_fetched_left;   // evaluated before the yield, never re-run
         } else {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            if (is_unwinding_) { return {}; }   // the left operand raised: the right one never runs (the vm's order)
             left_raw_opt = pop_value();  // Keep raw value for subscript handling
         }
         left_opt = left_raw_opt->deref();  // Dereferenced version for most operations

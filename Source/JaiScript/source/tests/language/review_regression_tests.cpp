@@ -74,6 +74,42 @@ public:
     review_regression_tests() : suite("Review Regressions") {}
 
     void forge_tests() override {
+        test("a_raising_left_operand_stops_the_expression_on_both_backends", [this]() {
+            // Astra's fuzz seed 1449: a missing instance field on the LEFT raises through the
+            // interpreter's unwinding flag with a placeholder value, and the interpreter went on to
+            // evaluate the RIGHT operand, so its side effect ran and a checked error from it (a
+            // missing static member) replaced the first; the vm stops at the left. Both backends
+            // now report the left's error and run the right operand zero times, for arithmetic,
+            // comparison and the logical operators
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                jai::stdlib::register_all(*e);
+                e->static_checking(check_mode::off);
+                const std::string label = vm ? "vm" : "interp";
+                auto run = [&](const char* body) {
+                    std::string src = std::string(R"(
+                        class C { int n = 0; static int s = 1; }
+                        var calls = 0;
+                        int touch() { calls = calls + 1; return 1; }
+                        var v = C();
+                        string msg = "";
+                        try { )") + body + R"( } catch (err) { msg = err; }
+                        return to_string(calls) + "|" + msg;
+                    )";
+                    return e->execute(src).as_string();
+                };
+                check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing + touch();"), label + " arithmetic, left raises");
+                check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing + C::nope;"), label + " arithmetic, both would raise: the left wins");
+                check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing < touch();"), label + " comparison, left raises");
+                check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing && touch();"), label + " logical and, left raises");
+                check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing || touch();"), label + " logical or, left raises");
+                check_eq(std::string("1|C has no member 'missing'"), run("var x = touch() + v.missing;"), label + " right raises after the left ran once");
+                check_eq(std::string("1|C has no member 'missing'"), run("var x = touch() && v.missing;"), label + " logical and, right raises");
+                check_eq(std::string("2|"), run("var x = touch() + touch();"), label + " control");
+            }
+        });
+
         // ---- #5 lexer: template (backtick) string at end-of-source ----
         test("tmpl_string_at_eof", [this]() {
             auto e = make_engine();

@@ -16,10 +16,10 @@ CMake + Ninja, opened as a folder in Visual Studio (VS 18). Build dirs live unde
 
 ### Fast iteration: use the **Debug** build
 
-Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured on the MSI; the link grows with the test exe), and it
-defines `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` (catches env/closure cycles) plus MSVC's
-`0xDDDDDDDD` freed-memory fill (surfaces dangling-reference / use-after-free bugs that Release
-can mask). **Iterate in Debug; do a final Release pass for the shipped config.**
+Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured on the MSI; the link grows with the test exe), and MSVC's
+`0xDDDDDDDD` freed-memory fill surfaces dangling-reference / use-after-free bugs that Release
+can mask. (`JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` is an inert CMake option: nothing in the runtime
+is guarded by it any more.) **Iterate in Debug; do a final Release pass for the shipped config.**
 
 Build the test target (`--target jaiscript_tests`). (The redundant standalone test exes —
 `test_runner`, `test_simple_static`, `test_string_ctor` — were removed from the CMake build.)

@@ -197,6 +197,9 @@ public:
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 #ifdef JAISCRIPT_PILOT_CLUSTER
 			check_true(listing.find("T_BLOCK_BACK") != std::string::npos, "the closed typed loop's back edge is the block: " + listing);
+#elif defined(JAISCRIPT_PILOT_CELLS)
+			check_true(listing.find("T_BLOCK_BACK") == std::string::npos, "no block under the cells pilot: " + listing);
+			check_true(listing.find("CELLS_BACK") != std::string::npos, "the closed typed loop's back edge is the cell entry: " + listing);
 #else
 			check_true(listing.find("T_BLOCK_BACK") == std::string::npos, "no block without the pilot define: " + listing);
 			check_true(listing.find("LOOP_BACK") != std::string::npos, "the general back edge: " + listing);

@@ -6476,6 +6476,363 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
 }
 
+#ifdef JAISCRIPT_PILOT_CELLS
+#ifdef JAISCRIPT_VM_PROFILE
+#define JAI_CELLS_COUNT(k) ++profile_cells_[k]
+#else
+#define JAI_CELLS_COUNT(k) ((void)0)
+#endif
+namespace {
+	inline int64_t cell_bits_of_float(script_float d) { int64_t b; std::memcpy(&b, &d, sizeof b); return b; }
+	inline script_float cell_float_of_bits(int64_t b) { script_float d; std::memcpy(&d, &b, sizeof d); return d; }
+}
+
+// Pilot variant B. A cell instruction never raises: anything it cannot do exactly (a kind byte that
+// does not match, overflow, a shift out of range, a divide by zero, a container guard, bounds, an
+// element of another kind) is a miss, which flushes every dirty cell back to its slot through the
+// landing that defined it and hands the general dispatch the ORIGINAL instruction's ip. Flushing
+// reproduces the general form's slot state: payload in place when the slot already carries the
+// stamp the landing would give it, the full landing otherwise.
+void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
+	cell_state& cs = *f.cells;
+	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+		if (!(cs.dirty & (uint64_t(1) << k)) || cs.kind[k] == 0) continue;
+		const chunk::cell_loop::cell& cl = loop.cells[k];
+		script_value* s = frame_slot(f, cl.slot);
+		if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+			const script_int v = static_cast<script_int>(cs.payload[k]);
+			type_info* stamp = cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_int();
+			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
+			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); continue; }
+			JAI_CELLS_COUNT(9);
+			script_value nv(v, engine_);
+			if (cl.landing == k_typed_dst_decl && cl.stamp) { nv.set_type_info(type_info_ptr{cl.stamp}); }
+			frame_slot_set(f, cl.slot, std::move(nv));
+		} else {
+			const script_float v = cell_float_of_bits(cs.payload[k]);
+			type_info* stamp = cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_float();
+			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
+			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); continue; }
+			JAI_CELLS_COUNT(9);
+			script_value nv(v, engine_);
+			if (cl.landing == k_typed_dst_decl && cl.stamp) { nv.set_type_info(type_info_ptr{cl.stamp}); }
+			frame_slot_set(f, cl.slot, std::move(nv));
+		}
+	}
+	cs.reset();
+}
+
+void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
+	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_cells_miss_step_[step < 8 ? step : 7];
+#else
+	(void)step;
+#endif
+	cells_flush(f, loop);
+	f.ip = original_ip;
+}
+
+// the original back edge: budget poll, then the entry guards on the live-in slots and the unboxing
+op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
+	if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
+	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
+	// rebound to its own area at every push, so a reused record never aliases another frame's cells
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed) { f.ip = loop.head; return {}; }
+	cell_state& cs = *f.cells;
+	// every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's
+	// canonical stamp and engine: the general form's first iteration established it, and a landing whose
+	// slot holds another kind (a declared-type conversion on a store) stays on the general form
+	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+		const chunk::cell_loop::cell& cl = loop.cells[k];
+		const script_value* s = frame_slot(f, cl.slot);
+		const type_info* canonical = cl.kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
+		if (!s || s->raw_storage_index() != cl.kind || s->type_info_raw() != canonical || s->get_engine() != engine_) {
+			JAI_CELLS_COUNT(1);
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_cells_refused_slot_[k < 64 ? k : 63];
+#endif
+			f.ip = loop.head;
+			return {};
+		}
+	}
+	if (cs.payload.size() < loop.cells.size()) {
+#ifdef JAISCRIPT_VM_PROFILE
+		if (cs.payload.empty()) { ++profile_cells_records_; }
+#endif
+		cs.payload.resize(loop.cells.size()); cs.kind.resize(loop.cells.size());
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t bytes = static_cast<uint64_t>(cs.payload.capacity()) * sizeof(int64_t) + static_cast<uint64_t>(cs.kind.capacity());
+		if (bytes > profile_cells_area_bytes_max_) { profile_cells_area_bytes_max_ = bytes; }
+#endif
+	}
+	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+		const chunk::cell_loop::cell& cl = loop.cells[k];
+		if (cl.live_in) {
+			const script_value* s = frame_slot(f, cl.slot);
+			cs.payload[k] = cl.kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(s->unchecked_as_int()) : cell_bits_of_float(s->unchecked_as_float());
+			cs.kind[k] = cl.kind;
+			JAI_CELLS_COUNT(3);
+		} else {
+			cs.kind[k] = 0;   // defined inside the body before any read; empty until then
+		}
+	}
+	cs.loop = ins.a;
+	cs.dirty = 0;
+	JAI_CELLS_COUNT(0);
+	f.ip = loop.copy_head;
+	return {};
+}
+
+op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	if (execution_limit_exhausted()) [[unlikely]] {
+		cells_flush(f, loop);   // the error and the debugger see materialized slots
+		f.ip = loop.back;
+		return raise_from(execution_limit_failure());
+	}
+	JAI_CELLS_COUNT(2);
+	f.ip = loop.copy_head;
+	return {};
+}
+
+op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
+	const uint32_t lk = ins.a & k_cell_index_mask;
+	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	bool truthy;
+	if (cs.kind[lk] != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+	if (ins.b & k_typed_const_bit) {
+		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+			const script_int a = static_cast<script_int>(cs.payload[lk]), b = rc.unchecked_as_int();
+			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
+		} else {
+			const script_float a = cell_float_of_bits(cs.payload[lk]), b = rc.unchecked_as_float();
+			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
+		}
+	} else {
+		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+			const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(cs.payload[ins.b]);
+			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
+		} else {
+			const script_float a = cell_float_of_bits(cs.payload[lk]), b = cell_float_of_bits(cs.payload[ins.b]);
+			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
+		}
+	}
+	if (truthy) { ++f.ip; return {}; }
+	JAI_CELLS_COUNT(4);
+	cells_flush(f, loop);   // the loop's exit: materialize, then continue after the loop
+	f.ip = ins.c;
+	return {};
+}
+
+op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
+	const uint32_t dk = ins.a & k_cell_index_mask;
+	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	const uint8_t kind = op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+	int64_t right_bits;
+	if (ins.c & k_typed_const_bit) {
+		const script_value& rc = f.code->constants[ins.c & ~k_typed_const_bit];
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
+	} else {
+		if (cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+		right_bits = cs.payload[ins.c];
+	}
+	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+		const script_int a = static_cast<script_int>(cs.payload[ins.b]), b = static_cast<script_int>(right_bits);
+		script_int r; bool ok = true;
+		switch (op) {
+		case opcode::op_t_add_ii: ok = ints::try_add(a, b, r); break;
+		case opcode::op_t_sub_ii: ok = ints::try_sub(a, b, r); break;
+		case opcode::op_t_mul_ii: ok = ints::try_mul(a, b, r); break;
+		case opcode::op_t_div_ii: ok = b != 0 && ints::try_div(a, b, r); break;
+		case opcode::op_t_mod_ii: ok = b != 0; if (ok) { r = ints::mod(a, b); } break;
+		case opcode::op_t_and_ii: r = a & b; break;
+		case opcode::op_t_or_ii: r = a | b; break;
+		case opcode::op_t_xor_ii: r = a ^ b; break;
+		case opcode::op_t_shl_ii: ok = b >= 0 && b <= 63; if (ok) { r = a << b; } break;
+		case opcode::op_t_shr_ii: ok = b >= 0 && b <= 63; if (ok) { r = a >> b; } break;
+		default: ok = false; break;
+		}
+		if (!ok) { cells_miss(f, loop, original_ip, 1); return {}; }
+		cs.payload[dk] = static_cast<int64_t>(r);
+	} else {
+		const script_float a = cell_float_of_bits(cs.payload[ins.b]), b = cell_float_of_bits(right_bits);
+		script_float r; bool ok = true;
+		switch (op) {
+		case opcode::op_t_add_ff: r = a + b; break;
+		case opcode::op_t_sub_ff: r = a - b; break;
+		case opcode::op_t_mul_ff: r = a * b; break;
+		case opcode::op_t_div_ff: ok = b != 0.0; if (ok) { r = a / b; } break;
+		case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+		default: ok = false; break;
+		}
+		if (!ok) { cells_miss(f, loop, original_ip, 1); return {}; }
+		cs.payload[dk] = cell_bits_of_float(r);
+	}
+	cs.kind[dk] = kind;
+	cs.dirty |= uint64_t(1) << dk;
+	++f.ip;
+	return {};
+}
+
+// T_LOAD's fast path landing raw: the container through the original site, every guard kept
+op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const uint32_t original_ip = ins.c;
+	const chunk::typed_site& site = f.code->typed_sites[original_ip];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 2); return {}; };
+	const script_value* cp = site.cont_slot != k_invalid_u32
+		? frame_slot(f, site.cont_slot)
+		: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? original_ip * 3 + 2 : original_ip * 3);
+	if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+	bool borrowed = false;
+	const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+	if (!node) return miss();
+	auto read_int = [&](uint32_t o, script_int& out) -> bool {
+		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		const uint32_t k = loop.slot_to_cell[o & k_typed_slot_mask];
+		if (k == k_invalid_u32 || cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cs.payload[k]);
+		return true;
+	};
+	script_int index = 0, r = 0;
+	bool ok = read_int(site.operands[0], index);
+	if (ok && site.fold_count) {
+		ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
+		for (uint8_t k = 1; ok && k < site.fold_count; ++k) {
+			ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
+		}
+	}
+	if (!ok || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
+	const size_t at = static_cast<size_t>(index);
+	const uint8_t expect = site.decl_expect;
+	int64_t bits;
+	switch (node->kind()) {
+	case script_array::kind_t::i64:
+		if (expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = node->ints()[at]; }
+		else { bits = cell_bits_of_float(static_cast<script_float>(node->ints()[at])); }   // the decl's int -> float row
+		break;
+	case script_array::kind_t::f64:
+		if (expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();   // float -> int is the checked kernel's, not a raw landing
+		bits = cell_bits_of_float(node->floats()[at]);
+		break;
+	case script_array::kind_t::hetero: {
+		const script_value& el = node->values()[at];
+		const size_t ei = el.raw_storage_index();
+		if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = el.unchecked_as_int(); }
+		else if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }
+		else if (ei == script_value::TYPEID_FLOAT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(el.unchecked_as_float()); }
+		else return miss();
+		break;
+	}
+	default: return miss();
+	}
+	cs.payload[ins.a] = bits;
+	cs.kind[ins.a] = expect;
+	cs.dirty |= uint64_t(1) << ins.a;
+	++f.ip;
+	return {};
+}
+
+// the typed index store lane with its index and value read from cells, every container guard kept
+op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const uint32_t original_ip = ins.c;
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
+	auto cell_int = [&](const fused_operand& o, script_int& out) -> bool {
+		if (o.const_index != k_invalid_u32) { const script_value& v = f.code->constants[o.const_index]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (o.slot == k_invalid_u32 || o.slot >= loop.slot_to_cell.size()) return false;
+		const uint32_t k = loop.slot_to_cell[o.slot];
+		if (k == k_invalid_u32 || cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cs.payload[k]);
+		return true;
+	};
+	// the value: a cell of either kind, or a constant; its stamp and engine are what its landing gave it
+	// (a var element takes the value's stamp and engine, as typed_index_store does)
+	uint8_t vkind; int64_t vbits; type_info_ptr vstamp; auto* veng = engine_;
+	if (p.store_value.const_index != k_invalid_u32) {
+		const script_value& v = f.code->constants[p.store_value.const_index];
+		vkind = static_cast<uint8_t>(v.raw_storage_index());
+		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { vbits = v.unchecked_as_int(); }
+		else if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { vbits = cell_bits_of_float(v.unchecked_as_float()); }
+		else return miss();
+		vstamp = v.get_type_info(); veng = v.get_engine();
+	} else {
+		if (p.store_value.slot == k_invalid_u32 || p.store_value.slot >= loop.slot_to_cell.size()) return miss();
+		const uint32_t k = loop.slot_to_cell[p.store_value.slot];
+		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
+		vkind = cs.kind[k]; vbits = cs.payload[k];
+		const chunk::cell_loop::cell& vc = loop.cells[k];
+		vstamp = type_info_ptr{vc.landing == k_typed_dst_decl && vc.stamp ? vc.stamp
+			: (vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float())};
+	}
+	script_int index;
+	if (p.index_binary != k_invalid_u32) {
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		script_int l, r;
+		if (!cell_int(bp.left, l) || !cell_int(bp.right, r) || !typed_int_index_row(static_cast<token_type>(bp.op), l, r, index)) return miss();
+		for (const uint32_t step : p.index_chain_ext) {   // ((l op r) op1 r1) op2 r2 ...: typed_fold_index's fold, cells for the rights
+			const fused_binary_proto& sp = f.code->fused_binary_protos[step];
+			script_int r2;
+			if (!cell_int(sp.right, r2) || !typed_int_index_row(static_cast<token_type>(sp.op), index, r2, index)) return miss();
+		}
+	} else if (!cell_int(p.index, index)) return miss();
+	const script_value* cp = fast_operand(f, p.container, p.index_binary != k_invalid_u32 ? original_ip * 3 + 2 : original_ip * 3);
+	if (!cp) return miss();
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!lane_deref_silent(*cp)) return miss(); cp = &cp->deref(); }
+	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return miss();
+	script_array* node = const_cast<script_value&>(*cp).unchecked_get_array_storage().get();
+	if (!node || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
+	const size_t at = static_cast<size_t>(index);
+	switch (node->kind()) {
+	case script_array::kind_t::i64:
+		if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { const script_float d = cell_float_of_bits(vbits); if (!detail::float_fits_script_int(d)) return miss(); node->ints()[at] = static_cast<script_int>(d); }
+		else { node->ints()[at] = static_cast<script_int>(vbits); }
+		break;
+	case script_array::kind_t::f64:
+		node->floats()[at] = vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
+		break;
+	case script_array::kind_t::hetero: {
+		const type_info* ti = cp->get_type_info().get();
+		if (ti && ti->element_type().get()) return miss();
+		script_value& target = node->values()[at];
+		if (target.raw_storage_index() != vkind) return miss();
+		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { target.unchecked_set_int_payload(static_cast<script_int>(vbits)); }
+		else { target.unchecked_set_float_payload(cell_float_of_bits(vbits)); }
+		target.set_type_info(vstamp);
+		target.set_engine(veng);
+		break;
+	}
+	default: return miss();
+	}
+	++f.ip;
+	return {};
+}
+#endif
+
+
 // Pilot variant C: the back edge of a closed typed loop runs the loop as one block. Each step is
 // the typed op's own fast path with every guard it has today; a miss hands the exact ip back to
 // the general dispatch, which runs that instruction with its fallback and continues in the
@@ -8373,6 +8730,10 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
+#ifdef JAISCRIPT_PILOT_CELLS
+	rec.cells.reset();
+	rec.f.cells = &rec.cells;
+#endif
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
@@ -13646,6 +14007,10 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
 	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
 	std::fill(std::begin(profile_block_), std::end(profile_block_), 0ull);
+	std::fill(std::begin(profile_cells_), std::end(profile_cells_), 0ull);
+	std::fill(std::begin(profile_cells_refused_slot_), std::end(profile_cells_refused_slot_), 0ull);
+	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
+	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
 	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
@@ -14123,6 +14488,24 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
 		fprintf(stderr, "[vm-profile] closed typed loop blocks (measured span): entries %llu | head compares %llu | body steps %llu | back edges %llu | misses %llu | exits %llu\n",
 			(unsigned long long)profile_block_[0], (unsigned long long)profile_block_[1], (unsigned long long)profile_block_[2], (unsigned long long)profile_block_[3], (unsigned long long)profile_block_[4], (unsigned long long)profile_block_[5]);
+		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
+			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
+			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_[7],
+			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
+		{
+			// the areas resident at dump time (a warm-up allocates them before the reset): every call record's
+			// payload plus kind capacity, and the bookkeeping the raw area rides on
+			uint64_t resident = 0, bytes_sum = 0, bytes_max = 0;
+			for (const auto& r : call_records_) {
+				if (!r || r->cells.payload.empty()) continue;
+				++resident;
+				const uint64_t b = static_cast<uint64_t>(r->cells.payload.capacity()) * sizeof(int64_t) + static_cast<uint64_t>(r->cells.kind.capacity());
+				bytes_sum += b; if (b > bytes_max) { bytes_max = b; }
+			}
+			fprintf(stderr, "[vm-profile] cell areas resident at dump: records with an area %llu of %llu allocated records | payload+kind capacity sum %llu bytes, max %llu bytes | sizeof(call_record) %llu, sizeof(frame) %llu, sizeof(cell_state) %llu, sizeof(script_value) %llu\n",
+				(unsigned long long)resident, (unsigned long long)call_records_.size(), (unsigned long long)bytes_sum, (unsigned long long)bytes_max,
+				(unsigned long long)sizeof(call_record), (unsigned long long)sizeof(frame), (unsigned long long)sizeof(cell_state), (unsigned long long)sizeof(script_value));
+		}
 		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
 			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
 			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);
@@ -14534,6 +14917,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP_SHARED(exec_typed_block_back(f, ins));
 				continue;
 #endif
+#ifdef JAISCRIPT_PILOT_CELLS
+			case opcode::op_cells_back: VM_TRY_OP_SHARED(exec_cells_back(f, ins)); continue;
+			case opcode::op_c_arith: VM_TRY_OP_SHARED(exec_c_arith(f, ins)); continue;
+			case opcode::op_c_cmp: VM_TRY_OP_SHARED(exec_c_cmp(f, ins)); continue;
+			case opcode::op_c_load: VM_TRY_OP_SHARED(exec_c_load(f, ins)); continue;
+			case opcode::op_c_index_store: VM_TRY_OP_SHARED(exec_c_index_store(f, ins)); continue;
+			case opcode::op_c_back: VM_TRY_OP_SHARED(exec_c_back(f, ins)); continue;
+#endif
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {
@@ -14876,6 +15267,10 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
+#ifdef JAISCRIPT_PILOT_CELLS
+	rec.cells.reset();
+	rec.f.cells = &rec.cells;
+#endif
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
 	// fallbacks gate field-vs-shadowing precedence)
@@ -15074,6 +15469,10 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
+#ifdef JAISCRIPT_PILOT_CELLS
+	rec.cells.reset();
+	rec.f.cells = &rec.cells;
+#endif
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
@@ -15232,6 +15631,10 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
+#ifdef JAISCRIPT_PILOT_CELLS
+	rec.cells.reset();
+	rec.f.cells = &rec.cells;
+#endif
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
 	// lexically correct) and NO method env at all — 'this', fields, and the access

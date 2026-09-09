@@ -200,8 +200,18 @@ namespace jai::vm {
         op_t_block_back,    // pilot variant C (JAISCRIPT_PILOT_CLUSTER): a = block proto index, b = loop
                             // head; the back edge of a closed typed loop runs the loop as one block
                             // (vm_backend::exec_typed_block_back); the instructions stay in place
+        // pilot variant B (JAISCRIPT_PILOT_CELLS): the cell-form copy of a closed typed loop
+        op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
+                            // unboxing, then the copy's head (or the general head when a guard refuses)
+        op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
+        op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
+        op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
+        op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
+        op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
         op_halt,
     };
+    inline constexpr uint32_t k_cell_op_shift = 24;
+    inline constexpr uint32_t k_cell_index_mask = (1u << k_cell_op_shift) - 1;
 
     inline constexpr uint32_t k_typed_const_bit = 0x80000000u;
     inline constexpr uint32_t k_typed_dst_shift = 30;
@@ -310,6 +320,12 @@ namespace jai::vm {
             case opcode::op_jump_if_true: return "JUMP_IF_TRUE";
             case opcode::op_loop_back: return "LOOP_BACK";
             case opcode::op_t_block_back: return "T_BLOCK_BACK";
+            case opcode::op_cells_back: return "CELLS_BACK";
+            case opcode::op_c_arith: return "C_ARITH";
+            case opcode::op_c_cmp: return "C_CMP";
+            case opcode::op_c_load: return "C_LOAD";
+            case opcode::op_c_index_store: return "C_INDEX_STORE";
+            case opcode::op_c_back: return "C_BACK";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

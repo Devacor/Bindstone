@@ -343,6 +343,20 @@ namespace jai::vm {
         struct block_proto { uint32_t head; uint32_t back; };
         std::vector<block_proto> block_protos;
 #endif
+#ifdef JAISCRIPT_PILOT_CELLS
+        // Pilot variant B: a closed typed loop's scalar slots as raw cells. The copy at [copy_head,
+        // copy_back] is the cell form; the original instructions at [head, back] are the general form
+        // a miss returns to (ip mapped by offset). Each cell records its slot, its expected kind, whether
+        // the loop reads it before writing it (live-in: unboxed at entry), whether the body defines it
+        // (flushed on exit or miss) and the landing that defines it (a decl carries its stamp).
+        struct cell_loop {
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; };
+            uint32_t head, back, copy_head, copy_back, exit_ip;
+            std::vector<cell> cells;
+            std::vector<uint32_t> slot_to_cell;   // indexed by frame slot; k_invalid_u32 = not a cell
+        };
+        std::vector<cell_loop> cell_loops;
+#endif
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;

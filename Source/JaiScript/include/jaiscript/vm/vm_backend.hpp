@@ -203,6 +203,13 @@ namespace jai::vm {
         // between head and back edge) [3]=back edges taken inside a block (completed iterations)
         // [4]=misses handed back to the general dispatch [5]=loop exits taken inside a block
         uint64_t profile_block_[6] = {};
+        // pilot variant B cells: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
+        // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
+        uint64_t profile_cells_[10] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced
+        uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
+        uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
+        uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
+        uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -423,6 +430,9 @@ namespace jai::vm {
         }
 
     private:
+#ifdef JAISCRIPT_PILOT_CELLS
+        struct cell_state;
+#endif
         struct frame {
             chunk* code = nullptr;
             std::shared_ptr<chunk> pin;
@@ -449,7 +459,22 @@ namespace jai::vm {
             // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
             const ast_node* debug_stmt = nullptr;
             size_t debug_stmt_ip = 0;
+#ifdef JAISCRIPT_PILOT_CELLS
+            struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
+#endif
         };
+#ifdef JAISCRIPT_PILOT_CELLS
+        // Pilot variant B: a call record's raw area. Payload bits (floats bit-preserved), a kind byte per
+        // cell (0 empty, else the script_value storage index), the active loop, and dirty bits over the
+        // loop's cells. Cleared at record push and on every exit, miss and raise.
+        struct cell_state {
+            std::vector<int64_t> payload;
+            std::vector<uint8_t> kind;
+            uint32_t loop = k_invalid_u32;
+            uint64_t dirty = 0;
+            void reset() { loop = k_invalid_u32; dirty = 0; }
+        };
+#endif
 
         struct frame_guard;
 
@@ -633,6 +658,9 @@ namespace jai::vm {
             uint64_t profile_entry_tsc = 0;            // inclusive per-function accounting
 #endif
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
+#ifdef JAISCRIPT_PILOT_CELLS
+            cell_state cells;                          // pilot variant B: the raw area, capacity reused across calls
+#endif
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
             strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
@@ -1535,6 +1563,16 @@ namespace jai::vm {
         bool typed_load_fast(frame& f, const vm_instruction& ins);
 #ifdef JAISCRIPT_PILOT_CLUSTER
         op_status exec_typed_block_back(frame& f, const vm_instruction& ins);
+#endif
+#ifdef JAISCRIPT_PILOT_CELLS
+        op_status exec_cells_back(frame& f, const vm_instruction& ins);
+        op_status exec_c_arith(frame& f, const vm_instruction& ins);
+        op_status exec_c_cmp(frame& f, const vm_instruction& ins);
+        op_status exec_c_load(frame& f, const vm_instruction& ins);
+        op_status exec_c_index_store(frame& f, const vm_instruction& ins);
+        op_status exec_c_back(frame& f, const vm_instruction& ins);
+        void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
+        void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
 #endif
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);

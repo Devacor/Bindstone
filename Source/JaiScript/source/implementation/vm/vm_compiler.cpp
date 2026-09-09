@@ -134,6 +134,12 @@ namespace {
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
 			case opcode::op_t_block_back:
+			case opcode::op_cells_back:
+			case opcode::op_c_arith:
+			case opcode::op_c_cmp:
+			case opcode::op_c_load:
+			case opcode::op_c_index_store:
+			case opcode::op_c_back:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -257,6 +263,12 @@ namespace {
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
 			case opcode::op_t_block_back:
+			case opcode::op_cells_back:
+			case opcode::op_c_arith:
+			case opcode::op_c_cmp:
+			case opcode::op_c_load:
+			case opcode::op_c_index_store:
+			case opcode::op_c_back:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2112,6 +2124,110 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (!closed) continue;
 		c.block_protos.push_back({ static_cast<uint32_t>(head), static_cast<uint32_t>(back) });
 		code[back] = vm_instruction{opcode::op_t_block_back, static_cast<uint32_t>(c.block_protos.size() - 1), static_cast<uint32_t>(head), 0};
+	}
+#endif
+#ifdef JAISCRIPT_PILOT_CELLS
+#ifdef JAISCRIPT_PILOT_CLUSTER
+#error "pilot variant D (cells under the block) is not built by this patch: choose one of JAISCRIPT_PILOT_CLUSTER / JAISCRIPT_PILOT_CELLS"
+#endif
+	// Closed typed loops (pilot variant B): the same shape the block recognizer takes, with every
+	// scalar slot's kind agreed across its uses. The loop's instructions are copied to the chunk's end
+	// as cell instructions; the original back edge becomes the entry; the originals stay as the
+	// general form a miss returns to.
+	const size_t original_size = code.size();
+	for (size_t back = 0; back < original_size; ++back) {
+		const vm_instruction be = code[back];
+		if (be.op != opcode::op_loop_back) continue;
+		const size_t head = be.a;
+		if (head >= back) continue;
+		const vm_instruction hd = code[head];
+		if (!(hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff) || hd.c != back + 1) continue;
+		// gather the scalar slots with their kinds; any disagreement or unknown kind keeps the loop open
+		std::vector<chunk::cell_loop::cell> cells;
+		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = 0; k < cells.size(); ++k) { if (cells[k].slot == slot) return static_cast<int>(k); } return -1; };
+		bool closed = true;
+		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp) {
+			if (operand & k_typed_const_bit) return;
+			const uint32_t slot = operand & k_typed_slot_mask;
+			int k = find_cell(slot);
+			if (k < 0) {
+				chunk::cell_loop::cell nc{ slot, kind, 0, !is_write, false, nullptr };
+				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
+			} else if (cells[k].kind != kind) { closed = false; return; }
+			if (is_write) { cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp; }
+		};
+		const uint8_t head_kind = hd.op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+		use_slot(hd.a, head_kind, false, 0, nullptr); use_slot(hd.b, head_kind, false, 0, nullptr);
+		for (size_t ip = head + 1; ip < back && closed; ++ip) {
+			const vm_instruction st = code[ip];
+			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
+				const uint8_t kind = st.op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				const uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
+				type_info* stamp = landing == k_typed_dst_decl && ip < c.typed_sites.size() ? c.typed_sites[ip].stamp : nullptr;
+				use_slot(st.b, kind, false, 0, nullptr); use_slot(st.c, kind, false, 0, nullptr);
+				use_slot(st.a & k_typed_slot_mask, kind, true, landing, stamp);
+				continue;
+			}
+			if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
+				const chunk::typed_site& site = c.typed_sites[ip];
+				// a scalar decl with a stamp only: an unstamped decl lands the element's own tag, which a raw cell loses
+				if ((site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || !site.stamp) { closed = false; break; }
+				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], static_cast<uint8_t>(script_value::TYPEID_INT), false, 0, nullptr); }
+				use_slot(st.a, site.decl_expect, true, k_typed_dst_decl, site.stamp);
+				continue;
+			}
+			if (st.op == opcode::op_index_store_fused && st.c != 0 && st.a < c.fused_index_protos.size() && c.fused_index_protos[st.a].typed_lane) {
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				// the index (and its fold operands) are int cells; the value's kind comes from its other uses
+				auto operand_slot = [&](const fused_operand& o, uint8_t kind) {
+					if (o.const_index != k_invalid_u32) return;
+					if (o.slot == k_invalid_u32 || !o.direct) { closed = false; return; }
+					if (kind == 0) { const int k = find_cell(o.slot); if (k < 0) { closed = false; return; } return; }
+					use_slot(o.slot, kind, false, 0, nullptr);
+				};
+				if (fp.index_binary != k_invalid_u32) {
+					const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
+					operand_slot(bp.left, static_cast<uint8_t>(script_value::TYPEID_INT)); operand_slot(bp.right, static_cast<uint8_t>(script_value::TYPEID_INT));
+					for (const uint32_t step : fp.index_chain_ext) {   // the left-spine chain: each step's right operand
+						if (step >= c.fused_binary_protos.size()) { closed = false; break; }
+						operand_slot(c.fused_binary_protos[step].right, static_cast<uint8_t>(script_value::TYPEID_INT));
+					}
+				} else { operand_slot(fp.index, static_cast<uint8_t>(script_value::TYPEID_INT)); }
+				if (fp.store_value.const_index == k_invalid_u32) { operand_slot(fp.store_value, 0); }
+				continue;
+			}
+			closed = false;
+		}
+		if (!closed || cells.empty() || cells.size() > 64) continue;
+		chunk::cell_loop loop;
+		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.exit_ip = hd.c;
+		loop.cells = cells;
+		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.slot > max_slot) max_slot = cl.slot; }
+		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
+		for (uint32_t k = 0; k < cells.size(); ++k) { loop.slot_to_cell[cells[k].slot] = k; }
+		auto cell_of = [&](uint32_t operand) -> uint32_t {
+			if (operand & k_typed_const_bit) return operand;   // constants pass through with their bit
+			return loop.slot_to_cell[operand & k_typed_slot_mask];
+		};
+		// the copy
+		loop.copy_head = static_cast<uint32_t>(code.size());
+		const uint32_t loop_index = static_cast<uint32_t>(c.cell_loops.size());
+		auto append = [&](vm_instruction ins, size_t from_ip) { code.push_back(ins); c.stmt_nodes.push_back(from_ip < c.stmt_nodes.size() ? c.stmt_nodes[from_ip] : nullptr); };
+		append(vm_instruction{opcode::op_c_cmp, (static_cast<uint32_t>(hd.op) << k_cell_op_shift) | cell_of(hd.a), cell_of(hd.b), hd.c}, head);
+		for (size_t ip = head + 1; ip < back; ++ip) {
+			const vm_instruction st = code[ip];
+			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
+				append(vm_instruction{opcode::op_c_arith, (static_cast<uint32_t>(st.op) << k_cell_op_shift) | cell_of(st.a & k_typed_slot_mask), cell_of(st.b), cell_of(st.c)}, ip);
+			} else if (st.op == opcode::op_t_load) {
+				append(vm_instruction{opcode::op_c_load, cell_of(st.a), loop_index, static_cast<uint32_t>(ip)}, ip);
+			} else {
+				append(vm_instruction{opcode::op_c_index_store, st.a, loop_index, static_cast<uint32_t>(ip)}, ip);
+			}
+		}
+		loop.copy_back = static_cast<uint32_t>(code.size());
+		append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back);
+		code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
+		c.cell_loops.push_back(std::move(loop));
 	}
 #endif
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }

@@ -2301,7 +2301,7 @@ bool interpreter::object_defines_custom_equality(const script_value& v) const {
 std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
     // Safe-mode workers never dispatch operator methods (increment B twin of the vm's
     // gate; handle_equal raises the verdict before the structural fallback diverges)
-    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2339,7 +2339,7 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
 std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
-    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2375,7 +2375,7 @@ std::optional<bool> interpreter::object_comparison_via_method(const script_value
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
 std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
-    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -3822,9 +3822,9 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             if (left.is_object()) {
                 // Safe-mode workers: operator[]/global-operator dispatch copies shared
                 // method values — verdict (increment B; KEEP BYTE-PARALLEL with the vm)
-                if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+                if (parallel_worker_) [[unlikely]] {
                     return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                        "custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+                        "custom operator dispatch on class instances is not admitted in a parallel body");
                 }
                 // First, try to find operator[] as a method on the object (for class instances)
                 auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
@@ -4134,8 +4134,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     // shared method value (cross-worker count race); a backing field's enforce+set is
     // exactly what the auto-setter does, on exclusively-owned instance storage. Any
     // non-field member store needs method machinery - wall it.
-    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT &&
-        !engine_->allow_unsafe_parallel()) [[unlikely]] {
+    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
         if (holder && holder->is_class_instance_wrapper && holder->data) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
@@ -4148,7 +4147,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                "only direct field stores on class instances are allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+                "only direct field stores on class instances are allowed in a parallel body");
         }
     }
     auto target = resolve_member_target(objectValue);
@@ -7138,11 +7137,11 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     // exec_call_method's twin.
                     const detail::parallel_method_pin* worker_pin = (parallel_worker_ && cls_raw && parallel_method_pins_)
                         ? parallel_method_pins_->find(cls_raw, member->member_id) : nullptr;
-                    if (parallel_worker_ && cls_raw && !worker_pin && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+                    if (parallel_worker_ && cls_raw && !worker_pin) [[unlikely]] {
                         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                             "method '{0}' was not admitted in this parallel body (admitted: single-overload "
                             "public methods on the element's own class touching only element, local, or "
-                            "captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
+                            "captured-read state)", member->member_id);
                     }
                     if (worker_pin) [[unlikely]] {
                         const detail::parallel_method_pin* pin = worker_pin;
@@ -7936,8 +7935,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // COPIES shared method values out of class_definition state - a cross-worker
     // count race on the non-atomic strong_ptr. Fields live on the (exclusively
     // owned) instance; anything else needs method machinery - wall it.
-    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT &&
-        !engine_->allow_unsafe_parallel()) [[unlikely]] {
+    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = objectValue.unchecked_get_object_storage();
         if (holder && holder->is_class_instance_wrapper && holder->data) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
@@ -7946,7 +7944,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                "only direct field access on class instances is allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+                "only direct field access on class instances is allowed in a parallel body");
         }
     }
 

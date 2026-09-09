@@ -2099,7 +2099,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			break;
 		}
 	}
-#ifdef JAISCRIPT_PILOT_CLUSTER
+#if defined(JAISCRIPT_PILOT_CLUSTER) && !defined(JAISCRIPT_PILOT_CELLS)
 	// Closed typed loops (pilot variant C): the head is a typed compare-jump whose target is the
 	// loop's exit, the body is only typed arithmetic, typed element loads and no-result typed-lane
 	// element stores, and the back edge returns to the head. The back edge becomes op_t_block_back;
@@ -2127,9 +2127,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	}
 #endif
 #ifdef JAISCRIPT_PILOT_CELLS
-#ifdef JAISCRIPT_PILOT_CLUSTER
-#error "pilot variant D (cells under the block) is not built by this patch: choose one of JAISCRIPT_PILOT_CLUSTER / JAISCRIPT_PILOT_CELLS"
-#endif
+	// variant D (both defines): the closed loops below take the cell form and run as a block from
+	// op_cells_back; the block recognizer above is compiled out so no loop is claimed twice
 	// Closed typed loops (pilot variant B): the same shape the block recognizer takes, with every
 	// scalar slot's kind agreed across its uses. The loop's instructions are copied to the chunk's end
 	// as cell instructions; the original back edge becomes the entry; the originals stay as the

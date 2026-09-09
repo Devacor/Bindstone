@@ -6585,7 +6585,27 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	cs.dirty = 0;
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head;
+#ifdef JAISCRIPT_PILOT_CLUSTER
+	// variant D: the copy runs as one block from here, each cell instruction through its own handler and
+	// no outer dispatch between them; an exit or a miss flushes (cs.loop clears) and leaves f.ip on the
+	// general form, a raise returns its status; the budget is polled at the cell back edge as before
+	for (;;) {
+		const vm_instruction& ci = f.code->code[f.ip];
+		op_status st = op_status::ok;
+		switch (ci.op) {
+		case opcode::op_c_cmp: st = exec_c_cmp(f, ci); break;
+		case opcode::op_c_arith: st = exec_c_arith(f, ci); break;
+		case opcode::op_c_load: st = exec_c_load(f, ci); break;
+		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
+		case opcode::op_c_back: st = exec_c_back(f, ci); break;
+		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
+		}
+		if (st == op_status::failed) return st;
+		if (cs.loop == k_invalid_u32) return {};   // flushed at an exit or a miss: f.ip is the general form's
+	}
+#else
 	return {};
+#endif
 }
 
 op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {

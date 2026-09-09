@@ -205,7 +205,7 @@ namespace jai::vm {
         uint64_t profile_block_[6] = {};
         // pilot variant B cells: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
-        uint64_t profile_cells_[10] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced
+        uint64_t profile_cells_[11] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
@@ -472,6 +472,7 @@ namespace jai::vm {
             std::vector<uint8_t> kind;
             uint32_t loop = k_invalid_u32;
             uint64_t dirty = 0;
+            std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
             void reset() { loop = k_invalid_u32; dirty = 0; }
         };
 #endif
@@ -1568,11 +1569,11 @@ namespace jai::vm {
 #endif
 #ifdef JAISCRIPT_PILOT_CELLS
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
-        op_status exec_c_arith(frame& f, const vm_instruction& ins);
-        op_status exec_c_cmp(frame& f, const vm_instruction& ins);
-        op_status exec_c_load(frame& f, const vm_instruction& ins);
-        op_status exec_c_index_store(frame& f, const vm_instruction& ins);
-        op_status exec_c_back(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
         void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
 #endif

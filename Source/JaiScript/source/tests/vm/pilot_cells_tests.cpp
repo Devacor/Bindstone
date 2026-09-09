@@ -251,6 +251,33 @@ public:
 			)";
 			both(script, "", "interleaved coroutines");
 		});
+		test("stores_through_the_hoisted_container_are_read_back_by_the_same_loop", [this]() {
+			// pix is resolved once per entry; the loop reads what it wrote through the same node
+			const std::string script = R"(
+				function walk(var& pix, int n, int k) -> int {
+					int gi = 0; int y = 0;
+					while (y < n) { int c = pix[gi]; int d = c + k; pix[gi + 1] = d; gi += 1; y = y + 1; }
+					return gi;
+				}
+				var PIX = [1, 0, 0, 0, 0, 0];
+				int r = walk(PIX, 4, 3);
+				string out = to_string(r); for (int i = 0; i < PIX.size(); ++i) { out = out + (i == 0 ? "|" : ",") + to_string(PIX[i]); }
+				out;
+			)";
+			both(script, "4|1,4,7,10,13,0", "read back through the hoisted node");
+		});
+		test("a_second_call_with_other_containers_resolves_them_anew", [this]() {
+			const std::string script = std::string(k_prelude) + R"(
+				var PIX2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+				STRIPS.push([1, 2, 3, 4]);
+				var& s0 = STRIPS[0]; var& s1 = STRIPS[1];
+				int a = paint(PIX, s0, 0, 4, 2, 0, 2048, 0, 1);
+				int b = paint(PIX2, s1, 0, 4, 2, 0, 2048, 0, 1);
+				string out = to_string(a) + "/" + to_string(b) + "|" + to_string(PIX[6]) + "," + to_string(PIX2[6]);
+				out;
+			)";
+			both(script, "8004/8004|10,4", "second call, other containers");
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

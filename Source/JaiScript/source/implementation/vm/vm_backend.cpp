@@ -6560,6 +6560,36 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
+	// the load and store sites' containers, resolved once per entry: the body has no call, no rebinding and no
+	// store to a container slot, so a node's identity holds until the exit or the miss (a miss re-enters through
+	// this resolution); a site whose container is not a plain array node (a getter-backed reference, a typed var
+	// array) keeps the loop on the general form, which runs the site's own resolution every time
+	const size_t span = loop.copy_back - loop.copy_head;
+	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
+	for (uint32_t ip = loop.copy_head; ip < loop.copy_back; ++ip) {
+		const vm_instruction& ci = f.code->code[ip];
+		const script_array* node = nullptr;
+		if (ci.op == opcode::op_c_load) {
+			const chunk::typed_site& site = f.code->typed_sites[ci.c];
+			const script_value* cp = site.cont_slot != k_invalid_u32
+				? frame_slot(f, site.cont_slot)
+				: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? ci.c * 3 + 2 : ci.c * 3);
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+			bool borrowed = false;
+			node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+		} else if (ci.op == opcode::op_c_index_store) {
+			const fused_index_proto& p = f.code->fused_index_protos[ci.a];
+			const script_value* cp = fast_operand(f, p.container, p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3);
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
+				const type_info* ti = cp->get_type_info().get();
+				const script_array* n = const_cast<script_value&>(*cp).unchecked_get_array_storage().get();
+				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
+			}
+		} else { continue; }
+		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); f.ip = loop.head; return {}; }
+		cs.site_node[ip - loop.copy_head] = node;
+	}
 	if (cs.payload.size() < loop.cells.size()) {
 #ifdef JAISCRIPT_VM_PROFILE
 		if (cs.payload.empty()) { ++profile_cells_records_; }
@@ -6607,8 +6637,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	return {};
 #endif
 }
-
-op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	if (execution_limit_exhausted()) [[unlikely]] {
 		cells_flush(f, loop);   // the error and the debugger see materialized slots
@@ -6619,8 +6648,7 @@ op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
 	f.ip = loop.copy_head;
 	return {};
 }
-
-op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -6655,8 +6683,7 @@ op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins) {
 	f.ip = ins.c;
 	return {};
 }
-
-op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -6713,19 +6740,14 @@ op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins) {
 }
 
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
-op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const uint32_t original_ip = ins.c;
 	const chunk::typed_site& site = f.code->typed_sites[original_ip];
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 2); return {}; };
-	const script_value* cp = site.cont_slot != k_invalid_u32
-		? frame_slot(f, site.cont_slot)
-		: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? original_ip * 3 + 2 : original_ip * 3);
-	if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
-	bool borrowed = false;
-	const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+	const script_array* node = cs.site_node[f.ip - loop.copy_head];   // resolved at entry
 	if (!node) return miss();
 	auto read_int = [&](uint32_t o, script_int& out) -> bool {
 		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
@@ -6774,7 +6796,7 @@ op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
 }
 
 // the typed index store lane with its index and value read from cells, every container guard kept
-op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
@@ -6819,11 +6841,7 @@ op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
 			if (!cell_int(sp.right, r2) || !typed_int_index_row(static_cast<token_type>(sp.op), index, r2, index)) return miss();
 		}
 	} else if (!cell_int(p.index, index)) return miss();
-	const script_value* cp = fast_operand(f, p.container, p.index_binary != k_invalid_u32 ? original_ip * 3 + 2 : original_ip * 3);
-	if (!cp) return miss();
-	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!lane_deref_silent(*cp)) return miss(); cp = &cp->deref(); }
-	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return miss();
-	script_array* node = const_cast<script_value&>(*cp).unchecked_get_array_storage().get();
+	script_array* node = const_cast<script_array*>(cs.site_node[f.ip - loop.copy_head]);   // resolved at entry
 	if (!node || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
 	const size_t at = static_cast<size_t>(index);
 	switch (node->kind()) {
@@ -6834,9 +6852,7 @@ op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
 	case script_array::kind_t::f64:
 		node->floats()[at] = vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
 		break;
-	case script_array::kind_t::hetero: {
-		const type_info* ti = cp->get_type_info().get();
-		if (ti && ti->element_type().get()) return miss();
+	case script_array::kind_t::hetero: {   // a typed var array was refused at entry
 		script_value& target = node->values()[at];
 		if (target.raw_storage_index() != vkind) return miss();
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { target.unchecked_set_int_payload(static_cast<script_int>(vbits)); }
@@ -14508,8 +14524,8 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
 		fprintf(stderr, "[vm-profile] closed typed loop blocks (measured span): entries %llu | head compares %llu | body steps %llu | back edges %llu | misses %llu | exits %llu\n",
 			(unsigned long long)profile_block_[0], (unsigned long long)profile_block_[1], (unsigned long long)profile_block_[2], (unsigned long long)profile_block_[3], (unsigned long long)profile_block_[4], (unsigned long long)profile_block_[5]);
-		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
-			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
+		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
+			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
 		{

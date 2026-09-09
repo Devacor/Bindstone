@@ -10389,7 +10389,10 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
         JAISCRIPT_TRY(dispatch_expr(extra.get()));
         containers.push_back(pop_value());
     }
-    return detail::run_parallel_for(*engine_, stmt, containers, environment_);
+    const std::function<const script_value*(size_t)> read_frame_slot = [this](size_t slot) -> const script_value* {
+        return call_stack_.empty() ? nullptr : call_stack_.back().get_local(slot);
+    };
+    return detail::run_parallel_for(*engine_, stmt, containers, environment_, read_frame_slot);
 }
 
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {

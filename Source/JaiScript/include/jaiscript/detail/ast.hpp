@@ -614,6 +614,9 @@ namespace jai {
         size_t arity() const noexcept { return 1 + extra_params.size(); }
         statement_ptr body;              // block_stmt, parsed inside the body's own function scope
         size_t local_count = 0;          // body frame size (loop variable = slot 0)
+        // Locals of the frame the statement runs in that the body names (symbol, slot): the
+        // barrier provisions them from that frame's slots, which no environment chain can see
+        std::vector<std::pair<uint64_t, size_t>> frame_captures;
         // The lazily-synthesized body function both backends share. Its body pointer
         // keys admission + the region slot pools; hot reload reparses the file and
         // mints a fresh node, so the cache can never go stale.

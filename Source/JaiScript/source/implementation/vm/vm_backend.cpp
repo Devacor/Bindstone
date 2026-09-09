@@ -11166,7 +11166,8 @@ op_status vm_backend::exec_parallel_for(frame& f, const vm_instruction& ins) {
 	containers.reserve(arity);
 	for (size_t k = stack_.size() - arity; k < stack_.size(); ++k) { containers.push_back(std::move(stack_[k])); }
 	for (size_t k = 0; k < arity; ++k) { stack_.pop_back(); }
-	return vm_check(detail::run_parallel_for(*engine_, stmt, containers, environment_));
+	const std::function<const script_value*(size_t)> read_frame_slot = [this, &f](size_t slot) -> const script_value* { return frame_slot(f, slot); };
+	return vm_check(detail::run_parallel_for(*engine_, stmt, containers, environment_, read_frame_slot));
 }
 
 op_status vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {

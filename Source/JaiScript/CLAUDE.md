@@ -334,6 +334,11 @@ engine stays usable", not by `check_throws`.
   strings, and the worker walls (unpinned method calls, operator dispatch, bound-method thunks,
   accessor reads and stores) raise their verdicts in every mode; only the script-semantic
   verdicts and the element proof's verdict go lenient. Runner: `--unsafe-parallel`.
+- **Parallel bodies see the enclosing function's locals** (`docs/parallel_design.md` §13): a body's
+  free name that is a local of the frame its statement runs in is provisioned from that frame's
+  slot (`parallel_for_stmt::frame_captures`, recorded by the parser), never from a global of the
+  same name; a pinned element method's captures resolve in its class's scope (the global
+  environment) and live in a separate per-worker method environment. `.jaibite` version 16.
 - **Read-only by-value parameters bind by handle** (`docs/parallel_design.md` §15): a by-value
   class/array/map parameter whose callee provably never mutates, aliases, compares, returns or
   passes it whole, reads only primitive/string terminals through it, and (with everything it

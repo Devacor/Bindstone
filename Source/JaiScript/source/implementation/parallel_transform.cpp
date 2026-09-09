@@ -72,10 +72,14 @@ namespace jai::detail {
 			// Private callables close over this environment. Break that cycle before
 			// the backend and its epoch sink die, including partially built slots.
 			if (root_env) { root_env->clear_values(); }
+			if (method_env) { method_env->clear_values(); }
 		}
 
 		std::unique_ptr<string_symbolizer> env_epoch_sink;
 		std::shared_ptr<environment> root_env;
+		// Pinned method bodies resolve here: a method's captures are its class's globals, the
+		// body's captures may be the caller's locals, and one name can mean both at once
+		std::shared_ptr<environment> method_env;
 		execution_limits limits;
 		std::unique_ptr<execution_backend> backend;
 		vm::vm_backend* vm = nullptr;                     // set when the engine backend is the vm
@@ -707,6 +711,76 @@ namespace {
 		// the engine-seam rules stay walls through wall() and the region still raises them
 		bool lenient = false;
 		bool lenient_saw_failure = false;
+		// Lenient mode's safety net: a verdict that returned early skipped a subtree, so every
+		// name a worker could probe in an admitted body is interned here regardless (member,
+		// getter and setter ids; identifiers the parser left lazy). Additive over the walk,
+		// single-threaded, before the tables freeze.
+		void warm_expr(const expression_ptr& e) {
+			if (!e) { return; }
+			switch (e->get_type()) {
+			case node_type::identifier_expr: {
+				auto* n = static_cast<identifier_expr*>(e.get());
+				if (n->symbol_id == UINT64_MAX) { n->symbol_id = sym.intern(n->name); }
+				return;
+			}
+			case node_type::member_expr: {
+				auto* m = static_cast<member_expr*>(e.get());
+				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+				m->getter_id = sym.get_getter_id_with_view(m->member_id).first;
+				(void)sym.get_setter_id_with_view(m->member_id);
+				warm_expr(m->object);
+				return;
+			}
+			case node_type::binary_expr: { auto* n = static_cast<binary_expr*>(e.get()); warm_expr(n->left); warm_expr(n->right); return; }
+			case node_type::unary_expr: warm_expr(static_cast<unary_expr*>(e.get())->operand); return;
+			case node_type::assignment_expr: { auto* n = static_cast<assignment_expr*>(e.get()); warm_expr(n->target); warm_expr(n->value); return; }
+			case node_type::call_expr: { auto* n = static_cast<call_expr*>(e.get()); warm_expr(n->callee); for (const auto& a : n->arguments) { warm_expr(a); } return; }
+			case node_type::lambda_expr: {
+				auto* n = static_cast<lambda_expr*>(e.get());
+				for (const auto& prm : n->parameters) { if (prm.symbol_id == UINT64_MAX) { prm.symbol_id = sym.intern(prm.name); } warm_expr(prm.default_value); }
+				warm_stmt(n->body);
+				return;
+			}
+			case node_type::new_expr: for (const auto& a : static_cast<new_expr*>(e.get())->arguments) { warm_expr(a); } return;
+			case node_type::ternary_expr: { auto* n = static_cast<ternary_expr*>(e.get()); warm_expr(n->condition); warm_expr(n->then_expression); warm_expr(n->else_expression); return; }
+			case node_type::array_literal_expr: for (const auto& x : static_cast<array_literal_expr*>(e.get())->elements) { warm_expr(x); } return;
+			case node_type::map_literal_expr: for (const auto& kv : static_cast<map_literal_expr*>(e.get())->entries) { warm_expr(kv.first); warm_expr(kv.second); } return;
+			case node_type::throw_expr: warm_expr(static_cast<throw_expr*>(e.get())->value); return;
+			case node_type::cast_expr: warm_expr(static_cast<cast_expr*>(e.get())->operand); return;
+			default: return;
+			}
+		}
+		void warm_stmt(const statement_ptr& s) {
+			if (!s) { return; }
+			switch (s->get_type()) {
+			case node_type::expression_stmt: warm_expr(static_cast<expression_stmt*>(s.get())->expression); return;
+			case node_type::expression_decl: warm_expr(static_cast<expression_decl*>(s.get())->expression); return;
+			case node_type::statement_decl: warm_stmt(static_cast<statement_decl*>(s.get())->statement); return;
+			case node_type::block_stmt: for (const auto& d : static_cast<block_stmt*>(s.get())->declarations) { warm_stmt(d); } return;
+			case node_type::if_stmt: { auto* n = static_cast<if_stmt*>(s.get()); warm_expr(n->condition); warm_stmt(n->then_statement); warm_stmt(n->else_statement); return; }
+			case node_type::while_stmt: { auto* n = static_cast<while_stmt*>(s.get()); warm_expr(n->condition); warm_stmt(n->body); return; }
+			case node_type::for_stmt: { auto* n = static_cast<for_stmt*>(s.get()); warm_stmt(n->initializer); warm_expr(n->condition); warm_expr(n->update); warm_stmt(n->body); return; }
+			case node_type::range_for_stmt: { auto* n = static_cast<range_for_stmt*>(s.get()); warm_expr(n->container); warm_stmt(n->body); return; }
+			case node_type::return_stmt: warm_expr(static_cast<return_stmt*>(s.get())->value); return;
+			case node_type::try_stmt: { auto* n = static_cast<try_stmt*>(s.get()); warm_stmt(n->try_block); warm_stmt(n->catch_block); return; }
+			case node_type::switch_stmt: {
+				auto* n = static_cast<switch_stmt*>(s.get());
+				warm_expr(n->condition);
+				for (const auto& c : n->cases) { warm_expr(c->value); for (const auto& st : c->body) { warm_stmt(st); } }
+				if (n->default_case) { for (const auto& st : n->default_case->body) { warm_stmt(st); } }
+				return;
+			}
+			case node_type::variable_decl: warm_expr(static_cast<variable_decl*>(s.get())->initializer); return;
+			case node_type::destructuring_decl: warm_expr(static_cast<destructuring_decl*>(s.get())->initializer); return;
+			case node_type::function_decl: {
+				auto* n = static_cast<function_decl*>(s.get());
+				for (const auto& prm : n->parameters) { if (prm.symbol_id == UINT64_MAX) { prm.symbol_id = sym.intern(prm.name); } warm_expr(prm.default_value); }
+				warm_stmt(n->body);
+				return;
+			}
+			default: return;
+			}
+		}
 		bool wall(const ast_node* node, std::string reason) {
 			const bool was = lenient;
 			lenient = false;
@@ -794,6 +868,7 @@ namespace {
 				}
 			}
 			scopes.swap(saved);
+			if (lenient) { warm_stmt(fn->body); }
 			return ok;
 		}
 
@@ -869,6 +944,7 @@ namespace {
 			}
 			scopes.swap(saved);
 			method_class = saved_class;
+			if (lenient) { warm_stmt(decl->body); }
 			return ok;
 		}
 
@@ -1760,6 +1836,7 @@ namespace {
 		auto ctx = std::make_unique<parallel_worker_slot>();
 		ctx->env_epoch_sink = std::make_unique<string_symbolizer>();
 		ctx->root_env = std::make_shared<environment>(ctx->env_epoch_sink.get());
+		ctx->method_env = std::make_shared<environment>(ctx->env_epoch_sink.get());
 
 		slice_worker_limits(eng, *ctx);
 
@@ -2492,6 +2569,9 @@ namespace {
 	// One captured name, resolved at the barrier from the LIVE global value
 	struct resolved_capture {
 		const parallel_admission::capture_entry* entry = nullptr;
+		bool method_scope = false;           // provisioned into the worker's method_env (a pinned method's capture)
+		// the snapshot cache's key: symbol ids are interner indices, so the top bit is free
+		uint64_t cache_key() const { return entry->name_id | (method_scope ? (uint64_t(1) << 63) : 0); }
 		std::optional<script_value> source;  // deref'd live value; for a borrow this handle
 		                                     // IS the region anchor (held until the join)
 		parallel_capture_kind kind = parallel_capture_kind::scalar;
@@ -2705,6 +2785,8 @@ struct region_plan {
 	const parallel_admission* adm = nullptr;
 	const std::shared_ptr<function_decl>* chunk_wrapper = nullptr;
 	std::shared_ptr<environment> capture_env;                        // null: the global environment
+	const std::vector<std::pair<uint64_t, size_t>>* frame_captures = nullptr;   // the statement's enclosing-frame locals (symbol, slot)
+	const std::function<const script_value*(size_t)>* frame_slot = nullptr;    // reads the executing frame's slot
 	bool inplace = false;                                            // parallel_for: the range is written, element methods admitted
 	std::vector<size_t> bounds;                                      // empty: the flat partition
 	const parallel_admission* extra_seed_adm = nullptr;              // weight fn types (transform)
@@ -2751,14 +2833,25 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		return false;
 	};
-	auto classify_and_add = [&](const parallel_admission::capture_entry& entry) -> checked_result<void> {
-		auto global = plan.capture_env ? plan.capture_env->get(entry.name_id)
-		                               : eng.get_global_environment()->get(entry.name_id);
+	auto classify_and_add = [&](const parallel_admission::capture_entry& entry, bool method_scope = false) -> checked_result<void> {
+		// a local of the frame the statement runs in reads from that frame's slot: no environment
+		// chain can see it, and a global of the same name must not shadow it; a method's capture
+		// is a global by construction (its class's scope), never the caller's local
+		const script_value* frame_local = nullptr;
+		if (!method_scope && plan.frame_captures && plan.frame_slot) {
+			for (const auto& [sym, slot] : *plan.frame_captures) {
+				if (sym == entry.name_id) { frame_local = (*plan.frame_slot)(slot); break; }
+			}
+		}
+		auto global = frame_local ? checked_result<script_value>(*frame_local)
+		            : (plan.capture_env && !method_scope) ? plan.capture_env->get(entry.name_id)
+		                                                   : eng.get_global_environment()->get(entry.name_id);
 		if (!global) {
 			return usage("captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
 		}
 		resolved_capture cap;
 		cap.entry = &entry;
+		cap.method_scope = method_scope;
 		cap.source = global.value().deref();
 		switch (cap.source->raw_storage_index()) {
 		case script_value::TYPEID_NULL:
@@ -2800,7 +2893,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
 		}
 		state.faults.checkpoint("region.capture_metadata", captures.size());
-		state.last_captures.emplace_back(entry.name_id, cap.kind);
+		bool listed = false;
+		for (const auto& seen : state.last_captures) { if (seen.first == entry.name_id) { listed = true; break; } }
+		if (!listed) { state.last_captures.emplace_back(entry.name_id, cap.kind); }
 		state.faults.checkpoint("region.capture_collect", captures.size());
 		captures.push_back(std::move(cap));
 		return {};
@@ -2918,21 +3013,17 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	method_adm.lenient = eng.allow_unsafe_parallel();
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
-	size_t method_capture_base = 0;
 	state.faults.checkpoint("region.method_admission");
 	if (plan.inplace && !element_classes.empty()) {
 		method_adm.adm.element_method_calls = adm->element_method_calls;
-		for (const auto& entry : adm->captures) {
-			method_adm.capture_index.emplace(entry.name_id, method_adm.adm.captures.size());
-			method_adm.adm.captures.push_back(entry);
-		}
-		method_capture_base = method_adm.adm.captures.size();
+		// the methods' captures are their own set: the same name is the body's capture in the
+		// region's enclosing scope and a method's in its class's scope
 		if (!method_adm.admit_element_methods(element_classes)) {
 			state.error_text = method_adm.adm.message;
 			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 		}
-		for (size_t ci = method_capture_base; ci < method_adm.adm.captures.size(); ++ci) {
-			auto classified = classify_and_add(method_adm.adm.captures[ci]);
+		for (const auto& entry : method_adm.adm.captures) {
+			auto classified = classify_and_add(entry, /*method_scope*/ true);
 			if (!classified) { return classified; }
 		}
 	}
@@ -3060,6 +3151,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					if (script_value* value = slot->root_env->get_own_value_ptr(id)) {
 						*value = script_value(std::monostate{}, &eng);   // existing storage, no allocation
 					}
+					if (slot->method_env) {
+						if (script_value* value = slot->method_env->get_own_value_ptr(id)) {
+							*value = script_value(std::monostate{}, &eng);
+						}
+					}
 				}
 				slot->capture_name_ids.clear();
 				slot->element_refs.clear();
@@ -3163,7 +3259,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::string:
 				case parallel_capture_kind::snapshot:
-					provision_snapshot_capture(*slot, cap.entry->name_id, *cap.source, eng,
+					provision_snapshot_capture(*slot, cap.cache_key(), *cap.source, eng,
 					                           value_types, provisioned,
 					                           state.region_use_counter, snapshot_validated,
 					                           fresh_nodes, any_snapshot_miss
@@ -3183,7 +3279,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.capture_track", k);
 			slot->capture_name_ids.push_back(cap.entry->name_id);
 			state.faults.checkpoint("region.capture_publish", k);
-			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
+			(cap.method_scope ? slot->method_env : slot->root_env)->define(cap.entry->name_id, std::move(provisioned));
 		}
 		state.faults.checkpoint("region.snapshot_metadata", k);
 		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
@@ -3204,10 +3300,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			wd.eng = src->eng;
 			wd.cls = src->cls;
 			wd.name_id = src->name_id;
-			// The worker's sandbox, not the class's defining scope: a method body's captured reads
-			// then resolve to this worker's provisioned copies (a borrowed string table read through
-			// the live global copied the shared literal's handle across threads; safe mode too)
-			wd.definition_env = slot->root_env;
+			// The worker's method sandbox, not the class's defining scope: a method body's captured
+			// reads resolve to this worker's provisioned copies (a borrowed string table read through
+			// the live global copied the shared literal's handle across threads; safe mode too), and
+			// not to the body's captures, which may be the caller's locals under the same names
+			wd.definition_env = slot->method_env;
 			detail::parallel_method_pin pin;
 			pin.method_value = script_value::make_function(std::move(wd), &eng);
 			pin.resolved = am.decl;
@@ -3497,7 +3594,8 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 // or the zip of several, the body run in place on every thread's segment.
 checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                       std::vector<script_value>& containers,
-                                      const std::shared_ptr<environment>& capture_env) {
+                                      const std::shared_ptr<environment>& capture_env,
+                                      const std::function<const script_value*(size_t)>& frame_slot) {
 	parallel_engine_state& state = eng.parallel_state();
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
@@ -3557,6 +3655,8 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	plan.adm = adm;
 	plan.chunk_wrapper = &chunk_wrapper;
 	plan.capture_env = capture_env;
+	plan.frame_captures = &stmt->frame_captures;
+	plan.frame_slot = &frame_slot;
 	plan.inplace = true;
 #ifdef JAISCRIPT_VM_PROFILE
 	plan.prof = &state.prof_for;

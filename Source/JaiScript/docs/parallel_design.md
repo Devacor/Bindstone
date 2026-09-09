@@ -143,8 +143,19 @@ freezes it before the fork whether or not `allow_unsafe_parallel` is set: unsafe
 for the script's sharing, never for the runtime's tables. Every name a worker can probe is
 interned at admission, single-threaded: member, getter and setter ids of every chain the body
 names and of every method-call site (both backends probe the user-accessor id of a method name
-before dispatch). A miss on the frozen interner is Debug's assert, the tripwire. A worker that
-finds a pin for a method uses it in unsafe mode too; an unpinned call there is unsafe's business.
+before dispatch). A miss on the frozen interner is Debug's assert, the tripwire.
+
+**Unsafe mode trusts the script's data, never the runtime's structures.** With
+`engine::allow_unsafe_parallel(true)` the admission walk still runs, warming every name and
+pinning every element method it can; only its script-semantic verdicts (captured-state writes,
+aliasing, mutating methods on captured state, member stores, lambdas, `new`) go lenient. The
+engine-seam rules stay walls in every mode: bare sibling-method calls, call targets the walk
+cannot resolve, `yield`, includes and declarations inside a body, `math::random`. The element
+proof still collects the element classes and detaches shared strings; its verdict goes lenient.
+The worker walls apply in every mode: an unpinned method call, operator dispatch on instances,
+bound-method and constructor thunks, accessor reads and stores all raise their verdict in a
+worker, because each of them copies a shared method value or touches an engine-owned cache. What
+unsafe buys is the skipped proof, not a way past those counts.
 
 **Wake protocol.** A pool worker that finishes its chunk spins on its own flag for up to
 `engine::parallel_spin_wait_us` (default 1000) before parking on the condition variable, and

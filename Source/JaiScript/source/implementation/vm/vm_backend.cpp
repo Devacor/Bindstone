@@ -1334,7 +1334,7 @@ std::optional<bool> vm_backend::object_equality_via_method(const script_value& l
 	// Safe-mode workers never dispatch operator methods: the method-value copy and the
 	// bound-method invocation both race shared state (increment B; handle_equal raises
 	// the verdict before the structural fallback could silently diverge)
-	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1364,7 +1364,7 @@ std::optional<bool> vm_backend::object_equality_via_method(const script_value& l
 std::optional<bool> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
 	// fallback is loud, so no divergence gate is needed here
-	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1394,7 +1394,7 @@ std::optional<bool> vm_backend::object_comparison_via_method(const script_value&
 std::optional<script_value> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
 	// fallback is loud, so no divergence gate is needed here
-	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -2429,10 +2429,10 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	// Safe-mode workers: a custom op== would be skipped by the operator wall and the
 	// structural fallback below would silently DIVERGE from serial — verdict instead.
 	// KEEP BYTE-PARALLEL with the interpreter twin.
-	if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+	if (parallel_worker_ &&
 	    (object_defines_custom_equality(left) || object_defines_custom_equality(right))) [[unlikely]] {
 		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-			"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+			"custom operator dispatch on class instances is not admitted in a parallel body");
 	}
 	auto custom_result = object_equality_via_method(left, right);
 	if (custom_result.has_value()) {
@@ -3583,11 +3583,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				if (!handled) {
 					// Safe-mode workers: operator= dispatch copies shared method values and
 					// escapes to the engine backend — verdict (increment B)
-					if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+					if (parallel_worker_ &&
 					    instance->get_class_definition() &&
 					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
 						return raise_(make_error_code(runtime_error_code::unsupported_operation),
-							"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+							"custom operator dispatch on class instances is not admitted in a parallel body");
 					}
 					script_value method = instance->get_method(assign_operator_id_, false);
 					if (method.is_function()) {
@@ -3625,11 +3625,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				if (instance_result) {
 					auto instance = instance_result.value();
 					// Safe-mode workers: verdict instead of a racing operator= (increment B)
-					if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+					if (parallel_worker_ &&
 					    instance->get_class_definition() &&
 					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
 						return raise_(make_error_code(runtime_error_code::unsupported_operation),
-							"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+							"custom operator dispatch on class instances is not admitted in a parallel body");
 					}
 					script_value method = instance->get_method(assign_operator_id_, false);
 					if (method.is_function()) {
@@ -5647,9 +5647,9 @@ op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 	if (left.is_object()) {
 		// Safe-mode workers: operator[]/global-operator dispatch copies shared method
 		// values and escapes to the engine backend — verdict (increment B)
-		if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+		if (parallel_worker_) [[unlikely]] {
 			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+				"custom operator dispatch on class instances is not admitted in a parallel body");
 		}
 		auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
 		if (instance_result) {
@@ -7922,11 +7922,11 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
 					? parallel_method_pins_->find(cd, member_id) : nullptr;
 				if (pin) { return {}; }
-				if (!engine_->allow_unsafe_parallel()) {
+				{
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
 						"public methods on the element's own class touching only element, local, or "
-						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member_id);
+						"captured-read state)", member_id);
 				}
 			}
 			if (cached_global_env_ && cd) {
@@ -8146,7 +8146,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		if (bthunk && bthunk->eng == engine_ &&
 		    bthunk->payload.kind == script_callable::kind_type::bound_method &&
 		    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
-		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+		    !parallel_worker_) {
 			const auto* dispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 			if (dispatch && dispatch->eng == engine_) {
 				const size_t slice_base = stack_.size() - argc;
@@ -8427,7 +8427,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 			if (bthunk && bthunk->eng == engine_ &&
 			    bthunk->payload.kind == script_callable::kind_type::bound_method &&
 			    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
-			    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+			    !parallel_worker_) {
 				const auto* mdispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 				if (mdispatch && mdispatch->eng == engine_) {
 					auto resolved = mdispatch->cls->resolve_method_overload_ref(mdispatch->name_id,
@@ -8496,7 +8496,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
 	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
-	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+	    !parallel_worker_) {
 #ifdef JAISCRIPT_VM_PROFILE
 		profile_bound_method_paths_[0]++;
 #endif
@@ -8604,7 +8604,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
 	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
-	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+	    !parallel_worker_) {
 		const auto* dispatch = thunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
 		if (dispatch && dispatch->eng == engine_) {
 			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
@@ -8624,7 +8624,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	// live in execute_callable); coroutine ctors take the native tail inside.
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::constructor &&
-	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+	    !parallel_worker_) {
 		auto script_cls = thunk->payload.cls && thunk->payload.cls->is_script_class()
 			? std::static_pointer_cast<script_class_definition>(thunk->payload.cls)
 			: std::shared_ptr<script_class_definition>();
@@ -9113,9 +9113,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	// shared method values out of class_definition::methods_ - a cross-worker count
 	// race on the non-atomic strong_ptr. Fields live on the (exclusively owned)
 	// instance, so read them directly; anything that is not a backing field would
-	// need method machinery - wall it (allow_unsafe_parallel opts out entirely).
-	if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT &&
-	    !engine_->allow_unsafe_parallel()) [[unlikely]] {
+	// need method machinery - wall it (unsafe mode included: the count is the runtime's).
+	if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
 		auto& holder = objectValue.unchecked_get_object_storage();
 		if (holder && holder->is_class_instance_wrapper && holder->data) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
@@ -9124,7 +9123,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"only direct field access on class instances is allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+				"only direct field access on class instances is allowed in a parallel body");
 		}
 	}
 
@@ -9795,8 +9794,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	// shared method value (cross-worker count race); a backing field's enforce+set is
 	// exactly what the auto-setter does, on exclusively-owned instance storage. Any
 	// non-field member store needs method machinery - wall it.
-	if (parallel_worker_ && object_value.raw_storage_index() == script_value::TYPEID_OBJECT &&
-	    !engine_->allow_unsafe_parallel()) [[unlikely]] {
+	if (parallel_worker_ && object_value.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
 		auto& holder = const_cast<script_value&>(object_value).unchecked_get_object_storage();
 		if (holder && holder->is_class_instance_wrapper && holder->data) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
@@ -9809,7 +9807,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"only direct field stores on class instances are allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+				"only direct field stores on class instances are allowed in a parallel body");
 		}
 	}
 	auto target = resolve_member_target(object_value);
@@ -10619,11 +10617,11 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data) [[unlikely]] {
 				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
 				worker_pin = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
-				if (!worker_pin && !engine_->allow_unsafe_parallel()) {
+				if (!worker_pin) {
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
 						"public methods on the element's own class touching only element, local, or "
-						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
+						"captured-read state)", member->member_id);
 				}
 			}
 			if (worker_pin) [[unlikely]] {
@@ -11051,7 +11049,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		const auto* ctor_thunk = func.target<script_callable_thunk>();
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
-		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+		    !parallel_worker_) {
 			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
 				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
 				: std::shared_ptr<script_class_definition>();
@@ -11105,7 +11103,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		const auto* ctor_thunk = func.target<script_callable_thunk>();
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
-		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+		    !parallel_worker_) {
 			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
 				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
 				: std::shared_ptr<script_class_definition>();

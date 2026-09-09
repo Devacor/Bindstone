@@ -124,6 +124,7 @@ struct options {
 	bool watch = false;
 	bool time_runs = false;
 	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
+	bool unsafe_parallel = false;
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
 	int debug_port = 0;                    // 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
@@ -255,6 +256,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--watch") { opt.watch = true; }
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--no-debug") { opt.debug = false; }
+		else if (a == "--unsafe-parallel") { opt.unsafe_parallel = true; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
@@ -1063,6 +1065,7 @@ bool spill_file(const std::string& path, const std::string& content) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
+	if (opt.unsafe_parallel) { eng->allow_unsafe_parallel(true); }
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	eng->parameter_alias(opt.param_alias);

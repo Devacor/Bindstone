@@ -328,6 +328,12 @@ engine stays usable", not by `check_throws`.
   pointer like `std::shared_ptr`; `same_object(x, y)` (engine-core builtin) is identity (refs resolve,
   handles unwrap, primitives/strings by value). Ordering stays off containers/instances. The C++-level
   `script_value::operator==`/`<=>` are unchanged (map-key identity ordering).
+- **Unsafe parallel mode trusts the script's data, never the runtime's structures**
+  (`engine::allow_unsafe_parallel(true)`, `docs/parallel_design.md`): the admission walk still
+  warms every name and pins every element method it can, the element proof still detaches shared
+  strings, and the worker walls (unpinned method calls, operator dispatch, bound-method thunks,
+  accessor reads and stores) raise their verdicts in every mode; only the script-semantic
+  verdicts and the element proof's verdict go lenient. Runner: `--unsafe-parallel`.
 - **Read-only by-value parameters bind by handle** (`docs/parallel_design.md` §15): a by-value
   class/array/map parameter whose callee provably never mutates, aliases, compares, returns or
   passes it whole, reads only primitive/string terminals through it, and (with everything it

@@ -3,6 +3,7 @@
 // Admission violations ERROR with location text - never silently serial.
 
 #include <jaiscript/testing/foundry.hpp>
+#include <map>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -1982,6 +1983,58 @@ public:
 				const auto& out = r.as_array();
 				check_eq((size_t)8, out.size());
 				for (int64_t i = 0; i < 8; ++i) { check_eq(i * 2 + i + 1, out[static_cast<size_t>(i)].as_int(), "element " + std::to_string(i)); }
+			}
+		});
+
+		test("unsafe_mode_keeps_the_runtime_walls", [this]() {
+			// Astra's unsafe matrix (2026-09-09): under allow_unsafe_parallel(true) at 8 workers a
+			// sibling call spelled this.inner(), a field's method leaf.read() and an accessor this.x
+			// asserted a getter-id miss on the frozen interner, and a bare sibling call died on a
+			// dead strong_ptr block: unsafe mode had skipped the element-class collection, which
+			// starved the barrier's method walk. Unsafe now keeps every runtime-owned protection
+			// (the walk warms and pins, the element proof detaches, the worker walls apply) and
+			// drops only the script-semantic verdicts. Each shape lands the same on both backends
+			struct shape { const char* name; const char* definition; };
+			const shape shapes[] = {
+				{ "own_method", "class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + 1; } }" },
+				{ "nested_own_method", "class Cell { int v = 0; Cell(int n) { v = n; } int inner() { return v + 1; } int calc() { return inner(); } }" },
+				{ "explicit_sibling_method", "class Cell { int v = 0; Cell(int n) { v = n; } int inner() { return v + 1; } int calc() { return this.inner(); } }" },
+				{ "nested_field_method", "class Leaf { int n = 1; int read() { return n; } } class Cell { int v = 0; Leaf leaf = Leaf(); Cell(int n) { v = n; } int calc() { return v + leaf.read(); } }" },
+				{ "getter", "class Cell { int v = 0; Cell(int n) { v = n; } int _get_x() { return v; } int calc() { return this.x + 1; } }" },
+				{ "literal_string", "class Cell { int v = 0; Cell(int n) { v = n; } int calc() { string text = \"x\"; return v + text.size(); } }" },
+				{ "captured_string_table", "array<string> palette = [\"x\"]; class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + palette[0].size(); } }" },
+			};
+			const std::map<std::string, std::string> expected = {
+				{ "own_method", "value 2208" },
+				{ "nested_own_method", "error parallel_for: method 'inner' must be called as 'this.inner()' in a parallel body (bare sibling calls are not admitted, v1)" },
+				{ "explicit_sibling_method", "value 2208" },
+				{ "nested_field_method", "error method 'read' was not admitted in this parallel body (admitted: single-overload public methods on the element's own class touching only element, local, or captured-read state)" },
+				{ "getter", "error only direct field access on class instances is allowed in a parallel body" },
+				{ "literal_string", "value 2208" },
+				{ "captured_string_table", "value 2208" },
+			};
+			const char* driver = " array<Cell> cells = []; for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }"
+			                     " for (int round = 0; round < 3; ++round) { parallel_for (auto& cell : cells) { cell.v = cell.calc(); } }"
+			                     " int total = 0; for (auto& cell : cells) { total += cell.v; } return total;";
+			for (const shape& sh : shapes) {
+				std::string seen[2];
+				for (bool vm : {false, true}) {
+					auto e = make_engine();
+					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->allow_unsafe_parallel(true);
+					e->parallel_thread_count(8);
+					e->execution_budget(0);
+					std::string out;
+					try { out = "value " + std::to_string(e->execute(std::string(sh.definition) + driver).as_int()); }
+					catch (const std::exception& ex) { out = std::string("error ") + ex.what(); }
+					seen[vm ? 1 : 0] = out;
+				}
+				check_eq(seen[0], seen[1], std::string(sh.name) + ": both backends land the same");
+				auto want = expected.find(sh.name);
+				check_true(want != expected.end(), std::string(sh.name) + " has an expectation");
+				if (want != expected.end()) {
+					check_true(seen[0].rfind(want->second, 0) == 0, std::string(sh.name) + ": expected '" + want->second + "', got '" + seen[0] + "'");
+				}
 			}
 		});
 

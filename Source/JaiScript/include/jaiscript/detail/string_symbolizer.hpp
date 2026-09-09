@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <deque>
 #include <string>
+#include <cstdio>
 #include <string_view>
 #include <cassert>
 #include <cstdint>
@@ -48,6 +49,9 @@ namespace jai {
 
 			// Parallel-region tripwire: workers may only ever HIT (reads). A miss while
 			// frozen means the pre-warm set missed a shape - fix the warm pass.
+#ifndef NDEBUG
+			if (frozen_) { std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)sv.size(), sv.data()); }
+#endif
 			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
 
 			// Copy once into deque (stable address), then map a string_view to it (no second copy).
@@ -67,6 +71,9 @@ namespace jai {
 			if (auto it = index_.find(sv); it != index_.end())
 				return { it->second, ids_[it->second] };
 
+#ifndef NDEBUG
+			if (frozen_) { std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)sv.size(), sv.data()); }
+#endif
 			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
 
 			auto& stored = storage_.emplace_back(sv);
@@ -116,6 +123,9 @@ namespace jai {
 			if (auto it = getter_cache_.find(member_id); it != getter_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			#ifndef NDEBUG
+			if (frozen_) { const std::string_view miss_name = get_string(member_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
+#endif
 			assert(!frozen_ && "string_symbolizer: getter-id miss during a parallel region");
 			std::string getter_name = "_get_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(getter_name);
@@ -129,6 +139,9 @@ namespace jai {
 			if (auto it = setter_cache_.find(member_id); it != setter_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			#ifndef NDEBUG
+			if (frozen_) { const std::string_view miss_name = get_string(member_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
+#endif
 			assert(!frozen_ && "string_symbolizer: setter-id miss during a parallel region");
 			std::string setter_name = "_set_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(setter_name);
@@ -142,6 +155,9 @@ namespace jai {
 			if (auto it = class_var_cache_.find(class_name_id); it != class_var_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			#ifndef NDEBUG
+			if (frozen_) { const std::string_view miss_name = get_string(class_name_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
+#endif
 			assert(!frozen_ && "string_symbolizer: class-var-id miss during a parallel region");
 			std::string class_var_name = "__class_" + std::string(get_string(class_name_id));
 			auto [id, view] = intern_with_view(class_var_name);

@@ -702,7 +702,20 @@ namespace {
 			return nullptr;
 		}
 
+		// Unsafe mode (engine::allow_unsafe_parallel): the script vouches for its data, so the
+		// script-semantic rules go lenient (the walk keeps warming names and pinning methods);
+		// the engine-seam rules stay walls through wall() and the region still raises them
+		bool lenient = false;
+		bool lenient_saw_failure = false;
+		bool wall(const ast_node* node, std::string reason) {
+			const bool was = lenient;
+			lenient = false;
+			const bool r = fail(node, std::move(reason));
+			lenient = was;
+			return r;
+		}
 		bool fail(const ast_node* node, std::string reason) {
+			if (lenient) { lenient_saw_failure = true; return true; }
 			if (!failed) {
 				failed = true;
 				adm.admitted = false;
@@ -738,14 +751,14 @@ namespace {
 		bool admit_function(const std::shared_ptr<script_defined_function>& fn, uint64_t global_name_id,
 		                    root_param param_mode, const ast_node* call_node) {
 			if (!fn || !fn->body) {
-				return fail(call_node, "fn has no body known at admission time");
+				return wall(call_node, "fn has no body known at admission time");
 			}
 			if (param_mode != root_param::none) {
 				if (fn->parameters().empty() || (param_mode == root_param::unary_value && fn->parameters().size() != 1)) {
-					return fail(fn->body.get(), "fn must take exactly one parameter");
+					return wall(fn->body.get(), "fn must take exactly one parameter");
 				}
 				if (param_mode == root_param::unary_value && fn->parameters()[0].is_reference) {
-					return fail(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
+					return wall(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
 				}
 			}
 			// Collect the graph entry before the visited check so recursion still records it
@@ -800,30 +813,33 @@ namespace {
 		std::unordered_set<const function_decl*> visited_methods;
 
 		bool admit_class_method(const class_definition* cls, uint64_t name_id, std::string_view name, const ast_node* site) {
+			// A method the barrier cannot pin: the verdict in safe mode; skipped in lenient
+			// mode, where its unpinned calls meet the worker's wall instead of a shared count
+			auto unpinnable = [&](std::string reason) { return lenient ? false : fail(site, std::move(reason)); };
 			auto decl = cls->single_method_overload_ptr(name_id);
 			if (!decl) {
-				return fail(site, "method '" + std::string(name) + "' on class '" + cls->get_name() +
-				               "' is not admitted in a parallel body (only single-overload methods defined on the element's own class)");
+				return unpinnable("method '" + std::string(name) + "' on class '" + cls->get_name() +
+				                  "' is not admitted in a parallel body (only single-overload methods defined on the element's own class)");
 			}
 			if (decl->is_coroutine) {
-				return fail(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
+				return wall(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
 			}
 			if (!decl->body) {
-				return fail(site, "method '" + std::string(name) + "' has no body known at admission time");
+				return unpinnable("method '" + std::string(name) + "' has no body known at admission time");
 			}
 			// The pinned worker dispatch bypasses the getter-precedence probe and the
 			// access-context check — the barrier proves both moot instead
 			if (cls->find_field_declaring_class(name_id) != nullptr) {
-				return fail(site, "'" + std::string(name) + "' names both a field and a method on class '" +
-				               cls->get_name() + "' — not admitted in a parallel body (v1)");
+				return unpinnable("'" + std::string(name) + "' names both a field and a method on class '" +
+				                  cls->get_name() + "' — not admitted in a parallel body (v1)");
 			}
 			if (cls->defines_method(sym.get_getter_id_with_view(name_id).first)) {
-				return fail(site, "method '" + std::string(name) + "' is shadowed by a property getter on class '" +
-				               cls->get_name() + "' — not admitted in a parallel body (v1)");
+				return unpinnable("method '" + std::string(name) + "' is shadowed by a property getter on class '" +
+				                  cls->get_name() + "' — not admitted in a parallel body (v1)");
 			}
 			if (cls->chain_has_nonpublic()) {
-				return fail(site, "class '" + cls->get_name() +
-				               "' has non-public members — its methods are not admitted in a parallel body (v1)");
+				return unpinnable("class '" + cls->get_name() +
+				                  "' has non-public members — its methods are not admitted in a parallel body (v1)");
 			}
 			if (!visited_methods.insert(decl.get()).second) { return true; }   // recursion / already admitted
 			// Pre-mint the shared parameter storage (a mutable lazy cache on the AST
@@ -866,7 +882,10 @@ namespace {
 				const auto callrec = adm.element_method_calls[i];   // copy: push_back may reallocate
 				for (const class_definition* cls : classes) {
 					if (!cls->defines_method(callrec.name_id)) { continue; }
-					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) { return false; }
+					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
+						if (lenient && !failed) { continue; }   // skipped, not walled: the next method still warms and pins
+						return false;
+					}
 				}
 			}
 			return true;
@@ -982,16 +1001,16 @@ namespace {
 				return true;
 			}
 			case node_type::function_decl:
-				return fail(s.get(), "function declarations are not allowed in a parallel body (v0)");
+				return wall(s.get(), "function declarations are not allowed in a parallel body (v0)");
 			case node_type::class_decl:
-				return fail(s.get(), "class declarations are not allowed in a parallel body");
+				return wall(s.get(), "class declarations are not allowed in a parallel body");
 			case node_type::namespace_decl:
-				return fail(s.get(), "namespace declarations are not allowed in a parallel body");
+				return wall(s.get(), "namespace declarations are not allowed in a parallel body");
 			case node_type::enum_decl:
-				return fail(s.get(), "enum declarations are not allowed in a parallel body");
+				return wall(s.get(), "enum declarations are not allowed in a parallel body");
 			case node_type::include_decl:
 			case node_type::import_decl:
-				return fail(s.get(), "include/import is not allowed in a parallel body");
+				return wall(s.get(), "include/import is not allowed in a parallel body");
 			default:
 				return fail(s.get(), "statement is not allowed in a parallel body (v0)");
 			}
@@ -1084,9 +1103,9 @@ namespace {
 				return walk_expr(n->operand);
 			}
 			case node_type::yield_expr:
-				return fail(e.get(), "yield is not allowed in a parallel body");
+				return wall(e.get(), "yield is not allowed in a parallel body");
 			case node_type::include_expr:
-				return fail(e.get(), "include is not allowed in a parallel body");
+				return wall(e.get(), "include is not allowed in a parallel body");
 			default:
 				return fail(e.get(), "expression is not allowed in a parallel body (v0)");
 			}
@@ -1144,7 +1163,7 @@ namespace {
 					const jai::detail::math_fn fn = jai::detail::math_intrinsic_for_call(m);
 					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range ||
 					    fn == jai::detail::math_fn::random_seed) {
-						return fail(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
+						return wall(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
 					}
 					if (fn != jai::detail::math_fn::none) {
 						for (const auto& a : call->arguments) {
@@ -1198,18 +1217,18 @@ namespace {
 				return true;
 			}
 			if (!call->callee || call->callee->get_type() != node_type::identifier_expr) {
-				return fail(call, "call target is not statically resolvable in a parallel body (v0)");
+				return wall(call, "call target is not statically resolvable in a parallel body (v0)");
 			}
 			auto* callee = static_cast<identifier_expr*>(call->callee.get());
 			const std::string callee_name(callee->name);
 			if (is_local(callee->symbol_id)) {
-				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body (v0)");
+				return wall(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body (v0)");
 			}
 			// Bare sibling-method calls resolve through the env→bound-method seam at
 			// runtime (the engine-backend escape the pins exist to prevent); the
 			// 'this.' spelling routes through the pinned dispatch op instead
 			if (method_class && method_class->defines_method(callee->symbol_id)) {
-				return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
+				return wall(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
 				               "()' in a parallel body (bare sibling calls are not admitted, v1)");
 			}
 			// Method bodies stay within the element: global-function graphs from methods
@@ -1278,6 +1297,7 @@ namespace {
 	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
 	                                   bool inplace_root = false) {
 		admission_builder builder(eng);
+		builder.lenient = eng.allow_unsafe_parallel();
 		if (inplace_root) {
 			builder.inplace_root = true;
 			builder.adm.inplace_root = true;
@@ -2327,7 +2347,7 @@ namespace {
 	// (one scan of the 16-byte slot tags, no instance read; Dev ruling: the declared type is
 	// a proven fact about every element) and walks per element only when it fails; every
 	// other source that is not statically all-primitive walks (normalize_element_inplace).
-	// engine::allow_unsafe_parallel skips it all (trusted scripts).
+	// engine::allow_unsafe_parallel keeps the classes and the detach and drops the verdict.
 	// elements: the boxed view walked for a non-object kind (the node's own vector, or the
 	// caller's materialized copy of a typed primitive/string buffer)
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
@@ -2348,7 +2368,8 @@ namespace {
 				if (std::find(proof.tags.begin(), proof.tags.end(), tag) == proof.tags.end()) { proof.tags.push_back(tag); }
 			}
 		}
-		if (!eng.allow_unsafe_parallel() && proof.typed_obj && n > 0) {
+		const bool lenient = eng.allow_unsafe_parallel();   // the script vouches: no verdict, but the classes still collect and shared strings still detach
+		if (proof.typed_obj && n > 0) {
 			declared_exclusive = node.live_elem_refs == 0;
 			std::vector<const class_definition*> visited;
 			for (type_info* tag : proof.tags) {
@@ -2371,7 +2392,7 @@ namespace {
 #else
 		(void)prefix;
 #endif
-		if (eng.allow_unsafe_parallel() || declared_exclusive || statically_all_scalar(array_value)) {
+		if (declared_exclusive || statically_all_scalar(array_value)) {
 			return proof;
 		}
 		// An object slot lends its handle to a boxed value for the walk (the count stays 1, so
@@ -2393,11 +2414,13 @@ namespace {
 					ok = normalize_element_inplace(elements[i], eng, reach, node.live_elem_refs == 0, string_free_class, types);
 				}
 			} catch (const std::exception& e) {
+				if (lenient) { continue; }
 				proof.failed = i;
 				proof.what = e.what();
 				return proof;
 			}
 			if (!ok) {
+				if (lenient) { continue; }
 				proof.failed = i;
 				return proof;
 			}
@@ -2816,7 +2839,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// read-only by-value parameter) reaches only the members it names; a body that copies the
 	// element (a mutating by-value parameter clones every field) reaches it whole. The
 	// builtin's all-primitive input is exclusive by construction (typed proof, zero scans;
-	// untyped pay ONE content scan). engine::allow_unsafe_parallel skips the walk entirely.
+	// untyped pay ONE content scan). engine::allow_unsafe_parallel keeps the walk and drops its verdict.
 	const bool binds_in_place = plan.inplace || (!adm->element_reach_all && !adm->element_mutated);
 	const reach_filter reach = binds_in_place
 		? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
@@ -2892,6 +2915,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
 	// classes the proof found; their captures classify like the body's
 	admission_builder method_adm(eng);
+	method_adm.lenient = eng.allow_unsafe_parallel();
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
 	size_t method_capture_base = 0;
@@ -3180,7 +3204,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			wd.eng = src->eng;
 			wd.cls = src->cls;
 			wd.name_id = src->name_id;
-			wd.definition_env = src->definition_env;
+			// The worker's sandbox, not the class's defining scope: a method body's captured reads
+			// then resolve to this worker's provisioned copies (a borrowed string table read through
+			// the live global copied the shared literal's handle across threads; safe mode too)
+			wd.definition_env = slot->root_env;
 			detail::parallel_method_pin pin;
 			pin.method_value = script_value::make_function(std::move(wd), &eng);
 			pin.resolved = am.decl;

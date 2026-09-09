@@ -123,6 +123,19 @@ padding band. The band is the minimum and maximum paired padding/normal
 percentage difference, not a confidence interval. No baseline/candidate
 improvement is established merely by exceeding zero.
 
+For three or four build variants, repeat `--variant-build NAME=PATH` alongside
+`--build` and optionally `--compare-build`. Names are simple labels, such as
+`raw`, `fused` and `both`. The runner keeps a fixed variant order: all normal
+binaries, then all padding binaries, repeated twice per round. Projecting that
+sequence onto any two variants preserves the existing ABAB protocol.
+
+Each variant keeps its own padding band. `differences.json` records every pair,
+including adjacent increments such as store-only versus store-plus-move, using
+`baseline_variant` and `candidate_variant` labels. The existing two-build
+baseline/candidate output keeps its prior schema. Busy attempts retry the same
+plan slot; an incomplete accepted series fails instead of silently dropping a
+pair. Resume checks preserve variant order and the exact accepted prefix.
+
 The runner defaults to a 0.20-core background CPU ceiling. Any override through
 `--max-background-cores` is recorded in `metadata.json`. This is a desktop
 activity allowance, not a claim that the machine was otherwise idle. Timing
@@ -214,3 +227,18 @@ reports also carry the same heading as the parent. Treat that version's rows
 as opcode-charge rankings, not disjoint script CPU self time. Other diagnostic
 counters may include warm-up because the reset covers function/IP and opcode
 totals, not every auxiliary counter.
+
+## Native CPU attribution
+
+`capture_profile.ps1` accepts `-JaiWorkloadRoot` for frozen scripts and
+`-OutputRoot` for a new capture directory under `out/astra`. It refuses an
+existing output directory before starting WPR. Use a build made with
+`-ProfileMarkers`; recording requires an elevated PowerShell session.
+
+The marker build writes one `[profile-cpu]` record per measured span, with
+process and calling-thread user/kernel CPU deltas in 100-nanosecond units.
+These bracket the existing begin/end markers and include their small overhead.
+Windows accounting is quantized, so pool repeated spans and report that
+resolution alongside per-capture variation. Keep CPU time separate from elapsed
+time and report additional-thread CPU separately. Profiled wall times are
+capture diagnostics; speed claims use the uninstrumented paired binaries.

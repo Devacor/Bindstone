@@ -6434,7 +6434,7 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 
 // op_t_load: typed_decl_read over the flattened site row (one line of memory instead of
 // the proto, its operands, the fold proto and the chain vector)
-bool vm_backend::typed_load_fast(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
@@ -7039,7 +7039,7 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 	}
 }
 
-bool vm_backend::typed_arith_fast(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE bool vm_backend::typed_arith_fast(frame& f, const vm_instruction& ins) {
 	// a registered global numeric operator turns every numeric row over to the general
 	// path, which consults the operator table (the fused kernels' gate, kept here)
 	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.b);
@@ -7088,7 +7088,7 @@ op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
 	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
 }
 
-int vm_backend::typed_cmp_jump_fast(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE int vm_backend::typed_cmp_jump_fast(frame& f, const vm_instruction& ins) {
 	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.a);
 	const script_value* rp = lp ? typed_right(f, ins.b) : nullptr;
 	if (rp) {

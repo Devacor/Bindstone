@@ -3034,6 +3034,17 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 
 op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
+	const size_t depth_before = stack_.size();
+	const op_status st = exec_load_impl(f, ins);
+	if (stack_.size() > depth_before) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_load_kinds_[k < 16 ? k : 15]; }
+	return st;
+#else
+	return exec_load_impl(f, ins);
+#endif
+}
+
+op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
 	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
 #endif
 	const uint64_t sym = f.code->symbols[ins.b];
@@ -5476,6 +5487,17 @@ op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
+#ifdef JAISCRIPT_VM_PROFILE
+	const size_t depth_before = stack_.size();   // INDEX pops two and pushes one: a result means size == before - 1
+	const op_status st = exec_index_impl(f, ins);
+	if (stack_.size() + 1 == depth_before) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_index_kinds_[k < 16 ? k : 15]; }
+	return st;
+#else
+	return exec_index_impl(f, ins);
+#endif
+}
+
+op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 	const bool lvalue_shape = (ins.a & index_flag_lvalue_shape) != 0;
 	const bool lvalue_write = (ins.a & index_flag_lvalue_write) != 0;
 	// Transient read (transient_read.hpp): the consumer provably discards identity, so
@@ -6414,6 +6436,9 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 // the proto, its operands, the fold proto and the chain vector)
 op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
+#endif
 	if (!has_custom_numeric_ops_) {
 		const script_value* cp = site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
@@ -6476,17 +6501,25 @@ bool vm_backend::lane_deref_silent(const script_value& v) noexcept {
 	return h && !h->property;
 }
 
+#ifdef JAISCRIPT_VM_PROFILE
+#define JAI_TYPED_LAND(k) ++profile_typed_land_[k]
+#else
+#define JAI_TYPED_LAND(k) ((void)0)
+#endif
+
 bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	const uint32_t slot = a & k_typed_slot_mask;
 	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
-		if (s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) { s->unchecked_set_int_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
+		JAI_TYPED_LAND(1);
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
 		type_info* stamp = f.code->typed_sites[f.ip].stamp;
-		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_type_info().get() == stamp) { s->unchecked_set_int_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_type_info().get() == stamp) { JAI_TYPED_LAND(2); s->unchecked_set_int_payload(v); return true; }
+		JAI_TYPED_LAND(3);
 		script_value nv(v, engine_);
 		if (stamp) { nv.set_type_info(type_info_ptr{stamp}); }
 		frame_slot_set(f, slot, std::move(nv));
@@ -6495,18 +6528,20 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	case k_typed_dst_store: {
 		// store_popped_value's proven-identity slot store: no reference in the slot, the
 		// slot's declared class agrees (the same-type proof), then `*slot = value`
-		if (!s || s->is_reference()) return false;
+		if (!s || s->is_reference()) { JAI_TYPED_LAND(4); return false; }
 		const type_info* slot_type = s->get_type_info().get();
-		if (slot_type && slot_type->base_type != script_value_type::jai_int_type) return false;
+		if (slot_type && slot_type->base_type != script_value_type::jai_int_type) { JAI_TYPED_LAND(4); return false; }
 		script_value nv(v, engine_);
-		if (s->raw_storage_index() == script_value::TYPEID_INT) { s->unchecked_set_int_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		if (s->raw_storage_index() == script_value::TYPEID_INT) { JAI_TYPED_LAND(5); s->unchecked_set_int_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		JAI_TYPED_LAND(6);
 		frame_slot_set(f, slot, std::move(nv));
 		return true;
 	}
 	case k_typed_dst_compound:
 		// exec_compound_fused's int row: the slot already holds an int (the operand read
 		// proved it), the payload updates in place, tag untouched
-		if (!s || s->raw_storage_index() != script_value::TYPEID_INT) return false;
+		if (!s || s->raw_storage_index() != script_value::TYPEID_INT) { JAI_TYPED_LAND(8); return false; }
+		JAI_TYPED_LAND(7);
 		s->unchecked_set_int_payload(v);
 		return true;
 	default:
@@ -6519,23 +6554,26 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
-		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) { s->unchecked_set_float_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
+		JAI_TYPED_LAND(1);
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
 		type_info* stamp = f.code->typed_sites[f.ip].stamp;
-		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_type_info().get() == stamp) { s->unchecked_set_float_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_type_info().get() == stamp) { JAI_TYPED_LAND(2); s->unchecked_set_float_payload(v); return true; }
+		JAI_TYPED_LAND(3);
 		script_value nv(v, engine_);
 		if (stamp) { nv.set_type_info(type_info_ptr{stamp}); }
 		frame_slot_set(f, slot, std::move(nv));
 		return true;
 	}
 	case k_typed_dst_store: {
-		if (!s || s->is_reference()) return false;
+		if (!s || s->is_reference()) { JAI_TYPED_LAND(4); return false; }
 		const type_info* slot_type = s->get_type_info().get();
-		if (slot_type && slot_type->base_type != script_value_type::jai_float_type) return false;
+		if (slot_type && slot_type->base_type != script_value_type::jai_float_type) { JAI_TYPED_LAND(4); return false; }
 		script_value nv(v, engine_);
-		if (s->raw_storage_index() == script_value::TYPEID_FLOAT) { s->unchecked_set_float_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		if (s->raw_storage_index() == script_value::TYPEID_FLOAT) { JAI_TYPED_LAND(5); s->unchecked_set_float_payload(v); s->set_type_info(nv.get_type_info()); return true; }
+		JAI_TYPED_LAND(6);
 		frame_slot_set(f, slot, std::move(nv));
 		return true;
 	}
@@ -6546,6 +6584,7 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 
 // The instruction a typed op was lowered from, run as the dispatcher would run it
 op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) {
+	JAI_TYPED_LAND(9);
 	switch (orig.op) {
 	case opcode::op_binary_fused_temp: {
 		temp_lane_sink lane{this, f, orig.b};
@@ -6746,6 +6785,9 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 }
 
 bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_typed_cont_src_[p.container.slot != k_invalid_u32 ? 2 : 3];
+#endif
 	const bool folded = p.index_binary != k_invalid_u32;
 	const bool value_operand = p.store_value.const_index != k_invalid_u32 || p.store_value.symbol != k_invalid_u32;
 	// the value first (the kernel resolves it first, so an undefined name keeps its position)
@@ -13258,8 +13300,69 @@ vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code
 }
 
 void vm_backend::profile_reset() {
+	// Every table, the opcode rows and the auxiliary taxonomies alike: a --profile-reset-tick
+	// capture reports the measured span only (bootstrap and warmup work differ, no divisor recovers a rate)
 	std::fill(std::begin(profile_cycles_), std::end(profile_cycles_), 0ull);
 	std::fill(std::begin(profile_counts_), std::end(profile_counts_), 0ull);
+	std::fill(std::begin(profile_decl_paths_), std::end(profile_decl_paths_), 0ull);
+	std::fill(std::begin(profile_store_paths_), std::end(profile_store_paths_), 0ull);
+	std::fill(std::begin(profile_store_path_cycles_), std::end(profile_store_path_cycles_), 0ull);
+	std::fill(std::begin(profile_store_path_counts_), std::end(profile_store_path_counts_), 0ull);
+	std::fill(std::begin(profile_env_births_), std::end(profile_env_births_), 0ull);
+	std::fill(std::begin(profile_scope_kinds_), std::end(profile_scope_kinds_), 0ull);
+	std::fill(std::begin(profile_call_method_paths_), std::end(profile_call_method_paths_), 0ull);
+	std::fill(std::begin(profile_get_member_paths_), std::end(profile_get_member_paths_), 0ull);
+	std::fill(std::begin(profile_bound_method_paths_), std::end(profile_bound_method_paths_), 0ull);
+	std::fill(std::begin(profile_env_resolve_), std::end(profile_env_resolve_), 0ull);
+	std::fill(std::begin(profile_cfs_cycles_), std::end(profile_cfs_cycles_), 0ull);
+	std::fill(std::begin(profile_cfs_counts_), std::end(profile_cfs_counts_), 0ull);
+	std::fill(std::begin(profile_call_push_cyc_), std::end(profile_call_push_cyc_), 0ull);
+	std::fill(std::begin(profile_probe_cyc_), std::end(profile_probe_cyc_), 0ull);
+	std::fill(std::begin(profile_call_ret_cyc_), std::end(profile_call_ret_cyc_), 0ull);
+	std::fill(std::begin(profile_mpush_cyc_), std::end(profile_mpush_cyc_), 0ull);
+	std::fill(std::begin(profile_mpush_sub_), std::end(profile_mpush_sub_), 0ull);
+	std::fill(std::begin(profile_pop_sub_), std::end(profile_pop_sub_), 0ull);
+	std::fill(std::begin(profile_slice_gate_), std::end(profile_slice_gate_), 0ull);
+	std::fill(std::begin(profile_push_sections_), std::end(profile_push_sections_), 0ull);
+	std::fill(std::begin(profile_typed_head_), std::end(profile_typed_head_), 0ull);
+	std::fill(std::begin(profile_push_fused_lane_), std::end(profile_push_fused_lane_), 0ull);
+	std::fill(std::begin(profile_typed_decl_read_), std::end(profile_typed_decl_read_), 0ull);
+	std::fill(std::begin(profile_typed_store_), std::end(profile_typed_store_), 0ull);
+	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
+	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
+	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
+	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
+	std::fill(std::begin(profile_bind_paths_), std::end(profile_bind_paths_), 0ull);
+	std::fill(std::begin(profile_ctor_cyc_), std::end(profile_ctor_cyc_), 0ull);
+	std::fill(std::begin(profile_binary_fused_next_), std::end(profile_binary_fused_next_), 0ull);
+	std::fill(std::begin(profile_load_next_), std::end(profile_load_next_), 0ull);
+	std::fill(std::begin(profile_index_fused_next_), std::end(profile_index_fused_next_), 0ull);
+	std::fill(std::begin(profile_decl_var_prev_), std::end(profile_decl_var_prev_), 0ull);
+	std::fill(std::begin(profile_store_prev_), std::end(profile_store_prev_), 0ull);
+	std::fill(std::begin(profile_decl_var_kinds_), std::end(profile_decl_var_kinds_), 0ull);
+	std::fill(std::begin(profile_index_read_paths_), std::end(profile_index_read_paths_), 0ull);
+	std::fill(std::begin(profile_decl_sub_), std::end(profile_decl_sub_), 0ull);
+	profile_call_push_count_ = 0;
+	profile_probe_count_ = 0;
+	profile_call_ret_count_ = 0;
+	profile_cmp_operands_cyc_ = 0;
+	profile_cmp_count_ = 0;
+	profile_cmp_sptr_null_ = 0;
+	profile_mpush_count_ = 0;
+	profile_pop_sub_count_ = 0;
+	profile_push_prologue_ = 0;
+	profile_new_count_ = 0;
+	profile_new_resolve_cyc_ = 0;
+	profile_new_invoke_cyc_ = 0;
+	profile_ctor_count_ = 0;
+	profile_nested_cycles_ = 0;
+	profile_native_callees_.clear();
+	profile_store_name_cycles_.clear();
+	profile_cfs_inloop_names_.clear();
+	profile_cfs_opaque_cycles_.clear();
+	profile_env_walk_names_.clear();
+	profile_builtin_direct_names_.clear();
+	profile_store_last_path_ = 7;
 	for (auto& [code, st] : profile_chunks_) {
 		std::fill(st.ip_cycles.begin(), st.ip_cycles.end(), 0ull);
 		std::fill(st.ip_counts.begin(), st.ip_counts.end(), 0ull);
@@ -13579,6 +13682,25 @@ void vm_backend::dump_opcode_profile() const {
 				fprintf(stderr, "  %-28s %10.1f Mcyc\n", by_name[i].first.c_str(), by_name[i].second / 1e6);
 			}
 		}
+	}
+	{
+		auto kinds_line = [](const char* label, const uint64_t* k) {
+			fprintf(stderr, "[vm-profile] %s (measured span): null %llu int %llu float %llu string %llu char %llu bool %llu array %llu map %llu object %llu function %llu reference %llu shared %llu weak %llu other %llu\n", label,
+				(unsigned long long)k[0], (unsigned long long)k[1], (unsigned long long)k[2], (unsigned long long)k[3],
+				(unsigned long long)k[4], (unsigned long long)k[5], (unsigned long long)k[6], (unsigned long long)k[7],
+				(unsigned long long)k[8], (unsigned long long)k[9], (unsigned long long)k[10], (unsigned long long)k[11],
+				(unsigned long long)k[12], (unsigned long long)(k[13] + k[14] + k[15]));
+		};
+		fprintf(stderr, "[vm-profile] typed landings (measured span): temp in-place %llu | temp construct %llu | decl stamp-hit %llu | decl construct %llu | store refused %llu | store payload+stamp %llu | store construct %llu | compound in-place %llu | compound refused %llu | fallback entries %llu\n",
+			(unsigned long long)profile_typed_land_[0], (unsigned long long)profile_typed_land_[1], (unsigned long long)profile_typed_land_[2],
+			(unsigned long long)profile_typed_land_[3], (unsigned long long)profile_typed_land_[4], (unsigned long long)profile_typed_land_[5],
+			(unsigned long long)profile_typed_land_[6], (unsigned long long)profile_typed_land_[7], (unsigned long long)profile_typed_land_[8],
+			(unsigned long long)profile_typed_land_[9]);
+		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
+			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
+			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);
+		kinds_line("LOAD result kinds", profile_load_kinds_);
+		kinds_line("INDEX result kinds", profile_index_kinds_);
 	}
 	{
 		uint64_t idx_total = 0;

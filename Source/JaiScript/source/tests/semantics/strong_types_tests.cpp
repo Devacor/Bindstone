@@ -89,6 +89,78 @@ public:
             for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
         });
 
+        test("handle_typed_elements_take_null_and_live_instances", [this]() {
+            // Dev rulings 2026-09-08: array<shared_ptr<T>> / array<weak_ptr<T>> elements and
+            // map<K, shared_ptr<T>> values take null at every site (a declaration literal, push,
+            // a subscript store, a map store, the reference route, a var-held null); a shared_ptr<T>
+            // element takes a live instance of T or a subclass the way a shared_ptr<T> variable does
+            // (the slot owns the handle) and checks a handle's class; the texts spell
+            // shared_ptr<T> in full (array<shared_ptr<Foo>> and array<Foo> were one id); by-value
+            // class and primitive elements stay non-nullable with their texts; both backends agree
+            const char* src = R"(
+                class Foo { int n = 1; }
+                class Dog : Foo { int extra = 2; }
+                class Bar { int b = 0; }
+                function put(var& x, var val) { x = val; }
+                var out = [];
+                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+                cap("decl", function() -> string { shared_ptr<Foo> h = Foo(); array<shared_ptr<Foo>> a = [null, h]; return to_string(a[0] == null) + "," + to_string(a[1] == null) + "," + to_string(a[1].n); });
+                cap("push", function() -> string { array<shared_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); a.push(null); a.push(h); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null) + "," + to_string(a[1].n); });
+                cap("store", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; int n = a[0].n; a[0] = null; return to_string(n) + "," + to_string(a[0] == null); });
+                cap("ref", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); put(a[0], h); int n = a[0].n; put(a[0], null); return to_string(n) + "," + to_string(a[0] == null); });
+                cap("var-null", function() -> string { array<shared_ptr<Foo>> a = []; var v = null; a.push(v); a[0] = v; return to_string(a.size()) + "," + to_string(a[0] == null); });
+                cap("map-decl", function() -> string { map<string, shared_ptr<Foo>> m = {"k": null}; return to_string(m["k"] == null); });
+                cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = Foo(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
+                cap("weak", function() -> string { array<weak_ptr<Foo>> a = [null]; a.push(null); a[0] = null; return to_string(a.size()) + "," + to_string(a[0] == null); });
+                cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
+                cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Foo()); return type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
+                cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [Foo(), null]; return to_string(a.size()) + "," + type_of(a[0]) + "," + to_string(a[1] == null); });
+                cap("raw-store", function() -> string { array<shared_ptr<Foo>> a = [null]; a[0] = Foo(); a[0].n = 4; return to_string(a[0].n); });
+                cap("raw-map", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = Foo(); return to_string(m["k"].n); });
+                cap("raw-shares-like-a-handle-slot", function() -> string { Foo f = Foo(); shared_ptr<Foo> h = f; h.n = 5; Foo g = Foo(); array<shared_ptr<Foo>> a = []; a.push(g); a[0].n = 5; return to_string((f.n == 5) == (g.n == 5)); });
+                cap("raw-subclass", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Dog()); shared_ptr<Dog> d = Dog(); a.push(d); return to_string(a.size()) + "," + type_of(a[0]) + "," + type_of(a[1]); });
+                cap("handle-array-widens", function() -> string { array<shared_ptr<Dog>> ds = [Dog()]; array<shared_ptr<Foo>> fs = ds; return to_string(fs.size()) + "," + type_of(fs[0]); });
+                cap("wrong-class-raw", function() -> int { array<shared_ptr<Foo>> a = []; a.push(Bar()); return 0; });
+                cap("wrong-class-handle", function() -> int { array<shared_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
+                cap("wrong-class-store", function() -> int { array<shared_ptr<Foo>> a = [null]; a[0] = Bar(); return 0; });
+                cap("int-into-handle-array", function() -> int { array<shared_ptr<Foo>> a = [5]; return 0; });
+                cap("value-decl", function() -> int { array<Foo> a = [null]; return 0; });
+                cap("value-push", function() -> int { array<Foo> a = []; a.push(null); return 0; });
+                cap("value-store", function() -> int { array<Foo> a = [Foo()]; a[0] = null; return 0; });
+                cap("value-map", function() -> int { map<string, Foo> m = {}; m["k"] = null; return 0; });
+                cap("int-push", function() -> int { array<int> a = []; a.push(null); return 0; });
+                cap("string-decl", function() -> int { array<string> a = [null]; return 0; });
+                out;
+            )";
+            std::vector<std::string> seen[2];
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                const auto rows = e->execute(src).as_array();
+                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+            }
+            check_eq(seen[0], seen[1], "both backends land and reject identically");
+            const std::vector<std::string> expected = {
+                "decl:true,false,1", "push:3,true,1", "store:1,true", "ref:1,true", "var-null:1,true",
+                "map-decl:true", "map-store:1,true", "weak:2,true", "iterate:1",
+                "raw-push:Foo,1,false", "raw-decl:2,Foo,true", "raw-store:4", "raw-map:1", "raw-shares-like-a-handle-slot:true",
+                "raw-subclass:2,Dog,Dog", "handle-array-widens:1,Dog",
+                "wrong-class-raw!Cannot push 'Bar' to array<shared_ptr<Foo>>",
+                "wrong-class-handle!Cannot push 'Bar' to array<shared_ptr<Foo>>",
+                "wrong-class-store!Cannot assign 'Bar' to element of type 'shared_ptr<Foo>'",
+                "int-into-handle-array!Cannot store int in array<shared_ptr<Foo>>",
+                "value-decl!Cannot store null in array<Foo>",
+                "value-push!Cannot push 'null' to array<Foo>",
+                "value-store!Cannot assign 'null' to element of type 'Foo'",
+                "value-map!Cannot assign 'null' to element of type 'Foo'",
+                "int-push!Cannot push 'null' to array<int>",
+                "string-decl!Cannot store null in array<string>",
+            };
+            check_eq(expected.size(), seen[0].size(), "row count");
+            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+        });
+
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {

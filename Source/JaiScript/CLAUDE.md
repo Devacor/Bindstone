@@ -265,6 +265,14 @@ engine stays usable", not by `check_throws`.
 - **Class-typed arrays admit subclasses** (Dev ruling 2026-09-02): `array<Base>` holds `Base`
   or any subclass (exact id first, parent walk on a name mismatch); each slot keeps its own
   class tag; `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.
+  The element boundary judges the instance behind a `var` (a var-held `Base` stores; a rejection
+  names the payload's type, never `any`). **Handle-typed elements take null** (Dev ruling
+  2026-09-08): `array<shared_ptr<T>>`, `array<weak_ptr<T>>` and `map<K, shared_ptr<T>>` values
+  hold null like a C++ vector of handles, and a `shared_ptr<T>` element takes a live instance of
+  `T` or a subclass the way a `shared_ptr<T>` variable does (the slot owns the handle); by-value
+  class and primitive elements stay non-nullable (`Cannot store null in array<Foo>`). A
+  `shared_ptr<T>` type spells itself in full (`array<shared_ptr<Foo>>`); its id is that spelling
+  interned, distinct from `Foo`'s.
 - **Map key types** (Dev ruling 2026-09-02): a direct store checks the declared key type
   (`map<string,int> m; m[5] = 1` raises; keys never coerce); `map<var,V>` takes any key; an
   `auto` key/value slot infers from a uniform literal (`map<auto,int> m = {5: 1}` is

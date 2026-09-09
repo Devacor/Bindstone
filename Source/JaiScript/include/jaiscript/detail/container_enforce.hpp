@@ -48,6 +48,11 @@ namespace jai::detail {
 	// engine.cpp: the class rows of the element boundary judge the instance behind the value's
 	// tag (a var-held Animal, a shared_ptr<Dog> handle) with the scalar table's own admission
 	bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng);
+	// The class a tag names for the subclass walk: a handle tag's pointee, else the tag itself
+	inline uint64_t class_tag_id(const type_info& t) {
+		const bool handle = t.base_type == script_value_type::jai_shared_ptr_type || t.base_type == script_value_type::jai_weak_ptr_type;
+		return handle && t.element_type() ? t.element_type()->id : t.id;
+	}
 	// engine.cpp: the instance's own class tag, for a copy stored under a var tag (null = none)
 	type_info_ptr object_element_own_tag(const script_value& v, engine* eng);
 
@@ -77,6 +82,12 @@ namespace jai::detail {
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
 
+		// Dev ruling 2026-09-08: a handle-typed element takes null (C++: a vector of handles
+		// holds empty handles); by-value elements stay non-nullable like std::vector<T>
+		if (actual_element.raw_storage_index() == script_value::TYPEID_NULL) {
+			return target_type == script_value_type::jai_shared_ptr_type || target_type == script_value_type::jai_weak_ptr_type;
+		}
+
 		if (elem_type == target_type) {
 			if (target_type == script_value_type::jai_object_type) {
 				auto elem_type_info = actual_element.get_type_info();
@@ -88,7 +99,16 @@ namespace jai::detail {
 					       object_element_admits(actual_element, *element_type, eng);
 				}
 			}
+			if (target_type == script_value_type::jai_shared_ptr_type && !element_type->type_name.empty()) {
+				// a handle into a shared_ptr<T> element: the pointee's class, like a shared_ptr<T> field
+				return object_element_admits(actual_element, *element_type, eng);
+			}
 			return true;
+		}
+		// Dev ruling 2026-09-08: a live instance stores into a shared_ptr<T> element the way it
+		// stores into a shared_ptr<T> variable or field (the slot owns the handle)
+		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
+			return element_type->type_name.empty() || object_element_admits(actual_element, *element_type, eng);
 		}
 
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
@@ -204,6 +224,9 @@ namespace jai::detail {
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
 		}
+		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
+			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
+		}
 		if (target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) {
 			// the stored copy carries its class, not the var tag it arrived under
 			script_value out = actual_element.clone_element();
@@ -249,7 +272,7 @@ namespace jai::detail {
 		type_info_ptr src_elem = array_tag ? array_tag->element_type() : nullptr;
 		return src_elem && element_type && src_elem->base_type == script_value_type::jai_object_type &&
 		       (src_elem->type_name == element_type->type_name ||
-		        class_derives_from(eng, src_elem->id, element_type->id));
+		        class_derives_from(eng, class_tag_id(*src_elem), class_tag_id(*element_type)));
 	}
 	inline type_info* typed_kind_element_type(script_array::kind_t kind, engine* eng) {
 		switch (kind) {

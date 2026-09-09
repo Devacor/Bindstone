@@ -824,24 +824,24 @@ public:
         // --- Issue 6: Typed Array Element Validation (FIXED) ---
 
         test("typed_array_rejects_wrong_element", [this]() {
-            auto eng = make_engine();
+			auto eng = make_engine();
 
-            // array<int> should reject pushing a string
-            bool caught = false;
-            try {
-                eng->execute(R"(
-                    array<int> nums = [1, 2, 3];
-                    nums.push("hello");  // Should be rejected
-                )");
-            } catch (const std::exception& e) {
-                caught = true;
-                std::string msg = e.what();
-                check_true(msg.find("Cannot push 'string' to array<int>") != std::string::npos,
-                    "Error message should mention type mismatch");
-            }
+			// array<int> should reject pushing a string
+			bool caught = false;
+			try {
+				eng->execute(R"(
+					array<int> nums = [1, 2, 3];
+					[[warn_mode]] nums.push("hello");  // Should be rejected
+				)");
+			} catch (const std::exception& e) {
+				caught = true;
+				std::string msg = e.what();
+				check_true(msg.find("Cannot push 'string' to array<int>") != std::string::npos,
+					"Error message should mention type mismatch");
+			}
 
-            check_true(caught, "array<int> should reject push(string)");
-        });
+			check_true(caught, "array<int> should reject push(string)");
+		});
 
         test("typed_array_allows_correct_element", [this]() {
             auto eng = make_engine();
@@ -898,24 +898,24 @@ public:
         });
 
         test("typed_array_subscript_rejects_wrong_type", [this]() {
-            auto eng = make_engine();
+			auto eng = make_engine();
 
-            // array<int>[i] = string should be rejected
-            bool caught = false;
-            try {
-                eng->execute(R"(
-                    array<int> nums = [1, 2, 3];
-                    nums[0] = "hello";  // Should be rejected
-                )");
-            } catch (const std::exception& e) {
-                caught = true;
-                std::string msg = e.what();
-                check_true(msg.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
-                    "Error message should mention type mismatch");
-            }
+			// array<int>[i] = string should be rejected
+			bool caught = false;
+			try {
+				eng->execute(R"(
+					array<int> nums = [1, 2, 3];
+					[[warn_mode]] nums[0] = "hello";  // Should be rejected
+				)");
+			} catch (const std::exception& e) {
+				caught = true;
+				std::string msg = e.what();
+				check_true(msg.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
+					"Error message should mention type mismatch");
+			}
 
-            check_true(caught, "array<int>[i] = string should be rejected");
-        });
+			check_true(caught, "array<int>[i] = string should be rejected");
+		});
 
         test("typed_array_subscript_allows_correct_type", [this]() {
             auto eng = make_engine();

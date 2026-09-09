@@ -3969,6 +3969,7 @@ public:
 			// containers with computed string keys, div-by-zero and typed-store mismatch
 			// all replay with the unfused spelling
 			auto [i1, v1] = run_both_backends(R"(
+				[[warn_mode]] // the mismatch must reach the runtime replay path
 				var a = [10, 20, 30, 40, 50];
 				array<int> t = [1, 2, 3, 4];
 				var m = {"kx": 5};
@@ -4289,11 +4290,11 @@ public:
 				run("var<-hetero-array", function() -> int { var r = []; int i = 4; r.push(th[i]); return r[0][0]; });
 				run("int<-int", function() -> int { array<int> r = []; int i = 2; r.push(ti[i]); return r[0]; });
 				run("int<-float", function() -> int { array<int> r = []; int i = 0; r.push(tf[i]); return r[0]; });
-				run("int<-str", function() -> int { array<int> r = []; int i = 0; r.push(ts[i]); return r[0]; });
+				run("int<-str", function() -> int { array<int> r = []; int i = 0; [[warn_mode]] r.push(ts[i]); return r[0]; });
 				run("float<-int", function() -> float { array<float> r = []; int i = 2; r.push(ti[i]); return r[0]; });
 				run("float<-float", function() -> float { array<float> r = []; int i = 1; r.push(tf[i]); return r[0]; });
 				run("str<-str", function() -> string { array<string> r = []; int i = 0; r.push(ts[i]); return r[0]; });
-				run("str<-int", function() -> string { array<string> r = []; int i = 0; r.push(ti[i]); return r[0]; });
+				run("str<-int", function() -> string { array<string> r = []; int i = 0; [[warn_mode]] r.push(ti[i]); return r[0]; });
 				run("oob", function() -> int { var r = []; int i = 9; r.push(ti[i]); return r.size(); });
 				run("neg", function() -> int { var r = []; int i = -1; r.push(ti[i]); return r.size(); });
 				run("ref-table", function() -> int { var& t = ti; var r = []; int i = 0; r.push(t[i]); return r[0]; });
@@ -4678,7 +4679,8 @@ public:
 				"var a = []; var f = function() { return 4; }; a.push(f); return to_string(a[0]());",
 			};
 			for (const char* body : cases) {
-				std::string program = std::string("string run() { ") + body + " } run();";
+				// Preserve literal argument shapes and exercise the runtime lanes, including rejection.
+				std::string program = std::string("[[warn_mode]] string run() { ") + body + " } run();";
 				auto interp = jai::engine::make();
 				jai::stdlib::register_all(*interp);
 				auto vmx = vm_engine();
@@ -4703,7 +4705,7 @@ public:
 			}
 			auto vmx = vm_engine();
 			jai::stdlib::register_all(*vmx);
-			check_eq(std::string("Cannot push 'string' to array<int>|0"), vmx->execute("string run() { array<int> a = []; string m = \"ok\"; try { a.push(\"x\"); } catch (e) { m = e; } return m + \"|\" + to_string(a.size()); } run();").as_string());
+			check_eq(std::string("Cannot push 'string' to array<int>|0"), vmx->execute("[[warn_mode]] string run() { array<int> a = []; string m = \"ok\"; try { a.push(\"x\"); } catch (e) { m = e; } return m + \"|\" + to_string(a.size()); } run();").as_string());
 			check_eq(std::string("Cannot convert float to integer: non-finite or out of range"), vmx->execute("string run() { array<int> a = []; var big = 1e100; string m = \"ok\"; try { a.push(big); } catch (e) { m = e; } return m; } run();").as_string());
 		});
 	}

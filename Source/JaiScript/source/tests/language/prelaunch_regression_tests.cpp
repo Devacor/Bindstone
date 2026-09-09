@@ -157,7 +157,8 @@ public:
 			auto eng = make_engine();
 			stdlib::register_all(*eng);
 			auto msg = [&](const std::string& body) {
-				return eng->execute("string message = \"\"; try { " + body + " } catch (e) { message = e; } message;").as_string();
+				// Keep the exact runtime boundary diagnostics under the approved static rules.
+				return eng->execute("[[warn_mode]] string message = \"\"; try { " + body + " } catch (e) { message = e; } message;").as_string();
 			};
 			check_eq(std::string("Cannot store string in array<int>"), msg("array<array<int>> aa = [[\"x\"]];"));
 			// an element store through the inner node is the flat array's store, text included

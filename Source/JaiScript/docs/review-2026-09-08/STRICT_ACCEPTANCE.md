@@ -102,3 +102,62 @@ Raw: out/astra/strict-20260908/step1/final-verification.json,
 gates-debug-post-unwind/, matrix/, gates-client-post-unwind/ and client/.
 The earlier failing fuzz source and its baseline reproduction remain recorded;
 Fable fixed its left-operand unwind propagation in 6e2bc1f5 without a suppression.
+
+
+## Follow-up rulings during increment 2
+
+- Handle-typed elements and map values admit null. Shared-handle elements also
+  admit a live instance of the declared class or a subclass and check the class
+  of a shared handle. By-value class and primitive elements stay non-nullable.
+- A consumed subscript assignment has the element's stored type, matching the
+  landed assignment-result rule. The top-level implicit result and setter-only
+  member exceptions remain the runtime lane's documented behavior.
+- Dev approved bool-to-int and int-to-bool element conversions. Implicit int-to-
+  string conversion stays rejected; to_string(value) or cast<string>(value)
+  supplies an explicit string. This adds no float-to-bool or bool-to-float row. Map keys never coerce.
+- Empty incompatible primitive containers are rejected by the runtime too,
+  as Fable's E18 probe confirmed; this is agreement, not an extra static rule.
+
+
+## Compatibility threshold review
+
+The first full run had nine failing existing tests, all deliberate runtime-error
+or value-dependent subclass-tag batteries. The later runtime landings added
+three more batteries that contain intentionally invalid typed operations.
+Counting those additions brings the adapted total to twelve, so the ten-test
+threshold was re-evaluated before further edits.
+
+On dce797ff, the only two remaining failures were bool_and_int_elements_convert
+and push_of_a_table_element_matches_the_interpreter. Their eight reported load
+errors were precisely the prohibited int/string, float/bool and wrong-key
+operations that their script bodies intended to catch at runtime. Only those
+statements gained warn_mode; the valid conversion statements remain strict and
+all runtime output assertions remain unchanged. The 129-program checker/runtime
+agreement battery passed in the same interpreter run. No checker rule was
+broadened or suppressed to make the tests pass.
+
+
+## Increment 2 verification
+
+Verified on dce797ff plus the reviewed checker/test overlay: 120 suites and
+3006 tests passed on each Debug backend, including the companion 129-program
+agreement battery. The same 39-program check/strict/off matrix passed its
+234-process audit with unchanged off-mode outcomes.
+
+At generator depth 4, the 3000-seed campaign and 1500-seed no-proofs campaign
+reported zero new divergences, crashes or hangs. One existing recursion
+suppression and 61/33 budget skips remain outside the agreement count.
+
+GLOOM300 seed666 held frame7fecc09815bb64e0/state3580805725 on both backends
+at zero and eight workers. JaiDOOM held state1746772898. The XTHREAD build
+passed all110 VM parallel cases. The isolated Release client passed76/76
+asset checks,30 login frames and120 Workbench frames.
+
+Fable approved the checker, the129-program guard, the documentation draft and
+the twelve-test compatibility scope review. The additional captured-method
+parallel probe remains a separately reported, baseline-reproduced runtime
+issue in Fable's lane; it is not hidden by these registered-suite results.
+
+Raw: out/astra/strict-20260908/step2/final-verification.json,
+gates-debug-threshold-review-v7/, gates-client-threshold-review-v7/, matrix/
+and client/. Additional probes: out/astra/unsafe-20260909/.

@@ -18,6 +18,7 @@
 #include <jaiscript/detail/fault_injection.hpp>
 #include <jaiscript/detail/thread_pool.hpp>
 #include <map>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -291,10 +292,13 @@ namespace jai::detail {
     // element safe for exclusive in-place mutation (primitives, typed primitive
     // containers, flat-value-class instances — engine::allow_unsafe_parallel skips the
     // proof) and pre-mints the element references single-threaded. capture_env is the
-    // statement's enclosing environment: captured reads resolve through its chain.
+    // statement's enclosing environment: captured reads resolve through its chain, except
+    // the enclosing frame's own locals (parallel_for_stmt::frame_captures), which frame_slot
+    // reads from the executing frame (null when the slot is not live).
     checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                           std::vector<script_value>& containers,   // [0] = the range, then the zip's arrays
-                                          const std::shared_ptr<environment>& capture_env);
+                                          const std::shared_ptr<environment>& capture_env,
+                                          const std::function<const script_value*(size_t)>& frame_slot);
 
     // Subscript READ through a parallel borrow - the tier-1 raw-read path. Called by
     // BOTH backends' subscript twins when the (deref'd) receiver is a parallel borrow

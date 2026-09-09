@@ -358,7 +358,7 @@ public:
             // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)15, (int)bytes[4], "jaibite format version");   // 15: variable_decl::function_spelling
+            check_eq((int)16, (int)bytes[4], "jaibite format version");   // 16: parallel_for frame captures
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

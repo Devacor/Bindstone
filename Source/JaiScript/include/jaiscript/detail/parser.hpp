@@ -266,7 +266,9 @@ namespace jai {
         // a body identifier would read a foreign frame. Body names resolve by symbol
         // through the worker environment instead (captures are provisioned there).
         size_t slot_lookup_boundary_ = 0;
-
+        // Per parallel_for being parsed: (symbol, slot) of the enclosing frame's locals its
+        // body names, drained into parallel_for_stmt::frame_captures (the barrier reads that frame)
+        std::vector<std::vector<std::pair<uint64_t, size_t>>> parallel_frame_captures_;
         // A use resolves directly to its own scope's slots or its immediate parent's
         // (read from that frame when the lambda is created). A deeper local is chained
         // instead: the lambda created in the declaring frame captures the slot, every
@@ -297,6 +299,17 @@ namespace jai {
                     }
                 }
                 return SIZE_MAX;
+            }
+            // A parallel body's free name that is a local of the frame its statement runs in:
+            // recorded for the region barrier, never stamped on the body identifier
+            if (slot_lookup_boundary_ > 0 && !parallel_frame_captures_.empty()) {
+                const auto& frame = function_scope_stack_[slot_lookup_boundary_ - 1];
+                if (auto found = frame.symbol_to_slot.find(symbol_id); found != frame.symbol_to_slot.end()) {
+                    auto& captures = parallel_frame_captures_.back();
+                    if (std::find_if(captures.begin(), captures.end(), [&](const auto& e) { return e.first == symbol_id; }) == captures.end()) {
+                        captures.emplace_back(symbol_id, found->second);
+                    }
+                }
             }
             return SIZE_MAX;
         }

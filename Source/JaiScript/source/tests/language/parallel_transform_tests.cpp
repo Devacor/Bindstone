@@ -1986,6 +1986,101 @@ public:
 			}
 		});
 
+		test("parallel_bodies_read_the_enclosing_functions_locals", [this]() {
+			// A body names locals of the function its statement runs in (a table, a scalar, a
+			// string): the parser records their frame slots on the statement and the barrier
+			// provisions from that frame, since no environment chain can see frame slots. No
+			// global shares these names. A local that is the mutated range itself keeps the
+			// aliasing rejection. Both backends.
+			const char* src = R"(
+				int run() {
+					array<int> table = [10, 20, 30];
+					int bias = 5;
+					string tag = "ab";
+					array<int> out = [0, 0, 0, 0];
+					parallel_for (auto& o : out) { o = table[1] + bias + tag.size(); }
+					return out[0] + out[3];
+				}
+				run();
+			)";
+			const char* aliased = R"(
+				int run() {
+					array<int> xs = [1, 2, 3, 4];
+					parallel_for (auto& x : xs) { x = xs[0]; }
+					return xs[3];
+				}
+				run();
+			)";
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				if (vm) { e->set_backend(jai::backend_type::vm); }
+				e->parallel_thread_count(4);
+				check_eq((int64_t)54, e->execute(src).as_int(), vm ? "vm" : "interp");
+				std::string text;
+				try { e->execute(aliased); } catch (const std::exception& ex) { text = ex.what(); }
+				check_true(text.find("captured name 'xs' is the container being mutated") != std::string::npos,
+				           std::string(vm ? "vm" : "interp") + ": aliasing the range through a local is rejected, got '" + text + "'");
+			}
+		});
+
+		test("captured_names_keep_their_scope_in_method_pins", [this]() {
+			// Astra's binding control (2026-09-09): a global palette read inside Cell.calc() and a
+			// caller-local palette of the same name read in the parallel body. A pinned method
+			// resolves its captures in the worker's method environment, the body in its own, so
+			// both bindings survive: v gains calc()'s 1 + 1 and the body's 3 per round, 63 -> 75.
+			// Both modes, both backends; the serial loop is the oracle.
+			const char* src = R"(
+				array<string> palette = ["x"];
+				class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + palette[0].size(); } }
+				int run() {
+					array<string> palette = ["yyy"];
+					array<Cell> cells = [];
+					for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }
+					for (int round = 0; round < 3; ++round) {
+						parallel_for (auto& cell : cells) { cell.v = cell.calc() + palette[0].size(); }
+					}
+					return cells[63].v;
+				}
+				run();
+			)";
+			for (bool vm : {false, true}) {
+				for (bool unsafe : {false, true}) {
+					auto e = make_engine();
+					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->allow_unsafe_parallel(unsafe);
+					e->parallel_thread_count(8);
+					e->execution_budget(0);
+					check_eq((int64_t)75, e->execute(src).as_int(), std::string(vm ? "vm" : "interp") + (unsafe ? " unsafe" : " safe"));
+				}
+			}
+		});
+
+		test("pinned_methods_read_provisioned_captures_in_safe_mode", [this]() {
+			// The safe-mode half of the string-table finding: calc() reads a captured string table
+			// through the pin's environment, which must be the worker's provisioned borrow (the
+			// live global's handle copied across threads tore the literal's count). The XTHREAD
+			// canary build turns that copy into a deterministic abort, so this shape rides the
+			// parallel suites there too.
+			const char* src = R"(
+				array<string> palette = ["x"];
+				class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + palette[0].size(); } }
+				array<Cell> cells = [];
+				for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }
+				for (int round = 0; round < 3; ++round) { parallel_for (auto& cell : cells) { cell.v = cell.calc(); } }
+				int total = 0; for (auto& cell : cells) { total += cell.v; }
+				return total;
+			)";
+			for (bool vm : {false, true}) {
+				for (int round = 0; round < 4; ++round) {
+					auto e = make_engine();
+					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->parallel_thread_count(8);
+					e->execution_budget(0);
+					check_eq((int64_t)2208, e->execute(src).as_int(), vm ? "vm" : "interp");
+				}
+			}
+		});
+
 		test("unsafe_mode_keeps_the_runtime_walls", [this]() {
 			// Astra's unsafe matrix (2026-09-09): under allow_unsafe_parallel(true) at 8 workers a
 			// sibling call spelled this.inner(), a field's method leaf.read() and an accessor this.x
@@ -2003,6 +2098,13 @@ public:
 				{ "getter", "class Cell { int v = 0; Cell(int n) { v = n; } int _get_x() { return v; } int calc() { return this.x + 1; } }" },
 				{ "literal_string", "class Cell { int v = 0; Cell(int n) { v = n; } int calc() { string text = \"x\"; return v + text.size(); } }" },
 				{ "captured_string_table", "array<string> palette = [\"x\"]; class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + palette[0].size(); } }" },
+				// iterating captured state is a lenient verdict in unsafe mode: the walk goes on into the
+				// loop body, twice() is pinned, and the shape runs (64 cells, 3 rounds of v -> 5v)
+				// on both backends
+				{ "skipped_subtree", "array<int> steps = [1, 2]; class Cell { int v = 0; Cell(int n) { v = n; } int twice() { return v * 2; } int calc() { int s = v; for (auto p : steps) { s = s + this.twice(); } return s; } }" },
+				// 'new' is a lenient verdict whose arguments the walk never reaches: the warm pass alone
+				// interns twice's accessor ids, so the unpinned call meets the wall, not the frozen interner
+				{ "new_argument", "class Box { int n = 0; Box(int k) { n = k; } } class Cell { int v = 0; Cell(int n) { v = n; } int twice() { return v * 2; } int calc() { Box b = new Box(this.twice()); return b.n; } }" },
 			};
 			const std::map<std::string, std::string> expected = {
 				{ "own_method", "value 2208" },
@@ -2012,6 +2114,8 @@ public:
 				{ "getter", "error only direct field access on class instances is allowed in a parallel body" },
 				{ "literal_string", "value 2208" },
 				{ "captured_string_table", "value 2208" },
+				{ "skipped_subtree", "value 252000" },
+				{ "new_argument", "error method 'twice' was not admitted in this parallel body" },
 			};
 			const char* driver = " array<Cell> cells = []; for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }"
 			                     " for (int round = 0; round < 3; ++round) { parallel_for (auto& cell : cells) { cell.v = cell.calc(); } }"
@@ -3107,6 +3211,25 @@ public:
 		test("pending_registrations_recover_before_immediate_hot_reload", [this]() {
 			check_pending_recovery(false, false, true);
 			check_pending_recovery(true, true, true);
+		});
+		test("registry_recovery_survives_load", [this]() {
+			// The swap-remove race (perf pass row 83) needed contention: an expired weak entry moved
+			// by a concurrent swap-remove while a fresh registration refilled the index lost one
+			// live instance about once per 150 runs under CPU load. Burner threads supply the
+			// contention here; the three recovery shapes must keep every survivor registered.
+			std::atomic<bool> stop{false};
+			std::vector<std::thread> burners;
+			const unsigned burner_count = std::max(2u, std::thread::hardware_concurrency()) - 1;
+			for (unsigned i = 0; i < burner_count; ++i) {
+				burners.emplace_back([&stop] { volatile uint64_t spin = 0; while (!stop.load(std::memory_order_relaxed)) { spin = spin + 1; } });
+			}
+			for (int round = 0; round < 12; ++round) {
+				check_pending_recovery(false, false, true);
+				check_pending_recovery(true, true, true);
+				check_pending_recovery(false, false, false, true);
+			}
+			stop.store(true);
+			for (auto& t : burners) { t.join(); }
 		});
 		test("failed_reload_retry_preserves_old_constructor_and_method", [this]() {
 			check_pending_recovery(false, false, false, true);

@@ -5,7 +5,7 @@ Status: DESIGN with the v0 slice SHIPPED — **`parallel_transform(arr, fn[, wei
 `detail/parallel_transform.hpp` + `source/implementation/parallel_transform.cpp`, tests in
 `source/tests/language/parallel_transform_tests.cpp`, scaling benches in
 `source/tests/performance/parallel_transform_bench.cpp`) — and the v0.5 slice SHIPPED
-(2026-07-08): **captured reads** (§13) — a body may READ enclosing globals under the
+(2026-07-08): **captured reads** (§13) — a body may READ enclosing names (globals, and the locals of the function its statement runs in) under the
 scalar/string/borrow/snapshot provisioning tiers; enclosing WRITES stay errors in every
 shape — and **element members** (§14): a transform body reads and stores members of its
 own element, a value-class instance included. The `parallel_for` keyword, `thread_storage`
@@ -466,7 +466,10 @@ Step 2 before steps 3-4 is the load-bearing ordering.
 
 ## 13. SHIPPED (v0.5, 2026-07-08): captured reads — read enclosing state, proven read-only
 
-A `parallel_transform` body may READ enclosing globals. Writes to enclosing state remain
+A parallel body may READ enclosing names: globals through the environment chain, and the
+locals of the function its statement runs in (the parser records their frame slots on the
+statement, `parallel_for_stmt::frame_captures`, and the barrier provisions from that frame;
+a global never shadows a local of the same name). Writes to enclosing state remain
 errors in every shape, always (contract A). Implementation:
 `source/implementation/parallel_transform.cpp` (admission + barrier + the borrow kernel),
 `core/value.hpp` variant alternative 15 (`parallel_borrow_tag`), both backends' subscript
@@ -488,9 +491,12 @@ worker-private) holds regardless.
 
 ### 13b. Provisioning tiers (classified per region entry, from the LIVE value)
 
-Every captured name resolves against the global environment at the barrier
+Every captured name resolves against the region's enclosing scope at the barrier
 (single-threaded) and provisions per worker as one of (`detail::parallel_capture_kind`,
-pinned by `engine::last_parallel_captures()`):
+pinned by `engine::last_parallel_captures()`). A pinned method's captures are its own set
+and its class's scope: they resolve against the global environment and provision into the
+worker's separate method environment, so a caller-local and a global of the same name each
+keep their binding (the body reads one, the method the other):
 
 - **scalar** — null/int/float/char/bool (bound primitives decode once at the barrier):
   plain per-worker copy. Free.

@@ -2843,8 +2843,9 @@ checked_result<statement_ptr> parser::while_statement() {
 // ONE-PARAMETER FUNCTION BODY (fresh function scope: loop variable = slot 0, own
 // local_count): workers execute it as a synthesized function, so an enclosing frame's
 // slots must never be stamped on body identifiers (slot_lookup_boundary_). Enclosing
-// names in the body resolve by symbol through the worker environment at runtime —
-// captured GLOBAL/env-resident reads are provisioned there by the region barrier.
+// names in the body resolve by symbol through the worker environment at runtime: the region
+// barrier provisions captured reads there, globals from the environment chain and the
+// enclosing frame's locals from the slots recorded in frame_captures.
 checked_result<statement_ptr> parser::parallel_for_statement() {
     token forToken = previous();
 
@@ -2897,14 +2898,18 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     enter_function_scope();
     const size_t saved_boundary = slot_lookup_boundary_;
     slot_lookup_boundary_ = function_scope_stack_.size() - 1;
+    parallel_frame_captures_.emplace_back();
     if (loop_param.symbol_id != UINT64_MAX) {
         loop_param.slot_index = allocate_slot(loop_param.symbol_id);
     }
     for (auto& extra : extra_params) {   // slots 1..m-1, before the body's locals
         if (extra.symbol_id != UINT64_MAX) { extra.slot_index = allocate_slot(extra.symbol_id); }
     }
+    std::vector<std::pair<uint64_t, size_t>> frame_captures;
     auto restore_scope = [&]() {
         slot_lookup_boundary_ = saved_boundary;
+        frame_captures = std::move(parallel_frame_captures_.back());
+        parallel_frame_captures_.pop_back();
         return exit_function_scope();
     };
     if (!match(token_type::left_brace)) {
@@ -2922,6 +2927,7 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     node->extra_params = std::move(extra_params);
     node->extra_containers = std::move(extra_containers);
     node->local_count = restore_scope();
+    node->frame_captures = std::move(frame_captures);
     return node;
 }
 

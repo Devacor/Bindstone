@@ -337,14 +337,7 @@ namespace jai::vm {
         std::vector<closure_proto> closure_protos;
         std::vector<destructure_proto> destructure_protos;
         std::vector<iter_proto> iter_protos;
-#ifdef JAISCRIPT_PILOT_CLUSTER
-        // Pilot variant C: closed typed loops as [head, back] ip ranges whose back edge runs the loop
-        // as one block; the instructions stay in place for the general form
-        struct block_proto { uint32_t head; uint32_t back; };
-        std::vector<block_proto> block_protos;
-#endif
-#ifdef JAISCRIPT_PILOT_CELLS
-        // Pilot variant B: a closed typed loop's scalar slots as raw cells. The copy at [copy_head,
+        // Closed typed loops as cell blocks: the loop's scalar slots as raw cells. The copy at [copy_head,
         // copy_back] is the cell form; the original instructions at [head, back] are the general form
         // a miss returns to (ip mapped by offset). Each cell records its slot, its expected kind, whether
         // the loop reads it before writing it (live-in: unboxed at entry), whether the body defines it
@@ -356,7 +349,6 @@ namespace jai::vm {
             std::vector<uint32_t> slot_to_cell;   // indexed by frame slot; k_invalid_u32 = not a cell
         };
         std::vector<cell_loop> cell_loops;
-#endif
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;

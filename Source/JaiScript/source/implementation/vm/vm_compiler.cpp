@@ -133,7 +133,6 @@ namespace {
 			case opcode::op_fused_cmp_jump:
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
-			case opcode::op_t_block_back:
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_cmp:
@@ -262,7 +261,6 @@ namespace {
 			case opcode::op_fused_cmp_jump:
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
-			case opcode::op_t_block_back:
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_cmp:
@@ -2099,37 +2097,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			break;
 		}
 	}
-#if defined(JAISCRIPT_PILOT_CLUSTER) && !defined(JAISCRIPT_PILOT_CELLS)
-	// Closed typed loops (pilot variant C): the head is a typed compare-jump whose target is the
-	// loop's exit, the body is only typed arithmetic, typed element loads and no-result typed-lane
-	// element stores, and the back edge returns to the head. The back edge becomes op_t_block_back;
-	// every instruction stays in place, so the general form runs from any ip the block hands back.
-	for (size_t back = 0; back < code.size(); ++back) {
-		const vm_instruction& be = code[back];
-		if (be.op != opcode::op_loop_back) continue;
-		const size_t head = be.a;
-		if (head >= back) continue;
-		const vm_instruction& hd = code[head];
-		if (!(hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff) || hd.c != back + 1) continue;
-		bool closed = true;
-		for (size_t ip = head + 1; ip < back && closed; ++ip) {
-			const vm_instruction& st = code[ip];
-			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) continue;
-			// a typed load into a scalar declaration only: a var destination may hold a heavy value from an
-			// earlier general-form iteration, whose destruction the loop must not run inside the block
-			if (st.op == opcode::op_t_load && ip < c.typed_sites.size() && c.typed_sites[ip].decl_expect != 0xFF) continue;
-			if (st.op == opcode::op_index_store_fused && st.c != 0 && st.a < c.fused_index_protos.size() && c.fused_index_protos[st.a].typed_lane) continue;
-			closed = false;
-		}
-		if (!closed) continue;
-		c.block_protos.push_back({ static_cast<uint32_t>(head), static_cast<uint32_t>(back) });
-		code[back] = vm_instruction{opcode::op_t_block_back, static_cast<uint32_t>(c.block_protos.size() - 1), static_cast<uint32_t>(head), 0};
-	}
-#endif
-#ifdef JAISCRIPT_PILOT_CELLS
-	// variant D (both defines): the closed loops below take the cell form and run as a block from
-	// op_cells_back; the block recognizer above is compiled out so no loop is claimed twice
-	// Closed typed loops (pilot variant B): the same shape the block recognizer takes, with every
+	// Closed typed loops as cell blocks: a typed compare-jump head to the exit and a body of typed
+	// arithmetic, stamped scalar T_LOAD declarations and no-result typed-lane index stores, with every
 	// scalar slot's kind agreed across its uses. The loop's instructions are copied to the chunk's end
 	// as cell instructions; the original back edge becomes the entry; the originals stay as the
 	// general form a miss returns to.
@@ -2228,7 +2197,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
 		c.cell_loops.push_back(std::move(loop));
 	}
-#endif
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
 }
 

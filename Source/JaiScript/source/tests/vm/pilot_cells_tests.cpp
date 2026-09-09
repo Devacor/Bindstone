@@ -1,8 +1,8 @@
-// Pilot variant B (JAISCRIPT_PILOT_CELLS): a closed typed loop's scalar slots run as raw cells. The
-// contract controls: every shape lands the same on the interpreter and the vm, with or without cells
-// (the suite runs in both configurations). Astra's additions: a miss right after the body-defined cell
-// is written and after the first pixel store, late overflow with prior stores retained, a budget stop
-// inside the cell loop, proofs off, zero and one iteration, a loop that is not closed.
+// A closed typed loop's scalar slots run as raw cells inside one block. The contract controls: every
+// shape lands the same on the interpreter and the vm: a miss right after the body-defined cell is
+// written and after the first pixel store, late overflow with prior stores retained, a budget stop
+// inside the cell loop, proofs off, zero and one iteration, a loop that is not closed, chained index
+// stores, a float slot fed by int arithmetic, interleaved coroutines, the hoisted containers.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -22,7 +22,7 @@ namespace jai::foundry::tests {
 
 class pilot_cells_tests : public suite {
 public:
-	pilot_cells_tests() : suite("Pilot Cells") {}
+	pilot_cells_tests() : suite("Cell Loops") {}
 
 	// The render column loop's shape over a var pixel array (so a string element can sit where a
 	// store lands) and a var strip table. Returns "<gi*1000+y>:<weighted pixel sum>" or "throw:<text>".
@@ -311,12 +311,8 @@ public:
 			(void)jai::detail::run_static_check(*vm, parse_result.value());
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
-#ifdef JAISCRIPT_PILOT_CELLS
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the closed typed loop's back edge is the cell entry: " + listing);
 			check_true(listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the cell copy is present: " + listing);
-#else
-			check_true(listing.find("CELLS_BACK") == std::string::npos, "no cell entry without the pilot define: " + listing);
-#endif
 		});
 	}
 };

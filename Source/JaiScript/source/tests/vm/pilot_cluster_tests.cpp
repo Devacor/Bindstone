@@ -1,6 +1,5 @@
-// Pilot variant C (JAISCRIPT_PILOT_CLUSTER): a closed typed loop runs from its back edge as one
-// block. These are the contract controls Astra asked for: every shape lands the same on the
-// interpreter and the vm, with or without the block (the suite runs in both configurations).
+// Closed typed loops run from their back edge as one cell block. These are the contract controls
+// for that shape: every shape lands the same on the interpreter and the vm.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -20,7 +19,7 @@ namespace jai::foundry::tests {
 
 class pilot_cluster_tests : public suite {
 public:
-	pilot_cluster_tests() : suite("Pilot Cluster") {}
+	pilot_cluster_tests() : suite("Closed Typed Loops") {}
 
 	// The render column loop's shape: a typed compare head, a typed element load through a var&
 	// container, two no-result typed-lane element stores through a var& container, typed adds,
@@ -195,15 +194,7 @@ public:
 			(void)jai::detail::run_static_check(*vm, parse_result.value());
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
-#if defined(JAISCRIPT_PILOT_CLUSTER) && !defined(JAISCRIPT_PILOT_CELLS)   // under D the loop takes the cell form
-			check_true(listing.find("T_BLOCK_BACK") != std::string::npos, "the closed typed loop's back edge is the block: " + listing);
-#elif defined(JAISCRIPT_PILOT_CELLS)
-			check_true(listing.find("T_BLOCK_BACK") == std::string::npos, "no block under the cells pilot: " + listing);
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the closed typed loop's back edge is the cell entry: " + listing);
-#else
-			check_true(listing.find("T_BLOCK_BACK") == std::string::npos, "no block without the pilot define: " + listing);
-			check_true(listing.find("LOOP_BACK") != std::string::npos, "the general back edge: " + listing);
-#endif
 		});
 	}
 };

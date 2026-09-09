@@ -6476,7 +6476,6 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
 }
 
-#ifdef JAISCRIPT_PILOT_CELLS
 #ifdef JAISCRIPT_VM_PROFILE
 #define JAI_CELLS_COUNT(k) ++profile_cells_[k]
 #else
@@ -6487,7 +6486,7 @@ namespace {
 	inline script_float cell_float_of_bits(int64_t b) { script_float d; std::memcpy(&d, &b, sizeof d); return d; }
 }
 
-// Pilot variant B. A cell instruction never raises: anything it cannot do exactly (a kind byte that
+// Cell loops. A cell instruction never raises: anything it cannot do exactly (a kind byte that
 // does not match, overflow, a shift out of range, a divide by zero, a container guard, bounds, an
 // element of another kind) is a miss, which flushes every dirty cell back to its slot through the
 // landing that defined it and hands the general dispatch the ORIGINAL instruction's ip. Flushing
@@ -6615,8 +6614,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	cs.dirty = 0;
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head;
-#ifdef JAISCRIPT_PILOT_CLUSTER
-	// variant D: the copy runs as one block from here, each cell instruction through its own handler and
+	// the copy runs as one block from here, each cell instruction through its own handler and
 	// no outer dispatch between them; an exit or a miss flushes (cs.loop clears) and leaves f.ip on the
 	// general form, a raise returns its status; the budget is polled at the cell back edge as before
 	for (;;) {
@@ -6633,9 +6631,6 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 		if (st == op_status::failed) return st;
 		if (cs.loop == k_invalid_u32) return {};   // flushed at an exit or a miss: f.ip is the general form's
 	}
-#else
-	return {};
-#endif
 }
 JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
@@ -6866,53 +6861,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	++f.ip;
 	return {};
 }
-#endif
 
 
-// Pilot variant C: the back edge of a closed typed loop runs the loop as one block. Each step is
-// the typed op's own fast path with every guard it has today; a miss hands the exact ip back to
-// the general dispatch, which runs that instruction with its fallback and continues in the
-// general form (the block resumes at the next back edge). A debugger armed or a registered
-// numeric operator takes the general back edge. The budget is polled once per iteration, as
-// LOOP_BACK polls it. Nothing here pins a slot address: every step resolves its slots as the
-// general op does, so a landing that grows the value stack needs no capacity proof.
-#ifdef JAISCRIPT_PILOT_CLUSTER
-#ifdef JAISCRIPT_VM_PROFILE
-#define JAI_BLOCK_COUNT(k) ++profile_block_[k]
-#else
-#define JAI_BLOCK_COUNT(k) ((void)0)
-#endif
-op_status vm_backend::exec_typed_block_back(frame& f, const vm_instruction& ins) {
-	const chunk::block_proto& bp = f.code->block_protos[ins.a];
-	if (debug_hook_ || has_custom_numeric_ops_) {
-		if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
-		f.ip = bp.head;
-		return {};
-	}
-	const auto& code = f.code->code;
-	JAI_BLOCK_COUNT(0);
-	for (;;) {
-		// the back edge: one budget poll per iteration, as LOOP_BACK polls it
-		if (execution_limit_exhausted()) [[unlikely]] { f.ip = bp.back; return raise_from(execution_limit_failure()); }
-		f.ip = bp.head;
-		JAI_BLOCK_COUNT(1);
-		const int cmp = typed_cmp_jump_fast(f, code[bp.head]);
-		if (cmp < 0) { JAI_BLOCK_COUNT(4); return {}; }   // f.ip == head: the general dispatch runs the compare with its fallback
-		if (cmp > 1) { JAI_BLOCK_COUNT(5); return {}; }   // the loop's exit: f.ip is the exit target
-		for (uint32_t ip = bp.head + 1; ip < bp.back; ++ip) {
-			f.ip = ip;
-			const vm_instruction& st = code[ip];
-			JAI_BLOCK_COUNT(2);
-			bool ok;
-			if (st.op == opcode::op_t_load) { ok = typed_load_fast(f, st); }
-			else if (st.op == opcode::op_index_store_fused) { ok = typed_index_store(f, f.code->fused_index_protos[st.a], true); }
-			else { ok = typed_arith_fast(f, st); }
-			if (!ok) { JAI_BLOCK_COUNT(4); return {}; }   // f.ip == ip: the general dispatch runs this instruction with its fallback
-		}
-		JAI_BLOCK_COUNT(3);
-	}
-}
-#endif
 
 // The proven index: a direct slot or literal, or the int fold with its chain steps (the
 // operands' cache roles are the kernel's: binary left/right at ip*3 / ip*3+1)
@@ -8766,10 +8716,8 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-#ifdef JAISCRIPT_PILOT_CELLS
 	rec.cells.reset();
 	rec.f.cells = &rec.cells;
-#endif
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
@@ -14042,7 +13990,6 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
 	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
 	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
-	std::fill(std::begin(profile_block_), std::end(profile_block_), 0ull);
 	std::fill(std::begin(profile_cells_), std::end(profile_cells_), 0ull);
 	std::fill(std::begin(profile_cells_refused_slot_), std::end(profile_cells_refused_slot_), 0ull);
 	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
@@ -14522,8 +14469,6 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
-		fprintf(stderr, "[vm-profile] closed typed loop blocks (measured span): entries %llu | head compares %llu | body steps %llu | back edges %llu | misses %llu | exits %llu\n",
-			(unsigned long long)profile_block_[0], (unsigned long long)profile_block_[1], (unsigned long long)profile_block_[2], (unsigned long long)profile_block_[3], (unsigned long long)profile_block_[4], (unsigned long long)profile_block_[5]);
 		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_[7],
@@ -14948,19 +14893,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				f.ip = ins.a;
 				continue;
-#ifdef JAISCRIPT_PILOT_CLUSTER
-			case opcode::op_t_block_back:
-				VM_TRY_OP_SHARED(exec_typed_block_back(f, ins));
-				continue;
-#endif
-#ifdef JAISCRIPT_PILOT_CELLS
 			case opcode::op_cells_back: VM_TRY_OP_SHARED(exec_cells_back(f, ins)); continue;
-			case opcode::op_c_arith: VM_TRY_OP_SHARED(exec_c_arith(f, ins)); continue;
-			case opcode::op_c_cmp: VM_TRY_OP_SHARED(exec_c_cmp(f, ins)); continue;
-			case opcode::op_c_load: VM_TRY_OP_SHARED(exec_c_load(f, ins)); continue;
-			case opcode::op_c_index_store: VM_TRY_OP_SHARED(exec_c_index_store(f, ins)); continue;
-			case opcode::op_c_back: VM_TRY_OP_SHARED(exec_c_back(f, ins)); continue;
-#endif
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {
@@ -15303,10 +15236,8 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-#ifdef JAISCRIPT_PILOT_CELLS
 	rec.cells.reset();
 	rec.f.cells = &rec.cells;
-#endif
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
 	// fallbacks gate field-vs-shadowing precedence)
@@ -15505,10 +15436,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
-#ifdef JAISCRIPT_PILOT_CELLS
 	rec.cells.reset();
 	rec.f.cells = &rec.cells;
-#endif
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
@@ -15667,10 +15596,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
-#ifdef JAISCRIPT_PILOT_CELLS
 	rec.cells.reset();
 	rec.f.cells = &rec.cells;
-#endif
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
 	// lexically correct) and NO method env at all — 'this', fields, and the access

@@ -374,7 +374,13 @@ engine stays usable", not by `check_throws`.
   instruction word; each op guards one tag per operand and falls back to the instruction it replaced
   (`chunk::typed_sites`), so texts and post-states are the general op's. Lowering follows the
   type-proofs flag (proofs off = typed ops off). A new opcode that a body may contain must be added
-  to both env safe-lists in `vm_compiler.cpp` and, if it names a slot, to the debugger's locals walk.
+  to both env safe-lists in `vm_compiler.cpp` and, if it names a slot, to the debugger's locals walk.
+- **Closed typed loops run as cell blocks** (`docs/typed_regions_design.md`, last section): a loop whose
+  head is a typed compare-jump and whose body is only typed arithmetic, stamped scalar `T_LOAD`s and
+  typed-lane index stores gets a cell-form copy; `op_cells_back` guards every slot, resolves the
+  containers once, unboxes into the call record's raw area and runs the copy as one block; a miss flushes
+  and re-runs the original instruction on the general form, so the interpreter stays the oracle. Controls:
+  suites `Closed Typed Loops` and `Cell Loops`.
 - **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
   declares a name defined outside the program (checker: a declared global, typed -> checked and
   proven; both backends: a no-op, the name resolves dynamically); `[[warn_mode]]` / `[[strict_mode]]`

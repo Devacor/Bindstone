@@ -197,10 +197,7 @@ namespace jai::vm {
                             // a = receiver slot, b = value slot or const bit | index, c = push_protos index
         op_t_load,          // `T x = arr[index]` on the proven shape: a = decl slot; the container, the
                             // index fold and the landing facts sit in chunk::typed_sites[ip]
-        op_t_block_back,    // pilot variant C (JAISCRIPT_PILOT_CLUSTER): a = block proto index, b = loop
-                            // head; the back edge of a closed typed loop runs the loop as one block
-                            // (vm_backend::exec_typed_block_back); the instructions stay in place
-        // pilot variant B (JAISCRIPT_PILOT_CELLS): the cell-form copy of a closed typed loop
+        // closed typed loops as cell blocks (docs/typed_regions_design.md): the cell-form copy of a closed typed loop
         op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
                             // unboxing, then the copy's head (or the general head when a guard refuses)
         op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
@@ -319,7 +316,6 @@ namespace jai::vm {
             case opcode::op_jump_if_false: return "JUMP_IF_FALSE";
             case opcode::op_jump_if_true: return "JUMP_IF_TRUE";
             case opcode::op_loop_back: return "LOOP_BACK";
-            case opcode::op_t_block_back: return "T_BLOCK_BACK";
             case opcode::op_cells_back: return "CELLS_BACK";
             case opcode::op_c_arith: return "C_ARITH";
             case opcode::op_c_cmp: return "C_CMP";

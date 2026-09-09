@@ -2053,8 +2053,8 @@ public:
 			check_false(ks.checked_as_array().has_value(), "the array<var> view stays unavailable (not demoted)");
 			auto r = e->execute(R"(
 				var out = [ks[0].a, ks[7].a, ks[63].a, type_of(ks) + "/" + type_of(ks[63])];
-				try { ks.push(5); out.push("accepted"); } catch (err) { out.push(err); }
-				try { ks[0] = "s"; out.push("accepted"); } catch (err) { out.push(err); }
+				[[warn_mode]] try { ks.push(5); out.push("accepted"); } catch (err) { out.push(err); }
+				[[warn_mode]] try { ks[0] = "s"; out.push("accepted"); } catch (err) { out.push(err); }
 				ks.push(K(3));
 				out.push(ks.size());
 				return out;

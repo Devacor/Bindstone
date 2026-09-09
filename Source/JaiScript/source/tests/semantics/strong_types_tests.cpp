@@ -90,76 +90,77 @@ public:
         });
 
         test("handle_typed_elements_take_null_and_live_instances", [this]() {
-            // Dev rulings 2026-09-08: array<shared_ptr<T>> / array<weak_ptr<T>> elements and
-            // map<K, shared_ptr<T>> values take null at every site (a declaration literal, push,
-            // a subscript store, a map store, the reference route, a var-held null); a shared_ptr<T>
-            // element takes a live instance of T or a subclass the way a shared_ptr<T> variable does
-            // (the slot owns the handle) and checks a handle's class; the texts spell
-            // shared_ptr<T> in full (array<shared_ptr<Foo>> and array<Foo> were one id); by-value
-            // class and primitive elements stay non-nullable with their texts; both backends agree
-            const char* src = R"(
-                class Foo { int n = 1; }
-                class Dog : Foo { int extra = 2; }
-                class Bar { int b = 0; }
-                function put(var& x, var val) { x = val; }
-                var out = [];
-                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
-                cap("decl", function() -> string { shared_ptr<Foo> h = Foo(); array<shared_ptr<Foo>> a = [null, h]; return to_string(a[0] == null) + "," + to_string(a[1] == null) + "," + to_string(a[1].n); });
-                cap("push", function() -> string { array<shared_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); a.push(null); a.push(h); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null) + "," + to_string(a[1].n); });
-                cap("store", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; int n = a[0].n; a[0] = null; return to_string(n) + "," + to_string(a[0] == null); });
-                cap("ref", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); put(a[0], h); int n = a[0].n; put(a[0], null); return to_string(n) + "," + to_string(a[0] == null); });
-                cap("var-null", function() -> string { array<shared_ptr<Foo>> a = []; var v = null; a.push(v); a[0] = v; return to_string(a.size()) + "," + to_string(a[0] == null); });
-                cap("map-decl", function() -> string { map<string, shared_ptr<Foo>> m = {"k": null}; return to_string(m["k"] == null); });
-                cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = Foo(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
-                cap("weak", function() -> string { array<weak_ptr<Foo>> a = [null]; a.push(null); a[0] = null; return to_string(a.size()) + "," + to_string(a[0] == null); });
-                cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
-                cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Foo()); return type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
-                cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [Foo(), null]; return to_string(a.size()) + "," + type_of(a[0]) + "," + to_string(a[1] == null); });
-                cap("raw-store", function() -> string { array<shared_ptr<Foo>> a = [null]; a[0] = Foo(); a[0].n = 4; return to_string(a[0].n); });
-                cap("raw-map", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = Foo(); return to_string(m["k"].n); });
-                cap("raw-shares-like-a-handle-slot", function() -> string { Foo f = Foo(); shared_ptr<Foo> h = f; h.n = 5; Foo g = Foo(); array<shared_ptr<Foo>> a = []; a.push(g); a[0].n = 5; return to_string((f.n == 5) == (g.n == 5)); });
-                cap("raw-subclass", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Dog()); shared_ptr<Dog> d = Dog(); a.push(d); return to_string(a.size()) + "," + type_of(a[0]) + "," + type_of(a[1]); });
-                cap("handle-array-widens", function() -> string { array<shared_ptr<Dog>> ds = [Dog()]; array<shared_ptr<Foo>> fs = ds; return to_string(fs.size()) + "," + type_of(fs[0]); });
-                cap("wrong-class-raw", function() -> int { array<shared_ptr<Foo>> a = []; a.push(Bar()); return 0; });
-                cap("wrong-class-handle", function() -> int { array<shared_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
-                cap("wrong-class-store", function() -> int { array<shared_ptr<Foo>> a = [null]; a[0] = Bar(); return 0; });
-                cap("int-into-handle-array", function() -> int { array<shared_ptr<Foo>> a = [5]; return 0; });
-                cap("value-decl", function() -> int { array<Foo> a = [null]; return 0; });
-                cap("value-push", function() -> int { array<Foo> a = []; a.push(null); return 0; });
-                cap("value-store", function() -> int { array<Foo> a = [Foo()]; a[0] = null; return 0; });
-                cap("value-map", function() -> int { map<string, Foo> m = {}; m["k"] = null; return 0; });
-                cap("int-push", function() -> int { array<int> a = []; a.push(null); return 0; });
-                cap("string-decl", function() -> int { array<string> a = [null]; return 0; });
-                out;
-            )";
-            std::vector<std::string> seen[2];
-            for (bool vm : {false, true}) {
-                auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
-                stdlib::register_all(*e);
-                const auto rows = e->execute(src).as_array();
-                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
-            }
-            check_eq(seen[0], seen[1], "both backends land and reject identically");
-            const std::vector<std::string> expected = {
-                "decl:true,false,1", "push:3,true,1", "store:1,true", "ref:1,true", "var-null:1,true",
-                "map-decl:true", "map-store:1,true", "weak:2,true", "iterate:1",
-                "raw-push:Foo,1,false", "raw-decl:2,Foo,true", "raw-store:4", "raw-map:1", "raw-shares-like-a-handle-slot:true",
-                "raw-subclass:2,Dog,Dog", "handle-array-widens:1,Dog",
-                "wrong-class-raw!Cannot push 'Bar' to array<shared_ptr<Foo>>",
-                "wrong-class-handle!Cannot push 'Bar' to array<shared_ptr<Foo>>",
-                "wrong-class-store!Cannot assign 'Bar' to element of type 'shared_ptr<Foo>'",
-                "int-into-handle-array!Cannot store int in array<shared_ptr<Foo>>",
-                "value-decl!Cannot store null in array<Foo>",
-                "value-push!Cannot push 'null' to array<Foo>",
-                "value-store!Cannot assign 'null' to element of type 'Foo'",
-                "value-map!Cannot assign 'null' to element of type 'Foo'",
-                "int-push!Cannot push 'null' to array<int>",
-                "string-decl!Cannot store null in array<string>",
-            };
-            check_eq(expected.size(), seen[0].size(), "row count");
-            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
-        });
+			// Dev rulings 2026-09-08: array<shared_ptr<T>> / array<weak_ptr<T>> elements and
+			// map<K, shared_ptr<T>> values take null at every site (a declaration literal, push,
+			// a subscript store, a map store, the reference route, a var-held null); a shared_ptr<T>
+			// element takes a live instance of T or a subclass the way a shared_ptr<T> variable does
+			// (the slot owns the handle) and checks a handle's class; the texts spell
+			// shared_ptr<T> in full (array<shared_ptr<Foo>> and array<Foo> were one id); by-value
+			// class and primitive elements stay non-nullable with their texts; both backends agree
+			const char* src = R"(
+				[[warn_mode]] // preserve runtime boundary diagnostics for intentional mismatches
+				class Foo { int n = 1; }
+				class Dog : Foo { int extra = 2; }
+				class Bar { int b = 0; }
+				function put(var& x, var val) { x = val; }
+				var out = [];
+				function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+				cap("decl", function() -> string { shared_ptr<Foo> h = Foo(); array<shared_ptr<Foo>> a = [null, h]; return to_string(a[0] == null) + "," + to_string(a[1] == null) + "," + to_string(a[1].n); });
+				cap("push", function() -> string { array<shared_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); a.push(null); a.push(h); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null) + "," + to_string(a[1].n); });
+				cap("store", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; int n = a[0].n; a[0] = null; return to_string(n) + "," + to_string(a[0] == null); });
+				cap("ref", function() -> string { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); put(a[0], h); int n = a[0].n; put(a[0], null); return to_string(n) + "," + to_string(a[0] == null); });
+				cap("var-null", function() -> string { array<shared_ptr<Foo>> a = []; var v = null; a.push(v); a[0] = v; return to_string(a.size()) + "," + to_string(a[0] == null); });
+				cap("map-decl", function() -> string { map<string, shared_ptr<Foo>> m = {"k": null}; return to_string(m["k"] == null); });
+				cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = Foo(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
+				cap("weak", function() -> string { array<weak_ptr<Foo>> a = [null]; a.push(null); a[0] = null; return to_string(a.size()) + "," + to_string(a[0] == null); });
+				cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
+				cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Foo()); return type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
+				cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [Foo(), null]; return to_string(a.size()) + "," + type_of(a[0]) + "," + to_string(a[1] == null); });
+				cap("raw-store", function() -> string { array<shared_ptr<Foo>> a = [null]; a[0] = Foo(); a[0].n = 4; return to_string(a[0].n); });
+				cap("raw-map", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = Foo(); return to_string(m["k"].n); });
+				cap("raw-shares-like-a-handle-slot", function() -> string { Foo f = Foo(); shared_ptr<Foo> h = f; h.n = 5; Foo g = Foo(); array<shared_ptr<Foo>> a = []; a.push(g); a[0].n = 5; return to_string((f.n == 5) == (g.n == 5)); });
+				cap("raw-subclass", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Dog()); shared_ptr<Dog> d = Dog(); a.push(d); return to_string(a.size()) + "," + type_of(a[0]) + "," + type_of(a[1]); });
+				cap("handle-array-widens", function() -> string { array<shared_ptr<Dog>> ds = [Dog()]; array<shared_ptr<Foo>> fs = ds; return to_string(fs.size()) + "," + type_of(fs[0]); });
+				cap("wrong-class-raw", function() -> int { array<shared_ptr<Foo>> a = []; a.push(Bar()); return 0; });
+				cap("wrong-class-handle", function() -> int { array<shared_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
+				cap("wrong-class-store", function() -> int { array<shared_ptr<Foo>> a = [null]; a[0] = Bar(); return 0; });
+				cap("int-into-handle-array", function() -> int { array<shared_ptr<Foo>> a = [5]; return 0; });
+				cap("value-decl", function() -> int { array<Foo> a = [null]; return 0; });
+				cap("value-push", function() -> int { array<Foo> a = []; a.push(null); return 0; });
+				cap("value-store", function() -> int { array<Foo> a = [Foo()]; a[0] = null; return 0; });
+				cap("value-map", function() -> int { map<string, Foo> m = {}; m["k"] = null; return 0; });
+				cap("int-push", function() -> int { array<int> a = []; a.push(null); return 0; });
+				cap("string-decl", function() -> int { array<string> a = [null]; return 0; });
+				out;
+			)";
+			std::vector<std::string> seen[2];
+			for (bool vm : {false, true}) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				const auto rows = e->execute(src).as_array();
+				for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+			}
+			check_eq(seen[0], seen[1], "both backends land and reject identically");
+			const std::vector<std::string> expected = {
+				"decl:true,false,1", "push:3,true,1", "store:1,true", "ref:1,true", "var-null:1,true",
+				"map-decl:true", "map-store:1,true", "weak:2,true", "iterate:1",
+				"raw-push:Foo,1,false", "raw-decl:2,Foo,true", "raw-store:4", "raw-map:1", "raw-shares-like-a-handle-slot:true",
+				"raw-subclass:2,Dog,Dog", "handle-array-widens:1,Dog",
+				"wrong-class-raw!Cannot push 'Bar' to array<shared_ptr<Foo>>",
+				"wrong-class-handle!Cannot push 'Bar' to array<shared_ptr<Foo>>",
+				"wrong-class-store!Cannot assign 'Bar' to element of type 'shared_ptr<Foo>'",
+				"int-into-handle-array!Cannot store int in array<shared_ptr<Foo>>",
+				"value-decl!Cannot store null in array<Foo>",
+				"value-push!Cannot push 'null' to array<Foo>",
+				"value-store!Cannot assign 'null' to element of type 'Foo'",
+				"value-map!Cannot assign 'null' to element of type 'Foo'",
+				"int-push!Cannot push 'null' to array<int>",
+				"string-decl!Cannot store null in array<string>",
+			};
+			check_eq(expected.size(), seen[0].size(), "row count");
+			for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+		});
 
         test("assignment_expressions_yield_the_stored_value", [this]() {
             // Dev ruling 2026-09-08: the value of an assignment expression is the destination's
@@ -239,59 +240,60 @@ public:
         });
 
         test("bool_and_int_elements_convert", [this]() {
-            // Dev ruling 2026-09-09: bool and int convert both ways at the element boundary (a
-            // declaration literal, push, a subscript store, a map value, a whole typed array), like
-            // the scalar slots; int -> string stays explicit (to_string / cast<string>), float and
-            // string rows keep their texts, map keys stay strict; both backends agree
-            const char* src = R"(
-                var out = [];
-                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
-                cap("int-decl", function() -> string { array<int> a = [true, false, 7]; return to_string(a[0]) + to_string(a[1]) + to_string(a[2]) + type_of(a[0]); });
-                cap("int-push", function() -> string { array<int> a = []; a.push(true); a.push(false); return to_string(a[0]) + to_string(a[1]); });
-                cap("int-store", function() -> string { array<int> a = [5]; a[0] = true; string r = to_string(a[0]); a[0] = false; return r + to_string(a[0]); });
-                cap("bool-decl", function() -> string { array<bool> b = [1, 0, 2, -3]; return to_string(b[0]) + "," + to_string(b[1]) + "," + to_string(b[2]) + "," + to_string(b[3]) + type_of(b[0]); });
-                cap("bool-push", function() -> string { array<bool> b = []; b.push(0); b.push(9); return to_string(b[0]) + "," + to_string(b[1]); });
-                cap("bool-store", function() -> string { array<bool> b = [false]; b[0] = 1; string r = to_string(b[0]); b[0] = 0; return r + "," + to_string(b[0]); });
-                cap("map-int", function() -> string { map<string, int> m = {"k": true}; m["j"] = false; return to_string(m["k"]) + to_string(m["j"]); });
-                cap("map-bool", function() -> string { map<string, bool> m = {"k": 1}; m["j"] = 0; return to_string(m["k"]) + "," + to_string(m["j"]); });
-                cap("whole-bool-to-int", function() -> string { array<bool> b = [true, false]; array<int> a = b; return to_string(a[0]) + to_string(a[1]) + type_of(a[0]); });
-                cap("whole-int-to-bool", function() -> string { array<int> a = [0, 3]; array<bool> b = a; return to_string(b[0]) + "," + to_string(b[1]); });
-                cap("var-held", function() -> string { var t = true; array<int> a = [t]; a.push(t); a[0] = t; return to_string(a.size()) + to_string(a[0]); });
-                cap("int-to-string", function() -> int { array<string> s = [1]; return 0; });
-                cap("push-int-to-string", function() -> int { array<string> s = []; s.push(1); return 0; });
-                cap("string-to-int", function() -> int { array<int> a = ["1"]; return 0; });
-                cap("explicit", function() -> string { array<string> s = [to_string(1), cast<string>(15)]; return s[0] + s[1]; });
-                cap("float-to-bool", function() -> int { array<bool> b = [1.5]; return 0; });
-                cap("bool-to-float", function() -> int { array<float> f = [true]; return 0; });
-                cap("bool-key", function() -> int { map<int, int> m = {true: 1}; return 0; });
-                out;
-            )";
-            std::vector<std::string> seen[2];
-            for (bool vm : {false, true}) {
-                auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
-                stdlib::register_all(*e);
-                const auto rows = e->execute(src).as_array();
-                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
-            }
-            check_eq(seen[0], seen[1], "both backends land and reject identically");
-            const std::vector<std::string> expected = {
-                "int-decl:107int", "int-push:10", "int-store:10",
-                "bool-decl:true,false,true,truebool", "bool-push:false,true", "bool-store:true,false",
-                "map-int:10", "map-bool:true,false", "whole-bool-to-int:10int", "whole-int-to-bool:false,true", "var-held:21",
-                "int-to-string!Cannot store int in array<string>",
-                "push-int-to-string!Cannot push 'int' to array<string>",
-                "string-to-int!Cannot store string in array<int>",
-                "explicit:115",
-                "float-to-bool!Cannot store float in array<bool>",
-                "bool-to-float!Cannot store bool in array<float>",
-                "bool-key!Cannot store bool in map<int,int>",
-            };
-            check_eq(expected.size(), seen[0].size(), "row count");
-            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
-        });
+			// Invalid conversion statements use warn_mode so their runtime texts are still exercised.
+			// Dev ruling 2026-09-09: bool and int convert both ways at the element boundary (a
+			// declaration literal, push, a subscript store, a map value, a whole typed array), like
+			// the scalar slots; int -> string stays explicit (to_string / cast<string>), float and
+			// string rows keep their texts, map keys stay strict; both backends agree
+			const char* src = R"(
+				var out = [];
+				function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+				cap("int-decl", function() -> string { array<int> a = [true, false, 7]; return to_string(a[0]) + to_string(a[1]) + to_string(a[2]) + type_of(a[0]); });
+				cap("int-push", function() -> string { array<int> a = []; a.push(true); a.push(false); return to_string(a[0]) + to_string(a[1]); });
+				cap("int-store", function() -> string { array<int> a = [5]; a[0] = true; string r = to_string(a[0]); a[0] = false; return r + to_string(a[0]); });
+				cap("bool-decl", function() -> string { array<bool> b = [1, 0, 2, -3]; return to_string(b[0]) + "," + to_string(b[1]) + "," + to_string(b[2]) + "," + to_string(b[3]) + type_of(b[0]); });
+				cap("bool-push", function() -> string { array<bool> b = []; b.push(0); b.push(9); return to_string(b[0]) + "," + to_string(b[1]); });
+				cap("bool-store", function() -> string { array<bool> b = [false]; b[0] = 1; string r = to_string(b[0]); b[0] = 0; return r + "," + to_string(b[0]); });
+				cap("map-int", function() -> string { map<string, int> m = {"k": true}; m["j"] = false; return to_string(m["k"]) + to_string(m["j"]); });
+				cap("map-bool", function() -> string { map<string, bool> m = {"k": 1}; m["j"] = 0; return to_string(m["k"]) + "," + to_string(m["j"]); });
+				cap("whole-bool-to-int", function() -> string { array<bool> b = [true, false]; array<int> a = b; return to_string(a[0]) + to_string(a[1]) + type_of(a[0]); });
+				cap("whole-int-to-bool", function() -> string { array<int> a = [0, 3]; array<bool> b = a; return to_string(b[0]) + "," + to_string(b[1]); });
+				cap("var-held", function() -> string { var t = true; array<int> a = [t]; a.push(t); a[0] = t; return to_string(a.size()) + to_string(a[0]); });
+				cap("int-to-string", function() -> int { [[warn_mode]] array<string> s = [1]; return 0; });
+				cap("push-int-to-string", function() -> int { array<string> s = []; [[warn_mode]] s.push(1); return 0; });
+				cap("string-to-int", function() -> int { [[warn_mode]] array<int> a = ["1"]; return 0; });
+				cap("explicit", function() -> string { array<string> s = [to_string(1), cast<string>(15)]; return s[0] + s[1]; });
+				cap("float-to-bool", function() -> int { [[warn_mode]] array<bool> b = [1.5]; return 0; });
+				cap("bool-to-float", function() -> int { [[warn_mode]] array<float> f = [true]; return 0; });
+				cap("bool-key", function() -> int { [[warn_mode]] map<int, int> m = {true: 1}; return 0; });
+				out;
+			)";
+			std::vector<std::string> seen[2];
+			for (bool vm : {false, true}) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				const auto rows = e->execute(src).as_array();
+				for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+			}
+			check_eq(seen[0], seen[1], "both backends land and reject identically");
+			const std::vector<std::string> expected = {
+				"int-decl:107int", "int-push:10", "int-store:10",
+				"bool-decl:true,false,true,truebool", "bool-push:false,true", "bool-store:true,false",
+				"map-int:10", "map-bool:true,false", "whole-bool-to-int:10int", "whole-int-to-bool:false,true", "var-held:21",
+				"int-to-string!Cannot store int in array<string>",
+				"push-int-to-string!Cannot push 'int' to array<string>",
+				"string-to-int!Cannot store string in array<int>",
+				"explicit:115",
+				"float-to-bool!Cannot store float in array<bool>",
+				"bool-to-float!Cannot store bool in array<float>",
+				"bool-key!Cannot store bool in map<int,int>",
+			};
+			check_eq(expected.size(), seen[0].size(), "row count");
+			for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+		});
 
-        // ===== AUTO KEYWORD TESTS =====
+		// ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {
             auto eng = make_engine();
@@ -2505,22 +2507,23 @@ public:
         });
 
         test("subclass_admission_battery", [check_quad, check_quad_error]() {
-            // Dev ruling 2026-09-02: class-typed arrays admit the class and its subclasses (exact
-            // ids compare first; the parent-chain walk runs only on a name mismatch); each
-            // slot keeps its own class tag; whole-array conversions prove the source class once
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B(), D()]; to_string(arr.size()) + \",\" + to_string(arr[1].b)", "2,2", "a subclass element keeps its own class (per-slot tag): its fields stay reachable");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr.push(D()); to_string(arr.size()) + \",\" + to_string(arr[1].a)", "2,1", "push of a subclass into array<Base>");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr[0] = D(); to_string(arr[0].b)", "2", "store of a subclass into an element");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } class E : D { int c = 3; } array<B> deep = [E()]; to_string(deep[0].c)", "3", "two inheritance levels");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<D> ds = [D()]; array<B> bs = ds; bs[0].a = 9; to_string(ds[0].a) + \",\" + to_string(bs[0].a)", "1,9", "array<Derived> into array<Base> is a copy (value semantics)");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [D(), D()]; array<D> back = bs; to_string(back.size()) + \",\" + to_string(back[1].b)", "2,2", "array<Base> whose elements are all Derived converts to array<Derived>");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } function total(array<B> xs) -> int { int t = 0; for (auto x : xs) { t += x.a; } return t; } array<D> ds = [D(), D()]; to_string(total(ds))", "2", "array<Derived> binds a by-value array<Base> parameter");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<B> bs = [D()]; grow(bs); to_string(bs.size())", "2", "reference parameter over array<Base> holding a subclass");
-            check_quad("class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [D()]; auto c = arr; c[0].b = 7; to_string(arr[0].b) + \",\" + to_string(c[0].b)", "2,7", "copy of an array<Base> clones the subclass element");
-            check_quad_error("class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [B()]; array<D> x = bs", "array<Base> holding a Base does not convert to array<Derived>");
-            check_quad_error("class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<D> ds = [D()]; grow(ds)", "a reference parameter aliases the caller's array under ITS tag: pushing a Base into array<Derived> still raises");
-            check_quad_error("class B { int a = 1; } class J { int j = 0; } array<B> bs = [B()]; bs.push(J())", "an unrelated class is still rejected");
-        });
+			// Runtime subclass tags and value-dependent downcasts are tested explicitly in warn mode.
+			// Dev ruling 2026-09-02: class-typed arrays admit the class and its subclasses (exact
+			// ids compare first; the parent-chain walk runs only on a name mismatch); each
+			// slot keeps its own class tag; whole-array conversions prove the source class once
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B(), D()]; to_string(arr.size()) + \",\" + to_string(arr[1].b)", "2,2", "a subclass element keeps its own class (per-slot tag): its fields stay reachable");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr.push(D()); to_string(arr.size()) + \",\" + to_string(arr[1].a)", "2,1", "push of a subclass into array<Base>");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr[0] = D(); to_string(arr[0].b)", "2", "store of a subclass into an element");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } class E : D { int c = 3; } array<B> deep = [E()]; to_string(deep[0].c)", "3", "two inheritance levels");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<D> ds = [D()]; array<B> bs = ds; bs[0].a = 9; to_string(ds[0].a) + \",\" + to_string(bs[0].a)", "1,9", "array<Derived> into array<Base> is a copy (value semantics)");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [D(), D()]; array<D> back = bs; to_string(back.size()) + \",\" + to_string(back[1].b)", "2,2", "array<Base> whose elements are all Derived converts to array<Derived>");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } function total(array<B> xs) -> int { int t = 0; for (auto x : xs) { t += x.a; } return t; } array<D> ds = [D(), D()]; to_string(total(ds))", "2", "array<Derived> binds a by-value array<Base> parameter");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<B> bs = [D()]; grow(bs); to_string(bs.size())", "2", "reference parameter over array<Base> holding a subclass");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [D()]; auto c = arr; c[0].b = 7; to_string(arr[0].b) + \",\" + to_string(c[0].b)", "2,7", "copy of an array<Base> clones the subclass element");
+			check_quad_error("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [B()]; array<D> x = bs", "array<Base> holding a Base does not convert to array<Derived>");
+			check_quad_error("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } function grow(array<B>& xs) { xs.push(B()); } array<D> ds = [D()]; grow(ds)", "a reference parameter aliases the caller's array under ITS tag: pushing a Base into array<Derived> still raises");
+			check_quad_error("[[warn_mode]] class B { int a = 1; } class J { int j = 0; } array<B> bs = [B()]; bs.push(J())", "an unrelated class is still rejected");
+		});
 
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {
             // fuzz seed 22684 (2026-09-02): the interpreter's typed declaration enforced the
@@ -2626,61 +2629,61 @@ public:
         });
 
         test("typed_to_array_var_conversion_rebuilds", [this, quad, check_quad, check_quad_error]() {
-            // `array<var> x = typed;` is the explicit representation step (typed_array_design.md):
-            // every typed kind reboxes into a fresh script_value vector under the array<var> tag
-            // (pushes of anything then land), the source buffer is untouched, and the two are
-            // independent. Pre-fix the raw buffer survived under the array<var> tag and the
-            // first heterogeneous push wrote a script_value into it (segfault, both backends).
-            check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(\"four\"); ints.push(9); m[0] = \"zero\"; "
-                       "to_json(m) + \"|\" + to_json(ints) + \"|\" + to_string(m.size()) + \"|\" + type_of(m) + \"|\" + type_of(m[1]) + \"|\" + type_of(m[3])",
-                       "[\"zero\",2,3,\"four\"]|[1,2,3,9]|4|array|int|string", "int buffer -> array<var>");
-            check_quad("array<float> fs = [1.5, 2.5]; array<var> m = fs; m.push(\"x\"); to_json(m) + \"|\" + to_json(fs) + \"|\" + type_of(m[0])",
-                       "[1.5,2.5,\"x\"]|[1.5,2.5]|float", "float buffer -> array<var>");
-            check_quad("array<bool> bs = [true, false]; array<var> m = bs; m.push(\"x\"); to_json(m) + \"|\" + to_json(bs) + \"|\" + type_of(m[0])",
-                       "[true,false,\"x\"]|[true,false]|bool", "bool buffer -> array<var>");
-            check_quad("array<char> cs = ['a', 'b']; array<var> m = cs; m.push(\"x\"); to_json(m) + \"|\" + to_json(cs) + \"|\" + type_of(m[0])",
-                       "[\"a\",\"b\",\"x\"]|[\"a\",\"b\"]|char", "char buffer -> array<var>");
-            check_quad("array<string> ss = [\"a\", \"b\"]; array<var> m = ss; m.push(5); m[0] = \"z\"; to_json(m) + \"|\" + to_json(ss) + \"|\" + type_of(m[2])",
-                       "[\"z\",\"b\",5]|[\"a\",\"b\"]|int", "string buffer -> array<var>");
-            check_quad("class K { int a = 1; K(int v) { a = v; } } array<K> ks = [K(1), K(2)]; array<var> m = ks; m.push(\"x\"); m[0].a = 9; "
-                       "to_string(m.size()) + \"|\" + type_of(m[0]) + \"|\" + to_string(m[0].a) + \"|\" + to_string(ks[0].a) + \"|\" + type_of(m[2])",
-                       "3|K|9|1|string", "object buffer -> array<var> (decl copies the instances)");
-            check_quad("array<int> ints = []; array<var> m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)", "[\"x\"]|[]", "empty buffer -> array<var>");
-            // the same table at every boundary: assignment, parameter, return, field store,
-            // field initializer, cast
-            check_quad("array<int> ints = [1, 2, 3]; array<var> m = []; m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "assignment");
-            check_quad("array<int> ints = [1, 2, 3]; function f(array<var> a) { a.push(\"x\"); return to_json(a); } f(ints) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "parameter");
-            check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } array<var> r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "return into array<var>");
-            check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } var r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "return into var (the rebuild never aliases the source)");
-            check_quad("class C { array<var> f = []; } array<int> ints = [1, 2, 3]; auto c = C(); c.f = ints; c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "field store");
-            check_quad("array<int> ints = [1, 2, 3]; class C { array<var> f = ints; } auto c = C(); c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "field initializer");
-            check_quad("array<int> ints = [1, 2, 3]; array<var> m = cast<array<var>>(ints); m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
-                       "[1,2,3,\"x\"]|[1,2,3]", "cast<array<var>>");
-            // auto infers the buffer (no rebuild): still enforced
-            check_quad("array<int> ints = [1, 2, 3]; auto a = ints; a.push(4); ints.push(9); to_json(a) + \"|\" + to_json(ints)", "[1,2,3,4]|[1,2,3,9]", "auto keeps array<int>");
-            check_quad_error("array<int> ints = [1, 2, 3]; auto a = ints; a.push(\"x\"); a.size()", "auto keeps array<int> enforcement");
-            // the opposite direction rebuilds the raw buffer from a vector holding only ints
-            check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(4); array<int> back = m; back.push(5); m.push(\"s\"); to_json(back) + \"|\" + to_json(m)",
-                       "[1,2,3,4,5]|[1,2,3,4,\"s\"]", "array<var> -> array<int> rebuilds the buffer");
-            // element coercion between primitive buffers, independent both ways
-            check_quad("array<int> ints = [1, 2]; array<float> fs = ints; fs.push(3.5); ints.push(7); to_json(fs) + \"|\" + type_of(fs[0]) + \"|\" + to_json(ints)",
-                       "[1.0,2.0,3.5]|float|[1,2,7]", "array<int> -> array<float>");
-            check_quad("array<float> fs = [1.5, 2.5]; array<int> ints = fs; ints.push(3); to_json(ints) + \"|\" + type_of(ints[0]) + \"|\" + to_json(fs)",
-                       "[1,2,3]|int|[1.5,2.5]", "array<float> -> array<int>");
-            // mismatches keep the documented boundary text on both backends
-            auto mixed = quad("array<var> m = [1, \"two\"]; array<int> ints = m; ints.size()");
-            check_eq(mixed[0], mixed[1], "mixed vector -> array<int> parity");
-            check(mixed[0].find("Cannot store string in array<int>") != std::string::npos, "mixed vector -> array<int> raises the boundary text: " + mixed[0]);
-            auto strs = quad("array<string> ss = [\"a\"]; array<int> ints = ss; ints.size()");
-            check_eq(strs[0], strs[1], "string buffer -> array<int> parity");
-            check(strs[0].find("Cannot store string in array<int>") != std::string::npos, "string buffer -> array<int> raises the boundary text: " + strs[0]);
-        });
+			// `array<var> x = typed;` is the explicit representation step (typed_array_design.md):
+			// every typed kind reboxes into a fresh script_value vector under the array<var> tag
+			// (pushes of anything then land), the source buffer is untouched, and the two are
+			// independent. Pre-fix the raw buffer survived under the array<var> tag and the
+			// first heterogeneous push wrote a script_value into it (segfault, both backends).
+			check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(\"four\"); ints.push(9); m[0] = \"zero\"; "
+					   "to_json(m) + \"|\" + to_json(ints) + \"|\" + to_string(m.size()) + \"|\" + type_of(m) + \"|\" + type_of(m[1]) + \"|\" + type_of(m[3])",
+					   "[\"zero\",2,3,\"four\"]|[1,2,3,9]|4|array|int|string", "int buffer -> array<var>");
+			check_quad("array<float> fs = [1.5, 2.5]; array<var> m = fs; m.push(\"x\"); to_json(m) + \"|\" + to_json(fs) + \"|\" + type_of(m[0])",
+					   "[1.5,2.5,\"x\"]|[1.5,2.5]|float", "float buffer -> array<var>");
+			check_quad("array<bool> bs = [true, false]; array<var> m = bs; m.push(\"x\"); to_json(m) + \"|\" + to_json(bs) + \"|\" + type_of(m[0])",
+					   "[true,false,\"x\"]|[true,false]|bool", "bool buffer -> array<var>");
+			check_quad("array<char> cs = ['a', 'b']; array<var> m = cs; m.push(\"x\"); to_json(m) + \"|\" + to_json(cs) + \"|\" + type_of(m[0])",
+					   "[\"a\",\"b\",\"x\"]|[\"a\",\"b\"]|char", "char buffer -> array<var>");
+			check_quad("array<string> ss = [\"a\", \"b\"]; array<var> m = ss; m.push(5); m[0] = \"z\"; to_json(m) + \"|\" + to_json(ss) + \"|\" + type_of(m[2])",
+					   "[\"z\",\"b\",5]|[\"a\",\"b\"]|int", "string buffer -> array<var>");
+			check_quad("class K { int a = 1; K(int v) { a = v; } } array<K> ks = [K(1), K(2)]; array<var> m = ks; m.push(\"x\"); m[0].a = 9; "
+					   "to_string(m.size()) + \"|\" + type_of(m[0]) + \"|\" + to_string(m[0].a) + \"|\" + to_string(ks[0].a) + \"|\" + type_of(m[2])",
+					   "3|K|9|1|string", "object buffer -> array<var> (decl copies the instances)");
+			check_quad("array<int> ints = []; array<var> m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)", "[\"x\"]|[]", "empty buffer -> array<var>");
+			// the same table at every boundary: assignment, parameter, return, field store,
+			// field initializer, cast
+			check_quad("array<int> ints = [1, 2, 3]; array<var> m = []; m = ints; m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "assignment");
+			check_quad("array<int> ints = [1, 2, 3]; function f(array<var> a) { a.push(\"x\"); return to_json(a); } f(ints) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "parameter");
+			check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } array<var> r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "return into array<var>");
+			check_quad("array<int> ints = [1, 2, 3]; array<var> f() { return ints; } var r = f(); r.push(\"x\"); to_json(r) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "return into var (the rebuild never aliases the source)");
+			check_quad("class C { array<var> f = []; } array<int> ints = [1, 2, 3]; auto c = C(); c.f = ints; c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "field store");
+			check_quad("array<int> ints = [1, 2, 3]; class C { array<var> f = ints; } auto c = C(); c.f.push(\"x\"); to_json(c.f) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "field initializer");
+			check_quad("array<int> ints = [1, 2, 3]; array<var> m = cast<array<var>>(ints); m.push(\"x\"); to_json(m) + \"|\" + to_json(ints)",
+					   "[1,2,3,\"x\"]|[1,2,3]", "cast<array<var>>");
+			// auto infers the buffer (no rebuild): still enforced
+			check_quad("array<int> ints = [1, 2, 3]; auto a = ints; a.push(4); ints.push(9); to_json(a) + \"|\" + to_json(ints)", "[1,2,3,4]|[1,2,3,9]", "auto keeps array<int>");
+			check_quad_error("array<int> ints = [1, 2, 3]; auto a = ints; a.push(\"x\"); a.size()", "auto keeps array<int> enforcement");
+			// the opposite direction rebuilds the raw buffer from a vector holding only ints
+			check_quad("array<int> ints = [1, 2, 3]; array<var> m = ints; m.push(4); array<int> back = m; back.push(5); m.push(\"s\"); to_json(back) + \"|\" + to_json(m)",
+					   "[1,2,3,4,5]|[1,2,3,4,\"s\"]", "array<var> -> array<int> rebuilds the buffer");
+			// element coercion between primitive buffers, independent both ways
+			check_quad("array<int> ints = [1, 2]; array<float> fs = ints; fs.push(3.5); ints.push(7); to_json(fs) + \"|\" + type_of(fs[0]) + \"|\" + to_json(ints)",
+					   "[1.0,2.0,3.5]|float|[1,2,7]", "array<int> -> array<float>");
+			check_quad("array<float> fs = [1.5, 2.5]; array<int> ints = fs; ints.push(3); to_json(ints) + \"|\" + type_of(ints[0]) + \"|\" + to_json(fs)",
+					   "[1,2,3]|int|[1.5,2.5]", "array<float> -> array<int>");
+			// mismatches keep the documented boundary text on both backends
+			auto mixed = quad("array<var> m = [1, \"two\"]; array<int> ints = m; ints.size()");
+			check_eq(mixed[0], mixed[1], "mixed vector -> array<int> parity");
+			check(mixed[0].find("Cannot store string in array<int>") != std::string::npos, "mixed vector -> array<int> raises the boundary text: " + mixed[0]);
+			auto strs = quad("[[warn_mode]] array<string> ss = [\"a\"]; array<int> ints = ss; ints.size()");
+			check_eq(strs[0], strs[1], "string buffer -> array<int> parity");
+			check(strs[0].find("Cannot store string in array<int>") != std::string::npos, "string buffer -> array<int> raises the boundary text: " + strs[0]);
+		});
 
         test("field_initializers_copy_like_declarations", [this, quad, check_quad]() {
             // `T f = expr;` in a class body is an initialization: an lvalue-shaped or
@@ -3417,30 +3420,32 @@ public:
         });
 
         test("typed_slot_container_boundary_on_params_and_returns", [this, check_both, both]() {
-            check_both(R"JAI(
-                void pa(array<int> a) {}
-                string r1 = ""; try { pa(["x"]); r1 = "ok"; } catch (e) { r1 = e; }
-                array<int> ga() { return ["x"]; }
-                string r2 = ""; try { ga(); r2 = "ok"; } catch (e) { r2 = e; }
-                string pb(array<int> a) { return type_of(a[1]) + to_string(a[1]); }
-                string r3 = pb([1, 2.5]);
-                array<int> g = [1, 2];
-                string pt(array<int> a) { return to_string(a.size()) + type_of(a[0]); }
-                r1 + "|" + r2 + "|" + r3 + "|" + pt(g)
-            )JAI", "Cannot store string in array<int>|Cannot store string in array<int>|int2|2int", "array<int> parameters and returns run the element boundary");
-            auto [i_out, v_out] = both(R"JAI(
-                void pc(array<int> a) { a.push("zz"); }
-                string r4 = ""; try { pc([1]); r4 = "ok"; } catch (e) { r4 = e; }
-                string r5 = ""; try { array<int> x = [1]; x.push("zz"); r5 = "ok"; } catch (e) { r5 = e; }
-                void pm(map<string,int> m) {}
-                string r6 = ""; try { pm({"k": "v"}); r6 = "ok"; } catch (e) { r6 = e; }
-                string r7 = ""; try { map<string,int> m = {"k": "v"}; r7 = "ok"; } catch (e) { r7 = e; }
-                to_string(r4 == r5) + ":" + r4 + "|" + to_string(r6 == r7) + ":" + r6
-            )JAI");
-            check_eq(i_out, v_out, "container parameter texts agree across backends");
-            check_true(i_out.rfind("true:Cannot push", 0) == 0 && i_out.find("|true:Cannot store") != std::string::npos,
-                "a bound array<int>/map<string,int> parameter is the declared representation (got: " + i_out + ")");
-        });
+			check_both(R"JAI(
+				[[warn_mode]] // retain runtime boundary-text coverage
+				void pa(array<int> a) {}
+				string r1 = ""; try { pa(["x"]); r1 = "ok"; } catch (e) { r1 = e; }
+				array<int> ga() { return ["x"]; }
+				string r2 = ""; try { ga(); r2 = "ok"; } catch (e) { r2 = e; }
+				string pb(array<int> a) { return type_of(a[1]) + to_string(a[1]); }
+				string r3 = pb([1, 2.5]);
+				array<int> g = [1, 2];
+				string pt(array<int> a) { return to_string(a.size()) + type_of(a[0]); }
+				r1 + "|" + r2 + "|" + r3 + "|" + pt(g)
+			)JAI", "Cannot store string in array<int>|Cannot store string in array<int>|int2|2int", "array<int> parameters and returns run the element boundary");
+			auto [i_out, v_out] = both(R"JAI(
+				[[warn_mode]] // retain runtime boundary-text coverage
+				void pc(array<int> a) { a.push("zz"); }
+				string r4 = ""; try { pc([1]); r4 = "ok"; } catch (e) { r4 = e; }
+				string r5 = ""; try { array<int> x = [1]; x.push("zz"); r5 = "ok"; } catch (e) { r5 = e; }
+				void pm(map<string,int> m) {}
+				string r6 = ""; try { pm({"k": "v"}); r6 = "ok"; } catch (e) { r6 = e; }
+				string r7 = ""; try { map<string,int> m = {"k": "v"}; r7 = "ok"; } catch (e) { r7 = e; }
+				to_string(r4 == r5) + ":" + r4 + "|" + to_string(r6 == r7) + ":" + r6
+			)JAI");
+			check_eq(i_out, v_out, "container parameter texts agree across backends");
+			check_true(i_out.rfind("true:Cannot push", 0) == 0 && i_out.find("|true:Cannot store") != std::string::npos,
+				"a bound array<int>/map<string,int> parameter is the declared representation (got: " + i_out + ")");
+		});
 
         test("typed_slot_local_container_assign_checks_elements", [check_both]() {
             check_both(R"JAI(

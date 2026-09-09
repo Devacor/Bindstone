@@ -69,6 +69,30 @@ namespace jai::vm {
         // to frame exit for in-loop script frames (a recursive activation counts its inner
         // activations again). Names, files and lines are copied when a chunk is first seen,
         // so the report does not depend on chunk lifetime.
+        // Slot census (serial plan, measurement 1). Per frame slot: use bits (1 typed-op operand,
+        // 2 general-op read, 4 general-op definition, 8 address taken, 16 captured by a closure,
+        // 32 an unproven kernel definition into a temp) and decl_kind (0 none = a compiler temp,
+        // 1 declared proven scalar, 2 declared non-scalar or dynamic). A raw-cell CANDIDATE is a
+        // proven-scalar declaration (or a temp with only proven definitions) that is not escaped;
+        // its general uses are BOUNDARY materializations (reads box, definitions unbox), weighted
+        // by ip_counts at report time. Everything else is a rejection with its first rejecting
+        // use named. Chunk-level uses (counted-for and call-site operands) carry no ip.
+        struct slot_census {
+            std::vector<uint8_t> use;
+            std::vector<uint8_t> decl_kind;
+            std::vector<std::string> decl_type;                  // spelled declared type (rejection text)
+            std::vector<uint32_t> first_general_ip;
+            std::vector<uint32_t> first_reject_ip;
+            std::vector<std::vector<uint32_t>> read_slots_at_ip;
+            std::vector<std::vector<uint32_t>> write_slots_at_ip;
+            std::vector<std::vector<uint32_t>> typed_slots_at_ip;
+            std::vector<uint32_t> call_ips;
+            std::vector<std::pair<uint32_t, uint32_t>> loops;   // [target, back-edge ip]
+            std::vector<std::string> slot_names;
+            std::vector<vm_instruction> code;                   // the chunk's instructions (the chunk may be gone at report time)
+            uint32_t opaque_ops = 0;
+            bool has_yield = false;
+        };
         struct profile_chunk_stats {
             std::string name;
             std::string file;
@@ -77,7 +101,9 @@ namespace jai::vm {
             std::vector<uint64_t> ip_counts;
             uint64_t inclusive_cycles = 0;
             uint64_t entries = 0;
+            slot_census census;
         };
+        void dump_slot_census() const;
         std::unordered_map<const chunk*, profile_chunk_stats> profile_chunks_;
         profile_chunk_stats& profile_stats_for(const chunk& code);
         std::map<std::string, uint64_t> profile_native_callees_;   // in-loop fast-path misses by name

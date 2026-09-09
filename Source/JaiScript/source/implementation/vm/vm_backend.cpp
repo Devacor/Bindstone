@@ -13312,12 +13312,249 @@ checked_result<void> vm_backend::run(frame& entry) {
 #ifdef JAISCRIPT_VM_PROFILE
 // Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
 // self-time histogram on backend teardown. Percentages are of total dispatched cycles.
+#ifdef JAISCRIPT_VM_PROFILE
+namespace {
+	enum : uint8_t { census_use_typed = 1, census_use_read = 2, census_use_write = 4, census_use_ref = 8, census_use_capture = 16, census_use_unproven = 32 };
+	enum : uint8_t { census_decl_none = 0, census_decl_scalar = 1, census_decl_other = 2 };
+
+	bool census_scalar_type(const type_info* t) {
+		if (!t) { return false; }
+		switch (t->base_type) {
+		case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+		case script_value_type::jai_bool_type: case script_value_type::jai_char_type: return true;
+		default: return false;
+		}
+	}
+
+	vm_backend::slot_census census_chunk(const chunk& c, const string_symbolizer* symbolizer) {
+		vm_backend::slot_census r;
+		const size_t n = c.local_count;
+		r.use.assign(n, 0);
+		r.decl_kind.assign(n, census_decl_none);
+		r.decl_type.assign(n, std::string());
+		r.first_general_ip.assign(n, UINT32_MAX);
+		r.first_reject_ip.assign(n, UINT32_MAX);
+		r.slot_names.assign(n, std::string());
+		r.read_slots_at_ip.resize(c.code.size());
+		r.write_slots_at_ip.resize(c.code.size());
+		r.typed_slots_at_ip.resize(c.code.size());
+		r.code = c.code;
+		auto name_slot = [&](uint32_t slot, std::string_view name) {
+			if (slot != k_invalid_u32 && slot < n && r.slot_names[slot].empty() && !name.empty()) { r.slot_names[slot] = std::string(name); }
+		};
+		auto sym_name = [&](uint32_t sym_idx) -> std::string_view {
+			return symbolizer && sym_idx < c.symbols.size() ? symbolizer->get_string(c.symbols[sym_idx]) : std::string_view();
+		};
+		auto declare = [&](uint32_t slot, const type_info* t, bool is_reference) {
+			if (slot == k_invalid_u32 || slot >= n || r.decl_kind[slot] != census_decl_none) { return; }
+			if (is_reference) { r.decl_kind[slot] = census_decl_other; r.decl_type[slot] = "reference"; return; }
+			if (census_scalar_type(t)) { r.decl_kind[slot] = census_decl_scalar; r.decl_type[slot] = std::string(t->canonical_name()); return; }
+			r.decl_kind[slot] = census_decl_other;
+			r.decl_type[slot] = t ? std::string(t->canonical_name()) : std::string("var/auto");
+		};
+		auto mark = [&](uint32_t slot, uint8_t bits, uint32_t ip) {
+			if (slot == k_invalid_u32 || slot >= n) { return; }
+			r.use[slot] |= bits;
+			if (bits & (census_use_ref | census_use_capture | census_use_unproven)) {
+				if (r.first_reject_ip[slot] == UINT32_MAX && ip != UINT32_MAX) { r.first_reject_ip[slot] = ip; }
+			}
+			if (ip == UINT32_MAX) { return; }
+			if (bits & census_use_read) { r.read_slots_at_ip[ip].push_back(slot); }
+			if (bits & census_use_write) { r.write_slots_at_ip[ip].push_back(slot); }
+			if ((bits & (census_use_read | census_use_write)) && r.first_general_ip[slot] == UINT32_MAX) { r.first_general_ip[slot] = ip; }
+			if (bits & census_use_typed) { r.typed_slots_at_ip[ip].push_back(slot); }
+		};
+		auto operand = [&](const fused_operand& o, uint32_t ip) {
+			if (o.slot == k_invalid_u32) { return; }
+			mark(o.slot, census_use_read, ip);
+			if (o.symbol != k_invalid_u32) { name_slot(o.slot, sym_name(o.symbol)); }
+		};
+		auto typed_slot = [&](uint32_t v, uint32_t ip) { if (!(v & k_typed_const_bit)) { mark(v & k_typed_slot_mask, census_use_typed, ip); } };
+		auto decl_of = [&](uint32_t node) -> uint32_t {
+			if (node >= c.nodes.size() || !c.nodes[node] || c.nodes[node]->get_type() != node_type::variable_decl) { return k_invalid_u32; }
+			const auto* vd = static_cast<const variable_decl*>(c.nodes[node].get());
+			if (vd->slot_index == SIZE_MAX) { return k_invalid_u32; }
+			const uint32_t slot = static_cast<uint32_t>(vd->slot_index);
+			name_slot(slot, vd->name);
+			declare(slot, vd->type.get(), false);   // reference declarations are their own opcodes (marked at the op)
+			if (vd->ref_escaping) { mark(slot, census_use_ref, UINT32_MAX); }   // boxed into a cell from birth
+			return slot;
+		};
+		for (const auto& pp : c.profile_params) { declare(pp.slot, pp.type, pp.is_reference); if (pp.is_reference) { mark(pp.slot, census_use_ref, UINT32_MAX); } }
+		auto binary_proto = [&](uint32_t idx, uint32_t ip) {
+			if (idx < c.fused_binary_protos.size()) { operand(c.fused_binary_protos[idx].left, ip); operand(c.fused_binary_protos[idx].right, ip); }
+		};
+		auto typed_operand = [&](const fused_operand& o, uint32_t ip) {
+			if (o.slot == k_invalid_u32) { return; }
+			mark(o.slot, census_use_typed, ip);
+			if (o.symbol != k_invalid_u32) { name_slot(o.slot, sym_name(o.symbol)); }
+		};
+		auto typed_binary_proto = [&](uint32_t idx, uint32_t ip) {
+			if (idx < c.fused_binary_protos.size()) { typed_operand(c.fused_binary_protos[idx].left, ip); typed_operand(c.fused_binary_protos[idx].right, ip); }
+		};
+		// a store lane reads its index and value operands as raw payloads (typed traffic); the
+		// container is a handle read; a general index op reads everything as values
+		auto index_proto = [&](uint32_t idx, uint32_t ip, bool raw_lane) {
+			if (idx >= c.fused_index_protos.size()) { return; }
+			const auto& p = c.fused_index_protos[idx];
+			operand(p.container, ip);
+			if (raw_lane) { typed_operand(p.index, ip); typed_operand(p.store_value, ip); typed_binary_proto(p.index_binary, ip); }
+			else { operand(p.index, ip); operand(p.store_value, ip); binary_proto(p.index_binary, ip); }
+			mark(p.decl_slot, census_use_write, ip);
+		};
+		for (uint32_t ip = 0; ip < c.code.size(); ++ip) {
+			const vm_instruction& ins = c.code[ip];
+			const opcode op = ins.op;
+			if (op >= opcode::op_t_add_ii && op <= opcode::op_t_mod_ff) {
+				mark(ins.a & k_typed_slot_mask, census_use_typed, ip); typed_slot(ins.b, ip); typed_slot(ins.c, ip);
+				if ((ins.a >> k_typed_dst_shift) == k_typed_dst_decl && ip < c.typed_sites.size()) {
+					const vm_instruction& orig = c.typed_sites[ip].orig;
+					if (orig.op == opcode::op_binary_fused_decl && orig.a < c.fused_binary_dst_protos.size()) { decl_of(c.fused_binary_dst_protos[orig.a].node_index); }
+				}
+				continue;
+			}
+			if (op >= opcode::op_t_jlt_ii && op <= opcode::op_t_jne_ff) { typed_slot(ins.a, ip); typed_slot(ins.b, ip); continue; }
+			switch (op) {
+			case opcode::op_t_decl_mov: mark(ins.a, census_use_typed, ip); mark(ins.b, census_use_typed, ip); decl_of(ins.c); break;
+			case opcode::op_t_decl_const: mark(ins.a, census_use_typed, ip); decl_of(ins.c); break;
+			case opcode::op_t_store_mov:
+			case opcode::op_t_store_const: {
+				mark(ins.a, census_use_typed, ip);
+				if (op == opcode::op_t_store_mov) { mark(ins.b, census_use_typed, ip); }
+				if (ip < c.typed_sites.size()) {
+					const auto& site = c.typed_sites[ip];
+					name_slot(ins.a, sym_name(site.orig2.a));
+					if (op == opcode::op_t_store_mov && site.orig.a != k_invalid_u32) { name_slot(site.orig.a, sym_name(site.orig.b)); }
+				}
+				break;
+			}
+			case opcode::op_t_push: mark(ins.a, census_use_read, ip); typed_slot(ins.b, ip); break;
+			case opcode::op_t_load: {
+				mark(ins.a, census_use_typed, ip);
+				if (ip < c.typed_sites.size()) {
+					const auto& site = c.typed_sites[ip];
+					mark(site.cont_slot, census_use_read, ip);
+					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { typed_slot(site.operands[k], ip); }
+					decl_of(site.orig.c);
+					if (site.orig.a < c.fused_index_protos.size()) { operand(c.fused_index_protos[site.orig.a].container, UINT32_MAX); }
+				}
+				break;
+			}
+			case opcode::op_load: mark(ins.a, census_use_read, ip); name_slot(ins.a, sym_name(ins.b)); break;
+			case opcode::op_return_ident: mark(ins.a, census_use_read, ip); name_slot(ins.a, sym_name(ins.b)); break;
+			case opcode::op_ref_return_bind: mark(ins.a, census_use_read | census_use_ref, ip); name_slot(ins.a, sym_name(ins.b)); break;
+			case opcode::op_store: mark(ins.b, census_use_write, ip); name_slot(ins.b, sym_name(ins.a)); break;
+			case opcode::op_compound_store:
+			case opcode::op_incdec: mark(ins.b, census_use_read | census_use_write, ip); name_slot(ins.b, sym_name(ins.a)); break;
+			case opcode::op_decl_var: mark(decl_of(ins.a), census_use_write, ip); break;
+			case opcode::op_decl_ref_ident:
+			case opcode::op_decl_ref_value: mark(decl_of(ins.a), census_use_write | census_use_ref, ip); break;
+			case opcode::op_index_fused_decl: mark(decl_of(ins.c), census_use_write, ip); index_proto(ins.a, ip, false); break;
+			case opcode::op_index_fused: index_proto(ins.a, ip, false); break;
+			case opcode::op_index_store_fused: index_proto(ins.a, ip, ins.a < c.fused_index_protos.size() && c.fused_index_protos[ins.a].typed_lane); break;
+			case opcode::op_binary_fused: binary_proto(ins.a, ip); break;
+			case opcode::op_binary_fused_temp: {
+				binary_proto(ins.a, ip);
+				// the general kernel lands in the temp: a proven class is a boundary definition, no proof is a rejection
+				const bool proven = ins.a < c.fused_binary_protos.size() && c.fused_binary_protos[ins.a].typed_class != 0;
+				mark(ins.b, static_cast<uint8_t>(census_use_write | (proven ? 0 : census_use_unproven)), ip);
+				break;
+			}
+			case opcode::op_fused_cmp_jump: binary_proto(ins.b, ip); break;
+			case opcode::op_compound_fused: {
+				if (ins.a < c.compound_fused_protos.size()) {
+					const auto& cp = c.compound_fused_protos[ins.a];
+					mark(cp.slot, census_use_read | census_use_write, ip); name_slot(cp.slot, sym_name(cp.symbol));
+					operand(cp.rhs, ip);
+					if (cp.rhs_proto != k_invalid_u32) { binary_proto(cp.rhs_proto, ip); }
+				}
+				break;
+			}
+			case opcode::op_binary_fused_decl:
+			case opcode::op_binary_fused_store: {
+				if (ins.a < c.fused_binary_dst_protos.size()) {
+					const auto& dp = c.fused_binary_dst_protos[ins.a];
+					mark(dp.slot, census_use_write, ip);
+					mark(decl_of(dp.node_index), census_use_write, ip);
+					binary_proto(dp.binary_proto, ip);
+				}
+				break;
+			}
+			case opcode::op_push_fused: {
+				if (ins.a < c.push_protos.size()) { operand(c.push_protos[ins.a].receiver, ip); operand(c.push_protos[ins.a].value, ip); }
+				break;
+			}
+			case opcode::op_call:
+			case opcode::op_call_method:
+			case opcode::op_call_from_scratch:
+				r.call_ips.push_back(ip);
+				if (ins.b < c.call_sites.size()) {
+					const auto& cs = c.call_sites[ins.b];
+					operand(cs.callee, ip);
+					mark(cs.receiver_slot, census_use_read, ip); mark(cs.chain_root_slot, census_use_read, ip);
+				}
+				break;
+			case opcode::op_closure:
+				if (ins.a < c.closure_protos.size()) {
+					for (const auto& [sym, slot] : c.closure_protos[ins.a].outer_slot_plan) {
+						if (slot != SIZE_MAX) { mark(static_cast<uint32_t>(slot), census_use_read | census_use_capture, ip); if (symbolizer) { name_slot(static_cast<uint32_t>(slot), symbolizer->get_string(sym)); } }
+					}
+				}
+				break;
+			case opcode::op_iter_init:
+			case opcode::op_iter_next:
+			case opcode::op_iter_pop:
+				if (ins.a < c.iter_protos.size() && c.iter_protos[ins.a].slot != SIZE_MAX) {
+					const auto& it = c.iter_protos[ins.a];
+					const uint32_t slot = static_cast<uint32_t>(it.slot);
+					if (symbolizer && it.var_symbol != UINT64_MAX) { name_slot(slot, symbolizer->get_string(it.var_symbol)); }
+					if (slot < n && r.decl_kind[slot] == census_decl_none) { r.decl_kind[slot] = census_decl_other; r.decl_type[slot] = it.is_reference ? "range-for binding (auto&)" : "range-for binding"; }
+					if (op == opcode::op_iter_next) { mark(slot, static_cast<uint8_t>(census_use_write | (it.is_reference ? census_use_ref : 0)), ip); }
+				}
+				break;
+			case opcode::op_try_push:
+				if (ins.c != k_invalid_u32 && ins.c < n) {
+					name_slot(ins.c, sym_name(ins.b));
+					if (r.decl_kind[ins.c] == census_decl_none) { r.decl_kind[ins.c] = census_decl_other; r.decl_type[ins.c] = "catch variable"; }
+					mark(ins.c, census_use_write, ip);
+				}
+				break;
+			case opcode::op_loop_back: r.loops.emplace_back(ins.a, ip); break;
+			case opcode::op_yield: r.has_yield = true; break;
+			default: ++r.opaque_ops; break;
+			}
+		}
+		for (const auto& p : c.counted_for_protos) { operand(p.var, UINT32_MAX); operand(p.end, UINT32_MAX); operand(p.step, UINT32_MAX); }
+		return r;
+	}
+
+	// candidate = a proven-scalar declaration, or a temp with only proven definitions, not escaped
+	bool census_candidate(const vm_backend::slot_census& cs, size_t slot) {
+		const uint8_t u = cs.use[slot];
+		if (u & (census_use_ref | census_use_capture | census_use_unproven)) { return false; }
+		if (cs.decl_kind[slot] == census_decl_other) { return false; }
+		if (cs.decl_kind[slot] == census_decl_none && !(u & census_use_typed)) { return false; }   // an undeclared binding, not a compiler temp
+		return u != 0;
+	}
+	const char* census_reject_reason(const vm_backend::slot_census& cs, size_t slot) {
+		const uint8_t u = cs.use[slot];
+		if (u & census_use_ref) { return "address taken"; }
+		if (u & census_use_capture) { return "captured by a closure"; }
+		if (cs.decl_kind[slot] == census_decl_other) { return "declared"; }
+		if (u & census_use_unproven) { return "unproven kernel definition"; }
+		if (cs.decl_kind[slot] == census_decl_none) { return "undeclared binding"; }
+		return "";
+	}
+}
+#endif
+
 vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code) {
 	auto& st = profile_chunks_[&code];
 	// a recycled chunk address with a different body starts a fresh row
 	if (st.lines.size() != code.code.size() || st.name != code.function_name) {
 		st = profile_chunk_stats{};
 		st.name = code.function_name;
+		st.census = census_chunk(code, symbolizer_);
 		st.lines.assign(code.code.size(), 0);
 		for (size_t ip = 0; ip < code.code.size(); ++ip) {
 			const ast_node* stmt = ip < code.stmt_nodes.size() ? code.stmt_nodes[ip] : nullptr;
@@ -13403,6 +13640,109 @@ void vm_backend::profile_reset() {
 		std::fill(st.ip_counts.begin(), st.ip_counts.end(), 0ull);
 		st.inclusive_cycles = 0;
 		st.entries = 0;
+	}
+}
+
+
+void vm_backend::dump_slot_census() const {
+	struct row { const profile_chunk_stats* st; uint64_t excl; };
+	std::vector<row> rows;
+	for (const auto& [code, st] : profile_chunks_) {
+		uint64_t excl = 0;
+		for (uint64_t cyc : st.ip_cycles) { excl += cyc; }
+		if (excl && !st.census.use.empty()) { rows.push_back({&st, excl}); }
+	}
+	if (rows.empty()) { return; }
+	std::sort(rows.begin(), rows.end(), [](const row& a, const row& b) { return a.excl > b.excl; });
+	fprintf(stderr, "[vm-profile] slot census (measured span; top functions by exclusive cycles). candidate = declared proven scalar or proven temp, not escaped; boundary = a general op on a candidate (reads box, definitions unbox), executions; rejected = address taken / captured / declared non-scalar or dynamic / unproven kernel definition:\n");
+	const size_t shown = rows.size() < 14 ? rows.size() : 14;
+	for (size_t i = 0; i < shown; ++i) {
+		const profile_chunk_stats& st = *rows[i].st;
+		const slot_census& cs = st.census;
+		const size_t n = cs.use.size();
+		size_t cand_typed_only = 0, cand_boundary = 0, cand_no_typed = 0, rej_ref = 0, rej_capture = 0, rej_declared = 0, rej_unproven = 0, rej_undeclared = 0, unused = 0, auto_with_typed = 0;
+		std::vector<uint64_t> bread(n, 0), bwrite(n, 0), rej_exec(n, 0);
+		for (size_t ip = 0; ip < st.ip_counts.size() && ip < cs.read_slots_at_ip.size(); ++ip) {
+			for (uint32_t slot : cs.read_slots_at_ip[ip]) { if (census_candidate(cs, slot)) { bread[slot] += st.ip_counts[ip]; } else { rej_exec[slot] += st.ip_counts[ip]; } }
+			for (uint32_t slot : cs.write_slots_at_ip[ip]) { if (census_candidate(cs, slot)) { bwrite[slot] += st.ip_counts[ip]; } else { rej_exec[slot] += st.ip_counts[ip]; } }
+		}
+		uint64_t bread_total = 0, bwrite_total = 0;
+		for (size_t slot = 0; slot < n; ++slot) {
+			const uint8_t u = cs.use[slot];
+			if (!u) { ++unused; continue; }
+			if (census_candidate(cs, slot)) {
+				const bool general = (u & (census_use_read | census_use_write)) != 0;
+				const bool typed = (u & census_use_typed) != 0;
+				if (typed && !general) { ++cand_typed_only; } else if (typed) { ++cand_boundary; } else { ++cand_no_typed; }
+				bread_total += bread[slot]; bwrite_total += bwrite[slot];
+			} else {
+				if (u & census_use_ref) { ++rej_ref; } else if (u & census_use_capture) { ++rej_capture; }
+				else if (cs.decl_kind[slot] == census_decl_other) { ++rej_declared; if ((u & census_use_typed) && cs.decl_type[slot] == "var/auto") { ++auto_with_typed; } }
+				else if (u & census_use_unproven) { ++rej_unproven; }
+				else { ++rej_undeclared; }
+			}
+		}
+		fprintf(stderr, "  %-26s slots %zu: candidates typed-only %zu | with boundaries %zu | no typed use %zu; rejected: address %zu | capture %zu | declared %zu (var/auto with typed uses %zu) | unproven %zu | undeclared %zu; unused %zu; opaque ops %u; yield %s; boundary executions: reads %llu writes %llu\n",
+			st.name.empty() ? "<top level>" : st.name.c_str(), n, cand_typed_only, cand_boundary, cand_no_typed, rej_ref, rej_capture, rej_declared, auto_with_typed, rej_unproven, rej_undeclared, unused, cs.opaque_ops, cs.has_yield ? "yes" : "no",
+			(unsigned long long)bread_total, (unsigned long long)bwrite_total);
+		std::vector<size_t> order;
+		for (size_t slot = 0; slot < n; ++slot) { if (bread[slot] + bwrite[slot] + rej_exec[slot]) { order.push_back(slot); } }
+		std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return bread[a] + bwrite[a] + rej_exec[a] > bread[b] + bwrite[b] + rej_exec[b]; });
+		for (size_t k = 0; k < order.size() && k < 8; ++k) {
+			const size_t slot = order[k];
+			const std::string nm = cs.slot_names[slot].empty() ? "slot" + std::to_string(slot) : cs.slot_names[slot];
+			if (census_candidate(cs, slot)) {
+				const uint32_t fip = cs.first_general_ip[slot];
+				fprintf(stderr, "      boundary %-14s %-8s reads %llu writes %llu   first %s at L%u\n", nm.c_str(), cs.decl_type[slot].empty() ? "temp" : cs.decl_type[slot].c_str(),
+					(unsigned long long)bread[slot], (unsigned long long)bwrite[slot],
+					fip < cs.code.size() ? std::string(opcode_name(cs.code[fip].op)).c_str() : "-", fip < st.lines.size() ? st.lines[fip] : 0u);
+			} else {
+				const uint32_t fip = cs.first_reject_ip[slot] != UINT32_MAX ? cs.first_reject_ip[slot] : cs.first_general_ip[slot];
+				fprintf(stderr, "      rejected %-14s %s %s   uses %llu   first %s at L%u\n", nm.c_str(), census_reject_reason(cs, slot), cs.decl_type[slot].c_str(),
+					(unsigned long long)rej_exec[slot],
+					fip < cs.code.size() ? std::string(opcode_name(cs.code[fip].op)).c_str() : "-", fip < st.lines.size() ? st.lines[fip] : 0u);
+			}
+		}
+		for (const auto& [target, back] : cs.loops) {
+			if (back >= st.ip_counts.size() || target > back) { continue; }
+			const uint64_t iterations = st.ip_counts[back];
+			if (!iterations) { continue; }
+			uint64_t typed_exec = 0, boundary_exec = 0, rejected_exec = 0, call_exec = 0, other_exec = 0;
+			std::vector<uint8_t> touched(n, 0);
+			for (uint32_t ip = target; ip <= back; ++ip) {
+				const uint64_t cnt = st.ip_counts[ip];
+				bool typed = !cs.typed_slots_at_ip[ip].empty(), boundary = false, rejected = false;
+				for (uint32_t slot : cs.read_slots_at_ip[ip]) { touched[slot] = 1; (census_candidate(cs, slot) ? boundary : rejected) = true; }
+				for (uint32_t slot : cs.write_slots_at_ip[ip]) { touched[slot] = 1; (census_candidate(cs, slot) ? boundary : rejected) = true; }
+				for (uint32_t slot : cs.typed_slots_at_ip[ip]) { touched[slot] = 1; }
+				if (typed) { typed_exec += cnt; }
+				if (boundary) { boundary_exec += cnt; }
+				if (rejected) { rejected_exec += cnt; }
+				if (!typed && !boundary && !rejected) { other_exec += cnt; }
+			}
+			for (uint32_t cip : cs.call_ips) { if (cip >= target && cip <= back) { call_exec += st.ip_counts[cip]; } }
+			std::string bnames, rnames;
+			for (size_t slot = 0; slot < n; ++slot) {
+				if (!touched[slot]) { continue; }
+				const std::string nm = cs.slot_names[slot].empty() ? "slot" + std::to_string(slot) : cs.slot_names[slot];
+				if (census_candidate(cs, slot)) { if (cs.use[slot] & (census_use_read | census_use_write)) { if (!bnames.empty()) { bnames += ","; } bnames += nm; } }
+				else { if (!rnames.empty()) { rnames += ","; } rnames += nm; }
+			}
+			fprintf(stderr, "      loop L%u..L%u [ip %u..%u] iterations %llu: per iteration typed %.2f | boundary %.2f | rejected-slot %.2f | calls %.2f | other %.2f; boundary slots {%s} rejected slots {%s}\n",
+				target < st.lines.size() ? st.lines[target] : 0u, st.lines[back], target, back, (unsigned long long)iterations,
+				(double)typed_exec / (double)iterations, (double)boundary_exec / (double)iterations, (double)rejected_exec / (double)iterations,
+				(double)call_exec / (double)iterations, (double)other_exec / (double)iterations, bnames.empty() ? "none" : bnames.c_str(), rnames.empty() ? "none" : rnames.c_str());
+			if (back - target < 48) {
+				std::string listing;
+				for (uint32_t ip = target; ip <= back && ip < cs.code.size(); ++ip) {
+					const vm_instruction& li = cs.code[ip];
+					char buf[96];
+					snprintf(buf, sizeof(buf), "%s%u:%s(%u,%u,%u)x%llu", listing.empty() ? "" : " ", ip, std::string(opcode_name(li.op)).c_str(), li.a, li.b, li.c, (unsigned long long)st.ip_counts[ip]);
+					listing += buf;
+				}
+				fprintf(stderr, "        %s\n", listing.c_str());
+			}
+		}
 	}
 }
 
@@ -13513,6 +13853,7 @@ void vm_backend::dump_opcode_profile() const {
 		}
 	};
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
+	dump_slot_census();
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
 	dump_next_histogram("DECL_VAR producers (previous opcode, not consumers)", profile_decl_var_prev_);
@@ -13641,8 +13982,8 @@ void vm_backend::dump_opcode_profile() const {
 			(double)profile_mpush_sub_[1] / (double)profile_mpush_count_);
 		fprintf(stderr, "[vm-profile] method-push prologue split (avg cyc from entry): depth+limit %.0f | +chunk-cache %.0f | +records %.0f\n",
 			(double)profile_mpush_pro_[0] / (double)profile_mpush_count_, (double)profile_mpush_pro_[1] / (double)profile_mpush_count_, (double)profile_mpush_pro_[2] / (double)profile_mpush_count_);
-		fprintf(stderr, "[vm-profile] decl fast-path sub-sections (avg cyc): node %.0f | flags+top %.0f | move+pop %.0f | tag+slot %.0f (%llu fast decls)\n",
-			profile_decl_paths_[0] ? (double)profile_decl_sub_[0] / (double)profile_decl_paths_[0] : 0.0, profile_decl_paths_[0] ? (double)profile_decl_sub_[1] / (double)profile_decl_paths_[0] : 0.0,
+		fprintf(stderr, "[vm-profile] decl fast-path sub-sections (avg cyc): flags+top %.0f | move+pop %.0f | tag+slot %.0f (%llu fast decls)\n",
+			profile_decl_paths_[0] ? (double)profile_decl_sub_[1] / (double)profile_decl_paths_[0] : 0.0,
 			profile_decl_paths_[0] ? (double)profile_decl_sub_[2] / (double)profile_decl_paths_[0] : 0.0, profile_decl_paths_[0] ? (double)profile_decl_sub_[3] / (double)profile_decl_paths_[0] : 0.0, (unsigned long long)profile_decl_paths_[0]);
 		fprintf(stderr, "[vm-profile] fused_cmp_jump: operand resolution %.0f avg cyc over %llu compares; %llu had a shared_ptr side\n",
 			profile_cmp_count_ ? (double)profile_cmp_operands_cyc_ / (double)profile_cmp_count_ : 0.0, (unsigned long long)profile_cmp_count_, (unsigned long long)profile_cmp_sptr_null_);

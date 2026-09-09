@@ -591,6 +591,9 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	for (const auto& p : parameters) {
 		uint64_t id = p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name);
 		callable_.declared.insert(id);
+#ifdef JAISCRIPT_VM_PROFILE
+		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
+#endif
 	}
 	{
 		body_walker walker;

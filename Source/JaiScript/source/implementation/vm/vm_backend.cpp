@@ -6806,14 +6806,6 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 	if (src && !dst->is_reference()) {
 		const script_value& v = src->deref();
 		const size_t vi = v.raw_storage_index();
-		// the same scalar kind, stamp and engine on both sides: the payload is the whole move
-		if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && dst->raw_storage_index() == vi &&
-		    dst->type_info_raw() == v.type_info_raw() && dst->get_engine() == v.get_engine()) {
-			JAI_TYPED_INPLACE(1);
-			if (vi == script_value::TYPEID_INT) { dst->unchecked_set_int_payload(v.unchecked_as_int()); }
-			else { dst->unchecked_set_float_payload(v.unchecked_as_float()); }
-			return {};
-		}
 		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
 		    vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) {
 			const type_info* slot_type = dst->type_info_raw();
@@ -6835,14 +6827,6 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 	script_value v = materialize_constant(*f.code, ins.b);
 	if (script_value* dst = frame_slot(f, ins.a); dst && !dst->is_reference()) {
-		const size_t vi = v.raw_storage_index();
-		if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && dst->raw_storage_index() == vi &&
-		    dst->type_info_raw() == v.type_info_raw() && dst->get_engine() == v.get_engine()) {
-			JAI_TYPED_INPLACE(1);
-			if (vi == script_value::TYPEID_INT) { dst->unchecked_set_int_payload(v.unchecked_as_int()); }
-			else { dst->unchecked_set_float_payload(v.unchecked_as_float()); }
-			return {};
-		}
 		const type_info* slot_type = dst->type_info_raw();
 		if (!slot_type || detail::same_type_payload(v, slot_type)) {
 			JAI_TYPED_INPLACE(2);
@@ -14135,7 +14119,7 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_land_[9]);
 		fprintf(stderr, "[vm-profile] typed temp misses (measured span): no live slot %llu | wrong payload or reference %llu | other stamp %llu\n",
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
-		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu | move assign %llu | move fallback %llu\n",
+		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
 		fprintf(stderr, "[vm-profile] closed typed loop blocks (measured span): entries %llu | head compares %llu | body steps %llu | back edges %llu | misses %llu | exits %llu\n",
 			(unsigned long long)profile_block_[0], (unsigned long long)profile_block_[1], (unsigned long long)profile_block_[2], (unsigned long long)profile_block_[3], (unsigned long long)profile_block_[4], (unsigned long long)profile_block_[5]);

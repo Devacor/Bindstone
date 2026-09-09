@@ -1,5 +1,6 @@
 """Checkpoint recovery must preserve input identity, screening and ABAB order."""
 import copy
+import itertools
 import importlib.util
 import pathlib
 import tempfile
@@ -89,11 +90,80 @@ class ResumeTests(unittest.TestCase):
 		with self.assertRaisesRegex(RuntimeError,"recorded affinity"):
 			self.validate(records=records)
 
+	def test_candidate_retry_keeps_the_cross_variant_prefix_aligned(self):
+		self.builds["candidate"]=self.out/"candidate"
+		self.records=[]
+		for variant in self.builds:
+			for layout,ticks,warm in (("normal",300,0),("normal",600,600),("padding",300,0),("padding",600,600)):
+				self.add(layout,"gate",ticks,warm,0,0.5)
+				self.records[-1]["variant"]=variant
+		for variant,background in (("baseline",0.5),("candidate",1.5),("candidate",0.5)):
+			self.add("normal","timed",600,600,1,background)
+			self.records[-1]["variant"]=variant
+		valid,completed=self.validate()
+		self.assertEqual(2,completed)
+		_,variant,layout,number=comparison.timing_plan(valid,self.builds,3)[completed]
+		self.assertEqual(("baseline","padding",1),(variant,layout,number))
+
 	def test_raw_logs_cannot_escape_the_session_directory(self):
 		records=copy.deepcopy(self.records);records[-2]["log"]="../outside.log"
 		with self.assertRaises(ValueError):
 			self.validate(records=records)
 
+
+
+class MultiVariantTests(unittest.TestCase):
+	def test_every_pair_keeps_the_required_interleaving(self):
+		config={"name":"fixture","workload":"gloom","target":"jai_gloom","cores":1}
+		builds={name:pathlib.Path(name) for name in ("baseline","raw","fused","both")}
+		plan=comparison.timing_plan([config],builds,3)
+		self.assertEqual(48,len(plan))
+		for before,after in itertools.combinations(builds,2):
+			projected=[(variant,layout,number) for _,variant,layout,number in plan if variant in (before,after)]
+			expected=[]
+			for number in range(1,4):
+				expected.extend([(before,"normal",number),(after,"normal",number),
+					(before,"padding",number),(after,"padding",number)]*2)
+			self.assertEqual(expected,projected)
+
+	def test_named_variants_cannot_replace_or_escape_a_label(self):
+		self.assertEqual(["baseline","candidate","move"],list(comparison.variant_builds("a","b",["move=c"])))
+		for extra in (["baseline=b"],["candidate=b"],["raw=b","raw=c"],["../raw=b"],["raw="],["no_equal"]):
+			with self.subTest(extra=extra),self.assertRaises(ValueError):
+				comparison.variant_builds("a","b",extra)
+
+	def test_each_mechanism_gets_its_own_delta_and_busy_rows_are_excluded(self):
+		config={"name":"fixture","unit":"ms/tick"}
+		builds={"baseline":None,"candidate":None,"move":None}
+		records=[]
+		for layout in ("normal","padding"):
+			for variant,metric in (("baseline",100),("candidate",80),("move",60)):
+				for index in range(6):
+					records.append({"configuration":"fixture","variant":variant,"layout":layout,
+						"phase":"timed","accepted":True,"metric_ms":metric*(1.02 if layout=="padding" else 1)})
+		records.append({**records[-1],"accepted":False,"metric_ms":99999})
+		rows=comparison.difference_rows([config],builds,records)
+		self.assertEqual(6,len(rows))
+		for row in rows:
+			want={("baseline","candidate"):-20,("baseline","move"):-40,("candidate","move"):-25}[
+				(row["baseline_variant"],row["candidate_variant"])]
+			self.assertAlmostEqual(want,row["median_delta_percent"])
+			for value in row["paired_delta_band_percent"]:self.assertAlmostEqual(want,value)
+
+	def test_missing_accepted_side_is_rejected(self):
+		config={"name":"fixture","unit":"ms/tick"}
+		rows=[{"configuration":"fixture","variant":variant,"layout":"normal","phase":"timed",
+			"accepted":True,"metric_ms":value} for variant,value in (("baseline",100),("candidate",80),("baseline",100))]
+		with self.assertRaisesRegex(RuntimeError,"Incomplete paired series"):
+			comparison.difference_rows([config],{"baseline":None,"candidate":None},rows)
+
+	def test_legacy_difference_schema_is_preserved(self):
+		config={"name":"fixture","unit":"ms/tick"}
+		records=[{"configuration":"fixture","variant":variant,"layout":"normal",
+			"phase":"timed","accepted":True,"metric_ms":metric} for variant,metric in (("baseline",100),("candidate",80))]
+		row=comparison.difference_rows([config],{"baseline":None,"candidate":None},records)[0]
+		self.assertNotIn("baseline_variant",row)
+		self.assertAlmostEqual(-20,row["median_delta_percent"])
 
 if __name__=="__main__":
 	unittest.main()

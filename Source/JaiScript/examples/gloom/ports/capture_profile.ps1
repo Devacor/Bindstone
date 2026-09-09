@@ -3,6 +3,8 @@ param(
 	[int]$Rounds = 3,
 	[string]$Workloads = 'gloom,timedemo',
 	[string]$BuildRoot = '',
+	[string]$JaiWorkloadRoot = '',
+	[string]$OutputRoot = '',
 	[double]$MaxBackgroundCores = 1.0
 )
 $ErrorActionPreference = 'Stop'
@@ -16,7 +18,12 @@ if ($cache -notmatch 'CMAKE_CXX_FLAGS:[^\r\n]*GLOOM_PROFILE_CAPTURE') { throw 'B
 if ($Rounds -lt 3) { throw 'At least three ABAB rounds are required.' }
 $state = & wpr -status 2>&1 | Out-String
 if ($state -notmatch 'not recording') { throw "Existing WPR recording left untouched: $state" }
-$output = Join-Path $jaiRoot ('out\astra\cpu-captures\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+if (-not $OutputRoot) { $OutputRoot = Join-Path $jaiRoot ('out\astra\cpu-captures\' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
+$output = [IO.Path]::GetFullPath($OutputRoot)
+if (-not $output.StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw 'Capture output must be under out/astra/.' }
+if (Test-Path -LiteralPath $output) { throw "Capture output already exists: $output" }
+$runnerArgs = @('--build',$BuildRoot,'--output',(Join-Path $output 'runs'),'--engines','jai','--workloads',$Workloads,'--rounds',$Rounds,'--max-background-cores',$MaxBackgroundCores,'--recording','WPR')
+if ($JaiWorkloadRoot) { $runnerArgs += @('--jai-workload-root',[IO.Path]::GetFullPath($JaiWorkloadRoot)) }
 New-Item -ItemType Directory -Force $output,(Join-Path $output 'temp') | Out-Null
 $profile = Join-Path $PSScriptRoot 'gloom_cpu.wprp'
 $started = $false
@@ -24,7 +31,7 @@ try {
 	& wpr -start ($profile + '!GloomCPU') -filemode -recordtempto (Join-Path $output 'temp')
 	if ($LASTEXITCODE -ne 0) { throw "WPR start failed: $LASTEXITCODE" }
 	$started = $true
-	& python -u (Join-Path $PSScriptRoot 'run_comparison.py') --build $BuildRoot --output (Join-Path $output 'runs') --engines jai --workloads $Workloads --rounds $Rounds --max-background-cores $MaxBackgroundCores --recording WPR
+	& python -u (Join-Path $PSScriptRoot 'run_comparison.py') @runnerArgs
 	if ($LASTEXITCODE -ne 0) { throw 'The whole-program capture gates failed; inspect the saved run logs.' }
 } finally {
 	if ($started) {

@@ -4,6 +4,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -173,7 +174,7 @@ def validate_resume(previous, current, records, configs, builds, out):
 	for key in ("jai_workload_root", "builds", "binary_sha256", "workload_sha256",
 		"cpu_sets", "performance_cpus", "rounds", "recording", "max_background_cores",
 		"order", "warmup", "units", "padding", "competitor_poll_interval_seconds",
-		"build_input_manifests"):
+		"build_input_manifests", "variant_order"):
 		if previous.get(key) != current.get(key):
 			raise RuntimeError("Cannot resume: changed " + key)
 	if [r["sequence"] for r in records] != list(range(1,len(records)+1)):
@@ -238,6 +239,39 @@ def validate_resume(previous, current, records, configs, builds, out):
 	return valid, completed
 
 
+
+def variant_builds(baseline, candidate, extra):
+	result={"baseline":pathlib.Path(baseline).resolve()}
+	if candidate is not None:result["candidate"]=pathlib.Path(candidate).resolve()
+	for entry in extra:
+		name,separator,directory=entry.partition("=")
+		if not separator or not directory or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*",name):
+			raise ValueError("Use --variant-build NAME=PATH with a simple letter/digit/underscore/hyphen name.")
+		if name in result:raise ValueError("Duplicate build variant: "+name)
+		result[name]=pathlib.Path(directory).resolve()
+	return result
+
+
+def difference_rows(configs, builds, records):
+	result=[]
+	legacy=list(builds)==["baseline","candidate"]
+	for config in configs:
+		for layout in ("normal","padding"):
+			series={variant:[r["metric_ms"] for r in records if r["configuration"]==config["name"] and
+				r["variant"]==variant and r["layout"]==layout and r["phase"]=="timed" and r["accepted"]] for variant in builds}
+			for before,after in itertools.combinations(builds,2):
+				a,b=series[before],series[after]
+				if a and b:
+					if len(a)!=len(b):raise RuntimeError("Incomplete paired series: "+before+" / "+after)
+					deltas=[100*(y/x-1) for x,y in zip(a,b)]
+					row={"configuration":config["name"],"layout":layout,"unit":config["unit"],
+						"median_delta_percent":100*(statistics.median(b)/statistics.median(a)-1),
+						"paired_delta_band_percent":[min(deltas),max(deltas)]}
+					if not legacy:row.update({"baseline_variant":before,"candidate_variant":after})
+					result.append(row)
+	return result
+
+
 def main():
 	if os.name!="nt":
 		raise SystemExit("This runner records Windows topology and affinity.")
@@ -246,6 +280,7 @@ def main():
 	parser.add_argument("--build",type=pathlib.Path,default=root/"out/astra/release")
 	parser.add_argument("--jai-workload-root",type=pathlib.Path,default=root,help="JaiScript source root containing examples/gloom and examples/jaidoom; use a frozen copy for campaign measurements.")
 	parser.add_argument("--compare-build",type=pathlib.Path,help="Interleave a candidate build against the baseline.")
+	parser.add_argument("--variant-build",action="append",default=[],metavar="NAME=PATH",help="Add a named build; every pair retains the interleaved normal/padding order.")
 	parser.add_argument("--output",type=pathlib.Path,default=root/"out/astra/whole-program")
 	parser.add_argument("--rounds",type=int,default=3)
 	parser.add_argument("--resume",action="store_true",help="Resume after completed gates, verifying the original inputs and exact accepted ABAB prefix.")
@@ -270,8 +305,8 @@ def main():
 	if (out/"runs.json").exists() and not args.resume:
 		parser.error("Use a new output directory; existing raw runs are never overwritten.")
 	configs=selected_configurations(workloads,args.engines)
-	builds={"baseline":args.build.resolve()}
-	if args.compare_build:builds["candidate"]=args.compare_build.resolve()
+	try:builds=variant_builds(args.build,args.compare_build,args.variant_build)
+	except ValueError as error:parser.error(str(error))
 	machine=WindowsMachine()
 	# Pin executable identities. Runtime source may advance in Fable's lane after a build.
 	binaries={}
@@ -295,6 +330,9 @@ def main():
 		"units":{"gloom":"ms/tick","timedemo":"reported elapsed integer ms / reported tic count"},
 		"competitor_poll_interval_seconds":0.25,
 		"padding":"40 retained volatile statements in each executable's cold help function"}
+	if len(builds)>2:
+		metadata["variant_order"]=list(builds)
+		metadata["order"]="For each workload/round: normal variants in variant_order, padding variants in variant_order, repeated twice."
 	for name,build in builds.items():
 		manifest=build/"build-inputs.json"
 		if manifest.exists():metadata.setdefault("build_input_manifests",{})[name]=json.loads(manifest.read_text())
@@ -425,19 +463,8 @@ def main():
 					"padding_paired_band_percent":[min(deltas),max(deltas)],"runs_per_layout":len(a)})
 			summary.append(row)
 	save(out/"summary.json",summary)
-	if "candidate" in builds:
-		differences=[]
-		for config in valid:
-			for layout in ("normal","padding"):
-				series={variant:[r["metric_ms"] for r in records if r["configuration"]==config["name"] and
-					r["variant"]==variant and r["layout"]==layout and r["phase"]=="timed" and r["accepted"]] for variant in builds}
-				a,b=series["baseline"],series["candidate"]
-				if a and b:
-					deltas=[100*(y/x-1) for x,y in zip(a,b)]
-					differences.append({"configuration":config["name"],"layout":layout,"unit":config["unit"],
-						"median_delta_percent":100*(statistics.median(b)/statistics.median(a)-1),
-						"paired_delta_band_percent":[min(deltas),max(deltas)]})
-		save(out/"differences.json",differences)
+	if len(builds)>1:
+		save(out/"differences.json",difference_rows(valid,builds,records))
 	metadata["completed_utc"]=time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
 	metadata["accepted_timings"]=sum(r["phase"]=="timed" and r["accepted"] for r in records)
 	metadata["rejected_timings"]=sum(r["phase"]=="timed" and not r["accepted"] for r in records)

@@ -6746,15 +6746,25 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 	if (src && !dst->is_reference()) {
 		const script_value& v = src->deref();
 		const size_t vi = v.raw_storage_index();
+		// the same scalar kind, stamp and engine on both sides: the payload is the whole move
+		if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && dst->raw_storage_index() == vi &&
+		    dst->type_info_raw() == v.type_info_raw() && dst->get_engine() == v.get_engine()) {
+			JAI_TYPED_INPLACE(1);
+			if (vi == script_value::TYPEID_INT) { dst->unchecked_set_int_payload(v.unchecked_as_int()); }
+			else { dst->unchecked_set_float_payload(v.unchecked_as_float()); }
+			return {};
+		}
 		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
 		    vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) {
-			const type_info* slot_type = dst->get_type_info().get();
+			const type_info* slot_type = dst->type_info_raw();
 			if (!slot_type || detail::same_type_payload(v, slot_type)) {
+				JAI_TYPED_INPLACE(2);
 				*dst = v;
 				return {};
 			}
 		}
 	}
+	JAI_TYPED_INPLACE(3);
 	VM_TRY(exec_load(f, site.orig));
 	VM_TRY(exec_store(f, site.orig2));
 	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }
@@ -6765,12 +6775,22 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 	script_value v = materialize_constant(*f.code, ins.b);
 	if (script_value* dst = frame_slot(f, ins.a); dst && !dst->is_reference()) {
-		const type_info* slot_type = dst->get_type_info().get();
+		const size_t vi = v.raw_storage_index();
+		if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && dst->raw_storage_index() == vi &&
+		    dst->type_info_raw() == v.type_info_raw() && dst->get_engine() == v.get_engine()) {
+			JAI_TYPED_INPLACE(1);
+			if (vi == script_value::TYPEID_INT) { dst->unchecked_set_int_payload(v.unchecked_as_int()); }
+			else { dst->unchecked_set_float_payload(v.unchecked_as_float()); }
+			return {};
+		}
+		const type_info* slot_type = dst->type_info_raw();
 		if (!slot_type || detail::same_type_payload(v, slot_type)) {
+			JAI_TYPED_INPLACE(2);
 			*dst = std::move(v);
 			return {};
 		}
 	}
+	JAI_TYPED_INPLACE(3);
 	stack_.push_back(std::move(v));
 	VM_TRY(exec_store(f, site.orig2));
 	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }

@@ -18,8 +18,10 @@ const check_report& d = engine->last_check_diagnostics();   // last checked exec
   `engine->jaibite()` / `jaibite_load*()` throw `jai::static_check_error` BEFORE anything
   runs. A strongly-typed → strongly-typed mismatch (`int x = "s"`, returning a string from
   a function declared `-> int`, passing an array to an `int` parameter, an unrelated class
-  into a typed slot) is therefore a load error; only a `var`-sourced value can still fail
-  at runtime, where `try`/`catch` sees it.
+  into a typed slot) is a load error when the source type is known. Dynamic or
+  unresolved sources and value-dependent failures still reach runtime, where
+  `try`/`catch` sees them. Examples include a computed float outside the int range
+  and a missing map key returning null.
 - **warn** — diagnostics collected and retrievable; execution proceeds and the runtime's
   own conversion errors apply unchanged (the pre-checker behavior, selectable per engine).
 - **off** — zero behavior change. No diagnostics collected anywhere.
@@ -38,7 +40,7 @@ related_line/column, strict_region}`); mode only decides whether errors gate exe
 (strict: every error; warn: only errors a `[[strict_mode]]` region raised - "Escape hatches").
 Warning severity never gates.
 
-## Rule table (mirrors `detail::convert_for_typed_slot` — the one table for declarations, assignment, parameters, returns and fields)
+## Rule table (known source and destination types)
 
 | target | accepts | notes |
 |---|---|---|
@@ -47,16 +49,30 @@ Warning severity never gates.
 | `bool` | anything | truthy conversion |
 | `string` | anything | to_string conversion; objects use their `to_string()` when defined |
 | `char` | char, object with `to_char()` | `char c = 65` is a runtime error too (`cast<char>` is the spelling) |
-| `array` / `map` | array / map | element/key types NOT checked statically (lenient v1); the runtime element boundary runs on every path (`Cannot store string in array<int>`) |
+| `array<T>` / `map<K,V>` | compatible container elements and keys | known literal elements, nested literals and declared container types are checked; typed subscript reads carry T/V, and typed push arguments and subscript stores are checked; var-sourced values stay lenient |
 | object `C` | null (a typed null); same class; derived→base; a `shared_ptr<C or derived>` handle; ctor conversion `C(src)` through exactly ONE true 1-param ctor whose parameter takes `src` directly (no chaining, no `to_X()` on the way in); on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
-| `shared_ptr` / `weak_ptr` / references / function slots | anything | lenient v1; `null` stores a typed null on every path |
-| `var` | anything, forever | THE opt-out: a var-typed expression makes downstream types unknown (like TS `any`); unknown never errors |
+| `shared_ptr<T>` | null or compatible object/handle sources | existing shared-handle declaration rules |
+| `weak_ptr<T>` | null or a compatible shared/weak handle | same pointee or derived-to-base; unknown sources stay lenient |
+| `T&` declaration | T, or a derived class for a base-class reference | conversions do not make a mismatched reference binding valid; unknown sources stay lenient |
+| `function` variable or field | callable or null | calls through callable variables and function-typed parameters remain unchecked |
+| `var` | anything, forever | the dynamic escape: downstream types are unknown; copying a typed container into var drops the copy's element constraint, and crossing back into a typed container validates its contents |
 | `auto` + initializer | inferred, then enforced as that type | a `null` initializer leaves it dynamic — null carries no type; the runtime locks at the first non-null store |
 | `auto` without initializer | dynamic (unchecked) | runtime locks at first assignment; the checker can't see branch order, so it opts out — documented leniency |
 
-**One table.** By-value parameters, returns and field stores run exactly this table at run
-time (`detail::convert_for_typed_slot`), the array/map element boundary included, so a value
-the checker admits converts. A chained conversion (`TA -> TB -> TC`, `X.to_int() -> C(int)`)
+**Conversion rules.** Scalar by-value parameters, returns and field stores use the
+runtime conversion table (`detail::convert_for_typed_slot`). Container elements
+use their own boundary: int/float and bool/int conversions, matching string/char
+types, compatible object classes and recursive nested containers. Storing an int
+in a string element requires to_string(value) or cast<string>(value). Map keys never coerce.
+Shared- and weak-handle elements admit null; shared-handle elements also admit a
+live instance of the declared class or a subclass. By-value elements stay non-nullable. Float literals outside
+the int64 range are load errors into int slots; computed values are checked at
+runtime. Unknown values and user conversion bodies can still fail at runtime.
+
+The checker also enforces the declared weak-handle, reference and callable rules
+even where an unchecked runtime store would accept the value. Known container
+types follow the runtime element boundary, including empty typed containers.
+`var` preserves dynamic checking, and `[[warn_mode]]` downgrades diagnostics. A chained conversion (`TA -> TB -> TC`, `X.to_int() -> C(int)`)
 is never implicit; a converting constructor or `to_X()` that throws surfaces its own error.
 Each site names its slot in the rejection text (`docs/diagnostics.md` family D):
 `Cannot initialize 'x' (declared int) with S` for declarations, `Cannot assign S to 'x'
@@ -336,23 +352,28 @@ Grow that seed count before loosening any lenient rule.
 
 ### Precision map
 
-Where strict typing is lenient BY DESIGN - the whole false-negative surface, in one place. A
-mistake in any of these spots is a run-time error, never a load error:
+Where static information remains incomplete. These paths can defer a type mistake
+to runtime; the declarations around them still receive their applicable checks:
 
 - `var` anywhere, and everything computed from it; `auto` without an initializer (locks at
   the first store, flow the checker cannot see); a `null` initializer.
-- References (`T&` declarations, `auto&` loop variables, by-reference parameters) and
-  `shared_ptr<T>` / `weak_ptr<T>` handles as STORE targets (member lookup through a typed handle
-  or reference is still checked).
-- Container elements: `array<T>` / `map<K,V>` element and key types (the runtime element
-  boundary is the check), subscripts, builtin container/string methods.
+- Stores through references, `auto&` loop variables and by-reference parameters.
+  A reference declaration's known initializer type is checked; reference use
+  otherwise stays conservative. Handle declarations and known handle stores are checked.
+- Elements reached through var or array<var>, inferred literals without a declared
+  element type in the checker, and builtin container/string method results.
+  Declared container reads, literal elements, push arguments and subscript stores
+  are checked. Bounds, missing map keys and computed numeric range failures remain runtime checks.
+- Calls through callable variables and function-typed parameters. Storing a known
+  non-callable in a function variable or field is a load error.
 - Engine globals (typed off the value tag: a later retag is invisible), host-object
   conversions, callables held in variables, host functions beyond arity and primitive
   certainties, binder (C++) methods reached through a script chain (no static signature:
   wrong arity or a wrong argument type raises at the call), binder properties (untyped).
 - Dynamic-path `import(expr)`/`include(expr)` units and below-top-level imports (undeclared
   identifiers drop to warnings), `extern` names (untyped: `var`; typed: checked), a parent found
-  nowhere (its subclass's bare names type as unknown), namespaces at every depth.
+  nowhere (its subclass's bare names type as unknown), namespace-qualified lookups
+  at every depth (declarations inside a namespace are still checked).
 - Accessor-bearing members whose declaration is ambiguous ("Members": two getter/setter
   overloads in the chain, `var`/`auto`/coroutine/parameterized getters, reference or untyped
   setter parameters, an accessor on a registered-only ancestor).

@@ -95,13 +95,16 @@ missing key read: true
 <p>Notes: writing <code>m[key] = v</code> inserts; <strong>reading a missing key returns <code>null</code> and does NOT insert</strong>. <code>get(key, default)</code> is the explicit fallback form. Keys are ordered (a <code>var</code> map takes any script value as a key; the total ordering of <code>&lt;=&gt;</code> guarantees it), so iteration order is deterministic. Note that <code>auto inventory = {…}</code> inferred <code>map&lt;string, int&gt;</code> from its literal, exactly as <code>auto</code> does for arrays, so <code>inventory[5]</code> would raise; see <a href="#key-types">Key types</a>. Map <code>filter</code>&#x27;s predicate takes <code>(key, value)</code>.</p>
 <h2 id="typed-containers">Typed containers<a class="hlink" href="#typed-containers" aria-label="link">&#8203;</a></h2>
 <p><code>array&lt;T&gt;</code> and <code>map&lt;K,V&gt;</code> enforce their element types. A push or a store converts when the value is compatible (int to float, say) and rejects otherwise, with an error that names the container:</p>
+<p>Elements and map values convert between <code>bool</code> and <code>int</code>: false becomes 0, true becomes 1, and an int becomes false only when it is zero. Int/float conversion also applies. Int-to-string requires an explicit <code>to_string(value)</code> or <code>cast&lt;string&gt;(value)</code>; float/bool conversion stays rejected. Map keys never coerce.</p>
+<p><code>shared_ptr&lt;T&gt;</code> and <code>weak_ptr&lt;T&gt;</code> elements admit <code>null</code>. A shared-handle element also takes a live instance of T or a subclass and checks the class of a shared handle. Class values, primitive values and nested containers remain non-nullable.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 nums.push(4.9);          // converts to the element type
 print(&quot;pushed 4.9 -&gt; {}&quot;, to_json(nums));
+var bad = &quot;nope&quot;; // a var-sourced value: the checker cannot see it
 try {
-    nums.push(&quot;nope&quot;);   // incompatible element rejected at run time
+	nums.push(bad);          // checked at run time
 } catch (e) {
-    print(&quot;caught: {}&quot;, e);
+	print(&quot;caught: {}&quot;, e);
 }
 map&lt;string, int&gt; ages = {&quot;ana&quot;: 31};
 ages[&quot;bo&quot;] = 44;
@@ -110,9 +113,9 @@ print(&quot;grid[1][0] + ages[bo] = {}&quot;, grid[1][0] + ages[&quot;bo&quot;])
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">pushed 4.9 -&gt; [1,2,3,4]
 caught: Cannot push &#x27;string&#x27; to array&lt;int&gt;
 grid[1][0] + ages[bo] = 47</code></pre></div>
-<p>These element checks happen at run time and are catchable. The <a href="13-strict-checking.html">checker</a> deliberately leaves element and key types to the runtime (it cannot see what a loop will push), so a container mistake is never a load error. Everything else on this page that says &quot;raises&quot; means the same thing: a catchable run-time error, byte-identical on both backends.</p>
+<p>The <a href="13-strict-checking.html">checker</a> checks known literal elements and keys, nested literals, typed push arguments and typed subscript stores. A subscript on a declared <code>array&lt;T&gt;</code> or <code>map&lt;K,V&gt;</code> carries its element type into later typed assignments. A <code>var</code>-sourced value is checked at run time and its error is catchable, as above. Bounds, missing keys and computed numeric range failures remain runtime checks. <code>[[warn_mode]]</code> is the explicit way to downgrade a static diagnostic.</p>
 <h3 id="representation-follows-the-declared-type">Representation follows the declared type<a class="hlink" href="#representation-follows-the-declared-type" aria-label="link">&#8203;</a></h3>
-<p>The declared element type is not just a check; it is the storage. <code>array&lt;int&gt;</code> and <code>array&lt;float&gt;</code> are raw int64 and double buffers, always; <code>bool</code>, <code>char</code>, <code>string</code> and class element types get packed buffers of their own. <code>array&lt;var&gt;</code>, and a literal without a spelled element type, is the one form that holds a vector of dynamic values. Moving between the two is an explicit assignment, and nothing demotes silently: a typed array never quietly turns into a dynamic one because something odd was pushed into it. It raises instead.</p>
+<p>The declared element type is not just a check; it is the storage. <code>array&lt;int&gt;</code> and <code>array&lt;float&gt;</code> are raw int64 and double buffers, always; <code>bool</code>, <code>char</code>, <code>string</code> and class element types get packed buffers of their own. <code>array&lt;var&gt;</code>, and a literal without a spelled element type, is the one form that holds a vector of dynamic values. Moving between the two is an explicit assignment, and a typed array keeps its constraint when a push is rejected. Copying it into <code>var</code> or <code>array&lt;var&gt;</code> explicitly creates a dynamic copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];         // a raw int buffer
 array&lt;var&gt; copy = nums;              // the explicit step to the dynamic form: a copy
 copy.push(4);

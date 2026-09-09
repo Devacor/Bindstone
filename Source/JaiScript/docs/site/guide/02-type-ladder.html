@@ -60,7 +60,7 @@ x is still 5</code></pre></div>
 <p>That split is the rule, and it holds for every typed <em>slot</em> in the language, any place a value can land: a variable, a parameter, a return, a field, a container element:</p>
 <ul>
 <li><strong>A mismatch the checker can see</strong> (a literal, a typed local, a typed field, a typed return, an argument to a function the program declares) is a <strong>load error</strong>. Nothing executes, so there is nothing to <code>catch</code>.</li>
-<li><strong>A mismatch it cannot see</strong> (anything sourced from a <code>var</code>, a container element, a host value, a callable held in a variable) is a <strong>run-time error</strong>, raised at the offending statement and catchable there.</li>
+<li><strong>A mismatch it cannot see</strong> (anything sourced from a <code>var</code>, an unresolved host value or a call through a callable variable) is a <strong>run-time error</strong>, raised at the offending statement and catchable there.</li>
 </ul>
 <p>None of this is opt-in. To loosen it, pass <code>--check=warn</code> to the runner (or call <code>eng-&gt;static_checking(jai::check_mode::warn)</code> in a host): the same diagnostics get reported, and the script runs anyway. <code>[[warn_mode]]</code> does the same for one file, one block, or one statement, and <code>extern</code> declares a name the checker cannot see. The full contract is in <a href="13-strict-checking.html">Types That Fail Early</a>.</p>
 <h2 id="auto-locks-on-first-use">auto locks on first use<a class="hlink" href="#auto-locks-on-first-use" aria-label="link">&#8203;</a></h2>

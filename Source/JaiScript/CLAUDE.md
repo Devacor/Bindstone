@@ -305,9 +305,11 @@ engine stays usable", not by `check_throws`.
   plain or compound; postfix keeps the old stored value. Both backends read the destination back
   only when the result is consumed (vm `next_op_discards_result` / `compound_flag_result_needed`,
   interpreter `expression_result_needed_`), so statement-position stores cost nothing extra. The
-  top-level implicit result of an expression statement stays the right-hand side (a host
-  convenience: no read-back copy, no extra getter call), and a setter-only member (no field, no
-  getter in the chain) yields its right-hand side (`member_reads_back`).
+  top-level implicit result of an expression statement is never read back (a host convenience: no
+  read-back copy, no extra getter call): a typed local or a plain static store hands the host the
+  stored value because it converts before producing anything, an explicit field, accessor, element
+  or map store hands it the right-hand side. A setter-only member (no field, no getter in the
+  chain) yields its right-hand side (`member_reads_back`).
 - **By-value returns copy, own locals move** (C++ [stmt.return]; `docs/script_extensible.md`
   6.5): `return e;` from a by-value function yields a value aliasing nothing the callee could
   name - a temporary moves, the callee's own local/parameter moves out of its dying slot

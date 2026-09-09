@@ -296,6 +296,15 @@ engine stays usable", not by `check_throws`.
   element boundary on every path; each site owns its rejection text.
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
+- **An assignment expression's value is the destination's stored value** (Dev ruling 2026-09-08,
+  C++ lvalue semantics): `auto r = (c.n = 3.9)` is int 3 for a typed local, a bare or explicit
+  field, a static, an accessor (read back through `_get_x`), an array element or a map value,
+  plain or compound; postfix keeps the old stored value. Both backends read the destination back
+  only when the result is consumed (vm `next_op_discards_result` / `compound_flag_result_needed`,
+  interpreter `expression_result_needed_`), so statement-position stores cost nothing extra. The
+  top-level implicit result of an expression statement stays the right-hand side (a host
+  convenience: no read-back copy, no extra getter call), and a setter-only member (no field, no
+  getter in the chain) yields its right-hand side (`member_reads_back`).
 - **By-value returns copy, own locals move** (C++ [stmt.return]; `docs/script_extensible.md`
   6.5): `return e;` from a by-value function yields a value aliasing nothing the callee could
   name - a temporary moves, the callee's own local/parameter moves out of its dying slot

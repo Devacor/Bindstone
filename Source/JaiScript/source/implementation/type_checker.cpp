@@ -2069,10 +2069,11 @@ private:
 			}
 			ctype recv;
 			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
-			// Runtime member assignments return the unconverted RHS (or operation
-			// result for compounds); plain Class::field stores return the typed slot.
+			// An assignment expression's value is the destination's stored value (Dev ruling
+			// 2026-09-08): the member's type when the checker knows it; for a member it cannot
+			// read (no field, no getter) the runtime hands back the rhs or the compound's result.
 			// Keep assignment results' existing non-key provenance.
-			ctype result_type = compound ? binary_result(read_type, base_op, rhs) : rhs;
+			ctype result_type = !read_type.is_unknown() ? read_type : compound ? binary_result(read_type, base_op, rhs) : rhs;
 			result_type.const_key = false;
 			if (hit.found && hit.read_only && recv.kind == ctype::object_k && !m->is_static) {
 				read_only_store(a->location, m->member);
@@ -2086,7 +2087,7 @@ private:
 								"field '" + std::string(typed_field->name) + "'", a->location,
 								hit.foreign ? 0 : typed_field->location.line, hit.foreign ? 0 : typed_field->location.column);
 				}
-				return m->is_static && !compound ? ft : result_type;
+				return ft;
 			}
 			if (recv.kind == ctype::object_k && !m->is_static) { check_accessor_store(recv.cls, m->member, rhs, compound, base_op, a->location); }
 			return result_type;

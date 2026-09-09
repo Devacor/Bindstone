@@ -204,11 +204,7 @@ static std::string get_type_name(script_value_type type) {
 
 // Helper to get a human-readable type name from a script_value
 static std::string get_value_type_name(const script_value& val) {
-    auto type_info = val.get_type_info();
-    if (type_info && !type_info->type_name.empty()) {
-        return type_info->type_name;
-    }
-    return get_type_name(val.type());
+    return detail::container_value_type_name(val);
 }
 
 // Helper to get type name from a type_info, falling back to base type

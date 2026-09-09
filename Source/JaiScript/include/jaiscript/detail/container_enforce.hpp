@@ -45,12 +45,23 @@ namespace jai::detail {
 		}
 	}
 
+	// engine.cpp: the class rows of the element boundary judge the instance behind the value's
+	// tag (a var-held Animal, a shared_ptr<Dog> handle) with the scalar table's own admission
+	bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng);
+	// engine.cpp: the instance's own class tag, for a copy stored under a var tag (null = none)
+	type_info_ptr object_element_own_tag(const script_value& v, engine* eng);
+
+	// The source spelling of every element and key text: the payload's type, never a var tag
 	inline std::string container_value_type_name(const script_value& val) {
-		auto info = val.get_type_info();
-		if (info && !info->type_name.empty()) {
+		const script_value& v = val.is_reference() ? val.deref() : val;
+		auto info = v.get_type_info();
+		if (info && !info->type_name.empty() && info->base_type != script_value_type::jai_any_type) {
 			return info->type_name;
 		}
-		return container_base_type_name(val.type());
+		if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) {
+			return holder->type_name;
+		}
+		return container_base_type_name(v.current_type());
 	}
 
 	inline bool container_element_compatible(const script_value& element, const type_info_ptr& element_type, engine* eng = nullptr) {
@@ -70,10 +81,11 @@ namespace jai::detail {
 			if (target_type == script_value_type::jai_object_type) {
 				auto elem_type_info = actual_element.get_type_info();
 				if (elem_type_info && !element_type->type_name.empty()) {
-					// exact class by interned id (one compare), else the subclass walk
+					// exact class by interned id (one compare), else the instance's class (a var
+					// tag says nothing about it) and the subclass walk
 					return elem_type_info->id == element_type->id ||
 					       elem_type_info->type_name == element_type->type_name ||
-					       class_derives_from(eng, elem_type_info->id, element_type->id);
+					       object_element_admits(actual_element, *element_type, eng);
 				}
 			}
 			return true;
@@ -96,7 +108,7 @@ namespace jai::detail {
 			}
 			auto elem_type_info = actual_element.get_type_info();
 			return elem_type_info && (elem_type_info->type_name == element_type->type_name ||
-			                          class_derives_from(eng, elem_type_info->id, element_type->id));
+			                          object_element_admits(actual_element, *element_type, eng));
 		}
 
 		if (target_type == script_value_type::jai_array_type && elem_type == script_value_type::jai_array_type) {
@@ -191,6 +203,15 @@ namespace jai::detail {
 		}
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
+		}
+		if (target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) {
+			// the stored copy carries its class, not the var tag it arrived under
+			script_value out = actual_element.clone_element();
+			const type_info* tag = out.get_type_info().get();
+			if (!tag || tag->base_type == script_value_type::jai_any_type) {
+				if (auto own = object_element_own_tag(actual_element, eng)) { out.set_type_info(std::move(own)); }
+			}
+			return out;
 		}
 
 		return actual_element.clone_element();

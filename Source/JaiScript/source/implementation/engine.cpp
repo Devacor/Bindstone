@@ -4089,6 +4089,15 @@ bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id) {
     }
     return false;
 }
+
+bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng) {
+    return class_slot_admits(resolve_slot_class(v, eng), v, element_type, eng);
+}
+
+type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
+    auto view = resolve_slot_class(v, eng);
+    return view.def ? view.def->get_type_info() : nullptr;
+}
 } // namespace detail
 
 std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data) {

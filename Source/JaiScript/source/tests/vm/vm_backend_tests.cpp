@@ -3097,9 +3097,8 @@ public:
 		});
 
 		// Element refs and direct subscript assign are ONE gate: the same store into the
-		// same typed array passes or fails with byte-identical text on both routes
-		// (the ref gate used to accept subtypes/var-held instances the direct gate
-		// rejects, and named 'any'-tagged values by their actual class)
+		// same typed array passes or fails with byte-identical text on both routes (both
+		// run the element kernel; a var-held instance is its class, never its var tag)
 		test("tier1_element_ref_gate_matches_direct_subscript", [this, run_both_backends]() {
 			const char* src = R"(
 				class Animal { int id = 0; }
@@ -3138,11 +3137,10 @@ public:
 			// Dev ruling 2026-09-02: a subclass is admitted into a class-typed element (no error)
 			check_true(parts[0].empty(), std::string("direct gate admits a subtype, got: ") + parts[0]);
 			check_eq(parts[0], parts[1], "subtype: ref matches direct");
-			check_true(parts[2].find("Cannot assign 'any' to element of type 'Animal'") != std::string::npos,
-				std::string("direct gate rejects var-held instance, got: ") + parts[2]);
+			check_true(parts[2].empty(), std::string("direct gate admits a var-held instance of the class, got: ") + parts[2]);
 			check_eq(parts[2], parts[3], "var-held: ref matches direct");
-			check_true(parts[4].find("Cannot assign 'any' to element of type 'int'") != std::string::npos,
-				std::string("direct gate names var tags 'any', got: ") + parts[4]);
+			check_true(parts[4].find("Cannot assign 'Box' to element of type 'int'") != std::string::npos,
+				std::string("direct gate names the payload's class, never the var tag, got: ") + parts[4]);
 			check_eq(parts[4], parts[5], "naming: ref matches direct");
 			check_eq(i_out, v_out, "element gate parity");
 		});
@@ -4271,6 +4269,49 @@ public:
 					check_eq(std::string("1|reads=1"), run("int read(array<int>& xs) { clear_reads(); var a = []; a.push(xs); return 1; } read(box.values);"), label + " push of the reference");
 				}
 			}
+		});
+
+		test("push_of_a_table_element_matches_the_interpreter", [this]() {
+			// `recv.push(table[i])`: the vm reads the element raw and appends it by the receiver's
+			// kind; every table kind (int, float, string, hetero, a global, a var& parameter, a
+			// literal index) into every receiver kind (var, array<int>, array<float>, array<string>)
+			// lands what the interpreter lands, and a miss (out of range, a float into array<int>,
+			// a string into array<int>, a hetero element that is not a plain scalar) keeps the text
+			const char* src = R"(
+				array<int> ti = [1, 2, 3]; array<float> tf = [0.5, 1.5]; array<string> ts = ["a", "b"];
+				var th = [7, 2.5, "s", true, [1]];
+				var out = [];
+				function run(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+				run("var<-int", function() -> int { var r = []; int i = 1; r.push(ti[i]); r.push(ti[0]); return r.size() * 100 + r[0] + r[1]; });
+				run("var<-float", function() -> float { var r = []; int i = 1; r.push(tf[i]); return r[0]; });
+				run("var<-str", function() -> string { var r = []; int i = 1; r.push(ts[i]); r.push(ts[0]); return r[0] + r[1]; });
+				run("var<-hetero", function() -> string { var r = []; int i = 0; r.push(th[i]); i = 2; r.push(th[i]); i = 3; r.push(th[i]); return to_string(r[0]) + r[1] + to_string(r[2]); });
+				run("var<-hetero-array", function() -> int { var r = []; int i = 4; r.push(th[i]); return r[0][0]; });
+				run("int<-int", function() -> int { array<int> r = []; int i = 2; r.push(ti[i]); return r[0]; });
+				run("int<-float", function() -> int { array<int> r = []; int i = 0; r.push(tf[i]); return r[0]; });
+				run("int<-str", function() -> int { array<int> r = []; int i = 0; r.push(ts[i]); return r[0]; });
+				run("float<-int", function() -> float { array<float> r = []; int i = 2; r.push(ti[i]); return r[0]; });
+				run("float<-float", function() -> float { array<float> r = []; int i = 1; r.push(tf[i]); return r[0]; });
+				run("str<-str", function() -> string { array<string> r = []; int i = 0; r.push(ts[i]); return r[0]; });
+				run("str<-int", function() -> string { array<string> r = []; int i = 0; r.push(ti[i]); return r[0]; });
+				run("oob", function() -> int { var r = []; int i = 9; r.push(ti[i]); return r.size(); });
+				run("neg", function() -> int { var r = []; int i = -1; r.push(ti[i]); return r.size(); });
+				run("ref-table", function() -> int { var& t = ti; var r = []; int i = 0; r.push(t[i]); return r[0]; });
+				run("param-table", function() -> int { int f(array<int>& t) { var r = []; r.push(t[1]); return r[0]; } return f(ti); });
+				run("float-index", function() -> int { var r = []; var i = 1.0; r.push(ti[i]); return r.size(); });
+				run("string-shares", function() -> string { var r = []; int i = 0; r.push(ts[i]); ts[0] = "z"; return r[0] + ts[0]; });
+				return out;
+			)";
+			auto interp = jai::engine::make();
+			auto vmx = vm_engine();
+			jai::stdlib::register_all(*interp);
+			jai::stdlib::register_all(*vmx);
+			const auto a = interp->execute(src).as_array();
+			const auto b = vmx->execute(src).as_array();
+			check_eq(a.size(), b.size());
+			for (size_t i = 0; i < a.size() && i < b.size(); ++i) { check_eq(a[i].as_string(), b[i].as_string(), "row " + std::to_string(i)); }
+			check_eq(std::string("var<-int:203"), a[0].as_string());
+			check_eq(std::string("oob!Array index 9 out of bounds for array of size 3"), a[12].as_string());
 		});
 
 		test("typed_scalar_ops_match_the_interpreter", [this]() {

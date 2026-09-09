@@ -108,11 +108,7 @@ namespace {
 	}
 
 	std::string vm_value_type_name(const script_value& val) {
-		auto type_info = val.get_type_info();
-		if (type_info && !type_info->type_name.empty()) {
-			return type_info->type_name;
-		}
-		return vm_type_name_of(val.type());
+		return detail::container_value_type_name(val);
 	}
 
 	std::string vm_type_info_name(type_info_ptr info) {

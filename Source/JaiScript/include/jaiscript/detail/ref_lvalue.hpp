@@ -531,13 +531,7 @@ namespace jai::detail {
 	}
 
 	inline std::string ref_type_info_name(type_info_ptr info) {
-		if (info && !info->type_name.empty()) {
-			return info->type_name;
-		}
-		if (info) {
-			return ref_type_name_of(info->base_type);
-		}
-		return "unknown";
+		return info ? info->canonical_name() : "unknown";
 	}
 
 	// Element errors name {0} exactly like the direct subscript-assign error does (the kernel's

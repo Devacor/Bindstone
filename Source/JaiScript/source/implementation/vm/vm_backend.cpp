@@ -112,13 +112,7 @@ namespace {
 	}
 
 	std::string vm_type_info_name(type_info_ptr info) {
-		if (info && !info->type_name.empty()) {
-			return info->type_name;
-		}
-		if (info) {
-			return vm_type_name_of(info->base_type);
-		}
-		return "unknown";
+		return info ? info->canonical_name() : "unknown";
 	}
 
 	// Element compatibility/conversion live in the shared kernel

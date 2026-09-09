@@ -119,8 +119,13 @@ namespace jai {
                     return "map<" + k + "," + v + ">";
                 }
                 case script_value_type::jai_object_type:
-                case script_value_type::jai_shared_ptr_type:
                     return type_name;  // Use registered class name
+                case script_value_type::jai_shared_ptr_type: {
+                    // spelled in full: the id is this name interned, and a handle type must not
+                    // share the pointee class's id (array<shared_ptr<Foo>> is not array<Foo>)
+                    if (element_type()) { return "shared_ptr<" + element_type()->canonical_name() + ">"; }
+                    return type_name == "shared_ptr" ? type_name : "shared_ptr<" + type_name + ">";
+                }
                 case script_value_type::jai_weak_ptr_type: {
                     std::string elem = element_type() ? element_type()->canonical_name() : "";
                     return "weak_ptr<" + elem + ">";

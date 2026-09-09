@@ -209,13 +209,7 @@ static std::string get_value_type_name(const script_value& val) {
 
 // Helper to get type name from a type_info, falling back to base type
 static std::string get_type_info_name(type_info_ptr info) {
-    if (info && !info->type_name.empty()) {
-        return info->type_name;
-    }
-    if (info) {
-        return get_type_name(info->base_type);
-    }
-    return "unknown";
+    return info ? info->canonical_name() : "unknown";
 }
 
 // Forward declaration for mutual recursion

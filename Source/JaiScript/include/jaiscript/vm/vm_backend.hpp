@@ -168,6 +168,8 @@ namespace jai::vm {
         // [5]=store payload+stamp [6]=store construct [7]=compound in-place [8]=compound refused
         // [9]=typed fallback entries
         uint64_t profile_typed_land_[10] = {};
+        // temp landing misses: [0]=no live slot [1]=wrong payload kind or a reference [2]=other stamp (or engine)
+        uint64_t profile_temp_miss_[3] = {};
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -1516,20 +1518,28 @@ namespace jai::vm {
             frame& fr;
             uint32_t slot;
             void operator()(script_value&& v) { vm->frame_slot_set(fr, slot, std::move(v)); }
+            // The canonical scalar stamp is what the construct path below produces (script_value's
+            // int/float constructors install it), with this engine's pointer, so a payload write into such a slot is the same value
             void raw_int(script_int iv) {
-                if (script_value* s = vm->frame_slot(fr, slot);
-                    s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) {
+                script_value* s = vm->frame_slot(fr, slot);
+                if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->type_info_raw() == vm->engine_->get_type_info_int() && s->get_engine() == vm->engine_) {
                     s->unchecked_set_int_payload(iv);
                     return;
                 }
+#ifdef JAISCRIPT_VM_PROFILE
+                ++vm->profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_INT ? 1 : 2];
+#endif
                 (*this)(script_value(iv, vm->engine_));
             }
             void raw_float(script_float fv) {
-                if (script_value* s = vm->frame_slot(fr, slot);
-                    s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) {
+                script_value* s = vm->frame_slot(fr, slot);
+                if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->type_info_raw() == vm->engine_->get_type_info_float() && s->get_engine() == vm->engine_) {
                     s->unchecked_set_float_payload(fv);
                     return;
                 }
+#ifdef JAISCRIPT_VM_PROFILE
+                ++vm->profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_FLOAT ? 1 : 2];
+#endif
                 (*this)(script_value(fv, vm->engine_));
             }
         };

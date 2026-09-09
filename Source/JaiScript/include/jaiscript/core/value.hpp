@@ -318,6 +318,9 @@ namespace jai {
         
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
+        // Borrowed view of the stamp for hot guards: no handle copy. Valid while this value is
+        // (type_info objects are engine-owned and outlive every value of that engine)
+        type_info* type_info_raw() const noexcept { return type_info_.get(); }
         bool has_type_tag() const noexcept { return static_cast<bool>(type_info_); }
 
         // Get interned type ID for error messages (falls back to enum value if type_info not set)

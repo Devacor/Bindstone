@@ -163,6 +163,16 @@ namespace jai::vm {
         uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
         uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
         uint64_t profile_typed_store_[2] = {};       // tried, hit
+        // Serial census (2026-09-09), reset with the opcode tables: typed landings by kind x outcome
+        // [0]=temp in-place [1]=temp construct [2]=decl stamp-hit [3]=decl construct [4]=store refused
+        // [5]=store payload+stamp [6]=store construct [7]=compound in-place [8]=compound refused
+        // [9]=typed fallback entries
+        uint64_t profile_typed_land_[10] = {};
+        // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
+        // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
+        uint64_t profile_typed_cont_src_[4] = {};
+        uint64_t profile_load_kinds_[16] = {};    // LOAD result storage kind (the DECL_VAR initializer kinds' twin)
+        uint64_t profile_index_kinds_[16] = {};   // INDEX result storage kind
         // typed heads: binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
@@ -1433,6 +1443,7 @@ namespace jai::vm {
         op_status vm_check(const checked_result<void>& r) { return r ? op_status::ok : raise_from(r); }
 
         op_status exec_load(frame& f, const vm_instruction& ins);
+        op_status exec_load_impl(frame& f, const vm_instruction& ins);
         op_status exec_store(frame& f, const vm_instruction& ins);
         op_status exec_compound_store(frame& f, const vm_instruction& ins);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
@@ -1577,6 +1588,7 @@ namespace jai::vm {
                                               size_t cache_slot);
         op_status exec_push_fused(frame& f, const vm_instruction& ins);
         op_status exec_index(frame& f, const vm_instruction& ins);
+        op_status exec_index_impl(frame& f, const vm_instruction& ins);
         op_status exec_index_assign(frame& f, const vm_instruction& ins);
         op_status exec_index_compound(frame& f, const vm_instruction& ins);
         op_status exec_index_store(frame& f, const vm_instruction& ins);

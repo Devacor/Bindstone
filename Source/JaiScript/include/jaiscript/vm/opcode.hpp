@@ -197,6 +197,9 @@ namespace jai::vm {
                             // a = receiver slot, b = value slot or const bit | index, c = push_protos index
         op_t_load,          // `T x = arr[index]` on the proven shape: a = decl slot; the container, the
                             // index fold and the landing facts sit in chunk::typed_sites[ip]
+        op_t_block_back,    // pilot variant C (JAISCRIPT_PILOT_CLUSTER): a = block proto index, b = loop
+                            // head; the back edge of a closed typed loop runs the loop as one block
+                            // (vm_backend::exec_typed_block_back); the instructions stay in place
         op_halt,
     };
 
@@ -306,6 +309,7 @@ namespace jai::vm {
             case opcode::op_jump_if_false: return "JUMP_IF_FALSE";
             case opcode::op_jump_if_true: return "JUMP_IF_TRUE";
             case opcode::op_loop_back: return "LOOP_BACK";
+            case opcode::op_t_block_back: return "T_BLOCK_BACK";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

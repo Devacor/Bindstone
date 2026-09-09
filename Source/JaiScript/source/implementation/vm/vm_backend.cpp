@@ -6434,7 +6434,7 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 
 // op_t_load: typed_decl_read over the flattened site row (one line of memory instead of
 // the proto, its operands, the fold proto and the chain vector)
-op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
+bool vm_backend::typed_load_fast(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
@@ -6464,12 +6464,62 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 			}
 			if (ok && index >= 0 && static_cast<size_t>(index) < node->size() &&
 			    typed_decl_land_element(f, ins.a, site.decl_expect, site.stamp, *node, static_cast<size_t>(index), borrowed)) {
-				return {};
+				return true;
 			}
 		}
 	}
-	return exec_index_fused_decl(f, site.orig);
+	return false;
 }
+
+op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
+	if (typed_load_fast(f, ins)) return {};
+	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
+}
+
+// Pilot variant C: the back edge of a closed typed loop runs the loop as one block. Each step is
+// the typed op's own fast path with every guard it has today; a miss hands the exact ip back to
+// the general dispatch, which runs that instruction with its fallback and continues in the
+// general form (the block resumes at the next back edge). A debugger armed or a registered
+// numeric operator takes the general back edge. The budget is polled once per iteration, as
+// LOOP_BACK polls it. Nothing here pins a slot address: every step resolves its slots as the
+// general op does, so a landing that grows the value stack needs no capacity proof.
+#ifdef JAISCRIPT_PILOT_CLUSTER
+#ifdef JAISCRIPT_VM_PROFILE
+#define JAI_BLOCK_COUNT(k) ++profile_block_[k]
+#else
+#define JAI_BLOCK_COUNT(k) ((void)0)
+#endif
+op_status vm_backend::exec_typed_block_back(frame& f, const vm_instruction& ins) {
+	const chunk::block_proto& bp = f.code->block_protos[ins.a];
+	if (debug_hook_ || has_custom_numeric_ops_) {
+		if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
+		f.ip = bp.head;
+		return {};
+	}
+	const auto& code = f.code->code;
+	JAI_BLOCK_COUNT(0);
+	for (;;) {
+		// the back edge: one budget poll per iteration, as LOOP_BACK polls it
+		if (execution_limit_exhausted()) [[unlikely]] { f.ip = bp.back; return raise_from(execution_limit_failure()); }
+		f.ip = bp.head;
+		JAI_BLOCK_COUNT(1);
+		const int cmp = typed_cmp_jump_fast(f, code[bp.head]);
+		if (cmp < 0) { JAI_BLOCK_COUNT(4); return {}; }   // f.ip == head: the general dispatch runs the compare with its fallback
+		if (cmp > 1) { JAI_BLOCK_COUNT(5); return {}; }   // the loop's exit: f.ip is the exit target
+		for (uint32_t ip = bp.head + 1; ip < bp.back; ++ip) {
+			f.ip = ip;
+			const vm_instruction& st = code[ip];
+			JAI_BLOCK_COUNT(2);
+			bool ok;
+			if (st.op == opcode::op_t_load) { ok = typed_load_fast(f, st); }
+			else if (st.op == opcode::op_index_store_fused) { ok = typed_index_store(f, f.code->fused_index_protos[st.a], true); }
+			else { ok = typed_arith_fast(f, st); }
+			if (!ok) { JAI_BLOCK_COUNT(4); return {}; }   // f.ip == ip: the general dispatch runs this instruction with its fallback
+		}
+		JAI_BLOCK_COUNT(3);
+	}
+}
+#endif
 
 // The proven index: a direct slot or literal, or the int fold with its chain steps (the
 // operands' cache roles are the kernel's: binary left/right at ip*3 / ip*3+1)
@@ -6612,7 +6662,7 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 	}
 }
 
-op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
+bool vm_backend::typed_arith_fast(frame& f, const vm_instruction& ins) {
 	// a registered global numeric operator turns every numeric row over to the general
 	// path, which consults the operator table (the fused kernels' gate, kept here)
 	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.b);
@@ -6636,7 +6686,7 @@ op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
 				case opcode::op_t_shr_ii: ok = b >= 0 && b <= 63; if (ok) { r = a >> b; } break;
 				default: ok = false; break;
 				}
-				if (ok && typed_land_int(f, ins.a, r)) return {};
+				if (ok && typed_land_int(f, ins.a, r)) return true;
 			}
 		} else if (lp->raw_storage_index() == script_value::TYPEID_FLOAT && rp->raw_storage_index() == script_value::TYPEID_FLOAT) {
 			const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
@@ -6650,13 +6700,18 @@ op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
 			case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
 			default: ok = false; break;
 			}
-			if (ok && typed_land_float(f, ins.a, r)) return {};
+			if (ok && typed_land_float(f, ins.a, r)) return true;
 		}
 	}
+	return false;
+}
+
+op_status vm_backend::exec_typed_arith(frame& f, const vm_instruction& ins) {
+	if (typed_arith_fast(f, ins)) return {};
 	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
 }
 
-op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
+int vm_backend::typed_cmp_jump_fast(frame& f, const vm_instruction& ins) {
 	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.a);
 	const script_value* rp = lp ? typed_right(f, ins.b) : nullptr;
 	if (rp) {
@@ -6673,7 +6728,7 @@ op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
 				default: truthy = a != b; break;
 				}
 				f.ip = truthy ? f.ip + 1 : ins.c;
-				return {};
+				return truthy ? 1 : 2;
 			}
 		} else if (lp->raw_storage_index() == script_value::TYPEID_FLOAT && rp->raw_storage_index() == script_value::TYPEID_FLOAT) {
 			const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
@@ -6686,9 +6741,14 @@ op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
 			default: truthy = a != b; break;
 			}
 			f.ip = truthy ? f.ip + 1 : ins.c;
-			return {};
+			return truthy ? 1 : 2;
 		}
 	}
+	return -1;
+}
+
+op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
+	if (typed_cmp_jump_fast(f, ins) > 0) return {};
 	return exec_fused_cmp_jump(f, f.code->typed_sites[f.ip].orig);
 }
 
@@ -13601,6 +13661,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
 	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
 	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
+	std::fill(std::begin(profile_block_), std::end(profile_block_), 0ull);
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
 	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
@@ -14076,6 +14137,8 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
+		fprintf(stderr, "[vm-profile] closed typed loop blocks (measured span): entries %llu | head compares %llu | body steps %llu | back edges %llu | misses %llu | exits %llu\n",
+			(unsigned long long)profile_block_[0], (unsigned long long)profile_block_[1], (unsigned long long)profile_block_[2], (unsigned long long)profile_block_[3], (unsigned long long)profile_block_[4], (unsigned long long)profile_block_[5]);
 		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
 			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
 			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);
@@ -14482,6 +14545,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				f.ip = ins.a;
 				continue;
+#ifdef JAISCRIPT_PILOT_CLUSTER
+			case opcode::op_t_block_back:
+				VM_TRY_OP_SHARED(exec_typed_block_back(f, ins));
+				continue;
+#endif
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {

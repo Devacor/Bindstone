@@ -337,6 +337,12 @@ namespace jai::vm {
         std::vector<closure_proto> closure_protos;
         std::vector<destructure_proto> destructure_protos;
         std::vector<iter_proto> iter_protos;
+#ifdef JAISCRIPT_PILOT_CLUSTER
+        // Pilot variant C: closed typed loops as [head, back] ip ranges whose back edge runs the loop
+        // as one block; the instructions stay in place for the general form
+        struct block_proto { uint32_t head; uint32_t back; };
+        std::vector<block_proto> block_protos;
+#endif
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;

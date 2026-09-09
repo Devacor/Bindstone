@@ -234,28 +234,31 @@ redistribute, so its two rows are a described measurement, not one you can rerun
 (sim ~3.7, render ~4.5, blit ~0.8)</td><td>~3.2&times; inside DOOM&#x27;s 28.5 ms (35 fps) frame budget,
 and rewriting the enemy brains as coroutines and the movers/weapons as classes measured
 <strong>free</strong> (the band did not move)</td></tr>
-<tr><td><strong>DOOM timedemo, 2026-09-08</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
+<tr><td><strong>DOOM timedemo, 2026-09-09</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
 one full replay warming the same engine before the measured replay; one P core,
-<code>c85ea0dd</code></td><td><strong>4.681 ms/tic</strong>,
-padding median <strong>4.648</strong><br>
-Padding band: -0.99% to -0.26%</td><td>Six accepted processes per layout in three interleaved
+<code>d6c9959b</code></td><td><strong>4.707 ms/tic</strong>,
+padding median <strong>4.750</strong><br>
+Padding band: +0.65% to +1.09%</td><td>Six accepted processes per layout in three interleaved
 rounds of the paired JaiScript comparison. Both replay hashes match 1746772898.
 The script timer excludes level/demo setup.</td></tr>
-<tr><td><strong>GLOOM, 2026-09-08 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
+<tr><td><strong>GLOOM, 2026-09-09 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
 seed 666, 100&times;40 quad output. One P core for serial configurations; eight for parallel
-JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX, <code>c85ea0dd</code>.</td><td>
-JaiScript VM serial: <strong>1.367 ms/tick</strong> (padding -0.46% to +0.69%)<br>
-JaiScript VM 8 workers: <strong>1.377 ms/tick</strong> (padding -0.50% to +20.56%)<br>
-Lua 5.4.8: <strong>0.385 ms/tick</strong> (padding -1.28% to +1.14%)<br>
-Lua 5.5.1: <strong>0.390 ms/tick</strong> (padding -1.98% to +1.26%)<br>
-LuaJIT 2.1 JIT: <strong>0.101 ms/tick</strong> (padding -14.67% to +14.49%)</td><td>All frame and state hashes match. Three A B A B rounds give six accepted
-runs per layout. The GLOOM/Lua window accepted 60 timings and excluded 64 busy
+JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX, <code>d6c9959b</code>.</td><td>
+JaiScript VM serial: <strong>1.401 ms/tick</strong> (padding -2.01% to -1.10%)<br>
+JaiScript VM 8 workers: <strong>0.973 ms/tick</strong> (padding -3.09% to +7.84%)<br>
+Lua 5.4.8: <strong>0.395 ms/tick</strong> (padding -4.09% to -1.62%)<br>
+Lua 5.5.1: <strong>0.395 ms/tick</strong> (padding -1.41% to +2.05%)<br>
+LuaJIT 2.1 JIT: <strong>0.102 ms/tick</strong> (padding -20.71% to +12.49%)</td><td>All frame and state hashes match. Three A B A B rounds give six accepted
+runs per layout. The GLOOM/Lua window accepted 60 timings and excluded 23 busy
 attempts under a 1.0-core desktop background screen across 24 cores.
-An accepted worker padding outlier is retained in its wide band. Small changes
-in the worker and LuaJIT JIT configurations are unresolved. Lua 5.4.8 and 5.5.1
-have overlapping observed ranges. LuaJIT JIT is a runtime-code-generation ceiling
-outside the iOS shipping target.
-<a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_2026-09-08_FINAL.md">Full results, control medians, versions and methodology</a>.</td></tr>
+The paired b306133b-to-d6c9959b run improves eight-worker GLOOM 21.63% normal
+and 22.89% padded (candidate padding band -1.53% to +0.37%). Serial GLOOM and
+JaiDOOM have no consistent improvement across layouts.
+The accepted worker padding outlier remains in its band. Small changes in the
+wide-band LuaJIT JIT result are unresolved. Lua 5.4.8 and 5.5.1 have overlapping
+observed ranges. LuaJIT JIT is a runtime code generation ceiling outside the iOS
+shipping target.
+<a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_2026-09-09.md">Full results, control medians, versions and methodology</a>.</td></tr>
 <tr><td><strong>Demoreel</strong> (<code>examples/demoreel</code>): thirteen truecolor scenes at
 100&times;40 = 4,000 cells per frame, the whole reel including transitions
 (<code>--smoke</code>, 1,700 frames; the example&#x27;s README is the record)</td><td>interpreter

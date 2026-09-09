@@ -369,6 +369,11 @@ namespace jai::vm {
         std::string function_name;                         // empty = top level
         size_t local_count = 0;
         bool is_function_body = false;
+#ifdef JAISCRIPT_VM_PROFILE
+        // slot census input: each parameter's slot, declared type (null = untyped) and by-reference flag
+        struct profile_param { uint32_t slot; type_info* type; bool is_reference; };
+        std::vector<profile_param> profile_params;
+#endif
         // Compile-time lazy-env gate: false = every op proven not to need the per-call
         // scope environment, so plain in-loop callees skip creating it (fail-closed default)
         bool needs_frame_env = true;

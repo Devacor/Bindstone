@@ -238,6 +238,59 @@ public:
             for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
         });
 
+        test("bool_and_int_elements_convert", [this]() {
+            // Dev ruling 2026-09-09: bool and int convert both ways at the element boundary (a
+            // declaration literal, push, a subscript store, a map value, a whole typed array), like
+            // the scalar slots; int -> string stays explicit (to_string / cast<string>), float and
+            // string rows keep their texts, map keys stay strict; both backends agree
+            const char* src = R"(
+                var out = [];
+                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+                cap("int-decl", function() -> string { array<int> a = [true, false, 7]; return to_string(a[0]) + to_string(a[1]) + to_string(a[2]) + type_of(a[0]); });
+                cap("int-push", function() -> string { array<int> a = []; a.push(true); a.push(false); return to_string(a[0]) + to_string(a[1]); });
+                cap("int-store", function() -> string { array<int> a = [5]; a[0] = true; string r = to_string(a[0]); a[0] = false; return r + to_string(a[0]); });
+                cap("bool-decl", function() -> string { array<bool> b = [1, 0, 2, -3]; return to_string(b[0]) + "," + to_string(b[1]) + "," + to_string(b[2]) + "," + to_string(b[3]) + type_of(b[0]); });
+                cap("bool-push", function() -> string { array<bool> b = []; b.push(0); b.push(9); return to_string(b[0]) + "," + to_string(b[1]); });
+                cap("bool-store", function() -> string { array<bool> b = [false]; b[0] = 1; string r = to_string(b[0]); b[0] = 0; return r + "," + to_string(b[0]); });
+                cap("map-int", function() -> string { map<string, int> m = {"k": true}; m["j"] = false; return to_string(m["k"]) + to_string(m["j"]); });
+                cap("map-bool", function() -> string { map<string, bool> m = {"k": 1}; m["j"] = 0; return to_string(m["k"]) + "," + to_string(m["j"]); });
+                cap("whole-bool-to-int", function() -> string { array<bool> b = [true, false]; array<int> a = b; return to_string(a[0]) + to_string(a[1]) + type_of(a[0]); });
+                cap("whole-int-to-bool", function() -> string { array<int> a = [0, 3]; array<bool> b = a; return to_string(b[0]) + "," + to_string(b[1]); });
+                cap("var-held", function() -> string { var t = true; array<int> a = [t]; a.push(t); a[0] = t; return to_string(a.size()) + to_string(a[0]); });
+                cap("int-to-string", function() -> int { array<string> s = [1]; return 0; });
+                cap("push-int-to-string", function() -> int { array<string> s = []; s.push(1); return 0; });
+                cap("string-to-int", function() -> int { array<int> a = ["1"]; return 0; });
+                cap("explicit", function() -> string { array<string> s = [to_string(1), cast<string>(15)]; return s[0] + s[1]; });
+                cap("float-to-bool", function() -> int { array<bool> b = [1.5]; return 0; });
+                cap("bool-to-float", function() -> int { array<float> f = [true]; return 0; });
+                cap("bool-key", function() -> int { map<int, int> m = {true: 1}; return 0; });
+                out;
+            )";
+            std::vector<std::string> seen[2];
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                const auto rows = e->execute(src).as_array();
+                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+            }
+            check_eq(seen[0], seen[1], "both backends land and reject identically");
+            const std::vector<std::string> expected = {
+                "int-decl:107int", "int-push:10", "int-store:10",
+                "bool-decl:true,false,true,truebool", "bool-push:false,true", "bool-store:true,false",
+                "map-int:10", "map-bool:true,false", "whole-bool-to-int:10int", "whole-int-to-bool:false,true", "var-held:21",
+                "int-to-string!Cannot store int in array<string>",
+                "push-int-to-string!Cannot push 'int' to array<string>",
+                "string-to-int!Cannot store string in array<int>",
+                "explicit:115",
+                "float-to-bool!Cannot store float in array<bool>",
+                "bool-to-float!Cannot store bool in array<float>",
+                "bool-key!Cannot store bool in map<int,int>",
+            };
+            check_eq(expected.size(), seen[0].size(), "row count");
+            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+        });
+
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {
@@ -2494,7 +2547,7 @@ public:
             check_quad("array<char> c = ['a', 'b']; array<char> d = c; d[0] = 'x'; to_string(c[0]) + to_string(d[0])", "ax", "char buffer copy is a copy");
             check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
             check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
-            check_quad_error("array<bool> f = [true]; f.push(1)", "bool buffer rejects int");
+            check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int (Dev ruling 2026-09-09)");
             check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
             // string handles: reads, stores, push, sort, join, copy, in-place mutator through an element, json
             check_quad("array<string> s = [\"b\", \"a\"]; s.push(\"c\"); s.sort(); s.join(\"-\")", "a-b-c", "string buffer push/sort/join");
@@ -2508,7 +2561,7 @@ public:
             // node with a numeric rhs - an int landed unchecked in a string buffer
             check_quad_error("array<string> s = [\"a\"]; int g = 5; s[0] = g", "string buffer element store rejects int");
             check_quad("array<string> s = [\"a\"]; s[0] += 1; s[0]", "a1", "string buffer compound store concatenates through the enforcing path");
-            check_quad_error("array<bool> f = [true]; int g = 1; f[0] = g", "bool buffer element store rejects int");
+            check_quad("array<bool> f = [true, true]; f[0] = 0; f[1] = 7; to_json(f)", "[false,true]", "bool buffer element store converts an int (Dev ruling 2026-09-09)");
             check_quad_error("array<char> c = ['a']; c[0] += 1", "char buffer compound store rejects int");
             check_quad("array<string> s = [\"a\"]; string t = \"b\"; s[0] = t; s[0]", "b", "string buffer element store of a string");
             // fuzz seed 6977 (2026-09-02): the vm's inline push named an ELEMENT-REFERENCE

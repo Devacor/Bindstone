@@ -272,7 +272,10 @@ engine stays usable", not by `check_throws`.
   `T` or a subclass the way a `shared_ptr<T>` variable does (the slot owns the handle); by-value
   class and primitive elements stay non-nullable (`Cannot store null in array<Foo>`). A
   `shared_ptr<T>` type spells itself in full (`array<shared_ptr<Foo>>`); its id is that spelling
-  interned, distinct from `Foo`'s.
+  interned, distinct from `Foo`'s. **Element conversions** (Dev ruling 2026-09-09): int and float
+  convert both ways (the checked float-to-int kernel), bool and int convert both ways, everything
+  else needs the exact type (`array<string> s = [1]` raises: `to_string(1)` or `cast<string>(1)`
+  spells it), map keys never coerce.
 - **Map key types** (Dev ruling 2026-09-02): a direct store checks the declared key type
   (`map<string,int> m; m[5] = 1` raises; keys never coerce); `map<var,V>` takes any key; an
   `auto` key/value slot infers from a uniform literal (`map<auto,int> m = {5: 1}` is

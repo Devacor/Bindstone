@@ -117,6 +117,12 @@ namespace jai::detail {
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return true;
 		}
+		// Dev ruling 2026-09-09: bool and int convert both ways at the element boundary, like the
+		// scalar slots (a string element still takes only a string: to_string / cast<string> spell it)
+		if ((target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_bool_type) ||
+		    (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type)) {
+			return true;
+		}
 
 		// A shared_ptr-tagged instance stores into an object-typed element slot exactly
 		// like field writes accept it (shared, not cloned — convert_container_element's
@@ -223,6 +229,12 @@ namespace jai::detail {
 		}
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
+		}
+		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_bool_type) {
+			return script_value(static_cast<script_int>(actual_element.unchecked_as_bool() ? 1 : 0), eng);
+		}
+		if (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type) {
+			return script_value(actual_element.unchecked_as_int() != 0, eng);
 		}
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
 			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
@@ -456,7 +468,9 @@ namespace jai::detail {
 				const script_value_type src_elem = typed_kind_element_base(src->kind());
 				const bool numeric_pair = (src_elem == script_value_type::jai_int_type || src_elem == script_value_type::jai_float_type) &&
 				                          (target_elem_base == script_value_type::jai_int_type || target_elem_base == script_value_type::jai_float_type);
-				if (!numeric_pair && src_elem != target_elem_base) {
+				const bool bool_int_pair = (src_elem == script_value_type::jai_bool_type && target_elem_base == script_value_type::jai_int_type) ||
+				                           (src_elem == script_value_type::jai_int_type && target_elem_base == script_value_type::jai_bool_type);
+				if (!numeric_pair && !bool_int_pair && src_elem != target_elem_base) {
 					out.offending = container_base_type_name(src_elem);
 					out.expected = target_type->canonical_name();
 					return out;
@@ -476,7 +490,8 @@ namespace jai::detail {
 					}
 					if (actual.type() != target_elem_base &&
 					    (target_elem_base == script_value_type::jai_int_type ||
-					     target_elem_base == script_value_type::jai_float_type)) {
+					     target_elem_base == script_value_type::jai_float_type ||
+					     target_elem_base == script_value_type::jai_bool_type)) {
 						needs_conversion = true;
 					}
 					if (target_elem_base == script_value_type::jai_array_type || target_elem_base == script_value_type::jai_map_type) {
@@ -545,7 +560,8 @@ namespace jai::detail {
 					const auto value_base = value_type->base_type;
 					if (actual.type() != value_base &&
 					    (value_base == script_value_type::jai_int_type ||
-					     value_base == script_value_type::jai_float_type)) {
+					     value_base == script_value_type::jai_float_type ||
+					     value_base == script_value_type::jai_bool_type)) {
 						needs_conversion = true;
 					}
 					if ((value_base == script_value_type::jai_array_type || value_base == script_value_type::jai_map_type) &&

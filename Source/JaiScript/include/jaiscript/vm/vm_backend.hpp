@@ -170,6 +170,8 @@ namespace jai::vm {
         uint64_t profile_typed_land_[10] = {};
         // temp landing misses: [0]=no live slot [1]=wrong payload kind or a reference [2]=other stamp (or engine)
         uint64_t profile_temp_miss_[3] = {};
+        // store and move landings: [0]=store in place [1]=move in place [2]=move assign [3]=move fallback
+        uint64_t profile_typed_inplace_[4] = {};
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};

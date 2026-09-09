@@ -198,6 +198,11 @@ namespace jai::vm {
         uint64_t profile_temp_miss_[3] = {};
         // store and move landings: [0]=store in place [1]=move in place [2]=move assign [3]=move fallback
         uint64_t profile_typed_inplace_[4] = {};
+        // closed typed loop blocks (pilot variant C): [0]=block entries (back edges reached from the
+        // general form) [1]=head compares run inside a block [2]=body step selections (the instructions
+        // between head and back edge) [3]=back edges taken inside a block (completed iterations)
+        // [4]=misses handed back to the general dispatch [5]=loop exits taken inside a block
+        uint64_t profile_block_[6] = {};
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -1522,6 +1527,15 @@ namespace jai::vm {
         }
         bool typed_land_int(frame& f, uint32_t a, script_int v);
         bool typed_land_float(frame& f, uint32_t a, script_float v);
+        // The typed ops' fast paths without their fallbacks (guards, arithmetic, landing): the
+        // wrappers below add the fallback, the pilot's loop block returns to the general dispatch
+        // at the missing ip instead. cmp_jump: 1 = fell through, 2 = jumped, -1 = miss
+        bool typed_arith_fast(frame& f, const vm_instruction& ins);
+        int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
+        bool typed_load_fast(frame& f, const vm_instruction& ins);
+#ifdef JAISCRIPT_PILOT_CLUSTER
+        op_status exec_typed_block_back(frame& f, const vm_instruction& ins);
+#endif
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);
         op_status exec_typed_cmp_jump(frame& f, const vm_instruction& ins);

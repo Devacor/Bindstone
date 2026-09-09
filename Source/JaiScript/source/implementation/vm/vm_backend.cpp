@@ -6512,8 +6512,12 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
-		if (s && s->raw_storage_index() == script_value::TYPEID_INT && !s->get_type_info()) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
+		// a temp this engine built already carries the canonical int stamp and the engine pointer the construct path would give it
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->type_info_raw() == engine_->get_type_info_int() && s->get_engine() == engine_) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
 		JAI_TYPED_LAND(1);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_INT ? 1 : 2];
+#endif
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
@@ -6554,8 +6558,11 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
-		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && !s->get_type_info()) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->type_info_raw() == engine_->get_type_info_float() && s->get_engine() == engine_) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
 		JAI_TYPED_LAND(1);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_FLOAT ? 1 : 2];
+#endif
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
@@ -13329,6 +13336,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_decl_read_), std::end(profile_typed_decl_read_), 0ull);
 	std::fill(std::begin(profile_typed_store_), std::end(profile_typed_store_), 0ull);
 	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
+	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
 	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
@@ -13696,6 +13704,8 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_land_[3], (unsigned long long)profile_typed_land_[4], (unsigned long long)profile_typed_land_[5],
 			(unsigned long long)profile_typed_land_[6], (unsigned long long)profile_typed_land_[7], (unsigned long long)profile_typed_land_[8],
 			(unsigned long long)profile_typed_land_[9]);
+		fprintf(stderr, "[vm-profile] typed temp misses (measured span): no live slot %llu | wrong payload or reference %llu | other stamp %llu\n",
+			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
 			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
 			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);

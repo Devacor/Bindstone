@@ -34,6 +34,61 @@ public:
             }
         });
 
+        test("var_held_values_cross_the_element_boundary_as_their_payload", [this]() {
+            // var is the runtime hatch: the element boundary (a declaration literal, push, a
+            // subscript store, a map value store, the reference route) admits a var-held instance
+            // of the element class or a subclass, the stored copy carries its class, and a
+            // rejection names the payload's type, never the var tag; byte-identical on both backends
+            const char* src = R"(
+                class Animal { int id = 1; }
+                class Dog : Animal { int extra = 2; }
+                class Box { int b = 0; }
+                function put(var& x, var val) { x = val; }
+                var out = [];
+                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+                var va = Animal(); var vd = Dog(); var vb = Box(); var vs = "s";
+                cap("decl", function() -> string { array<Animal> a = [va, vd]; return type_of(a[0]) + "," + type_of(a[1]) + "," + to_string(a[1].id); });
+                cap("push", function() -> string { array<Animal> a = []; a.push(va); a.push(vd); return type_of(a[0]) + "," + type_of(a[1]) + "," + to_string(a.size()); });
+                cap("store", function() -> string { array<Animal> a = [Animal()]; a[0] = vd; return type_of(a[0]) + "," + to_string(a[0].id); });
+                cap("ref", function() -> string { array<Animal> a = [Animal()]; put(a[0], vd); return type_of(a[0]) + "," + to_string(a[0].id); });
+                cap("map", function() -> string { map<string, Animal> m = {}; m["k"] = va; return type_of(m["k"]); });
+                cap("copy", function() -> int { array<Animal> a = []; a.push(va); a[0].id = 9; return va.id; });
+                cap("box-store", function() -> int { array<Animal> a = [Animal()]; a[0] = vb; return 0; });
+                cap("box-push", function() -> int { array<Animal> a = []; a.push(vb); return 0; });
+                cap("box-ref", function() -> int { array<Animal> a = [Animal()]; put(a[0], vb); return 0; });
+                cap("box-decl", function() -> int { array<Animal> a = [vb]; return 0; });
+                cap("box-int", function() -> int { array<int> a = [1]; a[0] = vb; return 0; });
+                cap("str-push", function() -> int { array<int> a = []; a.push(vs); return 0; });
+                cap("str-store", function() -> int { array<int> a = [1]; a[0] = vs; return 0; });
+                cap("str-decl", function() -> int { array<int> a = [vs]; return 0; });
+                cap("str-map", function() -> int { map<string, int> m = {}; m["k"] = vs; return 0; });
+                out;
+            )";
+            std::vector<std::string> seen[2];
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                const auto rows = e->execute(src).as_array();
+                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+            }
+            check_eq(seen[0], seen[1], "both backends land and reject identically");
+            const std::vector<std::string> expected = {
+                "decl:Animal,Dog,1", "push:Animal,Dog,2", "store:Dog,1", "ref:Dog,1", "map:Animal", "copy:1",
+                "box-store!Cannot assign 'Box' to element of type 'Animal'",
+                "box-push!Cannot push 'Box' to array<Animal>",
+                "box-ref!Cannot assign 'Box' to element of type 'Animal'",
+                "box-decl!Cannot store Box in array<Animal>",
+                "box-int!Cannot assign 'Box' to element of type 'int'",
+                "str-push!Cannot push 'string' to array<int>",
+                "str-store!Cannot assign 'string' to element of type 'int'",
+                "str-decl!Cannot store string in array<int>",
+                "str-map!Cannot assign 'string' to element of type 'int'",
+            };
+            check_eq(expected.size(), seen[0].size(), "row count");
+            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+        });
+
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {

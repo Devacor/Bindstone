@@ -6503,8 +6503,10 @@ bool vm_backend::lane_deref_silent(const script_value& v) noexcept {
 
 #ifdef JAISCRIPT_VM_PROFILE
 #define JAI_TYPED_LAND(k) ++profile_typed_land_[k]
+#define JAI_TYPED_INPLACE(k) ++profile_typed_inplace_[k]
 #else
 #define JAI_TYPED_LAND(k) ((void)0)
+#define JAI_TYPED_INPLACE(k) ((void)0)
 #endif
 
 bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
@@ -6533,7 +6535,10 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 		// store_popped_value's proven-identity slot store: no reference in the slot, the
 		// slot's declared class agrees (the same-type proof), then `*slot = value`
 		if (!s || s->is_reference()) { JAI_TYPED_LAND(4); return false; }
-		const type_info* slot_type = s->get_type_info().get();
+		const type_info* slot_type = s->type_info_raw();
+		// the slot already holds this engine's canonical int: the payload is the whole store (the
+		// path below writes the same payload and re-stamps the same type; it never touches the engine)
+		if (s->raw_storage_index() == script_value::TYPEID_INT && slot_type == engine_->get_type_info_int()) { JAI_TYPED_INPLACE(0); s->unchecked_set_int_payload(v); return true; }
 		if (slot_type && slot_type->base_type != script_value_type::jai_int_type) { JAI_TYPED_LAND(4); return false; }
 		script_value nv(v, engine_);
 		if (s->raw_storage_index() == script_value::TYPEID_INT) { JAI_TYPED_LAND(5); s->unchecked_set_int_payload(v); s->set_type_info(nv.get_type_info()); return true; }
@@ -6576,7 +6581,8 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 	}
 	case k_typed_dst_store: {
 		if (!s || s->is_reference()) { JAI_TYPED_LAND(4); return false; }
-		const type_info* slot_type = s->get_type_info().get();
+		const type_info* slot_type = s->type_info_raw();
+		if (s->raw_storage_index() == script_value::TYPEID_FLOAT && slot_type == engine_->get_type_info_float()) { JAI_TYPED_INPLACE(0); s->unchecked_set_float_payload(v); return true; }
 		if (slot_type && slot_type->base_type != script_value_type::jai_float_type) { JAI_TYPED_LAND(4); return false; }
 		script_value nv(v, engine_);
 		if (s->raw_storage_index() == script_value::TYPEID_FLOAT) { JAI_TYPED_LAND(5); s->unchecked_set_float_payload(v); s->set_type_info(nv.get_type_info()); return true; }
@@ -13337,6 +13343,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_store_), std::end(profile_typed_store_), 0ull);
 	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
 	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
+	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
 	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
@@ -13706,6 +13713,8 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_land_[9]);
 		fprintf(stderr, "[vm-profile] typed temp misses (measured span): no live slot %llu | wrong payload or reference %llu | other stamp %llu\n",
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
+		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu | move assign %llu | move fallback %llu\n",
+			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
 		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
 			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
 			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);

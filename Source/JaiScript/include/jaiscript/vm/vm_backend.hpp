@@ -1558,9 +1558,11 @@ namespace jai::vm {
         // The typed ops' fast paths without their fallbacks (guards, arithmetic, landing): the
         // wrappers below add the fallback, the pilot's loop block returns to the general dispatch
         // at the missing ip instead. cmp_jump: 1 = fell through, 2 = jumped, -1 = miss
-        bool typed_arith_fast(frame& f, const vm_instruction& ins);
-        int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
-        bool typed_load_fast(frame& f, const vm_instruction& ins);
+        // force-inlined into their wrappers (and the pilot block handlers): the split of row 92 left the
+        // wrappers calling out of line, which Astra's same-tree stock measured on JaiDOOM
+        JAI_FORCEINLINE bool typed_arith_fast(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
 #ifdef JAISCRIPT_PILOT_CLUSTER
         op_status exec_typed_block_back(frame& f, const vm_instruction& ins);
 #endif

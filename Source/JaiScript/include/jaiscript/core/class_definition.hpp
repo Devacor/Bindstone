@@ -2002,10 +2002,14 @@ public:
         if (auto live = instances_.back().lock()) { live->registry_slot_ = index; }
     }
 
-    // O(1) swap-remove by the instance's remembered index. Called from ~class_instance:
-    // the caller's own entry is already expired; the entry swapped into its place belongs
-    // to a live instance (destruction is sequential and members die after the body), so
-    // its index can be re-pointed. Never-registered instances (set_class_definition) skip.
+    // O(1) swap-remove by the instance's remembered index. Called from ~class_instance.
+    // The caller's own entry expired the moment its last owner let go, BEFORE this lock: while
+    // a region runs, another instance dying under the lock may have swap-removed across it,
+    // moving the expired entry or popping it and letting a fresh registration refill the
+    // index. So the entry is removed only when it is this instance's own (control-block
+    // identity survives expiry), and expired tails come off first so whatever moves into the
+    // hole is live and re-points; a mismatch means the entry already went or lingers elsewhere
+    // as an expired weak, which every reader skips. Never-registered instances skip.
     void unregister_instance(class_instance* instance) {
         if (instance->registry_slot_ == SIZE_MAX) { return; }   // pending or never registered: nothing to remove, no lock
         std::shared_ptr<class_instance> moved;   // may be the last owner (a worker's copy dying concurrently): released outside the lock
@@ -2014,6 +2018,10 @@ public:
             const size_t i = instance->registry_slot_;
             instance->registry_slot_ = SIZE_MAX;
             if (i >= instances_.size()) { return; }
+            const std::weak_ptr<class_instance> self = instance->weak_from_this();
+            const auto& entry = instances_[i];
+            if (entry.owner_before(self) || self.owner_before(entry)) { return; }   // not this instance's entry
+            while (instances_.size() - 1 > i && instances_.back().expired()) { instances_.pop_back(); }
             const size_t last = instances_.size() - 1;
             if (i != last) {
                 instances_[i] = std::move(instances_[last]);

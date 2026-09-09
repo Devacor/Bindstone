@@ -198,12 +198,7 @@ namespace jai::vm {
         uint64_t profile_temp_miss_[3] = {};
         // store and move landings: [0]=store in place [1]=move in place [2]=move assign [3]=move fallback
         uint64_t profile_typed_inplace_[4] = {};
-        // closed typed loop blocks (pilot variant C): [0]=block entries (back edges reached from the
-        // general form) [1]=head compares run inside a block [2]=body step selections (the instructions
-        // between head and back edge) [3]=back edges taken inside a block (completed iterations)
-        // [4]=misses handed back to the general dispatch [5]=loop exits taken inside a block
-        uint64_t profile_block_[6] = {};
-        // pilot variant B cells: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
+        // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
         uint64_t profile_cells_[11] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
@@ -430,9 +425,7 @@ namespace jai::vm {
         }
 
     private:
-#ifdef JAISCRIPT_PILOT_CELLS
         struct cell_state;
-#endif
         struct frame {
             chunk* code = nullptr;
             std::shared_ptr<chunk> pin;
@@ -459,12 +452,9 @@ namespace jai::vm {
             // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
             const ast_node* debug_stmt = nullptr;
             size_t debug_stmt_ip = 0;
-#ifdef JAISCRIPT_PILOT_CELLS
             struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
-#endif
         };
-#ifdef JAISCRIPT_PILOT_CELLS
-        // Pilot variant B: a call record's raw area. Payload bits (floats bit-preserved), a kind byte per
+        // Cell loops: a call record's raw area. Payload bits (floats bit-preserved), a kind byte per
         // cell (0 empty, else the script_value storage index), the active loop, and dirty bits over the
         // loop's cells. Cleared at record push and on every exit, miss and raise.
         struct cell_state {
@@ -475,7 +465,6 @@ namespace jai::vm {
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
             void reset() { loop = k_invalid_u32; dirty = 0; }
         };
-#endif
 
         struct frame_guard;
 
@@ -659,9 +648,7 @@ namespace jai::vm {
             uint64_t profile_entry_tsc = 0;            // inclusive per-function accounting
 #endif
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
-#ifdef JAISCRIPT_PILOT_CELLS
-            cell_state cells;                          // pilot variant B: the raw area, capacity reused across calls
-#endif
+            cell_state cells;                          // cell loops: the raw area, capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
             strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
@@ -1557,17 +1544,13 @@ namespace jai::vm {
         bool typed_land_int(frame& f, uint32_t a, script_int v);
         bool typed_land_float(frame& f, uint32_t a, script_float v);
         // The typed ops' fast paths without their fallbacks (guards, arithmetic, landing): the
-        // wrappers below add the fallback, the pilot's loop block returns to the general dispatch
+        // wrappers below add the fallback, the cell block loop returns to the general dispatch
         // at the missing ip instead. cmp_jump: 1 = fell through, 2 = jumped, -1 = miss
-        // force-inlined into their wrappers (and the pilot block handlers): the split of row 92 left the
+        // force-inlined into their wrappers (and the cell block loop): the split of row 92 left the
         // wrappers calling out of line, which Astra's same-tree stock measured on JaiDOOM
         JAI_FORCEINLINE bool typed_arith_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
-#ifdef JAISCRIPT_PILOT_CLUSTER
-        op_status exec_typed_block_back(frame& f, const vm_instruction& ins);
-#endif
-#ifdef JAISCRIPT_PILOT_CELLS
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
@@ -1576,7 +1559,6 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
         void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
-#endif
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);
         op_status exec_typed_cmp_jump(frame& f, const vm_instruction& ins);

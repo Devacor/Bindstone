@@ -184,3 +184,32 @@ The reference numbers are the GLOOM ports under bit-exact conformance hashes
 and collector changed between the two) and LuaJIT, each run warmed, with the core count
 stated, on the same 600-tick workload. Whole-application numbers (GLOOM, the JaiDOOM
 timedemo) are reported separately from native-bound object workloads.
+
+## Closed typed loops run as cell blocks
+
+A loop whose head is a typed compare-jump to the exit and whose body holds only typed arithmetic,
+`T_LOAD` into a stamped scalar declaration and no-result typed-lane index stores (the store's index
+chain included), with every scalar slot's kind agreed across its uses, gets a cell-form copy of its
+body appended to the chunk (`op_c_cmp`, `op_c_arith`, `op_c_load`, `op_c_index_store`, `op_c_back`;
+operands are cell indices). The loop's original back edge becomes `op_cells_back`: after one
+ordinary iteration it polls the budget, checks every cell's slot (the cell's kind, the engine's
+canonical stamp, the engine), resolves each load and store site's container once (a site whose
+container is not a plain array node keeps the loop on the general form), unboxes the live-in slots
+into the call record's raw area (an 8-byte payload and a kind byte per cell, floats bit-preserved),
+and runs the copy as one block, each cell instruction through its own handler with no dispatch
+between them.
+
+The cell compare exits by flushing every dirty cell through the landing that defined it (the
+declaration's stamp, the canonical stamp, a compound's payload in place) and continuing after the
+loop. Anything a cell instruction cannot do exactly (a kind byte that does not match, overflow, a
+shift out of range, a division by zero, bounds, an element of another kind, a `var` element of
+another kind) flushes first and hands the general dispatch the original instruction's ip, which runs
+it with its fallback; the next back edge re-enters through the guards. A budget stop at the cell back
+edge flushes before raising. Cells run only on window-backed record frames; fiber frames take the
+general form; a debugger armed or a registered numeric operator takes the general back edge. The
+interpreter is untouched, so texts and post-states are the general form's by construction.
+
+Controls: suites `Closed Typed Loops` and `Cell Loops` (interpreter parity on every shape). Profile
+builds count entries, refusals, cell iterations, unboxes, exits, misses by step, cell instructions,
+flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
+(21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.

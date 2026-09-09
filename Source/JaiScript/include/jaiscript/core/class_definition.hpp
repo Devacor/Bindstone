@@ -2481,6 +2481,24 @@ inline bool class_slot_admits(const slot_class_view& view, const script_value& v
     return !view.def && !tagged;
 }
 
+// A stored member an assignment expression can hand back: a field, a getter (`_get_x`, user or
+// synthesized) or a method of that name somewhere in the chain. A setter-only member has no
+// stored value to read, so its assignment yields the right-hand side. Host objects and unknowns
+// answer yes (the read path decides).
+inline bool member_reads_back(const script_value& v, uint64_t member_id, uint64_t getter_id, engine* eng) {
+    auto view = resolve_slot_class(v, eng);
+    if (!view.def) { return true; }
+    std::vector<const class_definition*> stack{ view.def };
+    int budget = 64;
+    while (!stack.empty() && budget-- > 0) {
+        const class_definition* cd = stack.back();
+        stack.pop_back();
+        if (cd->field_slot(member_id) != class_definition::k_no_field_slot || cd->has_method(getter_id) || cd->has_method(member_id)) { return true; }
+        for (const auto& parent : cd->get_parent_classes()) { if (parent) { stack.push_back(parent.get()); } }
+    }
+    return false;
+}
+
 // weak_ptr<T> slot taking a shared_ptr handle (C++: weak = shared): the pointee class must be
 // T or derive from it, then the handle downgrades to a weak one. false = not this row.
 inline bool weak_slot_takes_shared(const script_value& value, const type_info_ptr& target_type, engine* eng) {

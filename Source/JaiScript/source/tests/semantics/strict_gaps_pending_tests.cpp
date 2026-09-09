@@ -268,14 +268,14 @@ private:
 
 		test("rules_456_member_assignment_result_types", [this]() {
 			for (const char* source : {
-				"class C { int n = 0; } C c = C(); auto x = (c.n = 3.9); float& r = x; r == 3.9;",
-				"class C { int n = 1; } C c = C(); auto x = (c.n += 2.9); float& r = x; r == 3.9;",
-				"class C { static int n = 1; } auto x = (C::n += 2.9); float& r = x; r == 3.9;",
+				"class C { int n = 0; } C c = C(); auto x = (c.n = 3.9); int& r = x; r == 3;",
+				"class C { int n = 1; } C c = C(); auto x = (c.n += 2.9); int& r = x; r == 3;",
+				"class C { static int n = 1; } auto x = (C::n += 2.9); int& r = x; r == 3;",
 				"class C { static int n = 0; } auto x = (C::n = 3.9); int& r = x; r == 3;",
 				"int n = 0; auto x = (n = 3.9); int& r = x; r == 3;",
 				"int n = 1; auto x = (n += 2.9); int& r = x; r == 3;",
 				"class C { int n = 1; bool test() { auto x = (n += 2.9); int& r = x; return r == 3; } } C c = C(); c.test();",
-				"class C { int n = 1; int _get_x() { return n; } void _set_x(int v) { n = v; } } C c = C(); auto x = (c.x += 2.9); float& r = x; r == 3.9;",
+				"class C { int n = 1; int _get_x() { return n; } void _set_x(int v) { n = v; } } C c = C(); auto x = (c.x += 2.9); int& r = x; r == 3;",
 				"class C { string s = \"\"; } C c = C(); map<string,int> m = {{\"a\",1}}; for (auto kv : m) { auto x = (c.s = kv.first); string& r = x; r = \"b\"; return kv.first == \"a\" && r == \"b\"; } false;"
 			}) {
 				auto eng = make_engine();

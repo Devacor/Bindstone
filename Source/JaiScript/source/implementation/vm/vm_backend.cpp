@@ -3737,6 +3737,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 							if (!stored) {
 								return raise_from(stored);
 							}
+							if (assignment_result_used(f)) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
 						} else {
 							auto stored = detail::store_static_member(*class_def, sym, std::move(value));
 							if (!stored) {
@@ -3765,6 +3766,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				if (!stored) {
 					return raise_from(stored);
 				}
+				if (assignment_result_used(f)) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
 			} else {
 				auto stored = detail::store_static_member(*f.locals->scope_static, sym, std::move(value));
 				if (!stored) {
@@ -5734,7 +5736,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	if (typed_element) {
 		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
-	stack_.push_back(std::move(value));
+	stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
 	return {};
 }
 
@@ -5861,7 +5863,8 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	if (typed_element) {
 		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
-	stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
+	const bool result_needed = assignment_result_used(f);   // index compounds carry no result flag; the POP after a statement does
+	stack_.push_back(old_result ? std::move(postfix_old) : result_needed ? clone_for_assignment(*target_ptr) : std::move(resultValue));
 	return {};
 }
 
@@ -5895,7 +5898,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 					script_value value = std::move(stack_.back());
 					stack_.pop_back();
 					storage->set(static_cast<size_t>(index), value.deref());
-					stack_.push_back(std::move(value));   // assignment expression result
+					stack_.push_back(assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));   // the stored element is the expression's value
 					return {};
 				}
 			}
@@ -5927,7 +5930,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 					// No element type constraint - values deep-copy, shared_ptr handles share
 					*target_ptr = clone_for_assignment(value);
 				}
-				stack_.push_back(std::move(value));   // assignment expression result
+				stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
 				return {};
 			}
 		}
@@ -6797,9 +6800,11 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 	// the kernel's result discipline: an operand value pushes when a result is wanted; a
 	// stack value pops when it is not (when it is, the pending value IS the result)
 	if (value_operand) {
-		if (!no_result) { stack_.push_back(*vp); }
+		if (!no_result) { stack_.push_back(assignment_result_used(f) ? node->get(at, engine_) : *vp); }   // the stored element is the expression's value
 	} else if (no_result) {
 		stack_.pop_back();
+	} else if (assignment_result_used(f)) {
+		stack_.back() = node->get(at, engine_);   // the pending rhs becomes the stored element
 	}
 	return true;
 }
@@ -7096,11 +7101,11 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 						? static_cast<script_float>(rhs_peek.unchecked_as_int()) : rhs_peek.unchecked_as_float();
 				}
 				if (value_operand) {
-					if (!no_result) { stack_.push_back(*value_ptr); }
+					if (!no_result) { stack_.push_back(assignment_result_used(f) ? node->get(static_cast<size_t>(index), engine_) : *value_ptr); }   // the stored element is the expression's value
 				} else {
 					script_value value = std::move(stack_.back());
 					stack_.pop_back();
-					if (!no_result) { stack_.push_back(std::move(value)); }   // assignment expression result
+					if (!no_result) { stack_.push_back(assignment_result_used(f) ? node->get(static_cast<size_t>(index), engine_) : std::move(value)); }
 				}
 				return {};
 			}
@@ -7161,7 +7166,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				// No element type constraint - values deep-copy, shared_ptr handles share
 				*target_ptr = clone_for_assignment(value);
 			}
-			if (!no_result) { stack_.push_back(std::move(value)); }   // assignment expression result
+			if (!no_result) { stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value)); }   // a copy of the stored element is the expression's value
 			return {};
 		}
 	}
@@ -7230,7 +7235,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				storage->set(static_cast<size_t>(index), resultValue);
 				stack_.pop_back();   // rhs
 				stack_.pop_back();   // index
-				stack_.back() = std::move(resultValue);   // container slot becomes the result
+				stack_.back() = assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(resultValue);   // container slot becomes the result: the stored element
 				return {};
 			}
 			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
@@ -7280,7 +7285,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 					}
 					stack_.pop_back();   // rhs
 					stack_.pop_back();   // index
-					stack_.back() = std::move(resultValue);   // container slot becomes the result
+					stack_.back() = assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(resultValue);   // container slot becomes the result: a copy of the stored element
 					return {};
 				}
 			}
@@ -9862,8 +9867,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 
 	if (auto landed = member_field_write_fast(f, static_cast<size_t>(&ins - f.code->code.data()), ins.b, member, dereferenced, value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
-		stack_.push_back(std::move(value));
-		return {};
+		return land_member_store_result(f, dereferenced, member, std::move(value));
 	}
 
 	VM_TRY(assign_member(f, dereferenced, member, value));
@@ -9871,7 +9875,22 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 		stack_.push_back(make_null());
 		return {};
 	}
-	stack_.push_back(std::move(value));
+	return land_member_store_result(f, dereferenced, member, std::move(value));
+}
+
+op_status vm_backend::land_member_store_result(frame& f, const script_value& object, member_expr* member, script_value&& rhs) {
+	if (!assignment_result_used(f) ||
+	    !jai::detail::member_reads_back(object, member->member_id, symbolizer_->get_getter_id_with_view(member->member_id).first, engine_)) {
+		stack_.push_back(std::move(rhs));
+		return {};
+	}
+	script_value stored = make_null();
+	VM_TRY(member_access_value(f, object, member, stored));
+	if (is_unwinding_) {
+		stack_.push_back(make_null());
+		return {};
+	}
+	stack_.push_back(clone_for_assignment(stored.deref()));   // C++ copy-init from the lvalue
 	return {};
 }
 
@@ -9948,7 +9967,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 	return std::nullopt;
 }
 
-op_status vm_backend::store_static_target(frame& f, member_expr* member, const script_value& result) {
+op_status vm_backend::store_static_target(frame& f, member_expr* member, const script_value& result, script_value* stored_out) {
 	auto cls = detail::resolve_static_store_class(member, *environment_, *symbolizer_, frame_access_context(f));
 	if (!cls) {
 		return raise_from(cls);
@@ -9957,6 +9976,7 @@ op_status vm_backend::store_static_target(frame& f, member_expr* member, const s
 	if (!stored) {
 		return raise_from(stored);
 	}
+	if (stored_out) { *stored_out = stored.value(); }
 	return {};
 }
 
@@ -9973,7 +9993,7 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	if (!stored) {
 		return raise_from(stored);
 	}
-	stack_.push_back(std::move(stored.value()));
+	stack_.push_back(assignment_result_used(f) ? clone_for_assignment(stored.value()) : std::move(stored.value()));   // a consumed static store is a copy of the stored value
 	return {};
 }
 
@@ -9981,6 +10001,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
+	const bool result_needed = assignment_result_used(f);   // member compounds carry no result flag; the POP after a statement does
 
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
@@ -10015,8 +10036,9 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_result.has_value()) {
 				if (member->is_static) {
-					VM_TRY(store_static_target(f, member, custom_result.value()));
-					stack_.push_back(std::move(custom_result.value()));
+					script_value stored_static = make_null();
+					VM_TRY(store_static_target(f, member, custom_result.value(), &stored_static));
+					stack_.push_back(result_needed ? clone_for_assignment(stored_static) : std::move(custom_result.value()));
 					return {};
 				}
 				script_value objectValue = objectValueRaw.deref();
@@ -10026,6 +10048,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 						stack_.push_back(make_null());
 						return {};
 					}
+					if (result_needed) { return land_member_store_result(f, objectValue, member, std::move(custom_result.value())); }
 					stack_.push_back(std::move(custom_result.value()));
 					return {};
 				}
@@ -10132,8 +10155,9 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	}
 
 	if (member->is_static) {
-		VM_TRY(store_static_target(f, member, resultValue));
-		stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
+		script_value stored_static = make_null();
+		VM_TRY(store_static_target(f, member, resultValue, &stored_static));
+		stack_.push_back(old_result ? std::move(postfix_old) : result_needed ? clone_for_assignment(stored_static) : std::move(resultValue));
 		return {};
 	}
 
@@ -10154,6 +10178,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		}
 	}
 
+	if (result_needed && !old_result) { return land_member_store_result(f, objectValue, member, std::move(resultValue)); }
 	stack_.push_back(old_result ? std::move(postfix_old) : std::move(resultValue));
 	return {};
 }

@@ -4816,15 +4816,20 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                 }
 
-                // Store the enforced (declared-type converted) value; the expression result
-                // stays the promoted value, matching member/element compound semantics
+                // Store the enforced (declared-type converted) value; a consumed expression's
+                // value is the stored one (Dev ruling 2026-09-08), read back through a property getter
                 if (prop_setter) {
                     JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
+                    if (expression_result_needed_) {
+                        JAISCRIPT_TRY_ASSIGN(resultValue, detail::read_bare_cpp_property(this_val, instance.get(),
+                            instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+                    }
                 } else {
                     auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(resultValue));
                     if (!enforced) {
                         return enforced.error_value();
                     }
+                    if (expression_result_needed_) { resultValue = clone_for_assignment(enforced.value()); }
                     instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                 }
                 push_value(std::move(resultValue));
@@ -4832,7 +4837,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
         } else if (expr->target->get_type() == node_type::member_expr) {
             auto* memberExpr = static_cast<member_expr*>(expr->target.get());
             // C::s op= v writes back through the shared static-store kernel (vm parity)
-            auto store_static_target = [&](const script_value& result) -> checked_result<void> {
+            auto store_static_target = [&](const script_value& result) -> checked_result<script_value> {
                 auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
                                                               environment_->find_access_context());
                 if (!cls) {
@@ -4842,7 +4847,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 if (!stored) {
                     return stored.error_value();
                 }
-                return {};
+                return std::move(stored.value());
             };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // The receiver is evaluated ONCE and held raw (a reference receiver re-resolves by
@@ -4907,8 +4912,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                     if (custom_result.has_value()) {
                         if (memberExpr->is_static) {
-                            JAISCRIPT_TRY(store_static_target(custom_result.value()));
-                            push_value(std::move(custom_result.value()));
+                            script_value stored_static;
+                            JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(custom_result.value()));
+                            push_value(expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(custom_result.value()));
                             return {};
                         }
                         // Assign the result back to the property
@@ -4917,6 +4923,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, custom_result.value()));
                             if (is_unwinding_) {
                                 push_value(make_value());
+                                return {};
+                            }
+                            if (expression_result_needed_ &&
+                                detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
+                                JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));
+                                if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
                                 return {};
                             }
                             push_value(std::move(custom_result.value()));
@@ -5020,8 +5032,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
             
             if (memberExpr->is_static) {
-                JAISCRIPT_TRY(store_static_target(resultValue));
-                push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
+                script_value stored_static;
+                JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(resultValue));
+                push_value(expr->postfix_old_result ? std::move(postfix_old)
+                           : expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(resultValue));
                 return {};
             }
 
@@ -5043,7 +5057,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 push_value(make_value());
                 return {};
             }
-
+            if (expression_result_needed_ && !expr->postfix_old_result &&
+                detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
+                JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));   // the stored value, through a user _get_
+                if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
+                return {};
+            }
             push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
         } else {
             // Numeric subscript-compound fast path (a[i] op= v, the GLOOM store shape):
@@ -5868,6 +5887,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                         if (!stored) {
                                             return stored.error_value();
                                         }
+                                        if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
                                     } else {
                                         auto stored = detail::store_static_member(*class_def, identifier->symbol_id, std::move(value));
                                         if (!stored) {
@@ -5896,6 +5916,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if (!stored) {
                             return stored.error_value();
                         }
+                        if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
                     } else {
                         auto stored = detail::store_static_member(*member_scope_.statics, identifier->symbol_id, std::move(value));
                         if (!stored) {
@@ -5940,7 +5961,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 if (!stored) {
                     return stored.error_value();
                 }
-                push_value(std::move(stored.value()));
+                push_value(expression_result_needed_ ? clone_for_assignment(stored.value()) : std::move(stored.value()));   // a consumed static store is a copy of the stored value
                 return {};
             }
 
@@ -5989,19 +6010,29 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                         incoming = std::move(enforced.value());
                     }
-                    inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
-                    push_value(std::move(value));
+                    if (expression_result_needed_) {
+                        script_value stored = clone_for_assignment(incoming);   // the expression's value is a copy of the stored one (Dev ruling 2026-09-08)
+                        inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
+                        push_value(std::move(stored));
+                    } else {
+                        inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
+                        push_value(std::move(value));
+                    }
                     return {};
                 }
             }
-
             JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value));
             if (is_unwinding_) {
                 push_value(make_value());
                 return {};
             }
-
-            push_value(std::move(value));  // Assignment expressions return the assigned value
+            if (expression_result_needed_ &&
+                detail::member_reads_back(dereferenced, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
+                JAISCRIPT_TRY(member_read_on(memberExpr, dereferenced, false));   // the stored value, through a user _get_
+                if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
+                return {};
+            }
+            push_value(std::move(value));  // discarded: nothing observes it
         }
         // Check if target is a subscript expression (array[index] or map[key])
         else if (expr->target->get_type() == node_type::binary_expr) {
@@ -6086,7 +6117,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     if (typed_element) {
         refHolder->container->set(refHolder->container_index, *target_ptr);
     }
-    push_value(std::move(value));  // Assignment expressions return the assigned value
+    push_value(expression_result_needed_ ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value  // Assignment expressions return the assigned value
     return {};
 }
 
@@ -12274,6 +12305,11 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 // expression_decl): the value stays on the stack for a top-level implicit return
 template<bool Replaying>
 checked_result<void> interpreter::visit_expression_decl_t(expression_decl* decl) {
+    // A statement's value is not consumed: no read-back for an assignment expression (the
+    // top-level implicit return hands the host the right-hand side, like the vm)
+    const bool prev = expression_result_needed_;
+    expression_result_needed_ = false;
+    struct restore_flag { bool& flag; bool value; ~restore_flag() { flag = value; } } restore{ expression_result_needed_, prev };
     JAISCRIPT_TRY_ROOT(decl, decl->expression.get());
     return {};
 }
@@ -13418,6 +13454,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // RAII guard for call depth tracking - ensures decrement even on early return
     detail::call_depth_guard depth_guard(current_call_depth_);
+    // A callee's own statements decide whether their assignment expressions are consumed; the
+    // caller's statement position (an expression statement clears the flag) must not leak in
+    struct result_flag_scope { bool& flag; bool saved; ~result_flag_scope() { flag = saved; } } result_flag{ expression_result_needed_, expression_result_needed_ };
+    expression_result_needed_ = true;
 
     // Consume the pending call-site context (set by visit_call around the invoke): ref
     // params bind against the caller's variables through it. Consumed exactly once -

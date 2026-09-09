@@ -161,6 +161,83 @@ public:
             for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
         });
 
+        test("assignment_expressions_yield_the_stored_value", [this]() {
+            // Dev ruling 2026-09-08: the value of an assignment expression is the destination's
+            // stored value on every spelling (`auto r = (c.n = 3.9)` is int 3): typed local, bare and
+            // explicit field, static, accessor (read back through _get_), array element, map value,
+            // nested element, compound forms; postfix keeps the old stored value; a var element keeps
+            // what it stored; a heavy value comes back as a copy. Both backends agree row for row
+            const char* src = R"(
+                class C { int n = 0; int _get_x() { return n; } void _set_x(int v) { n = v; } static int s = 0;
+                          string test_plain() { auto r = (n = 3.9); return type_of(r) + ":" + to_string(r) + "|" + type_of(n) + ":" + to_string(n); }
+                          string test_compound() { n = 1; auto r = (n += 2.9); return type_of(r) + ":" + to_string(r) + "|" + type_of(n) + ":" + to_string(n); } }
+                class D { int n = 0; int _get_x() { return n; } void _set_x(int v) { n = v * 2; } }
+                class S { string t = ""; }
+                class H { array<int> a = []; }
+                class T { static array<int> a = []; }
+                class G { string s = "a"; }
+                class W { int seen = 0; void _set_virt(int v) { seen = seen + v; } }
+                class T2 { static int s = 0; static string m() { float v = 3.9; auto r = (s = v); return type_of(r) + ":" + to_string(r) + "|" + type_of(s) + ":" + to_string(s); } }
+                var out = [];
+                function cap(string label, function body) { try { out.push(label + ":" + to_string(body())); } catch (err) { out.push(label + "!" + err); } }
+                function show(var r, var dst) -> string { return type_of(r) + ":" + to_string(r) + "|" + type_of(dst) + ":" + to_string(dst); }
+                cap("local_plain", function() -> string { int n = 0; auto r = (n = 3.9); return show(r, n); });
+                cap("local_compound", function() -> string { int n = 1; auto r = (n += 2.9); return show(r, n); });
+                cap("bare_field_plain", function() -> string { C c = C(); return c.test_plain(); });
+                cap("bare_field_compound", function() -> string { C c = C(); return c.test_compound(); });
+                cap("field_plain", function() -> string { C c = C(); auto r = (c.n = 3.9); return show(r, c.n); });
+                cap("field_compound", function() -> string { C c = C(); c.n = 1; auto r = (c.n += 2.9); return show(r, c.n); });
+                cap("static_plain", function() -> string { auto r = (C::s = 3.9); return show(r, C::s); });
+                cap("static_compound", function() -> string { C::s = 1; auto r = (C::s += 2.9); return show(r, C::s); });
+                cap("accessor_plain", function() -> string { C c = C(); auto r = (c.x = 3.9); return show(r, c.x); });
+                cap("accessor_compound", function() -> string { C c = C(); c.n = 1; auto r = (c.x += 2.9); return show(r, c.x); });
+                cap("array_plain", function() -> string { array<int> a = [0]; auto r = (a[0] = 3.9); return show(r, a[0]); });
+                cap("array_compound", function() -> string { array<int> a = [1]; auto r = (a[0] += 2.9); return show(r, a[0]); });
+                cap("map_plain", function() -> string { map<string, int> m = {"k": 0}; auto r = (m["k"] = 3.9); return show(r, m["k"]); });
+                cap("map_compound", function() -> string { map<string, int> m = {"k": 1}; auto r = (m["k"] += 2.9); return show(r, m["k"]); });
+                cap("nested_plain", function() -> string { array<array<int>> g = [[0]]; auto r = (g[0][0] = 3.9); return show(r, g[0][0]); });
+                cap("var_array_plain", function() -> string { array<var> a = [0]; auto r = (a[0] = 3.9); return show(r, a[0]); });
+                cap("field_bool", function() -> string { C c = C(); auto r = (c.n = true); return show(r, c.n); });
+                cap("string_field", function() -> string { S s = S(); auto r = (s.t = 42); return show(r, s.t); });
+                cap("postfix_field", function() -> string { C c = C(); c.n = 7; auto r = (c.n++); return show(r, c.n); });
+                cap("postfix_element", function() -> string { array<int> a = [7]; auto r = (a[0]++); return show(r, a[0]); });
+                cap("prefix_element", function() -> string { array<int> a = [7]; auto r = (++a[0]); return show(r, a[0]); });
+                cap("chain", function() -> string { array<int> a = [0]; var k = (a[0] = 3.9); return show(k, a[0]); });
+                cap("accessor_setter_transforms", function() -> string { D d = D(); auto r = (d.x = 3); return show(r, d.x); });
+                cap("heavy_copy", function() -> string { array<array<int>> g = [[1]]; auto r = (g[0] = [5, 6]); r.push(7); return to_string(r.size()) + "," + to_string(g[0].size()); });
+                cap("member_heavy", function() -> string { H h = H(); auto r = (h.a = [5, 6]); r.push(7); return to_string(r.size()) + "," + to_string(h.a.size()); });
+                cap("map_heavy", function() -> string { map<string, array<int>> m = {}; auto r = (m["k"] = [5, 6]); r.push(7); return to_string(r.size()) + "," + to_string(m["k"].size()); });
+                cap("static_heavy", function() -> string { auto r = (T::a = [5, 6]); r.push(7); return to_string(r.size()) + "," + to_string(T::a.size()); });
+                cap("compound_member_heavy", function() -> string { G g = G(); auto r = (g.s += "b"); r += "c"; return r + "," + g.s; });
+                cap("bare_static_from_lvalue", function() -> string { return T2::m(); });
+                cap("setter_only_member", function() -> string { W w = W(); auto r = (w.virt = 2.5); return type_of(r) + ":" + to_string(r) + "|" + to_string(w.seen); });
+                cap("statement_position", function() -> string { C c = C(); c.n = 3.9; array<int> a = [0]; a[0] = 2.5; map<string, int> m = {}; m["k"] = 1.5; c.x = 4.9; return to_string(c.n) + to_string(a[0]) + to_string(m["k"]); });
+                out;
+            )";
+            std::vector<std::string> seen[2];
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                const auto rows = e->execute(src).as_array();
+                for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
+            }
+            check_eq(seen[0], seen[1], "both backends yield identically");
+            const std::string stored3 = "int:3|int:3";
+            const std::vector<std::string> expected = {
+                "local_plain:" + stored3, "local_compound:" + stored3, "bare_field_plain:" + stored3, "bare_field_compound:" + stored3,
+                "field_plain:" + stored3, "field_compound:" + stored3, "static_plain:" + stored3, "static_compound:" + stored3,
+                "accessor_plain:" + stored3, "accessor_compound:" + stored3, "array_plain:" + stored3, "array_compound:" + stored3,
+                "map_plain:" + stored3, "map_compound:" + stored3, "nested_plain:" + stored3,
+                "var_array_plain:float:3.900000|float:3.900000", "field_bool:int:1|int:1", "string_field:string:42|string:42",
+                "postfix_field:int:7|int:8", "postfix_element:int:7|int:8", "prefix_element:int:8|int:8", "chain:" + stored3,
+                "accessor_setter_transforms:int:6|int:6", "heavy_copy:3,2",
+                "member_heavy:3,2", "map_heavy:3,2", "static_heavy:3,2", "compound_member_heavy:abc,ab", "bare_static_from_lvalue:int:3|int:3", "setter_only_member:float:2.500000|2", "statement_position:421",
+            };
+            check_eq(expected.size(), seen[0].size(), "row count");
+            for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
+        });
+
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {
@@ -1353,10 +1430,10 @@ public:
         });
 
         test("compound_typed_element_and_ref_targets", [this, check_both]() {
-            // Constrained element: the store converts (12.5 -> 12); the expression result
-            // stays the promoted value, matching plain subscript-assign's result semantics
+            // Constrained element: the store converts (12.5 -> 12) and a consumed expression's
+            // value is the stored element (Dev ruling 2026-09-08)
             check_both("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "typed element converts");
-            check_both("array<int> a = [10]; var r = (a[0] += 2.5); to_string(r)", "12.500000", "element result promoted (matches '=')");
+            check_both("array<int> a = [10]; var r = (a[0] += 2.5); to_string(r)", "12", "element result is the stored element");
             check_both("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "typed element %=");
             // Constrained ref bound to a typed element behaves route-independently
             check_both(R"(
@@ -2934,7 +3011,7 @@ public:
                 "r = r + \":\" + to_string(q._get_b()) + \":\" + to_string(q._set_b(3)) + \":\" + to_string(q.raw());\n"
                 "var y = (q.b = 5);\n"
                 "r + \":\" + to_string(y) + \":\" + to_string(q.raw())",
-                "42:42:20:42:30:30:5:50", "same-class _get_b/_set_b own the member; the store yields the assigned value");
+                "42:42:20:42:30:30:42:50", "same-class _get_b/_set_b own the member; a consumed store reads back through _get_b");
         });
 
         test("accessor_bare_access_in_body", [check_both]() {
@@ -2962,8 +3039,8 @@ public:
                 "r = r + \":\" + to_string(c.b) + \":\" + to_string(c.raw());\n"
                 "var pre = --c.b;\n"
                 "r + \":\" + to_string(pre) + \":\" + to_string(c.b) + \":\" + to_string(c.raw())",
-                "1120:1020:1120:11310:11210:113100:113000:113099:1131090:1130990",
-                "compound reads through _get_b and writes through _set_b; postfix yields the old getter value");
+                "1120:1020:1120:11310:11210:113100:113000:1131090:1131090:1130990",
+                "compound reads through _get_b and writes through _set_b; postfix yields the old getter value, prefix the getter's value after the store");
         });
 
         test("accessor_child_over_parent_field", [check_both]() {

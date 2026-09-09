@@ -516,6 +516,15 @@ namespace jai::vm {
             const auto& code = f.code->code;
             return f.ip + 1 < code.size() && code[f.ip + 1].op == opcode::op_pop;
         }
+        // An assignment expression's value is consumed unless a POP follows (a statement) or the
+        // top-level implicit return does: the host's convenience result stays the right-hand side
+        // (no read-back copy, no extra getter call for a statement-shaped last line)
+        bool assignment_result_used(const frame& f) const noexcept {
+            const auto& code = f.code->code;
+            if (f.ip + 1 >= code.size()) { return true; }
+            const opcode next = code[f.ip + 1].op;
+            return next != opcode::op_pop && next != opcode::op_implicit_return;
+        }
         void land_call_result(frame& caller, script_value&& v) {
             if (next_op_discards_result(caller)) { caller.ip += 2; return; }
             stack_.push_back(std::move(v));
@@ -1378,7 +1387,7 @@ namespace jai::vm {
         // general assign_member ladder runs; a value is the landed store's status.
         std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
                                                          const script_value& dereferenced, const script_value& value);
-        op_status store_static_target(frame& f, member_expr* member, const script_value& result);
+        op_status store_static_target(frame& f, member_expr* member, const script_value& result, script_value* stored_out = nullptr);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare
         // sibling calls): call paths recover the payload (kind bound_method) and enter
@@ -1480,6 +1489,11 @@ namespace jai::vm {
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_push(frame& f, const vm_instruction& ins);
+        // The value of an assignment expression is the destination's stored value (Dev ruling
+        // 2026-09-08: `auto r = (c.n = 3.9)` is int 3). A consumed member store reads the member
+        // back (through a user _get_ when one exists); a discarded one lands the rhs, which
+        // nothing observes
+        op_status land_member_store_result(frame& f, const script_value& object, member_expr* member, script_value&& rhs);
         // The append rows shared by op_push_fused and op_t_push: a payload the buffer takes
         // as-is lands with the kernel's memory charge; declined = run the slice kernel
         enum class push_append { appended, declined, failed };

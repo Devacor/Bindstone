@@ -13,6 +13,8 @@ namespace jai {
     struct builtin_method_registries;
 }
 
+namespace jai::detail { enum class math_fn : uint8_t; }
+
 namespace jai::vm {
 
     class vm_compiler {
@@ -73,6 +75,9 @@ namespace jai::vm {
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         bool quiet_partner(const expression* e);
+        // a call to a one-argument math:: intrinsic whose result a compiler temp can carry (none = not one)
+        detail::math_fn math_temp_operand(const expression* e) const;
+        void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
         static uint8_t operand_expect(const binary_expr* node);

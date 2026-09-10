@@ -140,6 +140,9 @@ namespace jai::vm {
                                // result lands RAW in a compiler temp slot (above local_count,
                                // inside the window) - the register-file wave's producer form;
                                // consumers read it back through the ordinary fused slot operand
+        op_math_temp,          // a=fused_binary_protos index (left = the argument operand; k_invalid_u32 =
+                               // the argument rides the stack), b=frame slot (a compiler temp), c=math_fn:
+                               // a one-argument math:: intrinsic's result lands in the temp
         op_operand_temp,       // a=fused_binary_protos index (left = a subscript operand), b=frame
                                // slot: the operand resolves RAW into a compiler temp BEFORE a
                                // lifted right subtree computes (left-to-right sequencing of the
@@ -378,6 +381,7 @@ namespace jai::vm {
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
+            case opcode::op_math_temp: return "MATH_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";
             case opcode::op_push_fused: return "PUSH_FUSED";

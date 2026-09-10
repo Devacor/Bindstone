@@ -118,6 +118,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_math_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -256,6 +257,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_math_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
@@ -2318,7 +2320,56 @@ bool vm_compiler::quiet_partner(const expression* e) {
 		auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
 		return !id->global_qualified && identifier_slot_operand(id) != k_invalid_u32;
 	}
-	return fusable_index_expr(e);
+	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
+}
+
+// A call to math::itrunc, ifloor, floor, ceil, sqrt, abs, sin, cos, tan or a degree conversion with exactly one
+// argument: the shared kernel evaluates it (detail/math_intrinsics.hpp) and its result lands in a compiler temp,
+// where it is a direct operand of the binary around it (the checker classes the integer family int)
+detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return detail::math_fn::none;
+	if (!e || e->get_type() != node_type::call_expr) return detail::math_fn::none;
+	auto* call = static_cast<const call_expr*>(e);
+	if (call->arguments.size() != 1 || !call->callee || call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
+	const detail::math_fn fn = detail::math_intrinsic_for_call(static_cast<const member_expr*>(call->callee.get()));
+	switch (fn) {
+	case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::floor_: case detail::math_fn::ceil_:
+	case detail::math_fn::sqrt_: case detail::math_fn::abs_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
+	case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians:
+		return fn;
+	default: return detail::math_fn::none;
+	}
+}
+
+// The intrinsic's argument as an operand (a slot, a literal, an element read or another intrinsic into a temp;
+// anything else rides the stack), then op_math_temp lands the result in a fresh temp; `out` is that temp
+void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand& out) {
+	auto* call = static_cast<call_expr*>(e.get());
+	const detail::math_fn fn = math_temp_operand(e.get());
+	const expression_ptr& arg = call->arguments[0];
+	fused_binary_proto p;
+	bool operand = true;
+	if (arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr) {
+		p.left = make_fused_operand(arg);
+	} else if (math_temp_operand(arg.get()) != detail::math_fn::none) {
+		compile_math_into_temp(arg, p.left);
+	} else if (!(fusable_index_expr(arg.get()) && compile_subscript_into_temp(arg, 0xFF, p.left))) {
+		compile_expression(arg);
+		operand = false;
+	}
+	uint32_t a = k_invalid_u32;
+	if (operand) {
+		chunk_->fused_binary_protos.push_back(std::move(p));
+		a = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+	}
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	emit(opcode::op_math_temp, a, t, static_cast<uint32_t>(fn));
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
 }
 
 // A frame-slot identifier that names a reference declaration (var&, T&, a by-reference parameter): its
@@ -2535,8 +2586,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
-		const bool lsub = fusable_index_expr(expr->left.get()) && quiet_partner(expr->right.get());
-		const bool rsub = fusable_index_expr(expr->right.get()) && quiet_partner(expr->left.get());
+		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none; };
+		const bool lsub = hoists(expr->left.get()) && quiet_partner(expr->right.get());
+		const bool rsub = hoists(expr->right.get()) && quiet_partner(expr->left.get());
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind
@@ -2544,12 +2596,16 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				const uint8_t e = operand_expect(expr.get());
 				return e != 0xFF ? e : operand_expect(static_cast<const binary_expr*>(sub.get()));
 			};
+			auto hoist_into_temp = [&](const expression_ptr& side, fused_operand& out) {
+				if (math_temp_operand(side.get()) != detail::math_fn::none) { compile_math_into_temp(side, out); }
+				else { compile_subscript_into_temp(side, expect_of(side), out); }
+			};
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
-			if (lsub) { compile_subscript_into_temp(expr->left, expect_of(expr->left), proto.left); }
+			if (lsub) { hoist_into_temp(expr->left, proto.left); }
 			else if (reference_slot_operand(expr->left.get())) { materialize_operand_temp(expr->left, proto.left); }   // its dereference precedes the read
 			else { proto.left = make_fused_operand(expr->left); }
-			if (rsub) { compile_subscript_into_temp(expr->right, expect_of(expr->right), proto.right); } else { proto.right = make_fused_operand(expr->right); }
+			if (rsub) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
 			chunk_->fused_binary_protos.push_back(proto);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
@@ -2584,11 +2640,11 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		auto operand_shape = [this](const expression* e) -> bool {
 			return e->get_type() == node_type::identifier_expr ||
 			       e->get_type() == node_type::literal_expr ||
-			       fusable_subscript_operand(e) || fusable_index_expr(e);
+			       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
 		};
 		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
 		// the rule holds at every node of the lifted tree, the outer one included
-		auto temp_only = [this](const expression* c) { return fusable_index_expr(c) && !fusable_subscript_operand(c); };
+		auto temp_only = [this](const expression* c) { return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none; };
 		auto partners_ok = [&](const binary_expr* b) {
 			return !((temp_only(b->left.get()) && !quiet_partner(b->right.get())) ||
 			         (temp_only(b->right.get()) && !quiet_partner(b->left.get())));
@@ -2646,6 +2702,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// kind, read from the subscript node only (an identifier or literal operand has no class byte to read)
 			auto operand_of = [&](const binary_expr* b, const expression_ptr& e, const expression* partner) -> fused_operand {
 				fused_operand o;
+				if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, o); return o; }   // partners_ok admitted it
 				if (fusable_index_expr(e.get()) && quiet_partner(partner)) {
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
 					if (compile_subscript_into_temp(e, expect, o)) { return o; }

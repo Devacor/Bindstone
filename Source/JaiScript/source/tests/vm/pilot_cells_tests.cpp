@@ -787,6 +787,47 @@ public:
 			size_t loads = 0; for (size_t at = listing.find("T_LOAD"); at != std::string::npos; at = listing.find("T_LOAD", at + 6)) { ++loads; }
 			check_true(loads >= 2 && listing.find("INDEX_FUSED_DECL") == std::string::npos, "inner and outer reads both take the typed row: " + listing);
 		});
+		test("a_math_intrinsic_result_lands_in_a_temp_and_the_binary_takes_the_typed_row", [this]() {
+			// JaiDOOM's flat-column shapes: an intrinsic inside a typed binary, inside an index expression, in a float
+			// expression; the kernel's errors keep their place ahead of and behind a hoisted element read
+			const std::string script = R"(
+				function band(int bb, float z) -> int { int b = bb + math::itrunc(z * 0.001953125); if (b < 0) { b = 0; } if (b > 31) { b = 31; } return b; }
+				function texel(var& flat, float wx, float wy) -> int { return flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; }
+				function fl(float x) -> float { return math::sqrt(x) * 2.0 + math::floor(x); }
+				function ints(int i) -> int { return math::itrunc(i) + math::abs(i - 10); }
+				function bad(float x) -> string { try { return to_string(math::itrunc(x) + 1); } catch (err) { return "throw:" + err; } }
+				function read_first(var& arr, int i) -> string { try { return to_string(arr[i] + math::itrunc(1e300)); } catch (err) { return "throw:" + err; } }
+				function call_first(var& arr, int i) -> string { try { return to_string(math::itrunc(1e300) + arr[i]); } catch (err) { return "throw:" + err; } }
+				var F = []; for (int i = 0; i < 4096; ++i) { F.push(i); }
+				to_string(band(5, 1000.0)) + "," + to_string(band(0, 40000.0)) + "," + to_string(texel(F, 3.7, 2.2)) + "," + to_string(fl(4.0)) + "," + to_string(ints(3)) + "," + bad(1e300) + "," + read_first(F, 9999) + "," + call_first(F, 9999);
+			)";
+			both(script, "", "math temps");
+			both(script, "", "math temps, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("6,31,131,8", 0) == 0, "band, clamp, texel and the float expression: " + vm);
+			check_true(vm.find(",10,throw:") != std::string::npos, "the int forms and the conversion error: " + vm);
+			const std::string interp = run_on(false, script);
+			const size_t tail = vm.rfind(",throw:");
+			check_true(tail != std::string::npos && vm.substr(tail) == interp.substr(interp.rfind(",throw:")), "the read-first and call-first texts agree: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "var f = function(var& flat, int bb, float z, float wx, float wy) { int b = bb + math::itrunc(z * 0.001953125); return b + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			size_t maths = 0, temps = 0;
+			for (size_t at = listing.find("MATH"); at != std::string::npos; at = listing.find("MATH", at + 4)) { ++maths; if (listing.compare(at, 9, "MATH_TEMP") == 0) { ++temps; } }
+			check_true(maths == 3 && temps == 3, "every intrinsic lands in a temp: " + listing);
+			check_true(listing.find("T_AND_II") != std::string::npos && listing.find("T_SHL_II") != std::string::npos && listing.find("T_ADD_II") != std::string::npos, "the binaries around them take the int rows: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

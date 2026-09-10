@@ -4709,6 +4709,46 @@ op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// A one-argument math:: intrinsic into a compiler temp: the integer family on a float lands raw in place
+// (the kernel's own conversion), every other case runs the shared kernel and lands its value; the
+// argument is a fused operand or, for a computed argument, the stack's top (KEEP the kernel: parity)
+op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
+	const detail::math_fn fn = static_cast<detail::math_fn>(ins.c);
+	std::optional<script_value> scratch;
+	script_value popped(std::monostate{}, engine_);
+	const script_value* v;
+	if (ins.a != k_invalid_u32) {
+		const fused_operand& arg = f.code->fused_binary_protos[ins.a].left;
+		if (arg.const_index != k_invalid_u32) {
+			v = &f.code->constants[arg.const_index];
+		} else {
+			v = fused_subscript_value(f, arg, scratch, f.ip * 3);   // the identifier ladder raises before it hands back null
+			if (!v) return op_status::failed;
+		}
+	} else {
+		if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::unsupported_operation), "math:: intrinsic without an argument (internal)"); }
+		popped = std::move(stack_.back());
+		stack_.pop_back();
+		v = &popped;
+	}
+	v = &v->deref();
+	if (v->raw_storage_index() == script_value::TYPEID_FLOAT) {
+		const script_float x = v->unchecked_as_float();
+		if (fn == detail::math_fn::itrunc) {
+			if (auto r = detail::checked_float_to_integer(x)) { typed_land_int(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), r.value()); return {}; }
+		} else if (fn == detail::math_fn::ifloor) {
+			if (auto r = detail::checked_float_to_integer(std::floor(x))) { typed_land_int(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), r.value()); return {}; }
+		}
+	}
+	const script_value* argp[1] = { v };
+	auto result = detail::eval_math_intrinsic(fn, argp, 1, engine_, engine_->math_rng());
+	if (!result) {
+		return raise_from(result);
+	}
+	frame_slot_set(f, ins.b, std::move(result.value()));
+	return {};
+}
+
 op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	if (f.ip + 1 < f.code->code.size()) { ++profile_binary_fused_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
@@ -14746,6 +14786,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_store_mov: VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); break;
 			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
+			case opcode::op_math_temp: VM_TRY_OP_SHARED(exec_math_temp(f, ins)); break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;

@@ -1953,6 +1953,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (constant(bp.left, r) && direct_slot(bp.right, l) && commutes(op)) { op = mirrored(op); left = l; right = r; return true; }
 		return false;
 	};
+	uint32_t one_const = k_invalid_u32;   // the increment's operand, minted once per chunk
 	auto& code = c.code;
 	for (size_t ip = 0; ip < code.size(); ++ip) {
 		vm_instruction& ins = code[ip];
@@ -2005,6 +2006,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.orig = ins;
 			site.stamp = stamp;
 			ins = vm_instruction{t, dst, left, right};
+			break;
+		}
+		case opcode::op_incdec: {
+			// `++x` / `x--` in statement position on a direct slot: the int compound row in place (the
+			// landing `x += 1` takes); the slot's tag is the guard, a miss runs the general op
+			if (!(ins.c & incdec_flag_no_result) || (ins.c & incdec_flag_global_only) || ins.b == k_invalid_u32 || ins.b >= k_typed_slot_mask) break;
+			chunk_ = &c;
+			if (one_const == k_invalid_u32) { one_const = add_constant(script_value(static_cast<script_int>(1), static_cast<engine*>(nullptr))); }
+			if (one_const >= k_typed_slot_mask) break;
+			typed_site_at(ip).orig = ins;
+			ins = vm_instruction{(ins.c & incdec_flag_increment) ? opcode::op_t_add_ii : opcode::op_t_sub_ii,
+				ins.b | (k_typed_dst_compound << k_typed_dst_shift), ins.b, k_typed_const_bit | one_const};
 			break;
 		}
 		case opcode::op_compound_fused: {

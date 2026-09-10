@@ -229,4 +229,5 @@ kind a proof source, and a subscript node carries that kind in its operand class
 the proven kind for store values, nested indexes and binaries the checker could not class on their own. The parser's typed-store classification (`assignment_expr::typed_store_provable`, guarded at runtime
 like every proof) knows program-level `array<int>` and `array<float>` declarations by symbol and reference
 aliases of typed containers, so `acc = acc + G[idx]` and `acc = acc + pix[i]` are parse-proven typed stores and
-such loops close as cell blocks.
+such loops close as cell blocks. A typed value parameter classifies the same way (`vfx = vfx + dvfx` with both
+declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too.

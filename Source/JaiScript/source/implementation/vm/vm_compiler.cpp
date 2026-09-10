@@ -1850,6 +1850,8 @@ bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_
 // operands are direct slots, temps or literals becomes one op_t_* with the slots in the
 // instruction word; the original instruction waits in typed_sites for any guard miss.
 // In place, after every jump target is final, so nothing shifts.
+static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_proto& p);   // defined with the index lanes below
+
 void vm_compiler::lower_typed_ops(chunk& c) {
 	if (!typed_lowering_) return;
 	auto arith_op = [](token_type t, uint8_t cls) -> opcode {
@@ -2017,6 +2019,37 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ins = vm_instruction{t, cp.slot | (k_typed_dst_compound << k_typed_dst_shift), cp.slot, right};
 			break;
 		}
+		case opcode::op_operand_temp: {
+			// a typed-proven binary's element read into a compiler temp (materialize_typed_reads): the same
+			// T_LOAD row as a declaration's, landing in the temp with the canonical stamp; the op itself is
+			// the fallback. One level, identifier index in a frame slot, base a plain identifier.
+			const fused_binary_proto& rp = c.fused_binary_protos[ins.a];
+			if (rp.typed_class == 0 || !rp.left.is_subscript() || rp.left.subscript_chain.size() != 1) break;
+			const fused_subscript_index& level = rp.left.subscript_chain[0];
+			if (level.kind != fused_subscript_index::index_ident || level.slot == k_invalid_u32 || level.slot >= k_typed_slot_mask) break;
+			if (ins.b >= k_typed_slot_mask) break;
+			fused_index_proto rproto;
+			rproto.container = rp.left;
+			rproto.container.subscript_chain.clear();
+			rproto.index.slot = level.slot;
+			rproto.index.symbol = level.symbol;
+			rproto.index.direct = true;
+			if (!index_proto_typed_lane_shape(c, rproto)) break;
+			c.fused_index_protos.push_back(rproto);
+			chunk::typed_site site;
+			site.cont_slot = rproto.container.direct && rproto.container.slot != k_invalid_u32 && rproto.container.slot < k_typed_slot_mask
+				? rproto.container.slot : k_invalid_u32;
+			site.operands[0] = level.slot;
+			site.orig = ins;
+			site.stamp = nullptr;
+			site.temp = true;
+			site.decl_expect = rp.typed_class == 1 ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+			site.index_proto = static_cast<uint32_t>(c.fused_index_protos.size() - 1);
+			chunk_ = &c;
+			typed_site_at(ip) = site;
+			ins = vm_instruction{opcode::op_t_load, ins.b, 0, 0};
+			break;
+		}
 		case opcode::op_index_fused_decl: {
 			// the proven element read landing in a decl (typed_decl_read's shape) with at most
 			// two chain steps: flatten the proto into the site row
@@ -2139,7 +2172,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
 				const chunk::typed_site& site = c.typed_sites[ip];
 				// a scalar decl with a stamp only: an unstamped decl lands the element's own tag, which a raw cell loses
-				if ((site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || !site.stamp) { closed = false; break; }
+				if ((site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (!site.stamp && !site.temp)) { closed = false; break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], static_cast<uint8_t>(script_value::TYPEID_INT), false, 0, nullptr); }
 				use_slot(st.a, site.decl_expect, true, k_typed_dst_decl, site.stamp);
 				continue;
@@ -2219,6 +2252,57 @@ static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_pr
 		if (code.fused_binary_protos[step].typed_class != 1) return false;
 	}
 	return true;
+}
+
+// A typed-proven binary's subscript operand that can read into a compiler temp: one level, base a plain
+// identifier, index an identifier (the T_LOAD row's operand shapes)
+static bool typed_temp_read_shape(const fused_operand& o) {
+	return o.is_subscript() && o.subscript_chain.size() == 1 &&
+	       o.subscript_chain[0].kind == fused_subscript_index::index_ident &&
+	       o.member_node == k_invalid_u32 && o.load_flags == 0 && o.const_index == k_invalid_u32;
+}
+
+// The element read of a typed-proven binary lands in a compiler temp through op_operand_temp (the exact
+// general form of that read); the typed lowering turns the op into T_LOAD into the temp and the binary
+// into its typed row, and a closed loop around them takes the cell form. The other operand must be unable
+// to raise before the read (error order is contractual): a direct slot or a literal. Left before right.
+void vm_compiler::materialize_typed_reads(fused_binary_proto& p, const binary_expr* node) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return;
+	const uint8_t cls = node->static_operand_class == operand_class_int_int ? 1
+	                  : node->static_operand_class == operand_class_float_float ? 2 : 0;
+	if (cls == 0) return;
+	switch (static_cast<token_type>(p.op)) {
+		case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
+		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
+		case token_type::equal_equal: case token_type::bang_equal:
+			break;
+		case token_type::ampersand: case token_type::pipe: case token_type::caret:
+		case token_type::left_shift: case token_type::right_shift:
+			if (cls != 1) return;
+			break;
+		default:
+			return;
+	}
+	const bool ls = typed_temp_read_shape(p.left), rs = typed_temp_read_shape(p.right);
+	if (!ls && !rs) return;
+	auto quiet = [](const fused_operand& o) { return o.const_index != k_invalid_u32 || o.direct; };
+	if ((ls && !rs && !quiet(p.right)) || (rs && !ls && !quiet(p.left))) return;
+	auto materialize = [&](fused_operand& o) {
+		fused_binary_proto read;
+		read.left = std::move(o);
+		read.typed_class = cls;   // the element kind the lowering lands; the lift's own operand temps leave it 0
+		chunk_->fused_binary_protos.push_back(std::move(read));
+		const uint32_t t = static_cast<uint32_t>(temp_next_);
+		++temp_next_;
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t);
+		o = fused_operand{};
+		o.slot = t;
+		o.symbol = temp_symbol_index();
+		o.direct = true;
+	};
+	if (ls) materialize(p.left);
+	if (rs) materialize(p.right);
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
@@ -2316,9 +2400,12 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		proto.op = static_cast<uint8_t>(expr->op.type);
 		proto.left = make_fused_operand(expr->left);
 		proto.right = make_fused_operand(expr->right);
+		const size_t temp_mark = temp_next_;
+		materialize_typed_reads(proto, expr.get());
 		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
 		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
+		temp_next_ = temp_mark;   // the read temps die into the binary
 		return;
 	}
 
@@ -2393,6 +2480,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				p.left = side(b->left);
 				sequence_left(p.left, b->right.get());
 				p.right = side(b->right);
+				materialize_typed_reads(p, b);
 				stamp_typed_class(p, b);
 				chunk_->fused_binary_protos.push_back(p);
 				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
@@ -2413,6 +2501,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			outer.left = side(expr->left);
 			sequence_left(outer.left, expr->right.get());
 			outer.right = side(expr->right);
+			materialize_typed_reads(outer, expr.get());
 			stamp_typed_class(outer, expr.get());
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);

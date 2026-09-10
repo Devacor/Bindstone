@@ -6442,7 +6442,7 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 	if (!has_custom_numeric_ops_) {
 		const script_value* cp = site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
-			: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
+			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
 		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
 			cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr;   // a getter-backed reference: the kernel reads it exactly once
 		}
@@ -6463,7 +6463,11 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 				}
 			}
 			if (ok && index >= 0 && static_cast<size_t>(index) < node->size() &&
-			    typed_decl_land_element(f, ins.a, site.decl_expect, site.stamp, *node, static_cast<size_t>(index), borrowed)) {
+			    typed_decl_land_element(f, ins.a, site.decl_expect,
+			                            site.stamp ? site.stamp : (site.temp   // a compiler temp lands with the canonical stamp
+			                                ? (site.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? engine_->get_type_info_float() : engine_->get_type_info_int())
+			                                : nullptr),
+			                            *node, static_cast<size_t>(index), borrowed)) {
 				return true;
 			}
 		}
@@ -6473,7 +6477,9 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 
 op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	if (typed_load_fast(f, ins)) return {};
-	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
+	const vm_instruction& orig = f.code->typed_sites[f.ip].orig;
+	if (orig.op == opcode::op_operand_temp) return exec_operand_temp(f, orig);   // a typed-proven binary's element read
+	return exec_index_fused_decl(f, orig);
 }
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -6572,7 +6578,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 			const chunk::typed_site& site = f.code->typed_sites[ci.c];
 			const script_value* cp = site.cont_slot != k_invalid_u32
 				? frame_slot(f, site.cont_slot)
-				: fused_cmp_operand(f, f.code->fused_index_protos[site.orig.a].container, site.fold_count ? ci.c * 3 + 2 : ci.c * 3);
+				: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? ci.c * 3 + 2 : ci.c * 3);
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			bool borrowed = false;
 			node = cp ? lane_element_source(*cp, borrowed) : nullptr;
@@ -13825,7 +13831,7 @@ namespace {
 					mark(site.cont_slot, census_use_read, ip);
 					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { typed_slot(site.operands[k], ip); }
 					decl_of(site.orig.c);
-					if (site.orig.a < c.fused_index_protos.size()) { operand(c.fused_index_protos[site.orig.a].container, UINT32_MAX); }
+					if ((site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a) < c.fused_index_protos.size()) { operand(c.fused_index_protos[(site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a)].container, UINT32_MAX); }
 				}
 				break;
 			}

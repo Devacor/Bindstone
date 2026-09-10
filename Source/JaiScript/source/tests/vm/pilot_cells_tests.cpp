@@ -560,6 +560,52 @@ public:
 				check_eq(sc.getter_first, seen[1].find("GETTER_FIRST") != std::string::npos, std::string("which error comes first: ") + seen[1]);
 			}
 		});
+		test("a_reference_declaration_keeps_a_function_on_the_lazy_env_path", [this]() {
+			// var& g = G lands in a frame slot: the body needs no per-call scope environment
+			auto vm = engine::make();
+			vm->set_backend(backend_type::vm);
+			stdlib::register_all(*vm);
+			auto* symbolizer = vm->get_symbolizer();
+			const char* scripts[2] = {
+				"array<int> G = [1, 2, 3, 4]; int H = 7; var f = function(int n) { var& g = G; int acc = 0;"
+				" for (int i = 0; i < n; ++i) { acc = acc + g[i % 4] + H; } return acc; };",
+				"array<int> G = [1, 2, 3, 4]; var f = function(int n) { int acc = 0;"
+				" for (int i = 0; i < n; ++i) { auto& e = G[i % 4]; acc = acc + e; } return acc; };" };
+			for (const char* script : scripts) {
+				auto templates = vm->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, vm.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				(void)jai::detail::run_static_check(*vm, parse_result.value());
+				jai::vm::vm_compiler compiler(symbolizer);
+				const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+				check_true(listing.find("(env: lazy)") != std::string::npos, "the body is lazy: " + listing);
+			}
+			// the aliases read and write through on both backends: a global, a parameter, a boxed local, an element
+			const std::string run = R"(
+				array<int> G = [1, 2, 3, 4]; int H = 7;
+				function f(int n) -> int { var& g = G; int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + g[i % 4] + H; } return acc; }
+				function g(int v) -> int { var& a = v; a = a + 1; int w = 3; var& b = w; b = b * 2; return v * 100 + w; }
+				function r(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { var& e = G[i % 4]; s = s + e; e = e + 1; } return s; }
+				function fact(int n) -> int { var& g = G; if (n <= 1) { return g[0]; } return n * fact(n - 1); }
+				function outer() -> int { auto k = [](int x) -> int { return x; }; return f(4) + k(1); }
+				string out = to_string(f(10)) + "," + to_string(g(4)) + "," + to_string(r(8)) + "," + to_string(G[0]) + "," + to_string(fact(5)) + "," + to_string(outer());
+				G = [9, 9];
+				out + "," + to_string(f(2));
+			)";
+			both(run, "93,506,24,3,360,47,32", "aliases through lazy frames");
+			// a method's alias of its own field (the sticky method scope keeps the same rule)
+			const std::string method = R"(
+				class C { int hp = 10; int hit(int d) { var& h = hp; h = h - d; return hp; } }
+				C c = C();
+				to_string(c.hit(3)) + "," + to_string(c.hit(2));
+			)";
+			both(method, "7,5", "field alias in a method");
+			// an alias of an undefined name raises the same text on both backends
+			both("[[warn_mode]] function u() -> int { var& z = nowhere; return 1; } string out = \"\"; try { out = to_string(u()); } catch (e) { out = \"throw:\" + e; } out;", "", "undefined referent");
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

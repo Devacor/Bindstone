@@ -458,8 +458,10 @@ public:
 			check_false(body_needs_env("function boom() { throw \"bang\"; }"),
 				"throwing body elides");
 			// Trigger table: env-identity-capturing bodies stay eager
-			check_true(body_needs_env("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
-				"reference decl keeps the eager env");
+			// a reference declaration lands in its own frame slot and binds a boxed slot or an owner-pinned cell,
+			// never this frame's env, so the body stays lazy-eligible
+			check_false(body_needs_env("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
+				"reference decl into a frame slot elides the env");
 			check_true(body_needs_env("function closes() -> auto { var n = 2; return [=](int v) { return v + n; }; }"),
 				"closure mint keeps the eager env");
 			check_true(body_needs_env("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
@@ -517,8 +519,8 @@ public:
 				"member write stays sticky-eligible");
 			check_false(body_reusable("function closes() -> auto { var n = 2; return [=](int v) { return v + n; }; }"),
 				"closure mint captures the env - not sticky");
-			check_false(body_reusable("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
-				"reference decl - not sticky");
+			check_true(body_reusable("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
+				"reference decl into a frame slot - sticky-eligible (it parks nothing in the env)");
 			check_false(body_reusable("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
 				"try/catch - not sticky");
 			check_true(body_reusable("function iter(auto a) -> int { int t = 0; for (auto v : a) { t = t + v; } return t; }"),

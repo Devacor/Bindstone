@@ -2294,7 +2294,8 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 			binary_expr* spine[8];
 			const int depth = index_chain_spine(rb, spine);
 			if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) return true;
-			return depth == 1 && quiet_partner(b->left.get()) && index_read_partner_shape(rb);
+			if (depth == 1 && quiet_partner(b->left.get()) && index_read_partner_shape(rb)) return true;
+			return quiet_partner(b->left.get()) && binary_lands_fused(rb);
 		}
 	}
 	return false;
@@ -2540,9 +2541,101 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
+			if (quiet_partner(expr->left.get()) && binary_lands_fused(rb)) {
+				// an arithmetic tree as the index: compile_binary emits one fused binary last, rewritten to land in a
+				// fresh temp, and the read is the ident-plus-temp shape (the T_LOAD row); a reference-slot container
+				// is dereferenced ahead of the index (the interpreter's container-before-index order)
+				const size_t temp_mark = temp_next_;
+				fused_operand container;
+				const bool ref_container = reference_slot_operand(expr->left.get());
+				if (ref_container) { materialize_operand_temp(expr->left, container); }
+				compile_expression(expr->right);
+				vm_instruction& last = chunk_->code.back();
+				if (last.op != opcode::op_binary_fused) {
+					// unreachable by construction (binary_lands_fused mirrors compile_binary's decisions); the index is on the stack
+					emit_unsupported("an index tree that did not land fused", "row 110");
+					temp_next_ = temp_mark;
+					return true;
+				}
+				const uint32_t t = static_cast<uint32_t>(temp_next_);
+				++temp_next_;
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				last.op = opcode::op_binary_fused_temp;
+				last.b = t;
+				fused_index_proto p;
+				p.container = ref_container ? container : make_fused_operand(expr->left);
+				p.index = fused_operand{};
+				p.index.slot = t;
+				p.index.symbol = temp_symbol_index();
+				p.index.direct = true;
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+				temp_next_ = temp_mark;   // the index temp and a container snapshot die into the read
+				return true;
+			}
 		}
 	}
 	return false;
+}
+
+bool vm_compiler::lift_operand_shape(const expression* e) {
+	return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr ||
+	       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
+}
+
+// a subscript only a temp can carry (not a chain operand) or an intrinsic needs a partner that cannot raise first;
+// the rule holds at every node of the lifted tree, the outer one included
+bool vm_compiler::lift_temp_only(const expression* c) {
+	return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none;
+}
+
+// a partner that is itself a value binary is quiet here: the lift computes it into its temp in operand order,
+// so nothing of it runs ahead of the hoisted read (the flat pre-step keeps the strict rule: it resolves in-op)
+static bool lifted_partner(const expression* e) {
+	if (e->get_type() != node_type::binary_expr) return false;
+	const auto* b = static_cast<const binary_expr*>(e);
+	return b->op.type != token_type::left_bracket && detail::transient_read_marker::is_value_binary_op(b->op.type);
+}
+
+bool vm_compiler::lift_partners_ok(const binary_expr* b) {
+	return !((lift_temp_only(b->left.get()) && !quiet_partner(b->right.get()) && !lifted_partner(b->right.get())) ||
+	         (lift_temp_only(b->right.get()) && !quiet_partner(b->left.get()) && !lifted_partner(b->left.get())));
+}
+
+// Whole-tree classification: operands and pure value-op binaries all the way down. Returns the binary-node
+// count (the conservative temp bound), -1 = not fusible. literal-op-literal nodes stay UNFUSED, mirroring
+// binary_shape's refusal: the interpreter's fast paths never fire for them, and the general paths' error
+// spellings differ from the fused kernel's ("Division by zero" vs "... in float operation"; fuzz seed 115)
+int vm_compiler::lift_fusible_nodes(const expression* e) {
+	if (lift_operand_shape(e)) { return 0; }
+	if (e->get_type() != node_type::binary_expr) { return -1; }
+	const auto* b = static_cast<const binary_expr*>(e);
+	if (b->op.type == token_type::left_bracket) { return -1; }
+	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
+	if (b->left->get_type() == node_type::literal_expr && b->right->get_type() == node_type::literal_expr) { return -1; }
+	if (!lift_partners_ok(b)) { return -1; }
+	const int l = lift_fusible_nodes(b->left.get());
+	if (l < 0) { return -1; }
+	const int r = lift_fusible_nodes(b->right.get());
+	if (r < 0) { return -1; }
+	return l + r + 1;
+}
+
+// A value binary compile_binary emits as one fused binary last (the flat pre-step, the flat fuse or the lift), so
+// a fresh temp can take its result: the same decisions, made without emitting
+bool vm_compiler::binary_lands_fused(binary_expr* b) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return false;
+	if (b->op.type == token_type::left_bracket || b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return false;
+	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
+	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
+	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none; };
+	const bool lsub = hoists(b->left.get()) && quiet_partner(b->right.get());
+	const bool rsub = hoists(b->right.get()) && quiet_partner(b->left.get());
+	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
+	if (binary_shape(b) != binary_shape_none) return true;
+	const int ln = lift_fusible_nodes(b->left.get());
+	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
+	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
@@ -2637,40 +2730,15 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// that, and the shape is the method-body hot path). Gated to real function-body
 	// chunks (top level and default-arg chunks have no window of their own).
 	if (temps_active_ && chunk_->is_function_body) {
-		auto operand_shape = [this](const expression* e) -> bool {
-			return e->get_type() == node_type::identifier_expr ||
-			       e->get_type() == node_type::literal_expr ||
-			       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
-		};
+		auto operand_shape = [this](const expression* e) -> bool { return lift_operand_shape(e); };
 		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
 		// the rule holds at every node of the lifted tree, the outer one included
-		auto temp_only = [this](const expression* c) { return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none; };
-		auto partners_ok = [&](const binary_expr* b) {
-			return !((temp_only(b->left.get()) && !quiet_partner(b->right.get())) ||
-			         (temp_only(b->right.get()) && !quiet_partner(b->left.get())));
-		};
+		auto temp_only = [this](const expression* c) { return lift_temp_only(c); };
+		auto partners_ok = [this](const binary_expr* b) { return lift_partners_ok(b); };
 		// Whole-tree classification: operands and pure value-op binaries all the way
 		// down. Returns the binary-node count (the conservative temp bound), -1 = not
 		// fusible. Capped so a pathological expression can't bloat the window every call.
-		std::function<int(const expression*)> fusible_nodes = [&](const expression* e) -> int {
-			if (operand_shape(e)) { return 0; }
-			if (e->get_type() != node_type::binary_expr) { return -1; }
-			const auto* b = static_cast<const binary_expr*>(e);
-			if (b->op.type == token_type::left_bracket) { return -1; }
-			if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
-			// literal-op-literal nodes stay UNFUSED, mirroring binary_shape's refusal:
-			// the interpreter's fast paths never fire for them, and the general paths'
-			// error spellings differ from the fused kernel's ("Division by zero" vs
-			// "... in float operation") - fuzz seed 115 caught the re-pairing
-			if (b->left->get_type() == node_type::literal_expr &&
-			    b->right->get_type() == node_type::literal_expr) { return -1; }
-			if (!partners_ok(b)) { return -1; }
-			const int l = fusible_nodes(b->left.get());
-			if (l < 0) { return -1; }
-			const int r = fusible_nodes(b->right.get());
-			if (r < 0) { return -1; }
-			return l + r + 1;
-		};
+		auto fusible_nodes = [this](const expression* e) -> int { return lift_fusible_nodes(e); };
 		const int ln = fusible_nodes(expr->left.get());
 		const int rn = ln >= 0 ? fusible_nodes(expr->right.get()) : -1;
 		// At least one side must actually LIFT (ln+rn >= 1): a zero-lift arrival means
@@ -2703,7 +2771,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			auto operand_of = [&](const binary_expr* b, const expression_ptr& e, const expression* partner) -> fused_operand {
 				fused_operand o;
 				if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, o); return o; }   // partners_ok admitted it
-				if (fusable_index_expr(e.get()) && quiet_partner(partner)) {
+				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner))) {
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
 					if (compile_subscript_into_temp(e, expect, o)) { return o; }
 				}

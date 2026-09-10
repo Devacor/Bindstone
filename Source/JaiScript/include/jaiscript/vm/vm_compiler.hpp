@@ -78,6 +78,12 @@ namespace jai::vm {
         // a call to a one-argument math:: intrinsic whose result a compiler temp can carry (none = not one)
         detail::math_fn math_temp_operand(const expression* e) const;
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
+        // the register-file lift's classification (compile_binary), shared with the fused index emitter
+        bool lift_operand_shape(const expression* e);
+        bool lift_temp_only(const expression* e);
+        bool lift_partners_ok(const binary_expr* b);
+        int lift_fusible_nodes(const expression* e);
+        bool binary_lands_fused(binary_expr* b);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
         static uint8_t operand_expect(const binary_expr* node);

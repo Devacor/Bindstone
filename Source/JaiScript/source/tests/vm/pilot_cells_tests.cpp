@@ -828,6 +828,39 @@ public:
 			check_true(maths == 3 && temps == 3, "every intrinsic lands in a temp: " + listing);
 			check_true(listing.find("T_AND_II") != std::string::npos && listing.find("T_SHL_II") != std::string::npos && listing.find("T_ADD_II") != std::string::npos, "the binaries around them take the int rows: " + listing);
 		});
+		test("an_index_tree_lands_in_a_temp_and_the_read_takes_the_typed_row", [this]() {
+			// flat[((itrunc(wy) & 63) << 6) + (itrunc(wx) & 63)] (draw_flat_col's texel), a plain arithmetic tree index, a
+			// tree that raises inside the index, and the bounds error of a tree index: the same on both backends
+			const std::string script = R"(
+				function texel(var& flat, float wx, float wy) -> int { int v = flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; return v; }
+				function tree(var& arr, int i, int j) -> int { int s = 0; s = s + arr[(i + 1) * 2 - j]; return s; }
+				function raises(var& arr, int i) -> string { try { return to_string(arr[math::itrunc(1e300) + i]); } catch (err) { return "throw:" + err; } }
+				function oob(var& arr, int i) -> string { try { return to_string(arr[(i + 1) * 2]); } catch (err) { return "throw:" + err; } }
+				var F = []; for (int i = 0; i < 4096; ++i) { F.push(i); }
+				var A = [10, 20, 30, 40, 50, 60];
+				to_string(texel(F, 3.7, 2.2)) + "," + to_string(tree(A, 1, 1)) + "," + raises(A, 1) + "," + oob(A, 4);
+			)";
+			both(script, "", "index trees");
+			both(script, "", "index trees, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("131,40,throw:", 0) == 0, "the texel, the tree and the conversion error: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "var f = function(var& flat, float wx, float wy, int k) { int v = flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; int w = flat[(k + 1) * 2 - v]; return v + w; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			size_t loads = 0; for (size_t at = listing.find("T_LOAD"); at != std::string::npos; at = listing.find("T_LOAD", at + 6)) { ++loads; }
+			check_true(loads == 2 && listing.find("INDEX") == std::string::npos, "both tree-indexed reads take the typed row: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

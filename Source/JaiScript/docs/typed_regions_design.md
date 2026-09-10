@@ -156,7 +156,10 @@ census counts such a site's misses. A one-argument `math::` intrinsic (`itrunc`,
 `sqrt`, `abs`, `sin`, `cos`, `tan`, the degree conversions) inside a fused binary lands its result in a
 compiler temp (`op_math_temp`; the integer family on a float lands raw in place, every other case runs the
 shared kernel and lands its value), so the binary reads a direct operand and takes its typed row when the
-checker classed the call; the call keeps its place in the operand order like a hoisted element read.
+checker classed the call; the call keeps its place in the operand order like a hoisted element read. An
+index expression that is an arithmetic tree computes into a temp (the fused binary the compiler emits
+last lands there) and the read is the identifier-plus-temp shape, which takes the `T_LOAD` row; a
+reference-slot container is dereferenced ahead of the index.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload

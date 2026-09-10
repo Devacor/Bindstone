@@ -235,7 +235,9 @@ interpreter's evaluation order: an operand the interpreter evaluates before the 
 getter (a frame slot naming a reference declaration) is materialized into a temp first, so the getter runs once, in
 its place, and the consumer reads the temp; a reference bound to a value the unit declares (a local, a parameter, a
 program-level value declaration, an alias of one) dereferences a cell and needs no snapshot, so such loops still
-close as cell blocks. An index store evaluates its right-hand side before it dereferences the target on both
+close as cell blocks; inside a class body a program-level name does not count, since a member or a native property
+of the same name resolves first there. A reference declaration or a reference return that binds a bare name resolves the
+frame's own member before a global of the same name on both backends (locals, then members, then globals). An index store evaluates its right-hand side before it dereferences the target on both
 backends, so the store-value hoist is already in that order. A reference declaration into a frame slot
 (`var& pix = PIX;`) keeps its function on the lazy-environment path: the reference lands in the alias's slot and the
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope

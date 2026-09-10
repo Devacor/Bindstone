@@ -606,6 +606,40 @@ public:
 			// an alias of an undefined name raises the same text on both backends
 			both("[[warn_mode]] function u() -> int { var& z = nowhere; return 1; } string out = \"\"; try { out = to_string(u()); } catch (e) { out = \"throw:\" + e; } out;", "", "undefined referent");
 		});
+		test("a_member_shadowing_a_same_named_global_keeps_its_getter_ahead_of_a_hoisted_read", [this]() {
+			// same-unit `array<int> values`, a script class over a native class whose property is also `values`:
+			// inside the method the bare name is the native property, so its getter still runs before the read
+			struct shadow_box { bool armed = false; std::vector<script_int> values{5, 6, 7, 8}; };
+			std::string seen[2];
+			for (int backend = 0; backend < 2; ++backend) {
+				shadow_box box;
+				auto e = engine::make();
+				if (backend == 1) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				dynamic_binder<shadow_box>(*e, "shadow_box")
+					.constructor<>()
+					.property("values", [](shadow_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.values; }, nullptr)
+					.method("arm", [](shadow_box& b) { b.armed = true; })
+					.build();
+				e->add_global_ref("box", box);
+				const char* src = R"(
+					array<int> values = [1, 2, 3, 4];
+					array<int> Q = [1, 2];
+					class Probe : shadow_box {
+						int probe(int k, int i) { var& p = values; arm(); return p[Q[i % 16]]; }
+					}
+					var pr = shadow_box();
+					extend(pr, Probe);
+					string out = "";
+					try { out = to_string(pr.probe(0, 9)); } catch (err) { out = "throw:" + err; }
+					out;
+				)";
+				try { seen[backend] = e->execute(src).as_string(); } catch (const std::exception& ex) { seen[backend] = std::string("throw:") + ex.what(); }
+			}
+			check_eq(seen[0], seen[1], "member shadowing a global: both backends");
+			check_true(seen[1].find("GETTER_FIRST") != std::string::npos || seen[1].find("throw:") != 0,
+			           "the getter's error comes first when the member is the referent: " + seen[1]);
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

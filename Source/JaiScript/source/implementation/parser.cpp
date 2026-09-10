@@ -45,6 +45,9 @@ namespace {
             std::unordered_map<size_t, slot_decl_type> slot_types;
         };
         std::vector<scope> scopes;
+        // class bodies being walked: inside one, an unqualified name resolves to a member (a script field or a
+        // native property) before a same-named program global, and fields are never registered here
+        size_t class_depth = 0;
         // program-level array<int>/array<float> decls by symbol: their elements classify a subscript
         // read from any function (a store-enforced invariant; every consumer guards at runtime)
         std::unordered_map<uint64_t, uint8_t> global_elem_cls;
@@ -194,7 +197,9 @@ namespace {
                     found = true;
                 }
                 if (found) {
-                    return !is_ref;
+                    // a program-scope hit inside a class body may be shadowed by a member at runtime
+                    const bool program_scope = std::next(it) == scopes.rend();
+                    return !is_ref && !(program_scope && class_depth > 0);
                 }
             }
             return false;
@@ -702,6 +707,7 @@ namespace {
                 }
                 case node_type::class_decl: {
                     auto* cd = static_cast<class_decl*>(s);
+                    struct class_body_scope { size_t& depth; class_body_scope(size_t& d) : depth(d) { ++depth; } ~class_body_scope() { --depth; } } body_scope{class_depth};
                     for (const auto& m : cd->members) {
                         if (!m.declaration) {
                             continue;

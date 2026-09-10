@@ -183,6 +183,7 @@ namespace {
 				break;
 			}
 			case opcode::op_index_fused_decl: {
+				if (ins.c == k_invalid_u32) break;   // a compiler temp landing: a frame slot, never the env
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
 				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
@@ -306,6 +307,7 @@ namespace {
 				break;
 			}
 			case opcode::op_index_fused_decl: {
+				if (ins.c == k_invalid_u32) break;   // a compiler temp landing: a frame slot, never the env
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
 				if (decl->slot_index == SIZE_MAX) return false;
 				break;
@@ -2019,37 +2021,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ins = vm_instruction{t, cp.slot | (k_typed_dst_compound << k_typed_dst_shift), cp.slot, right};
 			break;
 		}
-		case opcode::op_operand_temp: {
-			// a typed-proven binary's element read into a compiler temp (materialize_typed_reads): the same
-			// T_LOAD row as a declaration's, landing in the temp with the canonical stamp; the op itself is
-			// the fallback. One level, identifier index in a frame slot, base a plain identifier.
-			const fused_binary_proto& rp = c.fused_binary_protos[ins.a];
-			if (rp.typed_class == 0 || !rp.left.is_subscript() || rp.left.subscript_chain.size() != 1) break;
-			const fused_subscript_index& level = rp.left.subscript_chain[0];
-			if (level.kind != fused_subscript_index::index_ident || level.slot == k_invalid_u32 || level.slot >= k_typed_slot_mask) break;
-			if (ins.b >= k_typed_slot_mask) break;
-			fused_index_proto rproto;
-			rproto.container = rp.left;
-			rproto.container.subscript_chain.clear();
-			rproto.index.slot = level.slot;
-			rproto.index.symbol = level.symbol;
-			rproto.index.direct = true;
-			if (!index_proto_typed_lane_shape(c, rproto)) break;
-			c.fused_index_protos.push_back(rproto);
-			chunk::typed_site site;
-			site.cont_slot = rproto.container.direct && rproto.container.slot != k_invalid_u32 && rproto.container.slot < k_typed_slot_mask
-				? rproto.container.slot : k_invalid_u32;
-			site.operands[0] = level.slot;
-			site.orig = ins;
-			site.stamp = nullptr;
-			site.temp = true;
-			site.decl_expect = rp.typed_class == 1 ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-			site.index_proto = static_cast<uint32_t>(c.fused_index_protos.size() - 1);
-			chunk_ = &c;
-			typed_site_at(ip) = site;
-			ins = vm_instruction{opcode::op_t_load, ins.b, 0, 0};
-			break;
-		}
 		case opcode::op_index_fused_decl: {
 			// the proven element read landing in a decl (typed_decl_read's shape) with at most
 			// two chain steps: flatten the proto into the site row
@@ -2088,6 +2059,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.orig = ins;
 			site.stamp = fp.decl_type;
 			site.decl_expect = fp.decl_expect;
+			site.temp = fp.decl_temp;
 			chunk_ = &c;
 			typed_site_at(ip) = site;
 			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
@@ -2254,55 +2226,147 @@ static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_pr
 	return true;
 }
 
-// A typed-proven binary's subscript operand that can read into a compiler temp: one level, base a plain
-// identifier, index an identifier (the T_LOAD row's operand shapes)
-static bool typed_temp_read_shape(const fused_operand& o) {
-	return o.is_subscript() && o.subscript_chain.size() == 1 &&
-	       o.subscript_chain[0].kind == fused_subscript_index::index_ident &&
-	       o.member_node == k_invalid_u32 && o.load_flags == 0 && o.const_index == k_invalid_u32;
+// A subscript expression the fused index op reads in one instruction: an identifier container with an
+// identifier or literal index, a member-base container, or an identifier container with a computed index
+// chain whose innermost node has a flat fused shape (the three cases try_emit_fused_index emits)
+bool vm_compiler::fusable_index_expr(const expression* e) {
+	if (!e || e->get_type() != node_type::binary_expr) return false;
+	auto* b = static_cast<binary_expr*>(const_cast<expression*>(e));
+	if (b->op.type != token_type::left_bracket) return false;
+	const bool operand_index = b->right->get_type() == node_type::identifier_expr || b->right->get_type() == node_type::literal_expr;
+	if (b->left->get_type() == node_type::identifier_expr && operand_index) return true;
+	if (fusable_member_container(b->left.get()) && operand_index) return true;
+	if (b->left->get_type() == node_type::identifier_expr) {
+		if (binary_expr* rb = index_binary_candidate(b->right.get())) {
+			binary_expr* spine[8];
+			const int depth = index_chain_spine(rb, spine);
+			return depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none;
+		}
+	}
+	return false;
 }
 
-// The element read of a typed-proven binary lands in a compiler temp through op_operand_temp (the exact
-// general form of that read); the typed lowering turns the op into T_LOAD into the temp and the binary
-// into its typed row, and a closed loop around them takes the cell form. The other operand must be unable
-// to raise before the read (error order is contractual): a direct slot or a literal. Left before right.
-void vm_compiler::materialize_typed_reads(fused_binary_proto& p, const binary_expr* node) {
-	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return;
-	const uint8_t cls = node->static_operand_class == operand_class_int_int ? 1
-	                  : node->static_operand_class == operand_class_float_float ? 2 : 0;
-	if (cls == 0) return;
-	switch (static_cast<token_type>(p.op)) {
-		case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
-		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
-		case token_type::equal_equal: case token_type::bang_equal:
-			break;
-		case token_type::ampersand: case token_type::pipe: case token_type::caret:
-		case token_type::left_shift: case token_type::right_shift:
-			if (cls != 1) return;
-			break;
-		default:
-			return;
+// An operand that cannot raise before a sibling's element read (the interpreter's left-to-right order
+// stays unobservable): a literal, an identifier in a frame slot, or another subscript (read in order)
+bool vm_compiler::quiet_partner(const expression* e) {
+	if (e->get_type() == node_type::literal_expr) return true;
+	if (e->get_type() == node_type::identifier_expr) {
+		auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+		return !id->global_qualified && identifier_slot_operand(id) != k_invalid_u32;
 	}
-	const bool ls = typed_temp_read_shape(p.left), rs = typed_temp_read_shape(p.right);
-	if (!ls && !rs) return;
-	auto quiet = [](const fused_operand& o) { return o.const_index != k_invalid_u32 || o.direct; };
-	if ((ls && !rs && !quiet(p.right)) || (rs && !ls && !quiet(p.left))) return;
-	auto materialize = [&](fused_operand& o) {
-		fused_binary_proto read;
-		read.left = std::move(o);
-		read.typed_class = cls;   // the element kind the lowering lands; the lift's own operand temps leave it 0
-		chunk_->fused_binary_protos.push_back(std::move(read));
-		const uint32_t t = static_cast<uint32_t>(temp_next_);
-		++temp_next_;
-		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-		emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t);
-		o = fused_operand{};
-		o.slot = t;
-		o.symbol = temp_symbol_index();
-		o.direct = true;
-	};
-	if (ls) materialize(p.left);
-	if (rs) materialize(p.right);
+	return fusable_index_expr(e);
+}
+
+// The kind a typed-proven binary's element read lands: int or float when the checker proved the pair,
+// any scalar (0xFF, the runtime kind) otherwise
+uint8_t vm_compiler::operand_expect(const binary_expr* node) {
+	if (node->static_operand_class == operand_class_int_int) return static_cast<uint8_t>(script_value::TYPEID_INT);
+	if (node->static_operand_class == operand_class_float_float) return static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	return 0xFF;
+}
+
+// The fused index read of `e` lands in a fresh compiler temp: op_index_fused_decl with decl_temp (its general
+// form is the read plus a slot store, exec_index_fused_decl's temp arm); the typed lowering gives it the
+// T_LOAD row when the shape allows. `out` becomes the direct temp operand. Function bodies only.
+bool vm_compiler::compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return false;
+	if (!fusable_index_expr(e.get())) return false;
+	auto* b = static_cast<binary_expr*>(e.get());
+	uint32_t flags = is_lvalue_shaped(b->left.get()) ? index_flag_lvalue_shape : 0;
+	if (b->transient_element_read) { flags |= index_flag_transient_read; }
+	if (!try_emit_fused_index(b, flags)) return false;
+	auto& code = chunk_->code;
+	vm_instruction& ins = code.back();
+	fused_index_proto& proto = chunk_->fused_index_protos[ins.a];
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	ins.op = opcode::op_index_fused_decl;
+	ins.c = k_invalid_u32;
+	proto.decl_slot = t;
+	proto.decl_type = nullptr;
+	proto.decl_expect = expect;
+	proto.decl_temp = true;
+	proto.typed_lane = index_proto_typed_lane_shape(*chunk_, proto);
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
+	return true;
+}
+
+// The fused index shapes (the read-site twin of the store path): true when one instruction was emitted
+bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
+	// Nested index `a[b[i]]` on a slot container: the inner read lands in a temp first (container a is a
+	// slot, so nothing that could raise precedes the inner read), then the outer read takes the ident/temp shape
+	if (expr->left->get_type() == node_type::identifier_expr && fusable_index_expr(expr->right.get()) &&
+	    quiet_partner(expr->left.get())) {
+		fused_operand inner;
+		if (compile_subscript_into_temp(expr->right, 0xFF, inner)) {
+			fused_index_proto p;
+			p.container = make_fused_operand(expr->left);
+			p.index = inner;
+			chunk_->fused_index_protos.push_back(p);
+			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+			return true;
+		}
+	}
+	// Fused shape: ident container + ident/literal index resolve as operands in-op
+	// (kills both LOAD dispatches; subscript-chain containers stay unfused in v1)
+	const bool operand_index = expr->right->get_type() == node_type::identifier_expr ||
+	                           expr->right->get_type() == node_type::literal_expr;
+	if (expr->left->get_type() == node_type::identifier_expr && operand_index) {
+		fused_index_proto p;
+		p.container = make_fused_operand(expr->left);
+		p.index = make_fused_operand(expr->right);
+		chunk_->fused_index_protos.push_back(p);
+		emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+		return true;
+	}
+	// Member-base container `base.member[i]`: the GET_MEMBER resolves inside the op
+	// through its own member_ic row (ladder replay for every non-slot shape)
+	if (member_expr* mc = fusable_member_container(expr->left.get()); mc && operand_index) {
+		fused_index_proto p;
+		p.container = make_fused_operand(mc->object);
+		p.container.member_node = add_node(expr->left);
+		p.index = make_fused_operand(expr->right);
+		chunk_->fused_index_protos.push_back(p);
+		emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+		return true;
+	}
+	// Computed index on an ident container: a left-spine arithmetic chain runs
+	// through the fused op (raw int fold / verbatim boxed replay); the innermost
+	// node must be the flat fused-binary shape
+	if (expr->left->get_type() == node_type::identifier_expr) {
+		if (binary_expr* rb = index_binary_candidate(expr->right.get())) {
+			binary_expr* spine[8];
+			const int depth = index_chain_spine(rb, spine);
+			if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
+				fused_index_proto p;
+				p.container = make_fused_operand(expr->left);
+				binary_expr* inner = spine[depth - 1];
+				fused_binary_proto bp;
+				bp.op = static_cast<uint8_t>(inner->op.type);
+				bp.left = make_fused_operand(inner->left);
+				bp.right = make_fused_operand(inner->right);
+				stamp_typed_class(bp, inner);
+				chunk_->fused_binary_protos.push_back(bp);
+				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+				for (int i = depth - 2; i >= 0; --i) {
+					fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
+					sp.op = static_cast<uint8_t>(spine[i]->op.type);
+					sp.right = make_fused_operand(spine[i]->right);
+					stamp_chain_step_typed_class(sp, spine[i]);
+					chunk_->fused_binary_protos.push_back(sp);
+					p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
+				}
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
@@ -2333,65 +2397,34 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		if (expr->transient_element_read) {
 			flags |= index_flag_transient_read;
 		}
-		// Fused shape: ident container + ident/literal index resolve as operands in-op
-		// (kills both LOAD dispatches; subscript-chain containers stay unfused in v1)
-		const bool operand_index = expr->right->get_type() == node_type::identifier_expr ||
-		                           expr->right->get_type() == node_type::literal_expr;
-		if (expr->left->get_type() == node_type::identifier_expr && operand_index) {
-			fused_index_proto p;
-			p.container = make_fused_operand(expr->left);
-			p.index = make_fused_operand(expr->right);
-			chunk_->fused_index_protos.push_back(p);
-			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
-			return;
-		}
-		// Member-base container `base.member[i]`: the GET_MEMBER resolves inside the op
-		// through its own member_ic row (ladder replay for every non-slot shape)
-		if (member_expr* mc = fusable_member_container(expr->left.get()); mc && operand_index) {
-			fused_index_proto p;
-			p.container = make_fused_operand(mc->object);
-			p.container.member_node = add_node(expr->left);
-			p.index = make_fused_operand(expr->right);
-			chunk_->fused_index_protos.push_back(p);
-			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
-			return;
-		}
-		// Computed index on an ident container: a left-spine arithmetic chain runs
-		// through the fused op (raw int fold / verbatim boxed replay); the innermost
-		// node must be the flat fused-binary shape
-		if (expr->left->get_type() == node_type::identifier_expr) {
-			if (binary_expr* rb = index_binary_candidate(expr->right.get())) {
-				binary_expr* spine[8];
-				const int depth = index_chain_spine(rb, spine);
-				if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
-					fused_index_proto p;
-					p.container = make_fused_operand(expr->left);
-					binary_expr* inner = spine[depth - 1];
-					fused_binary_proto bp;
-					bp.op = static_cast<uint8_t>(inner->op.type);
-					bp.left = make_fused_operand(inner->left);
-					bp.right = make_fused_operand(inner->right);
-					stamp_typed_class(bp, inner);
-					chunk_->fused_binary_protos.push_back(bp);
-					p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
-					for (int i = depth - 2; i >= 0; --i) {
-						fused_binary_proto sp;   // left stays EMPTY: the accumulator stands in
-						sp.op = static_cast<uint8_t>(spine[i]->op.type);
-						sp.right = make_fused_operand(spine[i]->right);
-						stamp_chain_step_typed_class(sp, spine[i]);
-						chunk_->fused_binary_protos.push_back(sp);
-						p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
-					}
-					chunk_->fused_index_protos.push_back(p);
-					emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
-					return;
-				}
-			}
-		}
+		if (try_emit_fused_index(expr.get(), flags)) return;
 		compile_expression(expr->left);
 		compile_expression(expr->right);
 		emit(opcode::op_index, flags);
 		return;
+	}
+
+	// A subscript operand the fused index op can read lands in a temp first (left before right) when its
+	// partner is a slot, a literal or another such read (nothing can raise ahead of the read); the binary
+	// then has direct operands, the typed lowering gives the read the T_LOAD row and the binary its typed row
+	if (typed_lowering_ && temps_active_ && chunk_->is_function_body &&
+	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
+		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
+		const bool lsub = fusable_index_expr(expr->left.get()) && quiet_partner(expr->right.get());
+		const bool rsub = fusable_index_expr(expr->right.get()) && quiet_partner(expr->left.get());
+		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
+			const size_t temp_mark = temp_next_;
+			const uint8_t expect = operand_expect(expr.get());
+			fused_binary_proto proto;
+			proto.op = static_cast<uint8_t>(expr->op.type);
+			if (lsub) { compile_subscript_into_temp(expr->left, expect, proto.left); } else { proto.left = make_fused_operand(expr->left); }
+			if (rsub) { compile_subscript_into_temp(expr->right, expect, proto.right); } else { proto.right = make_fused_operand(expr->right); }
+			stamp_typed_class(proto, expr.get());
+			chunk_->fused_binary_protos.push_back(proto);
+			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
+			temp_next_ = temp_mark;   // the read temps die into the binary
+			return;
+		}
 	}
 
 	const uint32_t shape = binary_shape(expr.get());
@@ -2400,12 +2433,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		proto.op = static_cast<uint8_t>(expr->op.type);
 		proto.left = make_fused_operand(expr->left);
 		proto.right = make_fused_operand(expr->right);
-		const size_t temp_mark = temp_next_;
-		materialize_typed_reads(proto, expr.get());
 		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
 		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
-		temp_next_ = temp_mark;   // the read temps die into the binary
 		return;
 	}
 
@@ -2420,10 +2450,17 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// that, and the shape is the method-body hot path). Gated to real function-body
 	// chunks (top level and default-arg chunks have no window of their own).
 	if (temps_active_ && chunk_->is_function_body) {
-		auto operand_shape = [](const expression* e) -> bool {
+		auto operand_shape = [this](const expression* e) -> bool {
 			return e->get_type() == node_type::identifier_expr ||
 			       e->get_type() == node_type::literal_expr ||
-			       fusable_subscript_operand(e);
+			       fusable_subscript_operand(e) || fusable_index_expr(e);
+		};
+		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
+		// the rule holds at every node of the lifted tree, the outer one included
+		auto temp_only = [](const expression* c) { return fusable_index_expr(c) && !fusable_subscript_operand(c); };
+		auto partners_ok = [&](const binary_expr* b) {
+			return !((temp_only(b->left.get()) && !quiet_partner(b->right.get())) ||
+			         (temp_only(b->right.get()) && !quiet_partner(b->left.get())));
 		};
 		// Whole-tree classification: operands and pure value-op binaries all the way
 		// down. Returns the binary-node count (the conservative temp bound), -1 = not
@@ -2440,6 +2477,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// "... in float operation") - fuzz seed 115 caught the re-pairing
 			if (b->left->get_type() == node_type::literal_expr &&
 			    b->right->get_type() == node_type::literal_expr) { return -1; }
+			if (!partners_ok(b)) { return -1; }
 			const int l = fusible_nodes(b->left.get());
 			if (l < 0) { return -1; }
 			const int r = fusible_nodes(b->right.get());
@@ -2452,7 +2490,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		// the flat fuse above DECLINED this shape (e.g. literal-op-literal), and
 		// re-emitting it fused would re-pair the error spellings the decline preserves.
 		// Cap total temps at 16 so pathological expressions can't bloat the window.
-		if (ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16) {
+		if (partners_ok(expr.get()) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16) {
 			// Depth-first emission: children compute into temps before their parent,
 			// left subtree before right (subtree evaluation order preserved; the temp
 			// dst may alias a released child slot — the kernel resolves both operands
@@ -2471,16 +2509,21 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				lo.symbol = temp_symbol_index();
 				lo.direct = true;
 			};
+			// a subscript operand of node `b` reads into a temp when its partner cannot raise ahead of it
+			auto operand_of = [&](const binary_expr* b, const expression_ptr& e, const expression* partner) -> fused_operand {
+				fused_operand o;
+				if (fusable_index_expr(e.get()) && quiet_partner(partner) && compile_subscript_into_temp(e, operand_expect(b), o)) { return o; }
+				return make_fused_operand(e);
+			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
 				if (operand_shape(e.get())) { return make_fused_operand(e); }
 				const auto* b = static_cast<const binary_expr*>(e.get());
 				fused_binary_proto p;
 				p.op = static_cast<uint8_t>(b->op.type);
 				const size_t mark = temp_next_;
-				p.left = side(b->left);
+				p.left = operand_shape(b->left.get()) ? operand_of(b, b->left, b->right.get()) : side(b->left);
 				sequence_left(p.left, b->right.get());
-				p.right = side(b->right);
-				materialize_typed_reads(p, b);
+				p.right = operand_shape(b->right.get()) ? operand_of(b, b->right, b->left.get()) : side(b->right);
 				stamp_typed_class(p, b);
 				chunk_->fused_binary_protos.push_back(p);
 				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
@@ -2498,10 +2541,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			const size_t temp_mark = temp_next_;
 			fused_binary_proto outer;
 			outer.op = static_cast<uint8_t>(expr->op.type);
-			outer.left = side(expr->left);
+			outer.left = operand_shape(expr->left.get()) ? operand_of(expr.get(), expr->left, expr->right.get()) : side(expr->left);
 			sequence_left(outer.left, expr->right.get());
-			outer.right = side(expr->right);
-			materialize_typed_reads(outer, expr.get());
+			outer.right = operand_shape(expr->right.get()) ? operand_of(expr.get(), expr->right, expr->left.get()) : side(expr->right);
 			stamp_typed_class(outer, expr.get());
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
@@ -2643,6 +2685,8 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	                  value->get_type() == node_type::literal_expr)) {
 		p.store_value = make_fused_operand(value);
 		value_operand = true;
+	} else if (no_result && fusable_index_expr(value.get()) && compile_subscript_into_temp(value, 0xFF, p.store_value)) {
+		value_operand = true;   // `a[i] = b[j]`: the element read lands in a temp, the store takes it as an operand
 	}
 	if (!value_operand) {
 		compile_expression(value);

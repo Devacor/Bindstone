@@ -1551,6 +1551,7 @@ namespace jai::vm {
         JAI_FORCEINLINE bool typed_arith_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
+        type_info* temp_stamp_for(const script_array& node, size_t at) const;
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);

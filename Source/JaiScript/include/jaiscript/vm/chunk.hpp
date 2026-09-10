@@ -303,6 +303,9 @@ namespace jai::vm {
         uint32_t decl_slot = k_invalid_u32;
         uint8_t decl_expect = 0xFF;
         type_info* decl_type = nullptr;
+        // decl_slot is a compiler temp (no declaration node): the read lands there for the consuming
+        // op (a binary operand, a store value, an outer index); a non-scalar element lands boxed
+        bool decl_temp = false;
         // Typed element lanes (docs/typed_regions_design.md): the compiler proved the shape -
         // a plain identifier container, an index that is a direct slot, a literal or an
         // int/int-stamped fold whose chain steps are int/int with direct or literal rights.

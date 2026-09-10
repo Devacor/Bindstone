@@ -65,7 +65,11 @@ namespace jai::vm {
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl);
-        void materialize_typed_reads(fused_binary_proto& p, const binary_expr* node);
+        static bool fusable_index_expr(const expression* e);
+        bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
+        bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
+        bool quiet_partner(const expression* e);
+        static uint8_t operand_expect(const binary_expr* node);
         bool try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags);
         chunk* chunk_ = nullptr;
         std::vector<loop_context> loops_;

@@ -534,6 +534,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 			break;
 		}
 		case opcode::op_index_fused_decl: {
+			if (ins.c == k_invalid_u32) break;   // a compiler temp landing has no name
 			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.c].get());
 			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
 			break;
@@ -6464,9 +6465,7 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 			}
 			if (ok && index >= 0 && static_cast<size_t>(index) < node->size() &&
 			    typed_decl_land_element(f, ins.a, site.decl_expect,
-			                            site.stamp ? site.stamp : (site.temp   // a compiler temp lands with the canonical stamp
-			                                ? (site.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? engine_->get_type_info_float() : engine_->get_type_info_int())
-			                                : nullptr),
+			                            site.stamp ? site.stamp : (site.temp ? temp_stamp_for(*node, static_cast<size_t>(index)) : nullptr),
 			                            *node, static_cast<size_t>(index), borrowed)) {
 				return true;
 			}
@@ -6475,11 +6474,25 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 	return false;
 }
 
+// a compiler temp lands an element with the engine's canonical stamp of the element's kind (in place
+// when the temp already holds that kind); the raw buffers say their kind, a var element says its own
+type_info* vm_backend::temp_stamp_for(const script_array& node, size_t at) const {
+	switch (node.kind()) {
+	case script_array::kind_t::i64: return engine_->get_type_info_int();
+	case script_array::kind_t::f64: return engine_->get_type_info_float();
+	case script_array::kind_t::hetero: {
+		const size_t ei = node.values()[at].raw_storage_index();
+		if (ei == script_value::TYPEID_INT) return engine_->get_type_info_int();
+		if (ei == script_value::TYPEID_FLOAT) return engine_->get_type_info_float();
+		return nullptr;
+	}
+	default: return nullptr;
+	}
+}
+
 op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	if (typed_load_fast(f, ins)) return {};
-	const vm_instruction& orig = f.code->typed_sites[f.ip].orig;
-	if (orig.op == opcode::op_operand_temp) return exec_operand_temp(f, orig);   // a typed-proven binary's element read
-	return exec_index_fused_decl(f, orig);
+	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
 }
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7302,7 +7315,10 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 			// Untyped-element raw shortcut admission: land() overwrites the tag with
 			// decl_type, so dropping the element's own tag is unobservable ONLY when
 			// decl_type is set (null decl_type keeps the incoming tag — must copy)
-			bool raw_tag_safe() const { return proto.decl_type != nullptr; }
+			bool raw_tag_safe() const { return proto.decl_type != nullptr || proto.decl_temp; }
+			// a temp's in-place test compares against the engine's canonical stamp (what a constructed scalar carries)
+			const type_info* want_int() const { return proto.decl_type ? proto.decl_type : (proto.decl_temp ? vm->engine_->get_type_info_int() : nullptr); }
+			const type_info* want_float() const { return proto.decl_type ? proto.decl_type : (proto.decl_temp ? vm->engine_->get_type_info_float() : nullptr); }
 			void land(script_value&& v) {
 				if (proto.decl_type) {
 					v.set_type_info(type_info_ptr{proto.decl_type});
@@ -7330,7 +7346,7 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 					// post-state to the mint+land path)
 					if (script_value* slot = vm->frame_slot(fr, proto.decl_slot)) {
 						if (slot->raw_storage_index() == script_value::TYPEID_INT &&
-						    slot->get_type_info().get() == proto.decl_type) {
+						    slot->get_type_info().get() == want_int()) {
 							slot->unchecked_set_int_payload(iv);
 							landed = true;
 							return;
@@ -7348,7 +7364,7 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 				    proto.decl_expect == 0xFF) {
 					if (script_value* slot = vm->frame_slot(fr, proto.decl_slot)) {
 						if (slot->raw_storage_index() == script_value::TYPEID_FLOAT &&
-						    slot->get_type_info().get() == proto.decl_type) {
+						    slot->get_type_info().get() == want_float()) {
 							slot->unchecked_set_float_payload(fv);
 							landed = true;
 							return;
@@ -7363,6 +7379,12 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 		VM_TRY(index_fused_read<false>(f, ins, sink));
 		if (sink.landed || is_unwinding_) {
 			return {};   // unwound: parity states stand, the decl never runs
+		}
+		if (p.decl_temp) {   // a compiler temp: the boxed element the sink pushed moves into the temp
+			script_value v = std::move(stack_.back());
+			stack_.pop_back();
+			frame_slot_set(f, p.decl_slot, std::move(v));
+			return {};
 		}
 		const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};
 		return exec_decl_var(f, decl_ins);
@@ -13844,7 +13866,7 @@ namespace {
 			case opcode::op_decl_var: mark(decl_of(ins.a), census_use_write, ip); break;
 			case opcode::op_decl_ref_ident:
 			case opcode::op_decl_ref_value: mark(decl_of(ins.a), census_use_write | census_use_ref, ip); break;
-			case opcode::op_index_fused_decl: mark(decl_of(ins.c), census_use_write, ip); index_proto(ins.a, ip, false); break;
+			case opcode::op_index_fused_decl: if (ins.c != k_invalid_u32) { mark(decl_of(ins.c), census_use_write, ip); } index_proto(ins.a, ip, false); break;
 			case opcode::op_index_fused: index_proto(ins.a, ip, false); break;
 			case opcode::op_index_store_fused: index_proto(ins.a, ip, ins.a < c.fused_index_protos.size() && c.fused_index_protos[ins.a].typed_lane); break;
 			case opcode::op_binary_fused: binary_proto(ins.a, ip); break;

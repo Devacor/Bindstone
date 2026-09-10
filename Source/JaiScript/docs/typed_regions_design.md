@@ -214,9 +214,11 @@ builds count entries, refusals, cell iterations, unboxes, exits, misses by step,
 flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
 (21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.
 
-Element reads inside typed expressions take the same row: when the checker has proved a binary's operands
-int/int or float/float and one operand is a one-level subscript `base[i]` (base a plain identifier, `i` an
-identifier), the compiler reads the element into a compiler temp through `op_operand_temp` and the typed
-lowering turns that op into `T_LOAD` (landing in the temp with the canonical stamp), so the binary takes its
-typed row and a loop around them can close; the other operand must be a direct slot or a literal so the read
-cannot reorder an error. A miss falls back to the operand-temp op, the general form of exactly that read.
+Element reads inside expressions take the same row: a subscript expression the fused index op can read
+(an identifier container with an identifier or literal index, a member-base container, or a computed index
+chain) lands in a compiler temp through the declaration-landing op with a temp flag, and the consumer takes
+the temp as a direct slot operand: a binary's operand (flat or lifted), the value of an element store, the
+index of an outer read. The typed lowering gives the read the `T_LOAD` row, landing the proven kind when
+the checker proved the binary and the runtime kind otherwise, in place when the temp already holds it; a
+non-scalar element lands boxed in the temp; the read happens before its partner only when the partner
+cannot raise first (a slot, a literal, a temp, another read), so the interpreter's error order stands.

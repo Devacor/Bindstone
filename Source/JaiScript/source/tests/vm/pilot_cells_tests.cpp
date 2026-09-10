@@ -654,6 +654,48 @@ public:
 			)";
 			both(script, "4002:780", "break inside the loop");
 		});
+		test("a_statement_increment_lowers_to_the_typed_row_and_the_loop_closes", [this]() {
+			// `++y` / `y--` in statement position on a frame slot: the int compound row (`y += 1`'s landing);
+			// a var slot holding a float, a shared cell, a reference and the overflow text take the general op
+			const char* values =
+				"function up(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += i; } int j = n; while (j > 0) { j--; s += j; } return s; }"
+				"function post(int n) -> int { int i = 0; int t = 0; while (i < n) { t = i++; } return t * 100 + i; }"
+				"function fl() -> string { var f = 1.5; ++f; f--; ++f; return to_string(f); }"
+				"function viaref() -> int { int x = 1; int& r = x; ++r; r++; --r; return x * 10 + r; }"
+				"function ovf() -> string { int m = 9223372036854775807; try { ++m; } catch (err) { return \"throw:\" + err; } return to_string(m); }"
+				"function unf() -> string { int m = -9223372036854775807 - 1; try { m--; } catch (err) { return \"throw:\" + err; } return to_string(m); }"
+				"function boxed() -> int { int c = 0; var bump = [&]() { ++c; }; bump(); bump(); return c; }"
+				"function dyn() -> int { var v = 5; ++v; v++; return v; }"
+				"to_string(up(10)) + \",\" + to_string(post(3)) + \",\" + fl() + \",\" + to_string(viaref()) + \",\" + ovf() + \",\" + unf() + \",\" + to_string(boxed()) + \",\" + to_string(dyn());";
+			both(values, "", "increments");
+			both(values, "", "increments, proofs off", false);
+			const std::string vm = run_on(true, values);
+			check_true(vm.rfind("90,203,2.500000,22,throw:", 0) == 0, "typed, postfix, float and reference shapes: " + vm);
+			check_true(vm.find("Integer overflow in '++'") != std::string::npos && vm.find("Integer overflow in '--'") != std::string::npos, "the general op's overflow texts: " + vm);
+			check_true(vm.size() >= 4 && vm.compare(vm.size() - 4, 4, ",2,7") == 0, "the shared cell and the var slot: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* script = "array<int> PIX = [0, 0, 0, 0]; var S = [[1, 2, 3]];"
+			                     " var f = function(var& pix, var& strip, int cy0, int cy1, int vw, int px0, int tstep) {"
+			                     " int gi = cy0 * vw + px0; int tacc = 0; int y = cy0;"
+			                     " while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; ++y; }"
+			                     " int z = cy1; while (z > cy0) { pix[gi] = z; z--; }"
+			                     " return gi; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("INCDEC") == std::string::npos, "no general increment remains: " + listing);
+			check_true(listing.find("T_ADD_II") != std::string::npos && listing.find("T_SUB_II") != std::string::npos, "++ and -- take the int rows: " + listing);
+			check_true(listing.find("CELLS_BACK") != std::string::npos, "the column loop still closes with ++y: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

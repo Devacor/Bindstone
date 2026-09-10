@@ -7019,6 +7019,13 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 	case opcode::op_binary_fused_store: return exec_binary_fused_store(f, orig);
 	case opcode::op_fused_cmp_jump: return exec_fused_cmp_jump(f, orig);
 	case opcode::op_compound_fused: return exec_compound_fused(f, orig);
+	case opcode::op_incdec: {
+		// the general op pushes its value; the lowered form is statement position, so the value goes
+		const op_status st = exec_incdec(f, orig);
+		if (st == op_status::failed) return st;
+		if (orig.c & incdec_flag_no_result) { stack_.pop_back(); }
+		return {};
+	}
 	default:
 		return raise_(make_error_code(runtime_error_code::unsupported_operation), "typed op without an origin (internal)");
 	}

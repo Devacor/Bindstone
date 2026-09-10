@@ -144,7 +144,9 @@ direct frame slots, compiler temps or literals (a literal on the left swaps for 
 commutative and mirrored operators); a decl landing needs the decl fast path's static
 admission and a declared type the class fits; a store landing needs the same-type proof, the
 provable-slot flag and statement position; a compound needs a bare right operand and
-statement position, int rows only. Lowering follows the type-proofs flag, so a proofs-off run
+statement position, int rows only; a statement-position `++x` or `x--` on a direct frame slot
+is the compound row with the constant 1 (`op_t_add_ii` / `op_t_sub_ii`), its miss running the
+general increment. Lowering follows the type-proofs flag, so a proofs-off run
 is a typed-ops-off run and the differential fuzz gate's second pass covers both.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its

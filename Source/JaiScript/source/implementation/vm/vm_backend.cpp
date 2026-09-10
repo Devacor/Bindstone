@@ -8175,17 +8175,23 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			targetPtr = frame_slot(f, target_ident->slot_index);
 		}
 	}
-	if (!targetPtr && !global_only) {
+	// the frame's own member before any global of the same name (locals, then members, then globals, the
+	// order both backends share): a field or static by pointer, a hybrid's bare C++ property minted
+	// (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch; ::name never mints)
+	std::optional<checked_result<script_value>> minted;
+	const bool method_frame = f.locals && f.locals->is_method && f.locals->this_object_ptr;
+	if (!targetPtr && !global_only && method_frame) {
+		targetPtr = frame_this_member_ptr(f, target_sym);
+		if (!targetPtr) { if (auto b = bind_bare_cpp_property_ref(f, target_sym)) { minted.emplace(std::move(*b)); } }
+	}
+	if (!targetPtr && !minted && !global_only) {
 		targetPtr = environment_->get_value_ptr(target_sym);
 	}
-	if (!targetPtr && !global_only) {
-		targetPtr = frame_this_member_ptr(f, target_sym);   // method-lazy: bare field targets
+	if (!targetPtr && !minted && !global_only && !method_frame) {
+		// a hybrid's bare C++ property reached through an env-bound this (a closure body): the last resort
+		if (auto b = bind_bare_cpp_property_ref(f, target_sym)) { minted.emplace(std::move(*b)); }
 	}
 	if (!targetPtr) {
-		// A hybrid's bare C++ property: the member itself / its accessors
-		// (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch; ::name never mints)
-		std::optional<checked_result<script_value>> minted;
-		if (!global_only) { auto b = bind_bare_cpp_property_ref(f, target_sym); if (b) { minted.emplace(std::move(*b)); } }
 		if (minted) {
 			if (!*minted) {
 				return raise_from(*minted);
@@ -13464,21 +13470,31 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 	if (ins.a != k_invalid_u32 && f.locals) {
 		storage = frame_slot(f, ins.a);
 	}
-	if (!storage && environment_) {
-		storage = environment_->get_value_ptr(symbol_id);
-	}
-	if (!storage) {
-		storage = frame_this_member_ptr(f, symbol_id);   // method-lazy: bare field targets
-	}
-	if (!storage) {
+	// a method frame's own member before any global of the same name (locals, then members, then globals);
+	// a plain function keeps the environment first and a hybrid's bare C++ property as the last resort
+	const bool method_frame = f.locals && f.locals->is_method && f.locals->this_object_ptr;
+	auto mint = [&]() -> std::optional<op_status> {
 		// A hybrid's bare C++ property (KEEP BYTE-PARALLEL with the interpreter's visit_return_stmt)
 		if (auto minted = bind_bare_cpp_property_ref(f, symbol_id)) {
 			if (!*minted) {
 				return raise_from(*minted);
 			}
 			stack_.push_back(std::move(minted->value()));
-			return {};
+			return op_status{};
 		}
+		return std::nullopt;
+	};
+	if (!storage && method_frame) {
+		storage = frame_this_member_ptr(f, symbol_id);
+		if (!storage) { if (auto done = mint()) { return *done; } }
+	}
+	if (!storage && environment_) {
+		storage = environment_->get_value_ptr(symbol_id);
+	}
+	if (!storage && !method_frame) {
+		if (auto done = mint()) { return *done; }
+	}
+	if (!storage) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot take reference of undefined variable", symbol_id);
 	}

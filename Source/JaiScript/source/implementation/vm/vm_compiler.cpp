@@ -2258,6 +2258,35 @@ bool vm_compiler::quiet_partner(const expression* e) {
 	return fusable_index_expr(e);
 }
 
+// A frame-slot identifier that names a reference declaration (var&, T&, a by-reference parameter): its
+// dereference may run a property getter, so it is not silent when the interpreter evaluates it ahead of a
+// hoisted read; a reference the callable recorded as plain (bound to a value the unit declares) is silent
+bool vm_compiler::reference_slot_operand(const expression* e) {
+	if (e->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+	if (id->global_qualified || id->names_value_decl) return false;
+	const uint32_t slot = identifier_slot_operand(id);
+	if (slot == k_invalid_u32) return false;
+	const auto plain = callable_.plain_refs.find(slot);   // a reference to a value this unit declares: a cell, never a getter
+	return plain == callable_.plain_refs.end() || plain->second != id->symbol_id;
+}
+
+// The operand's dereferenced value lands in a fresh temp now (op_operand_temp), so an operand the interpreter
+// evaluates before a hoisted read keeps its place; `out` becomes the direct temp operand
+void vm_compiler::materialize_operand_temp(const expression_ptr& e, fused_operand& out) {
+	fused_binary_proto p;
+	p.left = make_fused_operand(e);
+	chunk_->fused_binary_protos.push_back(std::move(p));
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t);
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
+}
+
 // The kind a typed-proven binary's element read lands: int or float when the checker proved the pair,
 // any scalar (0xFF, the runtime kind) otherwise
 uint8_t vm_compiler::operand_expect(const binary_expr* node) {
@@ -2301,11 +2330,14 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	// Nested index `a[b[i]]` on a slot container: the inner read lands in a temp first (container a is a
 	// slot, so nothing that could raise precedes the inner read), then the outer read takes the ident/temp shape
 	if (expr->left->get_type() == node_type::identifier_expr && fusable_index_expr(expr->right.get()) &&
-	    quiet_partner(expr->left.get())) {
+	    quiet_partner(expr->left.get()) && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
 		fused_operand inner;
+		fused_operand container;
+		const bool ref_container = reference_slot_operand(expr->left.get());
+		if (ref_container) { materialize_operand_temp(expr->left, container); }   // its dereference precedes the inner read
 		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
-			p.container = make_fused_operand(expr->left);
+			p.container = ref_container ? container : make_fused_operand(expr->left);
 			p.index = inner;
 			chunk_->fused_index_protos.push_back(p);
 			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
@@ -2422,7 +2454,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			};
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
-			if (lsub) { compile_subscript_into_temp(expr->left, expect_of(expr->left), proto.left); } else { proto.left = make_fused_operand(expr->left); }
+			if (lsub) { compile_subscript_into_temp(expr->left, expect_of(expr->left), proto.left); }
+			else if (reference_slot_operand(expr->left.get())) { materialize_operand_temp(expr->left, proto.left); }   // its dereference precedes the read
+			else { proto.left = make_fused_operand(expr->left); }
 			if (rsub) { compile_subscript_into_temp(expr->right, expect_of(expr->right), proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
 			chunk_->fused_binary_protos.push_back(proto);
@@ -2500,8 +2534,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// left subtree before right (subtree evaluation order preserved; the temp
 			// dst may alias a released child slot — the kernel resolves both operands
 			// before the sink writes).
-			auto sequence_left = [&](fused_operand& lo, const expression* r) {
-				if (!lo.is_subscript() || operand_shape(r)) { return; }
+			auto sequence_left = [&](fused_operand& lo, const expression* l, const expression* r) {
+				const bool ref_left = reference_slot_operand(l) && (temp_only(r) || !operand_shape(r));
+				if (!ref_left && (!lo.is_subscript() || operand_shape(r))) { return; }
 				fused_binary_proto p;
 				p.left = std::move(lo);
 				chunk_->fused_binary_protos.push_back(std::move(p));
@@ -2532,7 +2567,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				p.op = static_cast<uint8_t>(b->op.type);
 				const size_t mark = temp_next_;
 				p.left = operand_shape(b->left.get()) ? operand_of(b, b->left, b->right.get()) : side(b->left);
-				sequence_left(p.left, b->right.get());
+				sequence_left(p.left, b->left.get(), b->right.get());
 				p.right = operand_shape(b->right.get()) ? operand_of(b, b->right, b->left.get()) : side(b->right);
 				stamp_typed_class(p, b);
 				chunk_->fused_binary_protos.push_back(p);
@@ -2552,7 +2587,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto outer;
 			outer.op = static_cast<uint8_t>(expr->op.type);
 			outer.left = operand_shape(expr->left.get()) ? operand_of(expr.get(), expr->left, expr->right.get()) : side(expr->left);
-			sequence_left(outer.left, expr->right.get());
+			sequence_left(outer.left, expr->left.get(), expr->right.get());
 			outer.right = operand_shape(expr->right.get()) ? operand_of(expr.get(), expr->right, expr->left.get()) : side(expr->right);
 			stamp_typed_class(outer, expr.get());
 			chunk_->fused_binary_protos.push_back(outer);
@@ -3212,6 +3247,15 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		}
 		if (decl->initializer->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(decl->initializer.get());
+			// bound to a value the unit declares (a value slot, an alias already plain, a program-level value
+			// declaration): the alias dereferences a cell, never a getter, so hoisted reads may run ahead of it
+			if (decl->slot_index != SIZE_MAX && !ident->global_qualified) {
+				const uint32_t referent = identifier_slot_operand(ident);
+				const bool plain = referent != k_invalid_u32
+					? (ident->names_value_decl || callable_.plain_refs.count(referent) != 0)
+					: ident->names_known_value;
+				if (plain) { callable_.plain_refs[static_cast<uint32_t>(decl->slot_index)] = decl->name_id; }
+			}
 			emit(opcode::op_decl_ref_ident, add_node(decl), add_symbol(ident->symbol_id));
 		} else {
 			compile_expression(decl->initializer);

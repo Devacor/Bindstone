@@ -6491,7 +6491,15 @@ type_info* vm_backend::temp_stamp_for(const script_array& node, size_t at) const
 }
 
 op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
-	if (typed_load_fast(f, ins)) return {};
+	if (typed_load_fast(f, ins)) {
+#ifdef JAISCRIPT_VM_PROFILE
+		if (f.code->typed_sites[f.ip].speculative) { ++profile_typed_spec_[0]; }
+#endif
+		return {};
+	}
+#ifdef JAISCRIPT_VM_PROFILE
+	if (f.code->typed_sites[f.ip].speculative) { ++profile_typed_spec_[1]; }
+#endif
 	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
 }
 
@@ -14037,6 +14045,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_head_), std::end(profile_typed_head_), 0ull);
 	std::fill(std::begin(profile_push_fused_lane_), std::end(profile_push_fused_lane_), 0ull);
 	std::fill(std::begin(profile_typed_decl_read_), std::end(profile_typed_decl_read_), 0ull);
+	std::fill(std::begin(profile_typed_spec_), std::end(profile_typed_spec_), 0ull);
 	std::fill(std::begin(profile_typed_store_), std::end(profile_typed_store_), 0ull);
 	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
 	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
@@ -14307,9 +14316,10 @@ void vm_backend::dump_opcode_profile() const {
 		(unsigned long long)profile_decl_var_kinds_[4], (unsigned long long)profile_decl_var_kinds_[5], (unsigned long long)profile_decl_var_kinds_[6], (unsigned long long)profile_decl_var_kinds_[7],
 		(unsigned long long)profile_decl_var_kinds_[8], (unsigned long long)profile_decl_var_kinds_[9], (unsigned long long)profile_decl_var_kinds_[10], (unsigned long long)profile_decl_var_kinds_[11],
 		(unsigned long long)profile_decl_var_kinds_[12], (unsigned long long)profile_decl_var_kinds_[13] + profile_decl_var_kinds_[14] + profile_decl_var_kinds_[15]);
-	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu | typed store: tried %llu hit %llu\n",
+	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu | typed store: tried %llu hit %llu | speculative T_LOAD: hit %llu miss %llu\n",
 		(unsigned long long)profile_typed_decl_read_[0], (unsigned long long)profile_typed_decl_read_[1],
-		(unsigned long long)profile_typed_store_[0], (unsigned long long)profile_typed_store_[1]);
+		(unsigned long long)profile_typed_store_[0], (unsigned long long)profile_typed_store_[1],
+		(unsigned long long)profile_typed_spec_[0], (unsigned long long)profile_typed_spec_[1]);
 	fprintf(stderr, "[vm-profile] push_fused lanes: append %llu | kernel %llu | replay %llu\n",
 		(unsigned long long)profile_push_fused_lane_[0], (unsigned long long)profile_push_fused_lane_[1], (unsigned long long)profile_push_fused_lane_[2]);
 	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu | cmp_jump hit %llu miss %llu unstamped %llu\n",

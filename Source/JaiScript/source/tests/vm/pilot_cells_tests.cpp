@@ -640,6 +640,61 @@ public:
 			check_true(seen[1].find("GETTER_FIRST") != std::string::npos || seen[1].find("throw:") != 0,
 			           "the getter's error comes first when the member is the referent: " + seen[1]);
 		});
+		test("a_read_inside_an_index_expression_lands_in_a_temp_and_the_outer_read_fuses", [this]() {
+			// p[k + Q[i % 8]]: the inner read lands in a temp first, the outer read takes the T_LOAD row with the temp
+			// as an index operand, and the loop closes as a cell block
+			auto vm = engine::make();
+			vm->set_backend(backend_type::vm);
+			stdlib::register_all(*vm);
+			auto* symbolizer = vm->get_symbolizer();
+			const char* script =
+				"array<int> P = [10, 20, 30, 40, 50, 60, 70, 80]; array<int> Q = [1, 2, 3, 0, 1, 2, 3, 0];"
+				" var f = function(int n) { var& p = P; int acc = 0; int i = 0;"
+				" while (i < n) { int k = i % 4; acc = acc + p[k + Q[i % 8]]; i = i + 1; } return acc; };";
+			auto templates = vm->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, vm.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*vm, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("T_LOAD") != std::string::npos && listing.find("CELLS_BACK") != std::string::npos,
+			           "both reads typed and the loop closed: " + listing);
+			// the read on either side, or on both sides (left before right); values land the same on both backends
+			const std::string run = R"(
+				array<int> P = [10, 20, 30, 40, 50, 60, 70, 80]; array<int> Q = [1, 2, 3, 0, 1, 2, 3, 0];
+				function r1(int n) -> int { var& p = P; int acc = 0; int i = 0; while (i < n) { int k = i % 4; acc = acc + p[k + Q[i % 8]]; i = i + 1; } return acc; }
+				function r2(int n) -> int { var& p = P; int acc = 0; int i = 0; while (i < n) { int k = i % 4; acc = acc + p[Q[i % 8] + k]; i = i + 1; } return acc; }
+				function r3(int n) -> int { var& p = P; int acc = 0; int i = 0; while (i < n) { acc = acc + p[Q[i % 8] + Q[(i + 1) % 8]]; i = i + 1; } return acc; }
+				to_string(r1(20)) + "," + to_string(r2(21)) + "," + to_string(r3(22));
+			)";
+			both(run, "800,820,900", "nested reads land the same");
+			// error order: the inner read's failure comes first, then the outer's; the same texts on both backends
+			const std::string probe = R"(
+				array<int> P = [1, 2, 3, 4]; array<int> Q = [0, 1];
+				function f(int a, int b) -> int { var& p = P; return p[a + Q[b]]; }
+				string out = "";
+				try { out = to_string(f(1, 9)); } catch (e) { out = "throw:" + e; }
+				try { out = out + "|" + to_string(f(9, 1)); } catch (e) { out = out + "|throw:" + e; }
+				out;
+			)";
+			both(probe, "", "inner then outer raise");
+			const std::string vm_probe = run_on(true, probe);
+			check_true(vm_probe.rfind("throw:", 0) == 0 && vm_probe.find("|throw:") != std::string::npos, "both reads raise in turn: " + vm_probe);
+			// an undefined outer container raises before the inner read (the container must be a frame slot for the hoist)
+			const std::string outer_missing = R"(
+				[[warn_mode]] array<int> Q = [1, 2];
+				function probe(int k, int i) -> int { return missing_outer[k + Q[i % 16]]; }
+				string out = "";
+				try { out = to_string(probe(0, 9)); } catch (e) { out = "throw:" + e; }
+				out;
+			)";
+			both(outer_missing, "", "undefined outer container raises first");
+			const std::string vm_missing = run_on(true, outer_missing);
+			check_true(vm_missing.find("missing_outer") != std::string::npos, "the outer name is the error: " + vm_missing);
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -695,6 +750,42 @@ public:
 			check_true(listing.find("INCDEC") == std::string::npos, "no general increment remains: " + listing);
 			check_true(listing.find("T_ADD_II") != std::string::npos && listing.find("T_SUB_II") != std::string::npos, "++ and -- take the int rows: " + listing);
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the column loop still closes with ++y: " + listing);
+		});
+		test("a_read_through_an_unproven_container_takes_the_typed_row_and_falls_back_the_same", [this]() {
+			// pal[base + tp[i + j]] with both containers var& parameters (a computed inner index, JaiDOOM's texture shape): the checker cannot class the index binary, the
+			// outer read takes the T_LOAD row on the element-read temp anyway; a map container, a float element and a
+			// string element miss into the general op with its own results and texts
+			const std::string script = R"(
+				function f(var& tp, var& pal, int n, int j) -> string {
+					int s = 0;
+					try { for (int i = 0; i < n; ++i) { int base = i * 2; s = s + pal[base + tp[i + j]]; } }
+					catch (err) { return "throw:" + err; }
+					return to_string(s);
+				}
+				var T = [0, 1, 1]; var P = [10, 20, 30, 40, 50, 60]; var M = {0: 10, 3: 40, 5: 60};
+				var F = [0, 1.5, 1]; var S = [0, "x", 1];
+				f(T, P, 3, 0) + "," + f(T, M, 3, 0) + "," + f(F, P, 3, 0) + "," + f(S, P, 3, 0);
+			)";
+			both(script, "", "unproven index binary");
+			both(script, "", "unproven index binary, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("110,110,", 0) == 0, "the array and the map land the same sum: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "var f = function(var& tp, var& pal, int n, int j) { int s = 0; for (int i = 0; i < n; ++i) { int base = i * 2; s = s + pal[base + tp[i + j]]; } return s; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			size_t loads = 0; for (size_t at = listing.find("T_LOAD"); at != std::string::npos; at = listing.find("T_LOAD", at + 6)) { ++loads; }
+			check_true(loads >= 2 && listing.find("INDEX_FUSED_DECL") == std::string::npos, "inner and outer reads both take the typed row: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

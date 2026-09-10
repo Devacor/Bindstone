@@ -1868,6 +1868,7 @@ bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_
 // instruction word; the original instruction waits in typed_sites for any guard miss.
 // In place, after every jump target is final, so nothing shifts.
 static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_proto& p);   // defined with the index lanes below
+static bool index_proto_speculative_shape(const chunk& code, const fused_index_proto& p);
 
 void vm_compiler::lower_typed_ops(chunk& c) {
 	if (!typed_lowering_) return;
@@ -2089,6 +2090,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.stamp = fp.decl_type;
 			site.decl_expect = fp.decl_expect;
 			site.temp = fp.decl_temp;
+			site.speculative = fp.speculative;
 			chunk_ = &c;
 			typed_site_at(ip) = site;
 			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
@@ -2255,6 +2257,26 @@ static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_pr
 	return true;
 }
 
+// The lane without a proof: a flat index binary with an element-read temp operand and direct or int-literal
+// operands (the checker cannot class a read through an unproven container); typed_load_fast's guards decide
+static bool index_proto_speculative_shape(const chunk& code, const fused_index_proto& p) {
+	if (p.container.const_index != k_invalid_u32 || p.container.member_node != k_invalid_u32 ||
+	    p.container.is_subscript() || p.container.load_flags != 0) return false;
+	if (p.index_binary == k_invalid_u32 || !p.index_chain_ext.empty()) return false;
+	const fused_binary_proto& bp = code.fused_binary_protos[p.index_binary];
+	if (!bp.elem_read_operand || bp.typed_class != 0) return false;
+	auto int_operand = [&](const fused_operand& o) {
+		if (o.const_index != k_invalid_u32) return code.constants[o.const_index].raw_storage_index() == script_value::TYPEID_INT;
+		return o.direct && o.slot != k_invalid_u32;
+	};
+	switch (static_cast<token_type>(bp.op)) {
+	case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
+	case token_type::ampersand: case token_type::pipe: case token_type::caret: case token_type::left_shift: case token_type::right_shift:
+		return int_operand(bp.left) && int_operand(bp.right);
+	default: return false;
+	}
+}
+
 // A subscript expression the fused index op reads in one instruction: an identifier container with an
 // identifier or literal index, a member-base container, or an identifier container with a computed index
 // chain whose innermost node has a flat fused shape (the three cases try_emit_fused_index emits)
@@ -2269,10 +2291,23 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 		if (binary_expr* rb = index_binary_candidate(b->right.get())) {
 			binary_expr* spine[8];
 			const int depth = index_chain_spine(rb, spine);
-			return depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none;
+			if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) return true;
+			return depth == 1 && quiet_partner(b->left.get()) && index_read_partner_shape(rb);
 		}
 	}
 	return false;
+}
+
+// `a[x op b[j]]`: a flat index binary whose one operand is an element read only a temp can carry (its own index
+// computed) and whose other operand cannot raise ahead of it (a slot, a literal or another such read, read left
+// before right): the read lands in a temp first and the index binary keeps direct operands; the caller holds the
+// container to a frame slot (quiet_partner), so nothing raises ahead of the hoisted read there either
+bool vm_compiler::index_read_partner_shape(const binary_expr* rb) {
+	if (!detail::transient_read_marker::is_value_binary_op(rb->op.type)) return false;
+	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
+	const bool lsub = fusable_index_expr(rb->left.get()) && quiet_partner(rb->right.get());
+	const bool rsub = fusable_index_expr(rb->right.get()) && quiet_partner(rb->left.get());
+	return (lsub && (rsub || plain(rb->right.get()))) || (rsub && (lsub || plain(rb->left.get())));
 }
 
 // An operand that cannot raise before a sibling's element read (the interpreter's left-to-right order
@@ -2346,6 +2381,7 @@ bool vm_compiler::compile_subscript_into_temp(const expression_ptr& e, uint8_t e
 	proto.decl_expect = expect;
 	proto.decl_temp = true;
 	proto.typed_lane = index_proto_typed_lane_shape(*chunk_, proto);
+	if (!proto.typed_lane && index_proto_speculative_shape(*chunk_, proto)) { proto.typed_lane = true; proto.speculative = true; }
 	out = fused_operand{};
 	out.slot = t;
 	out.symbol = temp_symbol_index();
@@ -2421,6 +2457,34 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 					chunk_->fused_binary_protos.push_back(sp);
 					p.index_chain_ext.push_back(static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1));
 				}
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+				return true;
+			}
+			if (depth == 1 && typed_lowering_ && temps_active_ && chunk_->is_function_body && quiet_partner(expr->left.get()) && index_read_partner_shape(rb)) {
+				// the element-read operand lands in a temp first (left before right); the index binary then reads
+				// direct operands and the outer read takes the T_LOAD row when the binary's class is proven
+				fused_operand container;
+				const bool ref_container = reference_slot_operand(expr->left.get());
+				if (ref_container) { materialize_operand_temp(expr->left, container); }   // its dereference precedes the reads
+				fused_binary_proto bp;
+				bp.op = static_cast<uint8_t>(rb->op.type);
+				auto side = [&](const expression_ptr& e, fused_operand& out, bool ahead_of_a_read) {
+					if (fusable_index_expr(e.get())) {
+						if (compile_subscript_into_temp(e, operand_expect(static_cast<const binary_expr*>(e.get())), out)) { bp.elem_read_operand = true; }
+					} else if (ahead_of_a_read && reference_slot_operand(e.get())) {
+						materialize_operand_temp(e, out);
+					} else {
+						out = make_fused_operand(e);
+					}
+				};
+				side(rb->left, bp.left, fusable_index_expr(rb->right.get()));
+				side(rb->right, bp.right, false);
+				stamp_typed_class(bp, rb);
+				fused_index_proto p;
+				p.container = ref_container ? container : make_fused_operand(expr->left);
+				chunk_->fused_binary_protos.push_back(bp);
+				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 				chunk_->fused_index_protos.push_back(p);
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
@@ -2524,7 +2588,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		};
 		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
 		// the rule holds at every node of the lifted tree, the outer one included
-		auto temp_only = [](const expression* c) { return fusable_index_expr(c) && !fusable_subscript_operand(c); };
+		auto temp_only = [this](const expression* c) { return fusable_index_expr(c) && !fusable_subscript_operand(c); };
 		auto partners_ok = [&](const binary_expr* b) {
 			return !((temp_only(b->left.get()) && !quiet_partner(b->right.get())) ||
 			         (temp_only(b->right.get()) && !quiet_partner(b->left.get())));

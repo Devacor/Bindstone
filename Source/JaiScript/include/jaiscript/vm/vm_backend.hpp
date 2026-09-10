@@ -188,6 +188,7 @@ namespace jai::vm {
         uint64_t profile_typed_head_[6] = {};
         uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
         uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
+        uint64_t profile_typed_spec_[2] = {};        // speculative T_LOAD sites: hit, miss
         uint64_t profile_typed_store_[2] = {};       // tried, hit
         // Serial census (2026-09-09), reset with the opcode tables: typed landings by kind x outcome
         // [0]=temp in-place [1]=temp construct [2]=decl stamp-hit [3]=decl construct [4]=store refused

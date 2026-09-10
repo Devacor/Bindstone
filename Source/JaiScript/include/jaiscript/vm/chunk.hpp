@@ -184,6 +184,9 @@ namespace jai::vm {
         // Selects the typed head; the head's tag guards keep it sound and the general
         // kernel below it runs on any miss (proofs off = 0 everywhere, byte-identical).
         uint8_t typed_class = 0;
+        // an operand is a compiler temp holding an element read: an index fold over it may take the typed
+        // lane without a proof (the load's guards decide, the original instruction runs on a miss)
+        bool elem_read_operand = false;
         fused_operand left;
         fused_operand right;
     };
@@ -313,6 +316,7 @@ namespace jai::vm {
         // typed_decl_read; a store proto opens exec_index_store_fused with typed_index_store;
         // any runtime miss runs the general kernel unchanged.
         bool typed_lane = false;
+        bool speculative = false;   // the lane came from elem_read_operand, not a proof (census: misses per site)
     };
 
     struct chunk {
@@ -378,6 +382,7 @@ namespace jai::vm {
             // proto and lands in a compiler temp with the canonical stamp (in place when the temp holds it)
             uint32_t index_proto = k_invalid_u32;
             bool temp = false;
+            bool speculative = false;
         };
         std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;

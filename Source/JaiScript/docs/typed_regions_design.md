@@ -149,6 +149,11 @@ is the compound row with the constant 1 (`op_t_add_ii` / `op_t_sub_ii`), its mis
 general increment. Lowering follows the type-proofs flag, so a proofs-off run
 is a typed-ops-off run and the differential fuzz gate's second pass covers both.
 
+An index binary the checker left unproven still takes the lane when one operand is a compiler
+temp holding an element read and the others are direct slots or int literals (a read through a
+`var&` container): the load's runtime guards decide, a miss runs the original instruction, and the
+census counts such a site's misses.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as
@@ -232,7 +237,10 @@ the proven kind for store values, nested indexes and binaries the checker could 
 like every proof) knows program-level `array<int>` and `array<float>` declarations by symbol and reference
 aliases of typed containers, so `acc = acc + G[idx]` and `acc = acc + pix[i]` are parse-proven typed stores and
 such loops close as cell blocks. A typed value parameter classifies the same way (`vfx = vfx + dvfx` with both
-declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too. A hoisted read keeps the
+declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too. An index expression that itself contains an element read
+only a temp can carry (`palcm[pcm + tp[base + iv]]`) lands that read in a temp first, left before right, when its
+partner cannot raise ahead of it (a slot, a literal or another such read); the outer read then fuses with direct
+operands and takes the `T_LOAD` row when the index binary's class is proven. A hoisted read keeps the
 interpreter's evaluation order: an operand the interpreter evaluates before the read whose dereference may run a
 getter (a frame slot naming a reference declaration) is materialized into a temp first, so the getter runs once, in
 its place, and the consumer reads the temp; a reference bound to a value the unit declares (a local, a parameter, a

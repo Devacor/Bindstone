@@ -56,6 +56,9 @@ namespace jai::vm {
             // Symbols this callable itself declares (params + locals): identifiers outside
             // this set compile to env lookups, never to baked (possibly outer-frame) slots.
             std::unordered_set<uint64_t> declared;
+            // reference declarations bound to a value the unit declares (a value slot, a program-level value
+            // declaration, an alias already plain), slot -> symbol: their dereference is a cell, never a getter
+            std::unordered_map<uint32_t, uint64_t> plain_refs;
             bool active = false;
         };
 
@@ -69,6 +72,8 @@ namespace jai::vm {
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         bool quiet_partner(const expression* e);
+        bool reference_slot_operand(const expression* e);
+        void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
         static uint8_t operand_expect(const binary_expr* node);
         bool try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags);
         chunk* chunk_ = nullptr;

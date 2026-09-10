@@ -230,4 +230,10 @@ the proven kind for store values, nested indexes and binaries the checker could 
 like every proof) knows program-level `array<int>` and `array<float>` declarations by symbol and reference
 aliases of typed containers, so `acc = acc + G[idx]` and `acc = acc + pix[i]` are parse-proven typed stores and
 such loops close as cell blocks. A typed value parameter classifies the same way (`vfx = vfx + dvfx` with both
-declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too.
+declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too. A hoisted read keeps the
+interpreter's evaluation order: an operand the interpreter evaluates before the read whose dereference may run a
+getter (a frame slot naming a reference declaration) is materialized into a temp first, so the getter runs once, in
+its place, and the consumer reads the temp; a reference bound to a value the unit declares (a local, a parameter, a
+program-level value declaration, an alias of one) dereferences a cell and needs no snapshot, so such loops still
+close as cell blocks. An index store evaluates its right-hand side before it dereferences the target on both
+backends, so the store-value hoist is already in that order.

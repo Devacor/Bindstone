@@ -526,6 +526,40 @@ public:
 			both("function s(array<int> t, int acc, int n) -> int { int i = 0; while (i < n) { acc = acc + t[i % 4]; i = i + 1; } return acc; } to_string(s([1, 2, 3, 4], 0, 10));",
 			     "23", "typed array parameter");
 		});
+		test("a_hoisted_read_keeps_the_interpreter_order_past_a_property_reference", [this]() {
+			// a var& bound to a C++ property dereferences through its getter; the interpreter evaluates that operand
+			// before an element read that follows it, so the getter's error must come first on both backends
+			struct order_box { bool armed = false; std::vector<script_int> values{5, 6, 7, 8}; script_int n = 3; };
+			struct shape_case { const char* text; bool getter_first; };
+			const shape_case shapes[5] = {
+				{"function probe(int k, int i) -> int { var& p = box.values; box.arm(); return p[k + Q[i % 16]]; }", true},   // index-read arm
+				{"function probe(int k, int i) -> int { var& p = box.values; box.arm(); return p[Q[i % 16]]; }", true},       // nested-index arm
+				{"function probe(int k, int i) -> int { var& s = box.n; box.arm(); return s + Q[i % 16]; }", true},           // flat pre-step
+				{"function probe(int k, int i) -> int { var& s = box.n; box.arm(); return s + Q[i % 16] * 2; }", true},       // the lift
+				{"function probe(int k, int i) -> int { var& p = box.values; box.arm(); p[k] = Q[i % 16]; return 1; }", false} // a store: its right-hand side comes first
+			};
+			for (const shape_case& sc : shapes) {
+				const char* shape = sc.text;
+				std::string seen[2];
+				for (int backend = 0; backend < 2; ++backend) {
+					order_box box;
+					auto e = engine::make();
+					if (backend == 1) { e->set_backend(backend_type::vm); }
+					stdlib::register_all(*e);
+					dynamic_binder<order_box>(*e, "order_box")
+						.property("values", [](order_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.values; }, nullptr)
+						.property("n", [](order_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.n; }, nullptr)
+						.method("arm", [](order_box& b) { b.armed = true; })
+						.build();
+					e->add_global_ref("box", box);
+					const std::string src = std::string("array<int> Q = [1, 2];\n") + shape +
+						"\nstring out = \"\"; try { out = to_string(probe(0, 9)); } catch (err) { out = \"throw:\" + err; } out;";
+					try { seen[backend] = e->execute(src).as_string(); } catch (const std::exception& ex) { seen[backend] = std::string("throw:") + ex.what(); }
+				}
+				check_eq(seen[0], seen[1], std::string("evaluation order: ") + shape);
+				check_eq(sc.getter_first, seen[1].find("GETTER_FIRST") != std::string::npos, std::string("which error comes first: ") + seen[1]);
+			}
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

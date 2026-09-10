@@ -159,6 +159,47 @@ namespace {
             return false;
         }
 
+        // The same walk, answering whether the name resolves to a VALUE declaration at all (false for a
+        // reference declaration and for a name the unit does not declare: another unit's global, a host name)
+        bool names_known_value_decl(uint64_t symbol) const {
+            if (symbol == UINT64_MAX) {
+                return false;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                bool found = false;
+                bool is_ref = false;
+                auto vr = it->vars.equal_range(symbol);
+                for (auto v = vr.first; v != vr.second; ++v) {
+                    found = true;
+                    if (v->second->type && v->second->type->base_type == script_value_type::jai_reference_type) {
+                        is_ref = true;
+                    }
+                }
+                auto pr = it->params.equal_range(symbol);
+                for (auto q = pr.first; q != pr.second; ++q) {
+                    found = true;
+                    if (q->second->is_reference) {
+                        is_ref = true;
+                    }
+                }
+                auto rr = it->range_vars.equal_range(symbol);
+                for (auto r = rr.first; r != rr.second; ++r) {
+                    found = true;
+                    if (r->second->is_reference) {
+                        is_ref = true;
+                    }
+                }
+                auto dr = it->destructures.equal_range(symbol);
+                if (dr.first != dr.second) {
+                    found = true;
+                }
+                if (found) {
+                    return !is_ref;
+                }
+            }
+            return false;
+        }
+
         // Declared classification of an identifier, looked up ONLY in the innermost
         // function's slot map with a symbol double-check: an identifier whose slot came
         // from an enclosing function (later neutralized by lambda capture) can never
@@ -397,6 +438,7 @@ namespace {
                 case node_type::identifier_expr: {
                     auto* id = static_cast<identifier_expr*>(e);
                     id->names_value_decl = !names_reference_decl(id->symbol_id);
+                    id->names_known_value = names_known_value_decl(id->symbol_id);
                     escape_if_outer_read(id->symbol_id);   // default-[&] body: outer reads escape
                     break;
                 }

@@ -218,6 +218,10 @@ namespace jai {
         // when the storage holds a cell: value-decl names write the cell like the variable
         // itself (typed enforcement); ref-alias names store through unconstrained.
         bool names_value_decl = true;
+        // Parser resolution: true when this name statically resolves to a VALUE declaration the unit can see (a
+        // local, a parameter, a program-level declaration of this unit); false for reference declarations and
+        // for names the unit does not declare. A reference bound to such a name dereferences a cell, never a getter.
+        bool names_known_value = false;
         // Field proof (bare this-field read/write inside a method): the receiver's certain class
         // object, its flat field slot, the field_shape_epoch at stamp time, the declared type and
         // whether a write may bypass the accessor ladder. Raw pointers like mcache_*: script

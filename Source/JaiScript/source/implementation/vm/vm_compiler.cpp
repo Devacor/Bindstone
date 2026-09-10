@@ -2514,11 +2514,15 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				lo.symbol = temp_symbol_index();
 				lo.direct = true;
 			};
-			// a subscript operand of node `b` reads into a temp when its partner cannot raise ahead of it
+			// a subscript operand of node `b` reads into a temp when its partner cannot raise ahead of it; the read's
+			// landing kind is the binary's class when the checker proved the pair, else the read's own proven element
+			// kind, read from the subscript node only (an identifier or literal operand has no class byte to read)
 			auto operand_of = [&](const binary_expr* b, const expression_ptr& e, const expression* partner) -> fused_operand {
 				fused_operand o;
-				const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
-				if (fusable_index_expr(e.get()) && quiet_partner(partner) && compile_subscript_into_temp(e, expect, o)) { return o; }
+				if (fusable_index_expr(e.get()) && quiet_partner(partner)) {
+					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
+					if (compile_subscript_into_temp(e, expect, o)) { return o; }
+				}
 				return make_fused_operand(e);
 			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {

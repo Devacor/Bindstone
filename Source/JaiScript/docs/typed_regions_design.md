@@ -222,3 +222,11 @@ index of an outer read. The typed lowering gives the read the `T_LOAD` row, land
 the checker proved the binary and the runtime kind otherwise, in place when the temp already holds it; a
 non-scalar element lands boxed in the temp; the read happens before its partner only when the partner
 cannot raise first (a slot, a literal, a temp, another read), so the interpreter's error order stands.
+
+A reference alias of a declared typed container (`var& pix = PIX;` with `PIX` an `array<int>`) carries the
+container's type for element reads: the checker keeps it a reference for diagnostics and marks the element
+kind a proof source, and a subscript node carries that kind in its operand class, so the compiler's temps land
+the proven kind for store values, nested indexes and binaries the checker could not class on their own. The parser's typed-store classification (`assignment_expr::typed_store_provable`, guarded at runtime
+like every proof) knows program-level `array<int>` and `array<float>` declarations by symbol and reference
+aliases of typed containers, so `acc = acc + G[idx]` and `acc = acc + pix[i]` are parse-proven typed stores and
+such loops close as cell blocks.

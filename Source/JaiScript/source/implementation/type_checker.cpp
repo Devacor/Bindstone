@@ -100,6 +100,9 @@ struct ctype {
     // proof source for the operand class stamp (the typed rows guard it at runtime) while it stays
     // tentative for diagnostics, so no load-time text changes
     bool element_proof = false;
+    // a reference alias of a declared typed container (var& x = G): its element reads may prove while
+    // diagnostics still see a reference
+    bool alias_proof = false;
     // A map key read through a range-for pair (`kv.first`, C++ `const Key`): copies freely,
     // never mutated or aliased (reference, shared_ptr, T& parameter, T& return, cast<T&>)
     bool const_key = false;
@@ -377,6 +380,7 @@ private:
         bool is_reference = false;        // T&/auto&/var& decl, & parameter, auto& loop variable
         bool is_handle = false;           // declared shared_ptr<T> / shared_ptr<auto>
         bool map_pair = false;            // range-for variable over a map: .first is the read-only key
+        ctype alias;                      // a reference alias of a declared typed container: the type its element reads may prove
         const type_info* declared = nullptr;   // for message text; null for auto-inferred
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
@@ -1325,7 +1329,7 @@ private:
 		// Tentative for diagnostics; a scalar element of a declared, non-tentative typed container is a
 		// proof source for the operand class (the typed rows guard it at runtime)
 		result.tentative = true;
-		result.element_proof = !container.tentative && (result.kind == ctype::int_k || result.kind == ctype::float_k);
+		result.element_proof = (!container.tentative || container.alias_proof) && (result.kind == ctype::int_k || result.kind == ctype::float_k);
 		return result;
 	}
 
@@ -1776,8 +1780,12 @@ private:
 				ctype l = infer(b->left.get());
 				ctype r = infer(b->right.get());
 				if (b->op.type == token_type::left_bracket) {
-					stamp(b->static_operand_class, operand_class_unknown, operand_class_unknown);
-					return container_value_type(declared_container_receiver(b->left.get(), l));
+					// the proven element kind rides the node's class (int_int / float_float) for the compiler's temps
+					const ctype el = container_value_type(declared_container_receiver(b->left.get(), l));					const uint8_t cls = !el.element_proof ? operand_class_unknown
+					                  : el.kind == ctype::int_k ? operand_class_int_int
+					                  : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
+					stamp(b->static_operand_class, cls, operand_class_unknown);
+					return el;
 				}
 				stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
 				return binary_result(l, b->op.type, r);
@@ -1924,7 +1932,7 @@ private:
 						 local->line, local->column);
 				}
 			}
-			return local->dynamic ? ctype{} : local->type;
+			return local->dynamic ? (local->alias.kind != ctype::unknown ? local->alias : ctype{}) : local->type;
 		}
 		if (class_ctx_) {
 			member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
@@ -2644,6 +2652,13 @@ private:
 			entry.display = decl->type->canonical_name();
 			entry.type = ctype_from_type_info(decl->type.get());
 			entry.dynamic = decl->type->base_type == script_value_type::jai_any_type || is_reference_decl;
+			if (is_reference_decl && has_init && decl->initializer->get_type() == node_type::identifier_expr &&
+			    !init.tentative && init.ti && (init.kind == ctype::array_k || init.kind == ctype::map_k)) {
+				// `var& pix = PIX;` with PIX a declared typed container: the alias's element reads may prove
+				entry.alias = init;
+				entry.alias.tentative = true;
+				entry.alias.alias_proof = true;
+			}
 			entry.is_reference = is_reference_decl;
 			entry.is_handle = decl->type->base_type == script_value_type::jai_shared_ptr_type;
 			const bool plain_kind = decl->type->base_type != script_value_type::jai_shared_ptr_type &&

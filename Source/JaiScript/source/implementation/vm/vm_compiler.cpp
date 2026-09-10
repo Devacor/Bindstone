@@ -1979,6 +1979,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				dst = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
 				stamp = decl->type.get();
 			} else {
+
 				const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
 				if ((dp.flags & need) != need || (dp.flags & (store_flag_ref_alias | store_flag_global_only))) break;
 				if (dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) break;
@@ -2302,7 +2303,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	if (expr->left->get_type() == node_type::identifier_expr && fusable_index_expr(expr->right.get()) &&
 	    quiet_partner(expr->left.get())) {
 		fused_operand inner;
-		if (compile_subscript_into_temp(expr->right, 0xFF, inner)) {
+		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
 			p.container = make_fused_operand(expr->left);
 			p.index = inner;
@@ -2414,11 +2415,15 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		const bool rsub = fusable_index_expr(expr->right.get()) && quiet_partner(expr->left.get());
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
 			const size_t temp_mark = temp_next_;
-			const uint8_t expect = operand_expect(expr.get());
+			// the binary's class when the checker proved the pair, else the read's own proven element kind
+			auto expect_of = [&](const expression_ptr& sub) {
+				const uint8_t e = operand_expect(expr.get());
+				return e != 0xFF ? e : operand_expect(static_cast<const binary_expr*>(sub.get()));
+			};
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
-			if (lsub) { compile_subscript_into_temp(expr->left, expect, proto.left); } else { proto.left = make_fused_operand(expr->left); }
-			if (rsub) { compile_subscript_into_temp(expr->right, expect, proto.right); } else { proto.right = make_fused_operand(expr->right); }
+			if (lsub) { compile_subscript_into_temp(expr->left, expect_of(expr->left), proto.left); } else { proto.left = make_fused_operand(expr->left); }
+			if (rsub) { compile_subscript_into_temp(expr->right, expect_of(expr->right), proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
 			chunk_->fused_binary_protos.push_back(proto);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
@@ -2512,7 +2517,8 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// a subscript operand of node `b` reads into a temp when its partner cannot raise ahead of it
 			auto operand_of = [&](const binary_expr* b, const expression_ptr& e, const expression* partner) -> fused_operand {
 				fused_operand o;
-				if (fusable_index_expr(e.get()) && quiet_partner(partner) && compile_subscript_into_temp(e, operand_expect(b), o)) { return o; }
+				const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
+				if (fusable_index_expr(e.get()) && quiet_partner(partner) && compile_subscript_into_temp(e, expect, o)) { return o; }
 				return make_fused_operand(e);
 			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
@@ -2685,7 +2691,8 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	                  value->get_type() == node_type::literal_expr)) {
 		p.store_value = make_fused_operand(value);
 		value_operand = true;
-	} else if (no_result && fusable_index_expr(value.get()) && compile_subscript_into_temp(value, 0xFF, p.store_value)) {
+	} else if (no_result && fusable_index_expr(value.get()) &&
+	           compile_subscript_into_temp(value, operand_expect(static_cast<const binary_expr*>(value.get())), p.store_value)) {
 		value_operand = true;   // `a[i] = b[j]`: the element read lands in a temp, the store takes it as an operand
 	}
 	if (!value_operand) {

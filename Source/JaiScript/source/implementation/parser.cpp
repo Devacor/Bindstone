@@ -45,6 +45,9 @@ namespace {
             std::unordered_map<size_t, slot_decl_type> slot_types;
         };
         std::vector<scope> scopes;
+        // program-level array<int>/array<float> decls by symbol: their elements classify a subscript
+        // read from any function (a store-enforced invariant; every consumer guards at runtime)
+        std::unordered_map<uint64_t, uint8_t> global_elem_cls;
         string_symbolizer* symbolizer = nullptr;
 
         void escape(uint64_t symbol) {
@@ -176,9 +179,15 @@ namespace {
         // elements are store-enforced, and an OOB read throws (it never yields a
         // wrong-class value), so a subscript read of one classifies exactly.
         uint8_t declared_element_class(const identifier_expr* id) const {
-            if (scopes.empty() || id->slot_index == SIZE_MAX || !id->names_value_decl) {
+            if (scopes.empty()) {
                 return cls_unknown;
             }
+            if (id->slot_index == SIZE_MAX) {   // env-resolved: a program-level typed container
+                auto g = global_elem_cls.find(id->symbol_id);
+                return g == global_elem_cls.end() ? cls_unknown : g->second;
+            }
+            // a reference alias registers its referent's element class under its own slot, so the
+            // value-decl requirement of declared_numeric_class does not apply here
             const auto& slot_types = scopes.back().slot_types;
             auto found = slot_types.find(id->slot_index);
             if (found == slot_types.end() || found->second.symbol != id->symbol_id) {
@@ -588,7 +597,7 @@ namespace {
                     walk_expr(d->initializer.get());
                     if (!scopes.empty() && d->name_id != UINT64_MAX) {
                         scopes.back().vars.emplace(d->name_id, d);
-                        if (d->slot_index != SIZE_MAX && !d->is_static && d->type) {
+                        if (!d->is_static && d->type) {
                             uint8_t cls = cls_unknown;
                             uint8_t elem_cls = cls_unknown;
                             if (d->type->base_type == script_value_type::jai_int_type) {
@@ -603,10 +612,18 @@ namespace {
                                         elem_cls = cls_float;
                                     }
                                 }
+                            } else if (d->type->base_type == script_value_type::jai_reference_type && d->initializer &&
+                                       d->initializer->get_type() == node_type::identifier_expr) {
+                                // `var& pix = PIX;`: the alias reads the referent's elements (a typed local or program-level container)
+                                elem_cls = declared_element_class(static_cast<const identifier_expr*>(d->initializer.get()));
                             }
-                            if (cls != cls_unknown || elem_cls != cls_unknown) {
-                                scopes.back().slot_types.insert_or_assign(
-                                    d->slot_index, slot_decl_type{d->name_id, cls, elem_cls});
+                            if (d->slot_index != SIZE_MAX) {
+                                if (cls != cls_unknown || elem_cls != cls_unknown) {
+                                    scopes.back().slot_types.insert_or_assign(
+                                        d->slot_index, slot_decl_type{d->name_id, cls, elem_cls});
+                                }
+                            } else if (scopes.size() == 1 && elem_cls != cls_unknown) {
+                                global_elem_cls.insert_or_assign(d->name_id, elem_cls);   // a program-level typed container
                             }
                         }
                     }

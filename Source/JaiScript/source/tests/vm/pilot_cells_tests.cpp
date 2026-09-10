@@ -444,6 +444,48 @@ public:
 			)";
 			both(script, "", "error order with an env partner");
 		});
+		test("a_reference_alias_of_a_typed_global_proves_its_element_reads", [this]() {
+			// var& g = G with G an array<int>: the alias's reads are proven int, the loop closes as a cell block
+			auto vm = engine::make();
+			vm->set_backend(backend_type::vm);
+			stdlib::register_all(*vm);
+			auto* symbolizer = vm->get_symbolizer();
+			const char* scripts[2] = {
+				"array<int> G = [3, 1, 4, 1, 5, 9, 2, 6]; var f = function(int n) { var& g = G; int acc = 0; int i = 0;"
+				" while (i < n) { int idx = i % 8; acc = acc + g[idx]; i = i + 1; } return acc; };",
+				"array<int> G = [3, 1, 4, 1, 5, 9, 2, 6]; var f = function(int n) { int acc = 0; int i = 0;"
+				" while (i < n) { int idx = i % 8; acc = acc + G[idx]; i = i + 1; } return acc; };" };
+			for (const char* script : scripts) {
+			auto templates = vm->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, vm.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*vm, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("T_LOAD") != std::string::npos && listing.find("CELLS_BACK") != std::string::npos, "alias read typed and the loop closed: " + listing);
+			}
+			const std::string run = R"(
+				array<int> G = [3, 1, 4, 1, 5, 9, 2, 6];
+				function run(int n) -> int { var& g = G; int acc = 0; int i = 0; while (i < n) { int idx = i % 8; acc = acc + g[idx]; i = i + 1; } return acc; }
+				to_string(run(20));
+			)";
+			both(run, "71", "alias read lands the same");
+		});
+		test("an_element_copy_between_aliases_lands_the_same_and_a_reassigned_global_converts", [this]() {
+			// pix and pal alias typed globals; PIX is reassigned between calls (converted into array<int> by its declaration)
+			const std::string script = R"(
+				array<int> PIX = [0, 0, 0, 0]; array<int> PAL = [9, 8, 7, 6];
+				function blit(int n) -> int { var& pix = PIX; var& pal = PAL; int i = 0; while (i < n) { pix[i] = pal[i]; i = i + 1; } return pix[0] * 1000 + pix[n - 1]; }
+				int a = blit(4);
+				PIX = [1, 1, 1, 1, 1, 1];
+				int b = blit(3);
+				to_string(a) + "|" + to_string(b) + "|" + to_string(PIX[3]) + "," + to_string(PIX.size());
+			)";
+			both(script, "9006|9007|1,6", "alias to alias copy, reassigned global");
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

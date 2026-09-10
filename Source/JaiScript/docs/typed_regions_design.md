@@ -236,4 +236,7 @@ getter (a frame slot naming a reference declaration) is materialized into a temp
 its place, and the consumer reads the temp; a reference bound to a value the unit declares (a local, a parameter, a
 program-level value declaration, an alias of one) dereferences a cell and needs no snapshot, so such loops still
 close as cell blocks. An index store evaluates its right-hand side before it dereferences the target on both
-backends, so the store-value hoist is already in that order.
+backends, so the store-value hoist is already in that order. A reference declaration into a frame slot
+(`var& pix = PIX;`) keeps its function on the lazy-environment path: the reference lands in the alias's slot and the
+referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
+environment and its env-resident reads keep the two-compare fast head across calls.

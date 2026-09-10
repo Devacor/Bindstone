@@ -205,7 +205,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 
 	for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
 		if (ch.closure_protos[i].body_chunk) {
-			out << "\n-- closure proto " << i << " --\n";
+			out << "\n-- closure proto " << i << (ch.closure_protos[i].body_chunk->needs_frame_env ? " (env: frame) --\n" : " (env: lazy) --\n");
 			out << disassemble(*ch.closure_protos[i].body_chunk, symbolizer);
 		}
 	}

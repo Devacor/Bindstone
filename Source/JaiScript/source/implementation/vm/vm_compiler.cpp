@@ -188,6 +188,15 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
+			case opcode::op_decl_ref_ident:
+			case opcode::op_decl_ref_value: {
+				// the reference lands in the alias's frame slot; the referent resolves slot-first, then through
+				// the chain the frame already runs in (a global's cell, a this-field) or is the value the body
+				// just computed (an element, a member of an evaluated object): never this frame's env
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
+				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				break;
+			}
 			case opcode::op_cast:
 				// value forms never touch the env; the reference arms resolve storage through it
 				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
@@ -309,6 +318,12 @@ namespace {
 			case opcode::op_index_fused_decl: {
 				if (ins.c == k_invalid_u32) break;   // a compiler temp landing: a frame slot, never the env
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
+				if (decl->slot_index == SIZE_MAX) return false;
+				break;
+			}
+			case opcode::op_decl_ref_ident:
+			case opcode::op_decl_ref_value: {
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
 				if (decl->slot_index == SIZE_MAX) return false;
 				break;
 			}

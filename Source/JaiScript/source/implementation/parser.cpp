@@ -353,6 +353,28 @@ namespace {
                     p.symbol_id = symbolizer->intern(p.name);
                 }
                 scopes.back().params.emplace(p.symbol_id, &p);
+                // a typed value parameter classifies like a typed local: the by-value boundary lands the
+                // declared kind on entry and every store to the slot is typed-checked
+                if (!p.is_reference && p.type && p.slot_index != SIZE_MAX) {
+                    uint8_t cls = cls_unknown;
+                    uint8_t elem_cls = cls_unknown;
+                    if (p.type->base_type == script_value_type::jai_int_type) {
+                        cls = cls_int;
+                    } else if (p.type->base_type == script_value_type::jai_float_type) {
+                        cls = cls_float;
+                    } else if (p.type->base_type == script_value_type::jai_array_type) {
+                        if (const auto& elem = p.type->element_type()) {
+                            if (elem->base_type == script_value_type::jai_int_type) {
+                                elem_cls = cls_int;
+                            } else if (elem->base_type == script_value_type::jai_float_type) {
+                                elem_cls = cls_float;
+                            }
+                        }
+                    }
+                    if (cls != cls_unknown || elem_cls != cls_unknown) {
+                        scopes.back().slot_types.insert_or_assign(p.slot_index, slot_decl_type{p.symbol_id, cls, elem_cls});
+                    }
+                }
                 if (p.default_value) {
                     walk_expr(p.default_value.get());
                 }

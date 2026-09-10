@@ -486,6 +486,46 @@ public:
 			)";
 			both(script, "9006|9007|1,6", "alias to alias copy, reassigned global");
 		});
+		test("a_store_to_a_typed_parameter_takes_the_typed_row_and_the_loop_closes", [this]() {
+			// v = v + dv with both declared int parameters: a parse-proven typed store, so the loop is a cell block
+			auto vm = engine::make();
+			vm->set_backend(backend_type::vm);
+			stdlib::register_all(*vm);
+			auto* symbolizer = vm->get_symbolizer();
+			const char* script = "var g = function(int v, int dv, int n) { int i = 0; while (i < n) { v = v + dv; i = i + 1; } return v; };";
+			auto templates = vm->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, vm.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*vm, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("BINARY_FUSED_STORE") == std::string::npos && listing.find("CELLS_BACK") != std::string::npos,
+			           "the parameter store is typed and the loop closed: " + listing);
+			both("function g(int v, int dv, int n) -> int { int i = 0; while (i < n) { v = v + dv; i = i + 1; } return v; } to_string(g(1, 3, 20));",
+			     "61", "parameter store lands the same");
+			// the column loop's shape: the parameter advances by a parameter each row, a negative texel row wraps
+			const std::string column = R"(
+				function col(int y0, int y1, int vfx, int dvfx, int th) -> int {
+					int acc = 0;
+					for (int y = y0; y <= y1; ++y) { int iv = (vfx >> 16) % th; if (iv < 0) { iv = iv + th; } acc = acc + iv; vfx = vfx + dvfx; }
+					return acc;
+				}
+				to_string(col(0, 9, 0, 196608, 7)) + "," + to_string(col(0, 3, -131072, 65536, 7));
+			)";
+			both(column, "30,12", "column loop over parameters");
+			// a parameter bound by reference downstream (its storage is a cell): the alias sees every store
+			both("function k(int v, int dv, int n) -> int { var& a = v; int i = 0; while (i < n) { v = v + dv; i = i + 1; } return a; } to_string(k(1, 3, 20));",
+			     "61", "reference-escaping parameter");
+			// a float argument converts on entry: the parameter slot holds the declared int before the first store
+			both("function g(int v, int dv, int n) -> int { int i = 0; while (i < n) { v = v + dv; i = i + 1; } return v; } to_string(g(1.0, 3, 20)) + \",\" + to_string(g(true, 3, 2));",
+			     "61,7", "converted arguments");
+			// array<int> parameters: the element class classifies a read, the store into an int parameter proves
+			both("function s(array<int> t, int acc, int n) -> int { int i = 0; while (i < n) { acc = acc + t[i % 4]; i = i + 1; } return acc; } to_string(s([1, 2, 3, 4], 0, 10));",
+			     "23", "typed array parameter");
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

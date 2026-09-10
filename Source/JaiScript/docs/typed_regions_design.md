@@ -152,7 +152,11 @@ is a typed-ops-off run and the differential fuzz gate's second pass covers both.
 An index binary the checker left unproven still takes the lane when one operand is a compiler
 temp holding an element read and the others are direct slots or int literals (a read through a
 `var&` container): the load's runtime guards decide, a miss runs the original instruction, and the
-census counts such a site's misses.
+census counts such a site's misses. A one-argument `math::` intrinsic (`itrunc`, `ifloor`, `floor`, `ceil`,
+`sqrt`, `abs`, `sin`, `cos`, `tan`, the degree conversions) inside a fused binary lands its result in a
+compiler temp (`op_math_temp`; the integer family on a float lands raw in place, every other case runs the
+shared kernel and lands its value), so the binary reads a direct operand and takes its typed row when the
+checker classed the call; the call keeps its place in the operand order like a hoisted element read.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload

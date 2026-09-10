@@ -38,6 +38,8 @@ Conversely, accesses to `VW`, `CENTERY` and `VIEW_*` inside fused binary and ind
 
 These are candidates for guarded lowering under the existing syntax. They do not justify changing `var` semantics, conversion rules or evaluation order.
 
+The separate [LOAD cost controls](LOAD_COST_2026-09-10.md) measure stable environment reads and explain the limits of extrapolating their cost.
+
 ## Capture and verification
 
 Astra built the exact `4bd53021231649906f5f021a96fe1dd42eb92655` library with `/DJAISCRIPT_VM_PROFILE` in `CMAKE_CXX_FLAGS`. An isolated copy of the runner host exports the already collected `profile_chunks_` instruction counts and main-engine opcode totals after replay. No runtime-owned source changed. The host reads copied census metadata and does not dereference possibly expired chunk pointers.

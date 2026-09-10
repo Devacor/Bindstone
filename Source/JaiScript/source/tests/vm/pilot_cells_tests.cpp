@@ -377,6 +377,73 @@ public:
 			check_true(listing.find("T_LOAD") != std::string::npos, "the element read is a typed load: " + listing);
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the loop closes around it: " + listing);
 		});
+		test("a_computed_index_read_inside_an_expression_lands_the_same", [this]() {
+			const std::string script = R"(
+				function run(int n) -> int {
+					array<int> data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+					int acc = 0; int i = 0;
+					while (i < n) { acc = acc + data[i + 2]; i = i + 1; }
+					return acc;
+				}
+				to_string(run(8));
+			)";
+			both(script, "35", "computed index operand");   // 4+1+5+9+2+6+5+3
+		});
+		test("an_unknown_container_read_inside_an_expression_lands_and_falls_back_the_same", [this]() {
+			// tp is a var& parameter: no proof, the read lands as any scalar; a string element mid-loop raises the same
+			const std::string script = R"(
+				function run(var& tp, int n) -> string {
+					int acc = 0; int i = 0; string out = "";
+					try { while (i < n) { acc = acc + tp[i]; i = i + 1; } out = to_string(acc); }
+					catch (err) { out = "throw:" + err + "|" + to_string(acc); }
+					return out;
+				}
+				var T = [[10, 20, 30, 40, 50]];
+				var& t0 = T[0];
+				string a = run(t0, 5);
+				t0[3] = "x";
+				string b = run(t0, 5);
+				a + " / " + b;
+			)";
+			both(script, "", "unknown container operand");
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("150 / throw:", 0) == 0 && vm.find("|60") != std::string::npos, "150, then the string element after 60: " + vm);
+		});
+		test("an_element_to_element_copy_lands_the_same", [this]() {
+			const std::string script = R"(
+				function copy(var& dst, var& src, int n) -> int { int i = 0; while (i < n) { dst[i] = src[i]; i = i + 1; } return i; }
+				array<int> A = [0, 0, 0, 0]; array<int> B = [7, 8, 9, 10];
+				var V = [0, 0, 0, 0]; var W = [1, "two", 3.5, 4];
+				int a = copy(A, B, 4); int b = copy(V, W, 4);
+				to_string(a) + to_string(b) + "|" + to_string(A[3]) + "," + to_string(V[1]) + "," + to_string(V[2]);
+			)";
+			both(script, "44|10,two,3.500000", "element-to-element copies, typed and var");
+		});
+		test("a_nested_index_read_lands_the_same", [this]() {
+			const std::string script = R"(
+				function run(int n) -> int {
+					array<int> lut = [5, 6, 7, 8]; array<int> idx = [3, 1, 0, 2, 1];
+					int acc = 0; int i = 0;
+					while (i < n) { acc = acc + lut[idx[i]]; i = i + 1; }
+					return acc;
+				}
+				to_string(run(5));
+			)";
+			both(script, "32", "nested index");   // 8+6+5+7+6
+		});
+		test("an_operand_that_could_raise_first_keeps_the_interpreter_order", [this]() {
+			// `missing + data[9]`: the undefined global raises before the out-of-range read on both backends
+			const std::string script = R"(
+				function run() -> string {
+					array<int> data = [1, 2, 3];
+					string out = "";
+					try { int v = missing + data[9]; out = to_string(v); } catch (err) { out = "throw:" + err; }
+					return out;
+				}
+				run();
+			)";
+			both(script, "", "error order with an env partner");
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

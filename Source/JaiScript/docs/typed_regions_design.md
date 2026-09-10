@@ -213,3 +213,10 @@ Controls: suites `Closed Typed Loops` and `Cell Loops` (interpreter parity on ev
 builds count entries, refusals, cell iterations, unboxes, exits, misses by step, cell instructions,
 flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
 (21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.
+
+Element reads inside typed expressions take the same row: when the checker has proved a binary's operands
+int/int or float/float and one operand is a one-level subscript `base[i]` (base a plain identifier, `i` an
+identifier), the compiler reads the element into a compiler temp through `op_operand_temp` and the typed
+lowering turns that op into `T_LOAD` (landing in the temp with the canonical stamp), so the binary takes its
+typed row and a loop around them can close; the other operand must be a direct slot or a literal so the read
+cannot reorder an error. A miss falls back to the operand-temp op, the general form of exactly that read.

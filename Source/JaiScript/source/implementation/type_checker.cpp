@@ -96,6 +96,10 @@ struct ctype {
     // globals) - tentative kinds propagate through operators and are never proof sources.
     const type_info* ti = nullptr;
     bool tentative = false;
+    // An element read from a declared, non-tentative typed container (array<int> x; x[i]): the kind is a
+    // proof source for the operand class stamp (the typed rows guard it at runtime) while it stays
+    // tentative for diagnostics, so no load-time text changes
+    bool element_proof = false;
     // A map key read through a range-for pair (`kv.first`, C++ `const Key`): copies freely,
     // never mutated or aliased (reference, shared_ptr, T& parameter, T& return, cast<T&>)
     bool const_key = false;
@@ -214,6 +218,7 @@ ctype binary_result_kind(const ctype& l, token_type op, const ctype& r) {
 ctype binary_result(const ctype& l, token_type op, const ctype& r) {
     ctype out = binary_result_kind(l, op, r);
     out.tentative = l.tentative || r.tentative;
+    out.element_proof = (l.tentative || r.tentative) && (!l.tentative || l.element_proof) && (!r.tentative || r.element_proof);
     return out;
 }
 
@@ -1107,7 +1112,7 @@ private:
              related_line, related_column);
     }
     static bool certain_scalar(const ctype& t) {
-        return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k ||
+        return (!t.tentative || t.element_proof) && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k ||
                                 t.kind == ctype::char_k || t.kind == ctype::string_k);
     }
     bool certain_object(const ctype& t) {
@@ -1127,7 +1132,7 @@ private:
         return t;
     }
     static uint8_t operand_class_of(const ctype& l, const ctype& r) {
-        if (l.tentative || r.tentative) { return operand_class_unknown; }
+        if ((l.tentative && !l.element_proof) || (r.tentative && !r.element_proof)) { return operand_class_unknown; }
         const bool li = l.kind == ctype::int_k, lf = l.kind == ctype::float_k;
         const bool ri = r.kind == ctype::int_k, rf = r.kind == ctype::float_k;
         if (li && ri) { return operand_class_int_int; }
@@ -1317,8 +1322,10 @@ private:
 			? container.ti->element_type().get()
 			: (container.kind == ctype::map_k ? container.ti->value_type().get() : nullptr);
 		ctype result = ctype_from_type_info(element);
-		// Static diagnostics only. This increment introduces no element-read proofs.
+		// Tentative for diagnostics; a scalar element of a declared, non-tentative typed container is a
+		// proof source for the operand class (the typed rows guard it at runtime)
 		result.tentative = true;
+		result.element_proof = !container.tentative && (result.kind == ctype::int_k || result.kind == ctype::float_k);
 		return result;
 	}
 

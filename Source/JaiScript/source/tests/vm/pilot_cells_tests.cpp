@@ -278,6 +278,105 @@ public:
 			)";
 			both(script, "8004/8004|10,4", "second call, other containers");
 		});
+		test("element_reads_inside_typed_expressions_land_the_same", [this]() {
+			// acc = acc + data[idx]: the read lands in a compiler temp (T_LOAD), the add is typed, the loop closes
+			const std::string script = R"(
+				function run(int n) -> int {
+					array<int> data = [3, 1, 4, 1, 5, 9, 2, 6];
+					int acc = 0; int i = 0;
+					while (i < n) { int idx = i % 8; acc = acc + data[idx]; i = i + 1; }
+					return acc;
+				}
+				to_string(run(20));
+			)";
+			both(script, "71", "expression-form element read");
+		});
+		test("element_reads_from_a_var_array_land_and_a_string_element_falls_back", [this]() {
+			const std::string script = R"(
+				function run(var& data, int n) -> string {
+					int acc = 0; int i = 0;
+					string out = "";
+					try { while (i < n) { int idx = i % 8; acc = acc + data[idx]; i = i + 1; } out = to_string(acc); }
+					catch (err) { out = "throw:" + err + "|" + to_string(acc); }
+					return out;
+				}
+				var D = [3, 1, 4, 1, 5, 9, 2, 6];
+				string a = run(D, 20);
+				D[5] = "s";
+				string b = run(D, 20);
+				a + " / " + b;
+			)";
+			both(script, "", "var container, then a string element on the sixth read");
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("71 / throw:", 0) == 0, "first pass 71, second raises: " + vm);
+			check_true(vm.find("|14") != std::string::npos, "the sum before the string element is retained (3+1+4+1+5 = 14): " + vm);
+		});
+		test("an_out_of_range_element_read_inside_an_expression_raises_the_same", [this]() {
+			const std::string script = R"(
+				function run(int n) -> string {
+					array<int> data = [10, 20, 30, 40];
+					int acc = 0; int i = 0; string out = "";
+					try { while (i < n) { int idx = i + 2; acc = acc + data[idx]; i = i + 1; } out = to_string(acc); }
+					catch (err) { out = "throw:" + err + "|" + to_string(acc); }
+					return out;
+				}
+				run(5);
+			)";
+			both(script, "", "out of range on the third read");
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) == 0 && vm.find("|70") != std::string::npos, "30 + 40 retained, then the range error: " + vm);
+		});
+		test("two_element_reads_and_a_comparison_land_the_same", [this]() {
+			const std::string script = R"(
+				function run(int n, int limit) -> string {
+					array<int> a = [1, 2, 3, 4, 5, 6]; array<int> b = [10, 20, 30, 40, 50, 60];
+					int sum = 0; int count = 0; int i = 0;
+					while (i < n) { int s = a[i] + b[i]; sum = sum + s; if (a[i] < limit) { count = count + 1; } i = i + 1; }
+					return to_string(sum) + ":" + to_string(count);
+				}
+				run(6, 4);
+			)";
+			both(script, "231:3", "two reads, a comparison read");
+		});
+		test("float_element_reads_inside_expressions_land_bit_exactly", [this]() {
+			const std::string script = R"(
+				function run(int n) -> float {
+					array<float> fd = [0.5, 1.25, -2.75, 3.125, 1e-3];
+					float acc = 0.0; int i = 0;
+					while (i < n) { int idx = i % 5; acc = acc + fd[idx]; i = i + 1; }
+					return acc;
+				}
+				to_string(run(23));
+			)";
+			both(script, "", "float reads");
+		});
+		test("a_global_container_read_inside_an_expression_lands_the_same", [this]() {
+			const std::string script = R"(
+				array<int> G = [7, 8, 9, 10, 11];
+				function run(int n) -> int { int acc = 0; int i = 0; while (i < n) { int idx = i % 5; acc = acc + G[idx]; i = i + 1; } return acc; }
+				to_string(run(12));
+			)";
+			both(script, "105", "env-resident container");   // 45 + 45 + 7 + 8
+		});
+		test("the_expression_form_lowers_to_a_typed_load_and_the_loop_closes", [this]() {
+			auto vm = engine::make();
+			vm->set_backend(backend_type::vm);
+			stdlib::register_all(*vm);
+			auto* symbolizer = vm->get_symbolizer();
+			const char* script = "var f = function(int n) { array<int> data = [3, 1, 4, 1, 5, 9, 2, 6]; int acc = 0; int i = 0;"
+			                     " while (i < n) { int idx = i % 8; acc = acc + data[idx]; i = i + 1; } return acc; };";
+			auto templates = vm->get_registered_template_types();
+			jai::lexer lex(script, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, vm.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*vm, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("T_LOAD") != std::string::npos, "the element read is a typed load: " + listing);
+			check_true(listing.find("CELLS_BACK") != std::string::npos, "the loop closes around it: " + listing);
+		});
 		test("a_loop_with_a_break_is_not_closed_and_still_lands_the_same", [this]() {
 			const std::string script = R"(
 				array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0];

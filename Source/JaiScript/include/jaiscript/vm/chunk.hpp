@@ -371,6 +371,10 @@ namespace jai::vm {
             uint8_t fold_ops[3] = {};
             uint8_t fold_count = 0;
             uint8_t decl_expect = 0xFF;
+            // an op_operand_temp origin (materialize_typed_reads): the read resolves through this synthetic
+            // proto and lands in a compiler temp with the canonical stamp (in place when the temp holds it)
+            uint32_t index_proto = k_invalid_u32;
+            bool temp = false;
         };
         std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;

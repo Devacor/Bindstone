@@ -894,8 +894,8 @@ public:
 			check_true(vm.rfind("108,48,", 0) == 0, "the plain aliases land: " + vm);
 		});
 		test("a_closed_loop_may_branch_inside_itself", [this]() {
-			// Astra's diamond fixtures in while form, the texture loop's guarded arm, a continue, a break (leaves the loop
-			// open) and an overflow inside the taken arm: the same on both backends, proofs on and off
+			// Astra's diamond fixtures in while form, the texture loop's guarded arm, a continue, a break (an exit of the
+			// block) and an overflow inside the taken arm: the same on both backends, proofs on and off
 			const std::string script = R"(
 				function diamond(int n) -> int { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; }
 				function guarded(var& pix, var& pal, var& tp, int n, int th) -> int { int acc = 0; int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; acc = acc + pix[y]; y = y + 1; } return acc; }
@@ -929,7 +929,7 @@ public:
 			const std::string g = listing_of("var f = function(var& pix, var& pal, var& tp, int n, int th) { int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; y = y + 1; } return y; };");
 			check_true(g.find("CELLS_BACK") != std::string::npos && g.find("C_JCMP") != std::string::npos && g.find("C_GUARD") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
 			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
-			check_true(b.find("CELLS_BACK") == std::string::npos, "a break leaves the loop open: " + b);
+			check_true(b.find("CELLS_BACK") != std::string::npos && b.find("C_EXIT") != std::string::npos, "a break is an exit of the block: " + b);
 		});
 		test("an_environment_scalar_in_a_store_index_is_a_read_only_cell", [this]() {
 			// JaiDOOM's pix[y * VW + x] with VW a global: the loop closes with VW resolved once at entry; a float VW and a
@@ -1582,6 +1582,33 @@ var via_env = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int v
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(6), closed, "the six loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+		});
+		test("exits_leave_the_block", [this]() {
+			// a break, a compare whose edge leaves the loop, and a return inside the loop (bare, with a value, with an element read
+			// pushed for it) end the block: the cells flush and the general form runs the statement or continues at the target
+			const char* defs = R"JAI(
+array<int> A = [3, 1, 4, 1, 5, 9, 2, 6];
+var first_over = function(int n, int lim) { int acc = 0; int found = -1; for (int i = 0; i < n; ++i) { acc = acc + A[i]; if (A[i] > lim) { found = i; break; } } return acc * 100 + found; };
+var while_break = function(float lim) { int i = 0; int acc = 0; while (i < 100) { float f = i * 1.5; if (f > lim) { break; } acc = acc + i; i = i + 1; } return acc * 10 + i; };
+var and_head = function(int n) { int i = 0; int acc = 0; while (i < n && acc < 20) { acc = acc + i; i = i + 1; } return acc * 100 + i; };
+var ret_bare = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + i; if (acc > 6) { return acc; } } return -acc; };
+var ret_elem = function(int n) { for (int i = 0; i < n; ++i) { int v = A[i]; if (v == 4) { return A[i + 1]; } } return -1; };
+var ret_expr = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + i * 2; if (i == 2) { return acc + 1000; } } return acc; };
+var nested_break = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 3; if (t > 6) { if (t > 9) { break; } acc = acc + 100; } acc = acc + t; } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(first_over(8, 4));", "1404" }, { "to_string(while_break(4.0));", "33" }, { "to_string(and_head(10));", "2107" },
+				{ "to_string(ret_bare(10));", "10" }, { "to_string(ret_elem(8));", "1" }, { "to_string(ret_expr(6));", "1006" }, { "to_string(nested_break(6));", "118" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(7), closed, "every loop with an exit closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			check(listing.find("C_EXIT") != std::string::npos, "the exits are in the copies: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

@@ -6989,6 +6989,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_args: return exec_c_args(f, ci);
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
+	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 	}
 }

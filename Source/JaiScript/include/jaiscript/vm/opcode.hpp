@@ -231,6 +231,7 @@ namespace jai::vm {
         op_c_land,          // a = call index, b = cell loop index, c = the consumer's ip: the bindings re-read, the result landed by the declared-type rule or dropped
         op_c_lnot,          // a = dst cell, b = src cell or const: logical not of a truthiness (an int, a float or a bool), a bool
         op_c_cmpval,        // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: a comparison as a value, a bool
+        op_c_exit,          // a = the general ip: the block ends here (a return, a break out of the loop, a compare's edge out): flush, then the general form
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -367,6 +368,7 @@ namespace jai::vm {
             case opcode::op_c_land: return "C_LAND";
             case opcode::op_c_lnot: return "C_LNOT";
             case opcode::op_c_cmpval: return "C_CMPVAL";
+            case opcode::op_c_exit: return "C_EXIT";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

@@ -86,6 +86,7 @@ namespace jai::vm {
         bool binary_lands_fused(binary_expr* b);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
+        void guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard);
         static uint8_t operand_expect(const binary_expr* node);
         bool try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags);
         chunk* chunk_ = nullptr;

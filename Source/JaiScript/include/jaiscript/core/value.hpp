@@ -1931,6 +1931,8 @@ namespace jai {
             // scratch. value.cpp owns the touch logic (materialize/store re-resolve the
             // receiver's class and accessor per touch: reload-safe, shadow-aware).
             std::unique_ptr<property_binding> property;
+            // a reference whose dereference cannot raise: the owned cell, no container, field, map key or property behind it
+            bool plain_cell() const noexcept { return has_cell && !container && !container_map && !owner_instance && !property; }
             bool cpp_member_ref() const noexcept { return property && property->live_member; }
             bool property_ref() const noexcept { return property && !property->live_member; }
             const script_value& materialize_property(engine* eng);                       // throws on a failed getter

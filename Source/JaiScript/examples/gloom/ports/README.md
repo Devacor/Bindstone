@@ -3,6 +3,9 @@
 Measured snapshot: [2026-09-08 results](RESULTS_2026-09-08_FINAL.md).
 
 The ports execute the shared host's deterministic 100x40, quad-pixel workload.
+Squirrel 3.2 uses the bundled runtime with 64-bit integers and `SQUSEDOUBLE`,
+and the existing scripts in `squirrel/scripts`. Its normal and padding builds
+run the same conformance gates and timing protocol as the Lua configurations.
 Lua 5.4.8 and Lua 5.5.1 use the same Lua scripts and the same sol2 adapter.
 LuaJIT 2.1 JIT uses the same adapter with the overrides in `luajit/scripts`;
 unmodified modules come from `lua/scripts`.
@@ -76,7 +79,9 @@ padding deltas and the observed run range. The padding band includes normal
 run-to-run variation, ASLR and runtime hash-seed variation; it is not a pure
 measurement of one compiler mechanism.
 
-`metadata.json` records source and executable hashes. `runs.json` records every
+`metadata.json` records source and executable hashes. The runner passes the
+Squirrel script directory explicitly from `--jai-workload-root` and hashes its
+`.nut` inputs, including when that root is a frozen source snapshot. `runs.json` records every
 command, output filename, hash verdict, CPU affinity and background CPU reading.
 `summary.json` contains only accepted runs. A port that fails conformance has
 no timing result.
@@ -84,7 +89,7 @@ no timing result.
 ## JaiDOOM timedemo
 
 The default command runs both whole programs. For JaiScript increments, omit
-the Lua configurations with:
+the rival configurations with:
 
 ```powershell
 python Source/JaiScript/examples/gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build Source/JaiScript/out/astra/release --output Source/JaiScript/out/astra/whole-program-REFERENCE

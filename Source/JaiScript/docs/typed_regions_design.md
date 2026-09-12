@@ -320,6 +320,10 @@ widens, a var lands any kind); the flush writes the payload back through the res
 when the storage still holds that kind and stamp, and a call, which may read or rewrite the environment, has the
 written cells flushed ahead of its probe and re-read after its return.
 
+An element store's value binary is a value like a unary or a math call there: `a[i] = e op f` lands the binary in a
+compiler temp (its fused binary rewritten to land there) and the store takes the temp as a direct operand, so the
+typed store lane's shape holds and the block reads the value as a cell.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

@@ -9,6 +9,7 @@
 #include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/return_conv.hpp>
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <functional>
 
@@ -2830,22 +2831,56 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
-		// legality and lifetimes: a container binding's slot is never written; a compiler value is defined earlier in the body
-		// than it is read (a temp is undefined at entry, so a read ahead of every write in the body would only ever miss); a
-		// snapshot's slot is written only by its own guard between the guard and its read (temps are reused across statements,
-		// so the slot may carry other values outside that span)
+		// legality and lifetimes: a container binding's slot is never written; a slot the block enters with undefined (a compiler
+		// value, a local the body declares) is defined on every path to each of its reads; a snapshot's slot is written only by
+		// its own guard between the guard and its read (temps are reused across statements, so the slot may carry other values
+		// outside that span)
 		if (refusal == chunk::cell_refusal_none) {
-			auto is_temp = [&](uint32_t slot) { const int k = find_cell(slot); return k >= 0 && cells[k].temp; };
-			std::vector<uint32_t> defined;
+			// the region's control flow graph: an operation's successors are the next operation, a compare's target (the exit when
+			// the target is past the back edge; a head compare's false edge is the exit), a jump's target and nothing after an
+			// exit; the last operation continues to the back edge, which re-enters at the first. The must-define dataflow over that
+			// graph is the rule (a definition in an untaken branch does not reach a read after the join), and it is the rule every
+			// pass over the region must keep
+			const size_t n_ops = ops.size(), back_node = n_ops, exit_node = n_ops + 1;
+			auto node_of = [&](uint32_t target) -> size_t { return target > back || target < first ? exit_node : static_cast<size_t>(target - first); };
+			std::vector<std::array<size_t, 2>> succ(n_ops + 1, std::array<size_t, 2>{ exit_node, exit_node });
+			for (size_t k = 0; k < n_ops; ++k) {
+				const ir_op& op = ops[k];
+				switch (op.kind) {
+				case ir::exit: break;
+				case ir::jump: succ[k][0] = node_of(op.target); break;
+				case ir::cmp: succ[k][0] = k + 1; succ[k][1] = op.head ? exit_node : node_of(op.target); break;
+				default: succ[k][0] = k + 1; break;
+				}
+			}
+			succ[back_node][0] = 0;
+			std::vector<uint32_t> tracked;   // the slots undefined at entry
+			for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && (cl.temp || cl.first_decl) && std::find(tracked.begin(), tracked.end(), cl.slot) == tracked.end()) { tracked.push_back(cl.slot); } }
+			auto tracked_at = [&](uint32_t slot) -> int { for (size_t t = 0; t < tracked.size(); ++t) { if (tracked[t] == slot) return static_cast<int>(t); } return -1; };
+			std::vector<std::vector<bool>> in(n_ops + 1, std::vector<bool>(tracked.size(), true));   // the meet's identity; the entry defines nothing tracked
+			std::fill(in[0].begin(), in[0].end(), false);
+			std::vector<std::vector<size_t>> preds(n_ops + 1);
+			for (size_t k = 0; k <= n_ops; ++k) { for (size_t s : succ[k]) { if (s <= n_ops && s != 0) { preds[s].push_back(k); } } }
+			for (bool changed = true; changed;) {
+				changed = false;
+				for (size_t k = 1; k <= n_ops; ++k) {
+					if (preds[k].empty()) continue;
+					for (size_t t = 0; t < tracked.size(); ++t) {
+						bool all = true;
+						for (size_t p : preds[k]) { if (!(in[p][t] || (p < n_ops && ops[p].writes == tracked[t]))) { all = false; break; } }
+						if (in[k][t] != all) { in[k][t] = all; changed = true; }
+					}
+				}
+			}
 			std::vector<std::pair<uint32_t, uint32_t>> snapshots;   // slot, the read's ip (the guard is open until it)
-			for (size_t k = 0; k < ops.size() && refusal == chunk::cell_refusal_none; ++k) {
+			for (size_t k = 0; k < n_ops && refusal == chunk::cell_refusal_none; ++k) {
 				const size_t ip = first + k;
 				const ir_op& op = ops[k];
 				for (uint8_t r = 0; r < op.nreads; ++r) {
-					if (is_temp(op.reads[r]) && std::find(defined.begin(), defined.end(), op.reads[r]) == defined.end()) { refuse(chunk::cell_refusal_malformed, ip); }
+					const int t = tracked_at(op.reads[r]);
+					if (t >= 0 && !in[k][static_cast<size_t>(t)]) { refuse(chunk::cell_refusal_malformed, ip); }
 				}
 				if (op.writes != k_invalid_u32) {
-					if (is_temp(op.writes)) { defined.push_back(op.writes); }
 					for (const auto& s : snapshots) { if (s.first == op.writes && ip < s.second) { refuse(chunk::cell_refusal_malformed, ip); } }
 				}
 				if (op.kind == ir::guard) {
@@ -2870,6 +2905,21 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
 		loop.env_operands = env_ops;
+		if (ir_listing_) {
+			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit" };
+			std::string text;
+			for (size_t k = 0; k < ops.size(); ++k) {
+				const ir_op& op = ops[k];
+				text += std::to_string(k) + ":" + ir_names[static_cast<size_t>(op.kind)];
+				if (op.kind == ir::cmp || op.kind == ir::jump || op.kind == ir::exit) {
+					text += op.kind == ir::exit || op.head || op.target > back || op.target < first ? "->exit" : op.target == back ? "->back" : "->" + std::to_string(op.target - first);
+				}
+				if (op.writes != k_invalid_u32) { text += " w" + std::to_string(op.writes); }
+				for (uint8_t r = 0; r < op.nreads; ++r) { text += (r ? "," : " r") + std::to_string(op.reads[r]); }
+				text += ";";
+			}
+			loop.ir_text = std::move(text);
+		}
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask.set(k); } }
@@ -4428,6 +4478,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	{
 		vm_compiler body_compiler(symbolizer_, builtins_);
 		body_compiler.typed_lowering(typed_lowering_);
+		body_compiler.ir_listing(ir_listing_);
 		proto.body_chunk = body_compiler.compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
 	}
 

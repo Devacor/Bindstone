@@ -78,6 +78,7 @@ public:
 		if (!parse_result.has_value()) { return "<parse failed>"; }
 		(void)jai::detail::run_static_check(*e, parse_result.value());
 		jai::vm::vm_compiler compiler(symbolizer);
+		compiler.ir_listing(true);
 		return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 	}
 	void both(const std::string& script, const std::string& expected, const char* label, bool proofs = true) {
@@ -1661,6 +1662,26 @@ var across = function(int n) { string s = ""; try { s = to_string(looping(n)); }
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(5), closed, "the five loops with calls close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+		});
+		test("the_region_lists_its_operations_and_control_flow", [this]() {
+			// the listing prints each closed region's canonical operations with their control flow: a while loop's head compare
+			// exits, a diamond's compare targets an operation and its else arm jumps, a break is an exit, a counted loop's continue
+			// jumps to the back edge; the region verifier (must-define over that graph) accepts every loop the suite closes
+			const char* defs = R"JAI(
+var diamond = function(int n) { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; };
+var brk = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i == 3) { break; } acc = acc + i; } return acc; };
+var cont = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i == 1) { continue; } acc = acc + i; } return acc; };
+)JAI";
+			both(std::string(defs) + " to_string(diamond(6)) + \",\" + to_string(brk(10)) + \",\" + to_string(cont(10));", "-3,3,44", "the three loops");
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(3), closed, "the three loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			size_t ir_lines = 0; for (size_t at = listing.find("-- ir "); at != std::string::npos; at = listing.find("-- ir ", at + 1)) { ++ir_lines; }
+			check_eq(size_t(3), ir_lines, "one IR line per closed region: " + listing);
+			check(listing.find("-- ir 0:cmp->exit") != std::string::npos, "the while loop's head compare exits: " + listing);
+			check(listing.find(":jump->") != std::string::npos, "the diamond's else arm is a jump to an operation: " + listing);
+			check(listing.find(":exit->exit") != std::string::npos, "the break is an exit: " + listing);
+			check(listing.find(":jump->back") != std::string::npos, "the continue jumps to the back edge: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

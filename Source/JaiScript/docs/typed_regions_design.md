@@ -346,6 +346,13 @@ instruction, the cells flush and the general form runs the statement whole (its 
 and the return or jump), so any expression may appear in it; a compare whose taken edge leaves the loop lands on
 an exit appended after the copy's back edge (`C_EXIT`, its operand the general ip).
 
+The translation verifies a region over its control flow graph before emitting it: an operation's successors are
+the next operation, a compare's target (or the exit), a jump's target, nothing after an exit, and the back edge
+re-enters at the first operation; a slot the block enters with undefined (a compiler value, a local the body
+declares) must be defined on every path to each of its reads (the must-define dataflow), so a definition in an
+untaken branch does not reach a read after the join; a region that fails is refused as malformed. The listing
+prints each closed region's operations with their targets, writes and reads (`-- ir`).
+
 A landing after a call re-validates in proportion to what the call could have changed: the copy's sites are a list,
 the entry records how each site's container is reached (its frame slot, or its environment binding) and each
 environment cell's binding with the environment and its epoch, and a landing whose environment and epoch still

@@ -26,6 +26,8 @@ namespace jai::vm {
         // Typed scalar lowering follows the checker's proofs: off when type proofs are off,
         // so proofs-off runs are also typed-ops-off runs (the fuzz gate's second pass)
         void typed_lowering(bool on) { typed_lowering_ = on; }
+        // the listing tool and the tests: each closed region records its canonical operations (chunk::cell_loop::ir_text)
+        void ir_listing(bool on) { ir_listing_ = on; }
 
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
@@ -67,6 +69,7 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         bool typed_lowering_ = true;
+        bool ir_listing_ = false;
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl);

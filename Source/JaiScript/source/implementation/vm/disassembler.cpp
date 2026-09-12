@@ -210,6 +210,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 		out << " cells";
 		for (const auto& cl : loop.cells) { out << " " << (cl.env_operand != k_invalid_u32 ? "env" : cl.temp ? "t" : "s") << cl.slot << ":" << static_cast<unsigned>(cl.kind); }   // slot:kind (kinds: 0 adopted, 1 int, 2 float, 5 bool)
 		out << "\n";
+		if (!loop.ir_text.empty()) { out << "-- ir " << loop.ir_text << "\n"; }
 	}
 	for (const auto& r : ch.cell_refusals) {
 		out << "-- open loop " << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";

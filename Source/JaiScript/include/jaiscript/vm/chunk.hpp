@@ -403,6 +403,7 @@ namespace jai::vm {
             struct call_arg { uint8_t kind; uint32_t v; uint32_t ip; };   // kind 0 = a slot (a cell or verbatim, decided at emission), 1 = cell v, 2 = the push at ip verbatim
             struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; };
             std::vector<cell_call> calls;
+            std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
         };
         std::vector<cell_loop> cell_loops;
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's

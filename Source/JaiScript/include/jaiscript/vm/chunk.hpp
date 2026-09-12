@@ -397,7 +397,6 @@ namespace jai::vm {
             cell_mask temp_mask;
             cell_mask env_mask;       // every environment cell: the ones a body writes are flushed ahead of a call and at every exit
             std::vector<uint32_t> sites;   // the load and store sites' copy ips: the entry resolves their containers, a landing after a call checks them
-            std::vector<uint32_t> env_guard_temps;   // the temps of environment-name guards (op_operand_temp c = 1 over an environment name): no copy in the block (a site is a plain node once admitted), nulled by the flush so the general form's readers resolve the binding themselves
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;
             // a call inside the block: the probe, the pushes, the call and the landing are four copy instructions over one

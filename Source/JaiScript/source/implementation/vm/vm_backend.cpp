@@ -4749,25 +4749,11 @@ static const script_array* ref_pinned_element_container(const script_value& v) n
 
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
-		const fused_operand& src = f.code->fused_binary_protos[ins.a].left;
-		if (src.slot != k_invalid_u32 || src.const_index != k_invalid_u32) {
-			// the container guard over a slot: a plain cell (or no reference at all) needs no snapshot, the readers take the slot
-			const script_value* s = direct_operand(f, src);
-			if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
-		} else {
-			// the guard over an environment name (or a member): the binding is resolved once here, ahead of the reads that follow; a
-			// resolution that ran a getter (a property reference, a bare C++ property) leaves its value in the temp for the readers,
-			// any other leaves null and the readers resolve the binding themselves (a redeclaration after the function compiled,
-			// `var& P = box.values`, is met at run time, never assumed from the unit's declarations)
-			bool observed = false;
-			std::optional<script_value> scratch;
-			const script_value* v = fused_ident_value(f, src, scratch, f.ip * 3, &observed);
-			if (!v) return op_status::failed;
-			if (!observed) { frame_slot_set(f, ins.b, script_value(std::monostate{}, engine_)); return {}; }
-			script_value out = *v;
-			frame_slot_set(f, ins.b, std::move(out));
-			return {};
-		}
+		// the container guard's plain-cell form, a slot form: a plain cell (or no reference at all) needs no snapshot, the readers
+		// take the slot; an environment name takes the always form, since a captured value (null included) is a value, never a
+		// sign of absence
+		const script_value* s = direct_operand(f, f.code->fused_binary_protos[ins.a].left);
+		if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
 	}
 	std::optional<script_value> scratch;
 	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
@@ -6186,7 +6172,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			// the guard materialized the container ahead of the index (every time, or a reference that is not a plain cell): read
 			// that, not the binding again
 			if (p.guard_always) { guarded = frame_slot(f, p.container_guard); }
-			else if (p.container.slot == k_invalid_u32 && p.container.const_index == k_invalid_u32) { guarded = frame_slot(f, p.container_guard); if (guarded && guarded->is_null()) { guarded = nullptr; } }   // an environment name: the guard left its value when its resolution ran a getter, null otherwise
 			else {
 				const script_value* s = direct_operand(f, p.container);
 				if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) { guarded = frame_slot(f, p.container_guard); }
@@ -6591,9 +6576,7 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
 #endif
 	if (!has_custom_numeric_ops_) {
-		const script_value* gcp = site.guard_temp != k_invalid_u32 && !site.guard_always && site.cont_slot == k_invalid_u32 ? frame_slot(f, site.guard_temp) : nullptr;   // an environment name's guard: its value when the resolution ran a getter, null otherwise
-		if (gcp && gcp->is_null()) { gcp = nullptr; }
-		const script_value* cp = gcp ? gcp : site.cont_slot != k_invalid_u32
+		const script_value* cp = site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
 			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
 		if (cp && site.guard_always) { cp = frame_slot(f, site.guard_temp); }   // the guard took the container's value ahead of the index
@@ -6689,7 +6672,6 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 		if (!pending.test(k) || cs.kind[k] == 0) continue;
 		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
 	}
-	for (const uint32_t t : loop.env_guard_temps) { frame_slot_set(f, t, script_value(std::monostate{}, engine_)); }   // an environment name's guard temp: null, so the general form's readers resolve the binding themselves
 	cs.reset();
 }
 
@@ -7371,14 +7353,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instructio
 	const uint32_t alias = ins.b & 0xFFu, guarded = ins.b >> 8;
 	if (alias != 0xFFu) { cs.dirty.clear(alias); }
 	if (guarded != 0xFFFFFFu) {
-		// the plain-cell form (c = 1) restores a reference that is not a plain cell; the always form (c = 2) restores every container
-		const vm_instruction& orig = f.code->code[ins.c];
-		const fused_operand& src = f.code->fused_binary_protos[orig.a].left;
-		const script_value* s = orig.c == 2 ? fused_cmp_operand(f, src, static_cast<size_t>(ins.c) * 3) : direct_operand(f, src);
-		if (s && (orig.c == 2 || (s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)))) {
-			const script_array* node = cs.site_node[guarded];
-			script_value* g = frame_slot(f, ins.a);
-			if (!g || g->raw_storage_index() != script_value::TYPEID_ARRAY || g->unchecked_array_node() != node) { frame_slot_set(f, ins.a, script_value(s->deref())); }
+		const script_array* node = cs.site_node[guarded];
+		script_value* g = frame_slot(f, ins.a);
+		if (!(g && g->raw_storage_index() == script_value::TYPEID_ARRAY && g->unchecked_array_node() == node)) {   // the temp already holds this site's node in the steady state
+			// the plain-cell form (c = 1) restores a reference that is not a plain cell; the always form (c = 2) restores every container
+			const vm_instruction& orig = f.code->code[ins.c];
+			const fused_operand& src = f.code->fused_binary_protos[orig.a].left;
+			const script_value* s = orig.c == 2 ? fused_cmp_operand(f, src, static_cast<size_t>(ins.c) * 3) : direct_operand(f, src);
+			if (s && (orig.c == 2 || (s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)))) { frame_slot_set(f, ins.a, script_value(s->deref())); }
 		}
 	}
 	++f.ip;
@@ -8178,9 +8160,7 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
 	// op later as exactly this copy; every other element falls to the kernel untouched
 	const bool folded = p.index_binary != k_invalid_u32;
-	const script_value* gcp = p.container_guard != k_invalid_u32 && !p.guard_always && p.container.slot == k_invalid_u32 && p.container.const_index == k_invalid_u32 ? frame_slot(f, p.container_guard) : nullptr;   // an environment name's guard: its value when the resolution ran a getter, null otherwise
-	if (gcp && gcp->is_null()) { gcp = nullptr; }
-	const script_value* cp = gcp ? gcp : fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
 	if (p.guard_always) { cp = frame_slot(f, p.container_guard); if (!cp) return false; }   // the guard took the container's value ahead of the index
 	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter

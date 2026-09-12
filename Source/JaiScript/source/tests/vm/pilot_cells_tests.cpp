@@ -1961,7 +1961,65 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 			}
 			const std::string listing = listing_of("var P = [10]; var f = function(int n) { array<int> Q = [0, 0, 0, 0]; int s = 0; for (int i = 0; i < n; ++i) { s = s + P[Q[i]]; } return s; };");
 			size_t guards = 0; for (size_t at = listing.find("C_GUARD"); at != std::string::npos; at = listing.find("C_GUARD", at + 1)) { ++guards; }
-			check(listing.find("-- cell loop") != std::string::npos && listing.find("OPERAND_TEMP") != std::string::npos && guards == 1, "an environment container ahead of a quiet inner read is guarded on the general form and closes as a block with no guard copy (the counted loop carries its placeholder guard only): " + listing);
+			check(listing.find("-- cell loop") != std::string::npos && listing.find("OPERAND_TEMP") != std::string::npos && guards == 2, "an environment container ahead of a quiet inner read keeps its value snapshot at its own point in the block too (its guard and the counted loop's placeholder): " + listing);
+		});
+		test("a_guard_temp_is_a_value_at_its_own_point", [this]() {
+			// Astra's two reproductions against 118d.2: a getter's captured null is a value, never a sign that no snapshot was taken (the
+			// getter runs once whether it returns null or a table), and a guard temp's slot belongs to later definitions once the guard's
+			// read is past (a live multiply operand of the next statement is never erased: the overflow text and the checked float-to-int
+			// conversion both need it on the general form after a miss)
+			struct nulls { bool armed = false; bool flips = false; int calls = 0; };
+			auto run_null = [&](bool vm, bool flips, bool proofs) -> std::string {
+				nulls source; source.flips = flips;
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				dynamic_binder<nulls>(*e, "Nulls")
+					.property("values", [raw](nulls& s) -> script_value { if (s.armed) { ++s.calls; if (!s.flips || s.calls == 1) { return script_value(std::monostate{}, raw); } } return raw->get_variable("VALUES"); }, nullptr)
+					.build();
+				e->add_global_ref("box", source);
+				try {
+					e->execute("var VALUES = [10]; var P = [10]; function probe() { array<int> Q = [0]; return P[Q[0]]; } probe();");
+					e->execute("var& P = box.values;");
+					source.armed = true; source.calls = 0;
+					const std::string r = e->execute("var result = \"\"; try { probe(); result = \"value\"; } catch (err) { result = \"caught\"; } result;").as_string();
+					return r + "|" + std::to_string(source.calls);
+				}
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (bool flips : { false, true }) {
+				for (bool proofs : { true, false }) {
+					const std::string interp = run_null(false, flips, proofs), vm = run_null(true, flips, proofs);
+					const std::string label = std::string(flips ? "null once then a table" : "null") + (proofs ? "" : " proofs off");
+					check_eq(interp, vm, label + ": both backends");
+					check_eq(std::string("caught|1"), vm, label + ": the getter runs once and its null is the container");
+				}
+			}
+			const char* liveness = R"JAI(
+array<int> P = [1, 2, 3, 4];
+var overflow = function(int n, int limit) { array<int> Q = [0, 1, 2, 3]; int total = 0; int value = 0; int i = 0; string m = ""; try { while (i < n) { total = total + P[Q[i]]; value = (i + 1) * (limit - i); i = i + 1; } } catch (err) { m = err; } return m + "|" + to_string(total) + "|" + to_string(value); };
+var conversion = function(int n) { array<int> Q = [0, 1, 2, 3]; int total = 0; int value = 0; int i = 0; while (i < n) { total = total + P[Q[i]]; value = (i + 0.5) * 2.0; i = i + 1; } return to_string(total) + "|" + to_string(value); };
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = { { "overflow(3, 4611686018427387903);", "Integer overflow in '*'|6|9223372036854775804" }, { "conversion(3);", "6|5" } };
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(liveness) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

@@ -1907,6 +1907,62 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 			const std::string snap = listing_of("var f = function(var& t, var& pal, int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + pal[t[i + 1] + 1]; } return acc; };");
 			check(snap.find("-- cell loop") != std::string::npos, "a guarded container ahead of an index that may run user code still closes as a block: " + snap);
 		});
+		test("a_global_redeclared_as_a_property_reference_after_compilation_reads_first", [this]() {
+			// Astra's reload case: a function compiled while P and X2 were values of this unit; the host then redeclares them as
+			// references to properties (var& P = box.grid; var& X2 = box.number); the compiled reads must still read P (its getter,
+			// or its error) before the inner read that raises, and a getter-backed binding inside a loop runs its getter on every
+			// read (the block admits neither the site nor the cell). The fixture is a C++ box bound as a global by reference with
+			// a free arm(); the getters count in H
+			struct stepper { bool armed = false; };
+			const char* defs = R"JAI(
+var X = 5;
+var H = 0;
+var P = [10];
+var X2 = 7;
+array<int> grid_source = [5, 6, 7];
+function probe() { array<int> Q = [0]; string m = ""; try { int r = P[Q[2]]; m = to_string(r); } catch (err) { m = "caught"; } return m + "|" + to_string(X); }
+function probe2() { array<int> Q = [0]; string m = ""; try { int r = X2 + Q[2]; m = to_string(r); } catch (err) { m = "caught"; } return m + "|" + to_string(X); }
+function loop_container(int n) { array<int> Q = [0, 0, 0, 0]; int s = 0; for (int i = 0; i < n; ++i) { s = s + P[Q[i]]; } return to_string(s) + "|" + to_string(H); }
+function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X2; } return to_string(s) + "|" + to_string(H); }
+)JAI";
+			auto run_with = [&](bool vm, const char* first, const char* second, bool proofs) -> std::string {
+				stepper source;   // outlives the engine below
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				dynamic_binder<stepper>(*e, "Stepper")
+					.property("number", [raw](stepper& s) -> int64_t { if (s.armed) { raw->execute("X = 100; H = H + 1;"); } return 0; }, nullptr)
+					.property("grid", [raw](stepper& s) -> script_value { if (s.armed) { raw->execute("X = 100; H = H + 1;"); } return raw->get_variable("grid_source"); }, nullptr)
+					.build();
+				e->add_global_ref("box", source);
+				e->add_function("arm", [&source]() { source.armed = true; });
+				try {
+					const std::string before = e->execute(std::string(defs) + " " + first).as_string();   // compiled and run while the names are values
+					e->execute("var& P = box.grid; var& X2 = box.number;");   // the host redeclares them as references to properties
+					return before + " / " + e->execute(std::string("arm(); ") + second).as_string();
+				}
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* first; const char* second; const char* expected; };
+			const probe probes[] = {
+				{ "probe();", "probe();", "caught|5 / caught|100" },
+				{ "probe2();", "probe2();", "caught|5 / caught|100" },
+				{ "loop_container(4);", "loop_container(4);", "40|0 / 20|4" },
+				{ "loop_scalar(4);", "loop_scalar(4);", "28|0 / 0|4" },
+			};
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string interp = run_with(false, p.first, p.second, proofs), vm = run_with(true, p.first, p.second, proofs);
+					check_eq(interp, vm, std::string(p.second) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.second) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
+			const std::string listing = listing_of("var P = [10]; var f = function(int n) { array<int> Q = [0, 0, 0, 0]; int s = 0; for (int i = 0; i < n; ++i) { s = s + P[Q[i]]; } return s; };");
+			size_t guards = 0; for (size_t at = listing.find("C_GUARD"); at != std::string::npos; at = listing.find("C_GUARD", at + 1)) { ++guards; }
+			check(listing.find("-- cell loop") != std::string::npos && listing.find("OPERAND_TEMP") != std::string::npos && guards == 1, "an environment container ahead of a quiet inner read is guarded on the general form and closes as a block with no guard copy (the counted loop carries its placeholder guard only): " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

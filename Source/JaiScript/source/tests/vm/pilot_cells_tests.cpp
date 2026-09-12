@@ -1168,18 +1168,18 @@ public:
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect, a break is an effect, a string append is
-			// a representation (a string is not an admitted value), a member access is a representation, a stack-form unary
-			// minus is a translation gap
+			// a representation (a string is not an admitted value), a member access is a representation, a tree deeper than
+			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
 				" var f1 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + g(i); i = i + 1; } return acc; };"
 				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
 				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
 				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };"
-				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = -i; acc = acc + v; i = i + 1; } return acc; };");
+				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(UNARY)") != std::string::npos, "the unary minus is a translation gap: " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
 			check_true(listing.find(": representation at") != std::string::npos && listing.find("(COMPOUND_FUSED)") != std::string::npos, "the string append and the member access are representations: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
@@ -1294,6 +1294,32 @@ public:
 			check_true(vm.find("removed map entry") != std::string::npos, "the text where the loop reads it: " + vm);
 			const std::string listing = listing_of(defs);
 			check_true(listing.find("-- cell loop ") != std::string::npos, "the probe loops close, so the entry is what refuses: " + listing);
+		});
+		test("unaries_are_values", [this]() {
+			// a unary minus, complement or not over an operand is a definition into a compiler value: in a declaration, in a
+			// store, as a binary's operand, as a math argument and as an element store's value; the general unary runs
+			// underneath (the overflow text at the minimum int, the numeric-operand text on a string), the loops over int and
+			// float values close (neg and bnot in the copy), `!` keeps its bool on the general path; both backends, proofs on
+			// and off; the listing has no general UNARY left in these bodies
+			const char* defs =
+				"array<int> A = [3, 1, 4, 1, 5]; array<float> F = [0.5, 1.5, 2.5]; array<int> M = [1, 1 << 63, 3]; array<int> O = [0, 0, 0];"
+				" var u1 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = -A[i]; int w = ~A[i]; acc = acc + v + w; i = i + 1; } return acc; };"
+				" var u2 = function(int n) { float acc = 0.0; int i = 0; while (i < n) { float g = -F[i] * 2.0; acc = acc + g; i = i + 1; } return acc; };"
+				" var u3 = function(int n) { int acc = 0; int y = 0; int i = 0; while (i < n) { y = -i; acc = acc + math::abs(-A[i]) + y; O[i] = -y; i = i + 1; } return acc + O[0] + O[1] + O[2]; };"
+				" var u4 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = -M[i]; acc = acc + v; i = i + 1; } return acc; };"
+				" var u5 = function(int n) { int c = 0; int i = 0; while (i < n) { bool z = !A[i]; if (z) { c = c + 1; } i = i + 1; } return c; };";
+			const std::string script = std::string(defs) + " string r = to_string(u1(5)) + \",\" + to_string(u2(3)) + \",\" + to_string(u3(3)) + \",\" + to_string(u5(5));"
+			                           " try { r = r + \",\" + to_string(u4(3)); } catch (err) { r = r + \",throw:\" + err; } r;";
+			both(script, "", "unaries");
+			both(script, "", "unaries, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.find(",throw:") != std::string::npos && vm.find("unary '-'") != std::string::npos, "the negation overflow text: " + vm);
+			const std::string listing = listing_of(defs);
+			size_t unaries = 0; for (size_t at = listing.find("\tUNARY "); at != std::string::npos; at = listing.find("\tUNARY ", at + 1)) { ++unaries; }
+			check_eq(size_t(0), unaries, "no general UNARY left in the bodies: " + listing);
+			check_true(listing.find("UNARY_TEMP") != std::string::npos && listing.find("C_NEG") != std::string::npos && listing.find("C_BNOT") != std::string::npos, "the rows and their copies: " + listing);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(4), closed, "the four numeric loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

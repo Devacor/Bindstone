@@ -140,6 +140,10 @@ namespace jai::vm {
                                // result lands RAW in a compiler temp slot (above local_count,
                                // inside the window) - the register-file wave's producer form;
                                // consumers read it back through the ordinary fused slot operand
+        op_unary_temp,         // a=fused_binary_protos index (left = the operand; k_invalid_u32 = the operand
+                               // rides the stack), b=frame slot (a compiler temp), c=token_type: a unary
+                               // minus, complement or not lands its result in the temp (the general unary
+                               // runs underneath, verbatim)
         op_math_temp,          // a=fused_binary_protos index (left = the argument operand; k_invalid_u32 =
                                // the argument rides the stack), b=frame slot (a compiler temp), c=math_fn:
                                // a one-argument math:: intrinsic's result lands in the temp
@@ -219,6 +223,8 @@ namespace jai::vm {
         op_c_cfor_back,     // a = var cell, b = end cell or const, c = step cell or const: the counted back edge inside the block
         op_c_cmp_any,       // a = token_type << 24 | left cell or const, b = right cell or const, c = exit ip: a head compare with kinds from the cells
         op_c_jcmp_any,      // a = token_type << 24 | left cell or const, b = right cell or const, c = copy target: an interior compare-jump, kinds from the cells
+        op_c_neg,           // a = dst cell, b = src cell or const: unary minus (an int overflow misses)
+        op_c_bnot,          // a = dst cell, b = src cell or const: complement (an int only)
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -347,6 +353,8 @@ namespace jai::vm {
             case opcode::op_c_cfor_back: return "C_CFOR_BACK";
             case opcode::op_c_cmp_any: return "C_CMP_ANY";
             case opcode::op_c_jcmp_any: return "C_JCMP_ANY";
+            case opcode::op_c_neg: return "C_NEG";
+            case opcode::op_c_bnot: return "C_BNOT";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";
@@ -404,6 +412,7 @@ namespace jai::vm {
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";
+            case opcode::op_unary_temp: return "UNARY_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";
             case opcode::op_push_fused: return "PUSH_FUSED";

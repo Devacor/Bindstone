@@ -282,6 +282,11 @@ moves it with the same row. Their guard is total: the same-type payload test on 
 anything else replays the exact general pair from the typed site, so a proof adds nothing to their soundness and
 they are emitted with proofs on or off. The proofs flag gates the arithmetic and compare rows only.
 
+A unary minus, complement or not over an operand is a definition into a compiler value (`op_unary_temp`, the shape
+of `op_math_temp`): the lift, the flat pre-step, a math argument, a declaration, a statement-position store and an
+element store take it as an operand, the general unary runs verbatim underneath, and the cell copy lands neg and
+bnot (`op_c_neg`, `op_c_bnot`) with the checked negation's overflow as a miss.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

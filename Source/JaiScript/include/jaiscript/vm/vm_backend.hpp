@@ -1513,6 +1513,7 @@ namespace jai::vm {
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
+        op_status exec_unary_temp(frame& f, const vm_instruction& ins);
         // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
         // addressing): op_binary_fused pushes, the _decl/_store variants land the
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
@@ -1568,6 +1569,8 @@ namespace jai::vm {
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
         JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head);
+        JAI_FORCEINLINE op_status exec_c_neg(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_bnot(frame& f, const vm_instruction& ins);
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);

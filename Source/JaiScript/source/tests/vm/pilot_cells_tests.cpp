@@ -1731,6 +1731,36 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 				check(off.find("C_ARITH_P") == std::string::npos && off.find("C_JCMP_P") == std::string::npos && off.find("C_CMP_P") == std::string::npos && off.find("C_ARITH ") != std::string::npos, "the switch off emits the checked forms only: " + off);
 			}
 		});
+		test("a_redeclared_global_after_a_call_lands_by_its_new_type", [this]() {
+			// Astra's fourth finding: a native callee redeclares the global the loop holds as an environment cell (`var G` becomes
+			// `int G = 5`, the raw kind unchanged); the next iteration's float store must take the int boundary (the general form's
+			// conversion), so the landing misses on the stamp change and both backends land the same
+			const char* defs = R"JAI(
+var G = 1;
+var retag_at = function(int i, int at) -> void { if (i == at) { host_retag(); } };
+var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at); if (i == 2) { G = 1.5; } else { G = G + 1; } i = i + 1; } return to_string(G) + " " + type_of(G); };
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				e->add_function("host_retag", [raw]() { raw->execute("int G = 5;"); });
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; };
+			const probe probes[] = { { "probe(4, 2);" }, { "probe(4, 0);" }, { "probe(4, 9);" }, { "probe(6, 3);" } };
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(defs) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+				}
+			}
+			check(run_with(true, std::string(defs) + " probe(4, 2);", true).find("int") != std::string::npos, "the redeclared int boundary holds after the call: " + run_with(true, std::string(defs) + " probe(4, 2);", true));
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

@@ -7083,7 +7083,7 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
 	cell_state& cs = *f.cells;
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
-	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer_ip, 4); return {}; };
+	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return miss();
 	for (const chunk::cell_loop::call_arg& a : cc.args) {
 		if (a.kind != 1) continue;
@@ -7099,7 +7099,9 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 		if (cl.env_operand == k_invalid_u32) continue;
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
 		const script_value* v = env_ok && cs.env_ptr[k] ? cs.env_ptr[k] : fused_cmp_operand(f, er.operand, er.cache_slot);
-		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k]) return miss();
+		// the kind and the declaration stamp both as at entry: a callee that redeclared the global with another declared type
+		// (a reload of `var G` as `int G`, the raw kind unchanged) changes the landing rule, so it misses at the consumer
+		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k] || v->type_info_raw() != cs.stamp[k]) return miss();
 		cs.payload[k] = cs.kind[k] == kint ? static_cast<int64_t>(v->unchecked_as_int()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(v->unchecked_as_float()) : (v->unchecked_as_bool() ? 1 : 0);
 	}
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return miss();

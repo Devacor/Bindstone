@@ -175,6 +175,10 @@ too: its kind is pinned by a typed consumer (an index fold, a compare) or adopte
 slot's current value, the cell load lands the element's own kind, and every consumer checks the kind
 at run time as it does for any cell, so a mismatch is a miss onto the general form.
 
+An environment scalar read by a typed-lane index store inside the loop (a global view width) is a
+read-only cell: nothing in a cell body can change it, so the entry resolves it once (an int, else the
+block is refused), the copy's store reads it through a synthetic slot, and the flush never writes it.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

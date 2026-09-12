@@ -353,10 +353,14 @@ namespace jai::vm {
         // the loop reads it before writing it (live-in: unboxed at entry), whether the body defines it
         // (flushed on exit or miss) and the landing that defines it (a decl carries its stamp).
         struct cell_loop {
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; };
+            // env_operand: the environment scalar this cell holds (index into env_operands; k_invalid_u32 = a frame
+            // slot); such a cell has a synthetic slot above the frame's, is resolved once at entry and never written
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; };
             uint32_t head, back, copy_head, copy_back, exit_ip;
             std::vector<cell> cells;
-            std::vector<uint32_t> slot_to_cell;   // indexed by frame slot; k_invalid_u32 = not a cell
+            std::vector<uint32_t> slot_to_cell;   // indexed by frame slot (and the env cells' synthetic slots); k_invalid_u32 = not a cell
+            struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
+            std::vector<env_operand_ref> env_operands;
         };
         std::vector<cell_loop> cell_loops;
         std::vector<fused_binary_proto> fused_binary_protos;

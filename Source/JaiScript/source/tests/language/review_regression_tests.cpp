@@ -74,6 +74,39 @@ public:
     review_regression_tests() : suite("Review Regressions") {}
 
     void forge_tests() override {
+        test("a_compound_target_reference_is_read_after_the_right_hand_side", [this]() {
+            // Astra's backlog-drain finding (2026-09-11 18:00): `value += restore(data)` where `value` is an untyped element
+            // or map-entry reference whose element was removed and whose right side restores it. The interpreter
+            // dereferenced the target before the right side ran (to probe its fast paths) and raised the removed-element
+            // error with calls = 0; the VM, whose right value is already on the stack, ran restore() first and stored 22.
+            // The language's order is the right side first; both backends now agree, and a right side that raises
+            // surfaces its own error before any target error
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                jai::stdlib::register_all(*e);
+                e->static_checking(check_mode::off);
+                const std::string label = vm ? "vm" : "interp";
+                auto run = [&](const char* body) {
+                    std::string src = std::string(R"(
+                        var calls = 0;
+                        function restore_array(var& d) -> int { calls = calls + 1; d.push(20); return 2; }
+                        function restore_map(var& d) -> int { calls = calls + 1; d["key"] = 20; return 2; }
+                        function boom() -> int { calls = calls + 1; throw "boom"; }
+                        string msg = "";
+                        var got = 0;
+                        try { )") + body + R"( } catch (err) { msg = err; }
+                        return to_string(got) + "|" + to_string(calls) + "|" + msg;
+                    )";
+                    try { return e->execute(src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                };
+                check_eq(std::string("22|1|"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += restore_array(data); return value; } got = probe();"), label + " a removed array element restored by the right side");
+                check_eq(std::string("22|1|"), run("function probe() -> int { var data = {\"key\": 3}; var& value = data[\"key\"]; data.erase(\"key\"); value += restore_map(data); return value; } got = probe();"), label + " a removed map entry restored by the right side");
+                check_eq(std::string("0|1|boom"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += boom(); return value; } got = probe();"), label + " the right side's own error comes first");
+                check_eq(std::string("0|0|Reference to a removed array element"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += 2; return value; } got = probe();"), label + " a literal right side: the target's error stands");
+                check_eq(std::string("5|0|"), run("function probe() -> int { var data = [3]; var& value = data[0]; value += 2; return value; } got = probe();"), label + " control: a live element");
+            }
+        });
         test("a_raising_left_operand_stops_the_expression_on_both_backends", [this]() {
             // Astra's fuzz seed 1449: a missing instance field on the LEFT raises through the
             // interpreter's unwinding flag with a placeholder value, and the interpreter went on to

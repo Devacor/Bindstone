@@ -64,6 +64,22 @@ public:
 		catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 	}
 
+	// the VM's listing of a snippet (the closed loops and the refusals appear under each chunk)
+	std::string listing_of(const std::string& source) {
+		auto e = engine::make();
+		e->set_backend(backend_type::vm);
+		stdlib::register_all(*e);
+		auto* symbolizer = e->get_symbolizer();
+		auto templates = e->get_registered_template_types();
+		jai::lexer lex(source, symbolizer, templates);
+		auto tokens = lex.tokenize();
+		jai::parser p(tokens, symbolizer, e.get(), templates);
+		auto parse_result = p.parse();
+		if (!parse_result.has_value()) { return "<parse failed>"; }
+		(void)jai::detail::run_static_check(*e, parse_result.value());
+		jai::vm::vm_compiler compiler(symbolizer);
+		return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+	}
 	void both(const std::string& script, const std::string& expected, const char* label, bool proofs = true) {
 		const std::string interp = run_on(false, script, proofs);
 		const std::string vm = run_on(true, script, proofs);
@@ -1079,6 +1095,90 @@ public:
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			check_true(listing.find("CELLS_CFOR_BACK") != std::string::npos && listing.find("C_CFOR_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the counted clear loop closes: " + listing);
+		});
+		test("compare_jumps_with_run_time_kinds_close_a_patch_loop_and_an_env_headed_loop", [this]() {
+			// JaiDOOM's draw_patch inner loop (py >= VH with VH a var global, a continue, a pinned sprite table, VW in the
+			// store) and a while whose head compares against a var global; a float head operand takes the promotion row, a
+			// string global keeps the general form; the same on both backends, proofs on and off
+			const std::string script = R"(
+				var VW = 8; var VH = 8; var LIMIT = 5; var FLIMIT = 4.5; var SLIMIT = "x";
+				var PIX = []; for (int k = 0; k < 64; ++k) { PIX.push(0); }
+				var PALCM = []; for (int k = 0; k < 256; ++k) { PALCM.push(k * 3 % 251); }
+				var SPR_PIX = []; for (int t = 0; t < 2; ++t) { var s = []; for (int k = 0; k < 64; ++k) { s.push((k * (5 + t)) % 40 - 3); } SPR_PIX.push(s); }
+				function patch_col(int lump, int x0, int y0, int w, int h, int pw, int ph) -> int {
+					var& tp = SPR_PIX[lump]; var& pix = PIX; var& palcm = PALCM;
+					int acc = 0;
+					for (int sx = 0; sx < w; ++sx) {
+						int px = x0 + sx;
+						if (px < 0 || px >= VW) { continue; }
+						int base = (sx * pw / w) * ph;
+						for (int sy = 0; sy < h; ++sy) {
+							int py = y0 + sy;
+							if (py < 0) { continue; }
+							if (py >= VH) { continue; }
+							int texel = tp[base + sy * ph / h];
+							if (texel >= 0) { pix[py * VW + px] = palcm[texel]; }
+						}
+					}
+					for (int k = 0; k < 64; ++k) { acc = acc + pix[k] * (k + 1); }
+					return acc;
+				}
+				function count_up(int start) -> int { int x = start; int n = 0; while (x < LIMIT) { n = n + x; x = x + 1; } return n; }
+				function count_f(float start) -> int { float x = start; int n = 0; while (x < LIMIT) { n = n + 1; x = x + 0.5; } return n; }
+				function count_fl(int start) -> int { int x = start; int n = 0; while (x < FLIMIT) { n = n + 1; x = x + 1; } return n; }
+				int a = patch_col(1, -2, -3, 12, 12, 8, 8);
+				int b = patch_col(0, 3, 2, 4, 9, 8, 8);
+				int c = count_up(-3) * 1000 + count_f(1.25) * 10 + count_fl(0);
+				LIMIT = 7.5; int d = count_up(0);
+				string e = ""; try { LIMIT = SLIMIT; e = to_string(count_up(0)); } catch (err) { e = "throw:" + err; }
+				to_string(a) + "," + to_string(b) + "," + to_string(c) + "," + to_string(d) + "," + e;
+			)";
+			both(script, "", "run-time-kind compares");
+			both(script, "", "run-time-kind compares, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.find(",4085,28,") != std::string::npos, "the env-headed loops: " + vm);
+			const std::string listing = listing_of("var VW = 8; var VH = 8; var LIMIT = 5;"
+			                 " var f = function(var& pix, var& palcm, var& tp, int px, int y0, int h, int base, int ph) {"
+			                 " for (int sy = 0; sy < h; ++sy) { int py = y0 + sy; if (py < 0) { continue; } if (py >= VH) { continue; } int texel = tp[base + sy * ph / h]; if (texel >= 0) { pix[py * VW + px] = palcm[texel]; } } return h; };"
+			                 " var g = function(int start) { int x = start; int n = 0; while (x < LIMIT) { n = n + x; x = x + 1; } return n; };"
+			                 " var f_or = function(int h, int y0) { int acc = 0; for (int sy = 0; sy < h; ++sy) { int py = y0 + sy; if (py < 0 || py >= VH) { continue; } acc = acc + py; } return acc; };");
+			check_true(listing.find("C_JCMP_ANY") != std::string::npos && listing.find("CELLS_CFOR_BACK") != std::string::npos, "the patch loop closes over its env compare: " + listing);
+			check_true(listing.find("C_CMP_ANY") != std::string::npos, "the env-headed while closes: " + listing);
+			// the || chain compiles as a comparison value and JUMP_IF_TRUE: a translation gap the table names (row 116b)
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the || chain is a named translation gap: " + listing);
+		});
+		test("translation_equivalence_the_same_loop_in_every_spelling_closes_the_same_way", [this]() {
+			// one meaning, five spellings: the step as ++i, i += 1 and i = i + 1; the loop as a while, an identifier-start for
+			// and a literal-start for; every one closes (the listing) and lands the same sums on both backends
+			const char* defs =
+				"array<int> A = []; for (int k = 0; k < 32; ++k) { A.push(k * 3 % 17); }"
+				" var s1 = function(var& a, int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + a[i]; ++i; } return acc; };"
+				" var s2 = function(var& a, int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + a[i]; i += 1; } return acc; };"
+				" var s3 = function(var& a, int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + a[i]; i = i + 1; } return acc; };"
+				" var s4 = function(var& a, int n, int from) { int acc = 0; for (int i = from; i < n; ++i) { acc = acc + a[i]; } return acc; };"
+				" var s5 = function(var& a, int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + a[i]; } return acc; };";
+			const std::string script = std::string(defs) + " to_string(s1(A, 32)) + \",\" + to_string(s2(A, 32)) + \",\" + to_string(s3(A, 32)) + \",\" + to_string(s4(A, 32, 0)) + \",\" + to_string(s5(A, 32));";
+			both(script, "", "five spellings");
+			both(script, "", "five spellings, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.find(",") != std::string::npos && vm.find("throw") == std::string::npos, "ran: " + vm);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(5), closed, "every spelling closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
+		});
+		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
+			// the translation's refusals are recorded per loop: a call is an effect, a break is an effect, a string append is
+			// a translation gap (the compound form), a member access is a representation
+			const std::string listing = listing_of(
+				"var g = function(int x) { return x; }; class P { int v = 1; }"
+				" var f1 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + g(i); i = i + 1; } return acc; };"
+				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
+				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
+				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };");
+			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
+			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
+			check_true(listing.find(": translation at") != std::string::npos, "the string append is a translation gap: " + listing);
+			check_true(listing.find(": representation at") != std::string::npos, "the member access is a representation: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

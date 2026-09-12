@@ -364,10 +364,52 @@ namespace jai::vm {
             uint32_t counted = k_invalid_u32;
             std::vector<cell> cells;
             std::vector<uint32_t> slot_to_cell;   // indexed by frame slot (and the env cells' synthetic slots); k_invalid_u32 = not a cell
+            std::vector<uint32_t> origin;         // per copy instruction (copy_head + k): the original instruction it stands for (the miss path's map)
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;
         };
         std::vector<cell_loop> cell_loops;
+        // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
+        // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
+        // translation does not normalize yet, a coverage gap rather than a limit of the model
+        struct cell_refusal { uint32_t head, back, ip; uint8_t reason; uint8_t op; };
+        static constexpr uint8_t cell_refusal_none = 0, cell_refusal_head = 1, cell_refusal_representation = 2, cell_refusal_effect = 3,
+                                 cell_refusal_translation = 4, cell_refusal_malformed = 5, cell_refusal_no_cells = 6, cell_refusal_too_many_cells = 7;
+        static const char* cell_refusal_name(uint8_t r) {
+            switch (r) {
+            case cell_refusal_head: return "head";
+            case cell_refusal_representation: return "representation";
+            case cell_refusal_effect: return "effect";
+            case cell_refusal_translation: return "translation";
+            case cell_refusal_malformed: return "malformed";
+            case cell_refusal_no_cells: return "no cells";
+            case cell_refusal_too_many_cells: return "too many cells";
+            default: return "none";
+            }
+        }
+        // the class of an instruction the translation has no operation for: a supported core operation in another
+        // encoding is a translation gap; a call, an exit, a scope or a control effect is an effect; members, objects and
+        // allocations are representations the model does not take
+        static uint8_t cell_refusal_of(opcode op) {
+            switch (op) {
+            case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup:
+            case opcode::op_to_bool: case opcode::op_load: case opcode::op_store: case opcode::op_compound_store: case opcode::op_incdec:
+            case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index: case opcode::op_index_assign:
+            case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
+            case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
+            case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
+            case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
+            case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast:
+                return cell_refusal_translation;
+            case opcode::op_get_member: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
+            case opcode::op_this: case opcode::op_super: case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_probe_member:
+            case opcode::op_array: case opcode::op_map: case opcode::op_new: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_destructure:
+                return cell_refusal_representation;
+            default:
+                return cell_refusal_effect;
+            }
+        }
+        std::vector<cell_refusal> cell_refusals;
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;

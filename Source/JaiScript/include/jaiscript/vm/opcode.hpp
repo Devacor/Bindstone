@@ -216,6 +216,8 @@ namespace jai::vm {
         op_c_math,          // a = math_fn << 24 | dst cell, b = src cell: itrunc / ifloor on a cell
         op_cells_cfor_back, // a = cell loop index: a counted loop's back edge (the general step and compare), then the block entry
         op_c_cfor_back,     // a = var cell, b = end cell or const, c = step cell or const: the counted back edge inside the block
+        op_c_cmp_any,       // a = token_type << 24 | left cell or const, b = right cell or const, c = exit ip: a head compare with kinds from the cells
+        op_c_jcmp_any,      // a = token_type << 24 | left cell or const, b = right cell or const, c = copy target: an interior compare-jump, kinds from the cells
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -341,6 +343,8 @@ namespace jai::vm {
             case opcode::op_c_math: return "C_MATH";
             case opcode::op_cells_cfor_back: return "CELLS_CFOR_BACK";
             case opcode::op_c_cfor_back: return "C_CFOR_BACK";
+            case opcode::op_c_cmp_any: return "C_CMP_ANY";
+            case opcode::op_c_jcmp_any: return "C_JCMP_ANY";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

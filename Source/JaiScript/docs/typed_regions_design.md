@@ -333,6 +333,21 @@ An element store's value binary is a value like a unary or a math call there: `a
 compiler temp (its fused binary rewritten to land there) and the store takes the temp as a direct operand, so the
 typed store lane's shape holds and the block reads the value as a cell.
 
+A block holds up to 128 cells: the dirty set, the compiler-value set, the environment-value set and the live sets
+are two-word masks (`cell_mask`), and a loop with more cells stays on the general form (`too many cells`).
+
+A local the body declares enters empty: its cell needs no entry kind and no unbox (its slot may hold a placeholder
+until the declaration runs, in a branch the general form has not taken), its declaration is the first write and
+lands by the declared kind (an int declaration takes ints, a float declaration widens an int, a var or auto
+declaration takes any kind), and a read of an empty cell misses like any other kind mismatch.
+
+A landing after a call re-validates in proportion to what the call could have changed: the copy's sites are a list,
+the entry records how each site's container is reached (its frame slot, or its environment binding) and each
+environment cell's binding with the environment and its epoch, and a landing whose environment and epoch still
+hold re-reads the environment cells through their bindings and checks each site's container by identity (the
+same array node behind the slot or binding, a plain-cell reference dereferenced); any difference resolves the sites
+in full again and misses only if that fails.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

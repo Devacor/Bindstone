@@ -206,6 +206,7 @@ namespace jai::vm {
         op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
         op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
+        op_c_load_any,      // the same for a destination whose kind is adopted at run time: it lands through the declared-type rule
         op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
         op_c_jcmp,          // (c bit 31 = jump when true: a comparison value followed by JUMP_IF_TRUE) // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
@@ -333,6 +334,7 @@ namespace jai::vm {
             case opcode::op_c_arith: return "C_ARITH";
             case opcode::op_c_cmp: return "C_CMP";
             case opcode::op_c_load: return "C_LOAD";
+            case opcode::op_c_load_any: return "C_LOAD_ANY";
             case opcode::op_c_index_store: return "C_INDEX_STORE";
             case opcode::op_c_back: return "C_BACK";
             case opcode::op_c_jcmp: return "C_JCMP";

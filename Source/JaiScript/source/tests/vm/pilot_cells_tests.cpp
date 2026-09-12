@@ -1207,6 +1207,30 @@ public:
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(9), closed, "every loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
 		});
+		test("var_and_auto_locals_land_by_their_declared_type", [this]() {
+			// the declared-type rule: a var accumulator takes ints then floats (the kind change lands, the any stamp stays), an
+			// auto local infers then enforces, an int local fed a float takes the general form's checked conversion, a float
+			// local fed an int widens through a store as through a declaration; var element reads land the element's kind
+			const char* defs =
+				"array<int> A = [3, 1, 4, 1, 5, 9, 2, 6]; var H = [1, 2.5, 3, 4.5];"
+				" var v1 = function(var& a, int n) { var acc = 0; int i = 0; while (i < n) { acc = acc + a[i]; i = i + 1; } return acc; };"
+				" var v2 = function(var& h, int n) { var acc = 0; int i = 0; while (i < n) { var e = h[i]; acc = acc + e; i = i + 1; } return acc; };"
+				" var v3 = function(var& a, int n) { auto acc = 0; int i = 0; while (i < n) { acc = acc + a[i] * 2; i = i + 1; } return acc; };"
+				" var v4 = function(var& h, int n) { int acc = 0; int i = 0; string r = \"\"; try { while (i < n) { acc = acc + h[i]; i = i + 1; } r = to_string(acc); } catch (err) { r = \"throw:\" + err; } return r; };"
+				" var v5 = function(var& a, int n) { float acc = 0.0; int i = 0; while (i < n) { int t = a[i]; acc = t; acc = acc + i; i = i + 1; } return acc; };"
+				" var v6 = function(var& h, int n) { var last = 0; int i = 0; while (i < n) { last = h[i]; i = i + 1; } return last; };";
+			const std::string script = std::string(defs) + " to_string(v1(A, 8)) + \",\" + to_string(v2(H, 4)) + \",\" + to_string(v3(A, 8)) + \",\" + v4(H, 4) + \",\" + to_string(v5(A, 8)) + \",\" + to_string(v6(H, 4)) + \",\" + type_of(v6(H, 4)) + \",\" + type_of(v1(A, 8));";
+			both(script, "", "declared-type landings");
+			both(script, "", "declared-type landings, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("31,11.000000,62,", 0) == 0, "the var, the float sum and the auto: " + vm);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			// v5's widening store from a local (`acc = t`, a LOAD and STORE pair) and v6's assignment from an element read
+			// (`last = h[i]`, a pushing read and STORE) are stack pairs the table names for row 116c
+			check_eq(size_t(4), closed, "the four value-model loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(INDEX_FUSED)") != std::string::npos && listing.find("(STORE)") != std::string::npos, "the two stack pairs are named gaps: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

@@ -139,6 +139,7 @@ namespace {
 			case opcode::op_c_arith:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
+			case opcode::op_c_load_any:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
 			case opcode::op_c_jcmp:
@@ -288,6 +289,7 @@ namespace {
 			case opcode::op_c_arith:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
+			case opcode::op_c_load_any:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
 			case opcode::op_c_jcmp:
@@ -2358,7 +2360,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						auto* decl = dp.node_index < c.nodes.size() ? static_cast<const variable_decl*>(c.nodes[dp.node_index].get()) : nullptr;
 						stamp = decl ? decl->type.get() : nullptr;
 						if (!decl || (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX) { refuse(chunk::cell_refusal_representation, ip); break; }
-						if (stamp_kind(stamp) == 0) { refuse(chunk::cell_refusal_translation, ip); break; }   // a var or auto local's landing: row 117's declared-type rule
+						if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }   // a string, bool or class local
 						dst = static_cast<uint32_t>(decl->slot_index); landing = k_typed_dst_decl;
 					} else {
 						if (dp.slot == k_invalid_u32 || (dp.flags & store_flag_global_only)) { refuse(chunk::cell_refusal_effect, ip); break; }   // a global written: a binding write
@@ -2380,7 +2382,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!decl && (st.c & (store_flag_ref_alias | store_flag_global_only))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!decl && !(st.c & store_flag_no_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				type_info* stamp = decl && ip < c.typed_sites.size() ? c.typed_sites[ip].stamp : nullptr;
-				if (decl && stamp_kind(stamp) == 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (decl && stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (from_const) {
 					const size_t ci = st.b < c.constants.size() && st.b < k_typed_slot_mask ? c.constants[st.b].raw_storage_index() : SIZE_MAX;
 					if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -2397,9 +2399,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// (an unstamped decl lands the element's own tag, which a raw cell loses), a compiler value takes the element's kind
 				const chunk::typed_site& site = c.typed_sites[ip];
 				const bool classed = site.decl_expect == kint || site.decl_expect == kflt;
-				if ((!classed && !site.temp) || (!site.stamp && !site.temp)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
-				use_slot(st.a, classed ? site.decl_expect : 0, true, site.temp ? k_typed_dst_temp : k_typed_dst_decl, site.temp ? nullptr : site.stamp, ip);
+				use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, site.temp ? k_typed_dst_temp : k_typed_dst_decl, site.temp ? nullptr : site.stamp, ip);
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
 			} else if (st.op == opcode::op_index_fused_decl && st.a < c.fused_index_protos.size()) {
 				// load the typed lowering left general (an environment value in the index, an unproven container): the same site
@@ -2408,7 +2410,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask || fp.index_chain_ext.size() > 2 || !container_operand(fp.container)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint8_t dk = stamp_kind(fp.decl_type);
-				if (!fp.decl_temp && dk == 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!fp.decl_temp && dk == 0 && fp.decl_type && fp.decl_type->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(fp.decl_slot, fp.decl_temp ? 0 : dk, true, fp.decl_temp ? k_typed_dst_temp : k_typed_dst_decl, fp.decl_temp ? nullptr : fp.decl_type, ip);
 				op.kind = ir::load; op.a = fp.decl_slot; op.proto = st.a; op.writes = fp.decl_slot;
@@ -2626,14 +2628,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					site.orig = code[ip];
 					site.index_proto = op.proto;
 					site.stamp = fp.decl_temp ? nullptr : fp.decl_type;
-					site.decl_expect = fp.decl_temp ? 0xFF : stamp_kind(fp.decl_type);
+					site.decl_expect = fp.decl_temp || stamp_kind(fp.decl_type) == 0 ? 0xFF : stamp_kind(fp.decl_type);   // a var or auto decl lands the element's own kind
 					site.temp = fp.decl_temp;
 					site.speculative = fp.speculative;
 					site.guard_temp = fp.container_guard;
 					chunk_ = &c;
 					typed_site_at(ip) = site;
 				}
-				append(vm_instruction{opcode::op_c_load, cell_of(op.a), loop_index, static_cast<uint32_t>(ip)}, ip);
+				const uint32_t dst = cell_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
+				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
 			case ir::store: {

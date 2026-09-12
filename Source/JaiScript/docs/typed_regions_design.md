@@ -250,6 +250,20 @@ entry marks the loop in the call record's cell state and the entry is not attemp
 refusal valve): a binding does not change within a call, and the guards would otherwise run at every back edge
 for nothing.
 
+A local's landing follows its declared type, which is the language's own rule: the entry records the stamp of
+each cell whose kind is decided at run time (an adopted kind: the canonical int or float of an inferred `auto` or
+unproven local, the `any` stamp of a `var`) and the flush restores it; a pinned cell needs none, its slot carries
+the canonical stamp and its landing is the declared kind. An int slot lands ints (a float result misses onto the
+checked conversion), a float slot lands
+floats and widens ints, by a declaration or a store alike, and an `any` slot lands whatever kind the operation
+produced. So `var` and `auto` locals are cells of adopted kind, judged at run time only where the language
+itself decides at run time; typed locals keep the pinned forms.
+
+An element read lands in place when its destination is a pinned-kind local or a compiler value (`op_c_load`:
+the site's expected kind is the cell's kind by construction) and through the declared-type rule when the
+destination's kind is adopted at run time (`op_c_load_any`), the same split the arithmetic has between its
+pinned and its any-kind form.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

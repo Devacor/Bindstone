@@ -4258,6 +4258,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         return {};
                     }
                 }
+                // an element, map-entry or property reference is dereferenced only after the right-hand side has run: the
+                // language's order reads the target after the right side (a reference to a removed element raises when the
+                // store resolves, not before the right side's calls; KEEP BYTE-PARALLEL with the VM's compound store, whose
+                // right value is already on the stack); a plain cell or a value slot cannot raise on a dereference, so the
+                // fast paths keep reading it first
+                const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
+                const bool deferred_target = target_holder != nullptr && !target_holder->plain_cell();
+                if (!deferred_target) {
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
                 auto leftType = target.type();
@@ -4381,6 +4389,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                     }
                 }
+                }   // !deferred_target: the fast paths over a target that cannot raise on its dereference
 
                 // Evaluate the right-hand side (general path)
                 JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
@@ -4681,6 +4690,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (!varPtr) [[unlikely]] {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", identifier->symbol_id);
+                }
+                if (deferred_target) {
+                    // the target's reference is read here, after the right side: a removed element or map entry is the
+                    // language's error at this point (the checked twin of deref, so the error takes the ordinary flow)
+                    auto alive = detail::ref_checked_deref(*varPtr);
+                    if (!alive) [[unlikely]] { return alive.error_value(); }
                 }
                 return apply(varPtr->deref(), varPtr->deref().type());
             } else {

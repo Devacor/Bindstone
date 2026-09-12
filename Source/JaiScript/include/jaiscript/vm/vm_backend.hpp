@@ -466,7 +466,11 @@ namespace jai::vm {
             uint32_t loop = k_invalid_u32;
             uint64_t dirty = 0;
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
+            // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call; container bindings
+            // do not change within a call, so the entry is not attempted again until the next call
+            uint64_t refused_loops = 0;
             void reset() { loop = k_invalid_u32; dirty = 0; }
+            void reset_call() { reset(); refused_loops = 0; }
         };
 
         struct frame_guard;
@@ -1576,6 +1580,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
+        void refuse_container_site(frame& f, const chunk::cell_loop& loop);   // the refusal valve: mark the loop for the rest of the call
         void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);

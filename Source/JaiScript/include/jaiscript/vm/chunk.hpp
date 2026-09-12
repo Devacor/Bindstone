@@ -335,6 +335,7 @@ namespace jai::vm {
         // C++-exception path (interpreter parity: visit_call converts arg-eval throws into
         // script unwinding at the frame making the call, so its own try/catch can fire)
         std::vector<std::pair<uint32_t, uint32_t>> call_arg_zones;
+        std::vector<uint32_t> reference_slots;   // slots declared as references (a by-reference parameter, a local bound to something other than a value this unit declares): their load dereferences, possibly through a getter
         std::vector<uint64_t> symbols;
         std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive

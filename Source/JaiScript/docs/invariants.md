@@ -265,3 +265,15 @@ gate. Rules:
   agree); the batteries can: `Map Tests :: map_key_immutable_battery`, `Strong Types ::
   string_value_semantics_battery / string_mutator_receiver_lvalue_battery /
   string_mutator_chain_battery`, `review_regression :: string_cow_*`.
+
+## 12. A compound assignment reads its target after its right side (2026-09-11)
+
+`x op= e` evaluates `e`, then reads `x`, then stores, on both backends (the right operand before the left, as
+C++17 sequences every assignment operator); `x = x op e` and the plain binary keep their left-to-right reads.
+So with `mutate(int& v) { v = 20; return 2; }`, `x + mutate(x)` and `x = x + mutate(x)` are 5 and `x += mutate(x)`
+is 22. The rule for an implementation: never carry a C++ reference to a slot's current representation across an
+evaluation that can run user code, because a by-reference argument boxes the variable into a cell in place and
+the saved reference then names the slot's reference wrapper; re-resolve the binding and read the payload at the
+point the language's order puts the read (the interpreter's identifier compound path does this after the right
+side; the VM's compound store reads the slot after the right side by construction). Suite `Compound Assignment
+Order` pins it.

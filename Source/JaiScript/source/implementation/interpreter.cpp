@@ -4397,6 +4397,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Get type for RHS
                 auto rightType = derefRight.type();
 
+                // The right side ran user code: a by-reference argument may have boxed the variable into a cell in
+                // place, so the slot's representation changed under the reference taken above (the wrapper read as a
+                // Type mismatch). The rest of the path runs against the binding read again HERE, where the language's
+                // order puts the target's read (the right operand before the left, as for every compound assignment;
+                // KEEP BYTE-PARALLEL with the VM's compound store, which reads the slot after the right side)
+                auto apply = [&](script_value& target, script_value_type leftType) -> checked_result<void> {
                 // Check for custom operators first (rare path; flat table, no env probe)
                 if (has_custom_numeric_ops_) [[unlikely]] {
                     detail::op_slot op_slot = detail::op_slot::none;
@@ -4664,6 +4670,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
 
                 push_value(expression_result_needed_ ? target.clone() : target);
+                return {};
+                };
+                varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
+                if (!varPtr) [[unlikely]] {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", identifier->symbol_id);
+                }
+                return apply(varPtr->deref(), varPtr->deref().type());
             } else {
                 // VM parity (C++17 sequencing): the rhs of a compound assignment is
                 // evaluated BEFORE the target resolves, so rhs errors and side effects

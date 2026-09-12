@@ -4354,6 +4354,49 @@ struct return_copy_probe {
 // [stmt.return]): lvalue reads copy through the one store kernel, temporaries move, the
 // callee's own local/parameter moves out of its dying slot (NRVO), shared_ptr handles and
 // `-> T&` returns keep sharing. Every row runs on both backends and pins parity.
+class compound_order_tests : public suite {
+public:
+    compound_order_tests() : suite("Compound Assignment Order") {}
+
+    void forge_tests() override {
+        auto run_both = [](const std::string& src) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto expect = [this, run_both](const std::string& src, const std::string& expected, const char* what) {
+            auto [i_out, v_out] = run_both(src);
+            check_eq(expected, i_out, std::string(what) + " (interpreter)");
+            check_eq(expected, v_out, std::string(what) + " (vm)");
+        };
+
+        test("compound_reads_its_target_after_a_mutating_right_side", [expect]() {
+            // a by-reference argument boxes the target into a cell while the right side runs; a compound reads its
+            // target after the right side (the right operand before the left, C++17's order), so the callee's write is
+            // what it adds to, on both backends, whether the slot was boxed before or during the statement; the plain
+            // binary keeps its left-to-right reads, so x + mutate(x) sees the value before the call
+            const std::string defs = "function mutate(int& value) -> int { value = 20; return 2; }";
+            expect(defs + " function f() -> int { int x = 3; return x + mutate(x); } f();", "5", "x + mutate(x)");
+            expect(defs + " function f() -> int { int x = 3; x = x + mutate(x); return x; } f();", "5", "x = x + mutate(x)");
+            expect(defs + " function f() -> int { int x = 3; x += mutate(x); return x; } f();", "22", "x += mutate(x)");
+            expect(defs + " function f() -> int { int x = 3; x -= mutate(x); return x; } f();", "18", "x -= mutate(x)");
+            expect(defs + " function f() -> int { int x = 3; int& alias = x; x += mutate(x); return x; } f();", "22", "a pre-boxed target");
+            expect(defs + " function f() -> int { int x = 3; int rhs = mutate(x); x += rhs; return x; } f();", "22", "the right side hoisted");
+            expect(defs + " function f() -> int { var v = 3; v += mutate(v); return v; } f();", "22", "a var target");
+            expect(defs + " function f() -> int { int x = 3; int r = (x += mutate(x)); return r * 100 + x; } f();", "2222", "the compound's value");
+        });
+    }
+};
+
 class return_value_semantics_tests : public suite {
 public:
     return_value_semantics_tests() : suite("Return Value Semantics") {}
@@ -4676,3 +4719,5 @@ using flat_value_class_tests = jai::foundry::tests::flat_value_class_tests;
 FOUNDRY_REGISTER(flat_value_class_tests)
 using return_value_semantics_tests = jai::foundry::tests::return_value_semantics_tests;
 FOUNDRY_REGISTER(return_value_semantics_tests)
+using compound_order_tests = jai::foundry::tests::compound_order_tests;
+FOUNDRY_REGISTER(compound_order_tests)

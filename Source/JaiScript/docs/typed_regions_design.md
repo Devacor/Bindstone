@@ -167,8 +167,9 @@ alias pays one tag test.
 A closed loop may branch inside itself: a typed compare-jump or a jump whose target lies forward inside the
 loop or at its back edge is copied as a cell branch (`op_c_jcmp`, `op_c_jump`), so one-arm and two-arm
 diamonds over typed work, a `continue` and a guarded store close; a branch that leaves the loop (a `break`,
-an early return) keeps it open. A container guard inside the loop is a no-op in the copy (`op_c_nop`): the
-entry resolves the container once and refuses a reference that is not a plain cell.
+an early return) keeps it open. A container guard inside the loop keeps its place in the copy (`op_c_guard`,
+which only clears the dirty bit of a dead temp cell sharing the guard's slot): the entry resolves the
+container once and refuses a reference that is neither a plain cell nor a pinned table entry (below).
 
 A temp that holds an element the checker could not class (a read through a `var&` container) is a cell
 too: its kind is pinned by a typed consumer (an index fold, a compare) or adopted at entry from the
@@ -178,6 +179,17 @@ at run time as it does for any cell, so a mismatch is a miss onto the general fo
 An environment scalar read by a typed-lane index store inside the loop (a global view width) is a
 read-only cell: nothing in a cell body can change it, so the entry resolves it once (an int, else the
 block is refused), the copy's store reads it through a synthetic slot, and the flush never writes it.
+
+Arithmetic the typed heads left general (an operand that is an environment scalar or a value the checker
+could not class) joins a block as cell arithmetic with run-time kinds (`op_c_arith_any`): the general
+kernel's int rows, float rows and the int to float promotion of the four arithmetic operators, landing
+by the destination cell's kind (a float declaration widens an int; any other disagreement is a miss onto
+the general form). An environment cell adopts int or float from its value at entry when no typed use pins
+it. Typed moves copy into cells (`op_c_mov`), `math::itrunc` and `math::ifloor` of a cell run the kernel's
+conversion in the block (`op_c_math`), and an intrinsic's binary argument lands in a temp so the block can
+carry it. A guarded container that is an element reference into a hetero array (a texture table's entry)
+is resolved once at entry like a plain cell when no store site of the loop writes that table; a store into
+the table refuses the block, since the general form re-reads the entry at every guard.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload

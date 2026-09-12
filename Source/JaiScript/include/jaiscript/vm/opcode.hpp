@@ -210,7 +210,10 @@ namespace jai::vm {
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
         op_c_jcmp,          // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
         op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
-        op_c_nop,           // a container guard's place in the copy (the entry checked the slot)
+        op_c_guard,         // a container guard's place in the copy: a = guard slot, b = the temp cell aliasing it (dirty bit cleared) or k_invalid_u32
+        op_c_arith_any,     // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: kinds from the cells
+        op_c_mov,           // a = dst cell, b = src cell or const bit | index: a typed move's copy
+        op_c_math,          // a = math_fn << 24 | dst cell, b = src cell: itrunc / ifloor on a cell
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -330,7 +333,10 @@ namespace jai::vm {
             case opcode::op_c_back: return "C_BACK";
             case opcode::op_c_jcmp: return "C_JCMP";
             case opcode::op_c_jump: return "C_JUMP";
-            case opcode::op_c_nop: return "C_NOP";
+            case opcode::op_c_guard: return "C_GUARD";
+            case opcode::op_c_arith_any: return "C_ARITH_ANY";
+            case opcode::op_c_mov: return "C_MOV";
+            case opcode::op_c_math: return "C_MATH";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

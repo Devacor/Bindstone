@@ -355,7 +355,9 @@ namespace jai::vm {
         struct cell_loop {
             // env_operand: the environment scalar this cell holds (index into env_operands; k_invalid_u32 = a frame
             // slot); such a cell has a synthetic slot above the frame's, is resolved once at entry and never written
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; };
+            // temp: a compiler temp (written before read inside its statement, no declared type): no entry guard, no unbox,
+            // any kind lands
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; };
             uint32_t head, back, copy_head, copy_back, exit_ip;
             std::vector<cell> cells;
             std::vector<uint32_t> slot_to_cell;   // indexed by frame slot (and the env cells' synthetic slots); k_invalid_u32 = not a cell

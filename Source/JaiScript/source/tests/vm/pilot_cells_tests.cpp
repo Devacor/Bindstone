@@ -1448,6 +1448,34 @@ var from_call = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REM
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(11), closed, "every loop writing a global closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
+		test("element_store_values_are_values", [this]() {
+			// draw_seg's `clipsn[x] = cn + 1`: an element store whose value is a value binary lands the binary in a compiler temp and
+			// stores the temp; the store's typed lane and the block hold; a lifted tree, a float value, a value that raises (the
+			// kernel's text first), an int array fed a float value (the checked conversion), a map container and a var& container
+			const char* defs = R"JAI(
+array<int> G = [0, 0, 0, 0, 0, 0]; array<float> F = [0.0, 0.0, 0.0, 0.0]; var M = {1: 0, 2: 0}; var V = [0, 0, 0, 0];
+var fill = function(int n, var& a) { int acc = 0; for (int x = 0; x < n; ++x) { int v = a[x]; a[x] = v + x * 2 + 1; acc = acc + a[x]; } return acc; };
+var tree = function(int n) { for (int i = 0; i < n; ++i) { G[i] = i * 3 + (i - 1) * 2; } return to_string(G); };
+var floats = function(int n) { for (int i = 0; i < n; ++i) { F[i] = i * 0.5 + 1.0; } return to_string(F); };
+var raises = function(int n) { int d = 0; try { for (int i = 0; i < n; ++i) { G[i] = i / d; } } catch (e) { return e; } return "no"; };
+var narrow = function(int n) { try { for (int i = 0; i < n; ++i) { G[i] = i * 1.5; } } catch (e) { return e; } return to_string(G); };
+var keyed = function(int n) { for (int i = 1; i <= n; ++i) { M[i] = i * 10 + 1; } return to_string(M); };
+var mixed = function(int n) { for (int i = 0; i < n; ++i) { V[i] = i + 0.5; } return to_string(V); };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(fill(4, G));", "16" }, { "tree(4);", "" }, { "floats(4);", "" }, { "raises(3);", "" }, { "narrow(3);", "" }, { "keyed(2);", "" }, { "mixed(3);", "" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_ge(closed, size_t(5), "the stores with value binaries close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			size_t pushing = 0; for (size_t at = listing.find("\tBINARY_FUSED op="); at != std::string::npos; at = listing.find("\tBINARY_FUSED op=", at + 1)) { ++pushing; }
+			check_eq(size_t(0), pushing, "no pushing fused binary feeds an element store: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

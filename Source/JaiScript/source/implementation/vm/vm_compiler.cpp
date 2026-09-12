@@ -3853,6 +3853,23 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	} else if (no_result && (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none)) {
 		compile_value_into_temp(value, 0xFF, p.store_value);
 		value_operand = true;   // `a[i] = -e` or `a[i] = math::f(e)`: the value lands in a temp
+	} else if (no_result && value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
+		// `a[i] = e op f`: the value binary lands in a compiler temp (its fused binary rewritten to land there, as an operand's
+		// does) and the store takes the temp as an operand; a shape the fuse declined stays on the stack
+		compile_expression(value);
+		value_operand = true;   // compiled either way: never twice
+		vm_instruction& last = chunk_->code.back();
+		if (last.op == opcode::op_binary_fused) {
+			const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+			++temp_next_;
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			last.op = opcode::op_binary_fused_temp;
+			last.b = t0;
+			p.store_value = fused_operand{};
+			p.store_value.slot = t0;
+			p.store_value.symbol = temp_symbol_index();
+			p.store_value.direct = true;
+		}
 	}
 	if (!value_operand) {
 		compile_expression(value);

@@ -264,6 +264,15 @@ the site's expected kind is the cell's kind by construction) and through the dec
 destination's kind is adopted at run time (`op_c_load_any`), the same split the arithmetic has between its
 pinned and its any-kind form.
 
+A compiler value is a definition, not a slot. The compiler reuses a temp slot across statements, so one slot may
+carry an int element read in one statement and a float subtraction in the next; the translation opens a new cell
+for each temp definition whose kind differs from the slot's current one (a local keeps one cell: two kinds on a
+declared local are the general form's conversion), reads bind to the latest definition in program order, and the
+copy names cells directly, in its instruction words, in its own site rows at the copy instruction's index and in
+its cloned store protos. A definition is live from the instruction after it through its last read; the flush
+writes a slot only from a live definition, so a dead value never overwrites the one the general continuation
+reads.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

@@ -1231,6 +1231,26 @@ public:
 			check_eq(size_t(4), closed, "the four value-model loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(INDEX_FUSED)") != std::string::npos && listing.find("(STORE)") != std::string::npos, "the two stack pairs are named gaps: " + listing);
 		});
+		test("temps_are_values_per_definition", [this]() {
+			// a compiler temp reused by consecutive statements with different kinds (draw_seg's column loop: an int element
+			// read in the test, a float subtraction in the next statement) is two values, not one slot of two kinds, so the
+			// loop closes; a miss at an int overflow in the first statement, after the float definition of the same temp in the
+			// previous iteration, still reports the overflow (the dead float is never flushed over the live int); both
+			// backends, proofs on and off
+			const char* defs =
+				"array<int> done = [0, 1, 0, 0, 1, 0]; array<float> F = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]; array<int> B = [1, 2, 3, 4, 5, 6]; array<int> C = [1, 2, 9223372036854775807, 4, 5, 6];"
+				" var s1 = function(int xa, int xb, float x1f, float spanx) { float acc = 0.0; for (int x = xa; x <= xb; ++x) { if (done[x] != 0) { continue; } float t3 = (x - x1f) / spanx; acc = acc + t3 * F[x]; } return acc; };"
+				" var s2 = function(var& a, int n) { int p = 0; float q = 0.0; int i = 0; while (i < n) { p = p + (a[i] + 1); q = q + (F[i] - 0.5) * 2.0; i = i + 1; } return to_string(p) + \",\" + to_string(q); };";
+			const std::string script = std::string(defs) + " string r = to_string(s1(0, 5, 1.5, 0.75)) + \",\" + s2(B, 6);"
+			                           " try { r = r + \",\" + s2(C, 6); } catch (err) { r = r + \",throw:\" + err; } r;";
+			both(script, "", "values per definition");
+			both(script, "", "values per definition, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.find(",throw:") != std::string::npos && vm.find("overflow") != std::string::npos, "the overflow after a float definition of the same temp: " + vm);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(2), closed, "both loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

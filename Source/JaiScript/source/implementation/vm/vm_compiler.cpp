@@ -2258,7 +2258,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// slot at entry, a typed use pins it; a landing's contract belongs to the operation that lands (stamp, landing)
 		std::vector<chunk::cell_loop::cell> cells;
 		std::vector<chunk::cell_loop::env_operand_ref> env_ops;
-		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = 0; k < cells.size(); ++k) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };
+		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
+		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
 		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp, size_t at) {
 			if (operand & k_typed_const_bit) return;
 			const uint32_t slot = operand & k_typed_slot_mask;
@@ -2266,9 +2267,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (k < 0) {
 				chunk::cell_loop::cell nc{ slot, kind, 0, !is_write, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
+			} else if (is_write && landing == k_typed_dst_temp && cells[k].temp && cells[k].kind != kind) {
+				// a compiler value is a definition, not a slot: a temp redefined with another kind (the compiler reuses temp
+				// slots across statements) is a new cell of the same slot; reads bind to the latest definition
+				chunk::cell_loop::cell nc{ slot, kind, 0, false, false, nullptr };
+				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
 			} else if (cells[k].kind == 0) { cells[k].kind = kind; }   // an adopted kind takes the first typed use's
 			else if (kind != 0 && cells[k].kind != kind) { refuse(chunk::cell_refusal_representation, at); return; }   // two kinds on one local: the general form's conversion
-			if (is_write) { cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp; if (landing == k_typed_dst_temp) { cells[k].temp = true; } }
+			if (is_write) {
+				cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp;
+				if (landing == k_typed_dst_temp) { cells[k].temp = true; defs.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(k)); }
+			}
 		};
 		auto env_cell = [&](const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at) -> uint32_t {
 			for (size_t e = 0; e < env_ops.size(); ++e) {
@@ -2571,13 +2580,23 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.cells = cells;
 		loop.env_operands = env_ops;
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
-		for (uint32_t k = 0; k < cells.size(); ++k) { loop.slot_to_cell[cells[k].slot] = k; }
+		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding
+		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask |= uint64_t(1) << k; } }
 		auto env_slot = [&](uint32_t e) -> uint32_t { for (const auto& cl : cells) { if (cl.env_operand == e) return cl.slot; } return k_invalid_u32; };
-		// an IR operand as the copy reads it: a constant behind its bit, else the cell index
+		// the binding at the instruction being emitted: a slot's current definition (a temp slot advances to its next
+		// definition once the emission passes the defining instruction; a local or an environment value has one cell); an
+		// instruction's own definition is the destination it writes, its sources are the definitions before it
+		std::vector<uint32_t> current = loop.slot_to_cell;
+		size_t next_def = 0;
+		uint32_t pending_def = k_invalid_u32;
 		auto cell_of = [&](uint32_t operand) -> uint32_t {
 			if (operand & k_typed_const_bit) return operand;
-			if (operand & k_ir_env_bit) return loop.slot_to_cell[env_slot(operand & ~k_ir_env_bit)];
-			return loop.slot_to_cell[operand & k_typed_slot_mask];
+			if (operand & k_ir_env_bit) return current[env_slot(operand & ~k_ir_env_bit)];
+			return current[operand & k_typed_slot_mask];
+		};
+		auto dst_of = [&](uint32_t operand) -> uint32_t {
+			if (pending_def != k_invalid_u32 && cells[pending_def].slot == (operand & k_typed_slot_mask)) return pending_def;
+			return cell_of(operand);
 		};
 		// a proto operand as the copy's site or proto reads it: an environment value becomes its synthetic slot
 		auto synthetic = [&](fused_operand& o) {
@@ -2586,7 +2605,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (env_ops[e].operand.symbol == o.symbol) { fused_operand d; d.slot = env_slot(static_cast<uint32_t>(e)); d.symbol = o.symbol; d.direct = true; o = d; return; }
 			}
 		};
-		auto site_operand = [&](fused_operand o, uint32_t& out) { synthetic(o); out = o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : o.slot; };
+		auto site_operand = [&](fused_operand o, uint32_t& out) { synthetic(o); out = o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : current[o.slot]; };   // the copy's rows name cells
+		auto cellify = [&](fused_operand& o) {   // a proto operand for the copy: the cell of the value it reads (an empty chain-step left stays empty)
+			if (o.const_index != k_invalid_u32 || (o.slot == k_invalid_u32 && o.symbol == k_invalid_u32)) return;
+			synthetic(o);
+			fused_operand d; d.slot = o.slot < current.size() ? current[o.slot] : k_invalid_u32; d.symbol = o.symbol; d.direct = true; o = d;
+		};
 		// the copy: one cell instruction per original instruction; the origin table is the runtime's map back
 		loop.copy_head = static_cast<uint32_t>(code.size());
 		const uint32_t loop_index = static_cast<uint32_t>(c.cell_loops.size());
@@ -2597,12 +2621,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			loop.origin.push_back(static_cast<uint32_t>(from_ip));
 		};
 		auto emit = [&](const ir_op& op, size_t ip) {
+			pending_def = next_def < defs.size() && defs[next_def].first == ip ? defs[next_def].second : k_invalid_u32;
 			switch (op.kind) {
 			case ir::arith:
-				if (op.fast != opcode::op_halt) { append(vm_instruction{opcode::op_c_arith, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
-				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
+				if (op.fast != opcode::op_halt) { append(vm_instruction{opcode::op_c_arith, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
+				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
 				break;
-			case ir::mov: append(vm_instruction{opcode::op_c_mov, cell_of(op.a), cell_of(op.b), 0}, ip); break;
+			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::cmp: {
 				const uint32_t target = (op.head ? op.target : op.target + shift) | (op.sense ? 0x80000000u : 0u);
 				if (op.fast != opcode::op_halt) { append(vm_instruction{op.head ? opcode::op_c_cmp : opcode::op_c_jcmp, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
@@ -2610,10 +2635,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::load: {
+				// the copy's own site row at the copy instruction's index: the general row keeps slots, this one names cells
+				chunk::typed_site site;
 				if (op.proto != k_invalid_u32) {
 					// a general read's site row, built for the copy only (the general instruction keeps its proto)
 					const fused_index_proto& fp = c.fused_index_protos[op.proto];
-					chunk::typed_site site;
 					site.cont_slot = fp.container.direct && fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 					if (fp.index_binary == k_invalid_u32) { site_operand(fp.index, site.operands[0]); }
 					else {
@@ -2632,44 +2658,44 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					site.temp = fp.decl_temp;
 					site.speculative = fp.speculative;
 					site.guard_temp = fp.container_guard;
-					chunk_ = &c;
-					typed_site_at(ip) = site;
+				} else {
+					site = c.typed_sites[ip];   // a T_LOAD's row with its slot operands rebound to cells
+					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
 				}
-				const uint32_t dst = cell_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
+				chunk_ = &c;
+				typed_site_at(code.size()) = site;
+				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
 				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
 			case ir::store: {
 				// the copy reads environment values through synthetic-slot operands: a clone of the proto (and of its index binaries)
 				// with each environment value replaced; the original proto stays the general form's
-				uint32_t proto_index = op.proto;
-				if (!env_ops.empty()) {
-					fused_index_proto cp = c.fused_index_protos[op.proto];
-					bool cloned = false;
-					auto clone_binary = [&](uint32_t& idx) {
-						fused_binary_proto bp = c.fused_binary_protos[idx];
-						synthetic(bp.left); synthetic(bp.right);
-						if (bp.left.slot != c.fused_binary_protos[idx].left.slot || bp.right.slot != c.fused_binary_protos[idx].right.slot) {
-							c.fused_binary_protos.push_back(bp); idx = static_cast<uint32_t>(c.fused_binary_protos.size() - 1); cloned = true;
-						}
-					};
-					if (cp.index_binary != k_invalid_u32) { clone_binary(cp.index_binary); for (auto& step : cp.index_chain_ext) { clone_binary(step); } }
-					else { synthetic(cp.index); cloned = cloned || cp.index.slot != c.fused_index_protos[op.proto].index.slot; }
-					synthetic(cp.store_value); cloned = cloned || cp.store_value.slot != c.fused_index_protos[op.proto].store_value.slot;
-					if (cloned) { c.fused_index_protos.push_back(cp); proto_index = static_cast<uint32_t>(c.fused_index_protos.size() - 1); }
-				}
-				append(vm_instruction{opcode::op_c_index_store, proto_index, loop_index, static_cast<uint32_t>(ip)}, ip);
+				// the copy's proto: a clone whose index and value operands name cells (the container stays the general operand,
+				// resolved from the frame at entry); the original proto stays the general form's
+				fused_index_proto cp = c.fused_index_protos[op.proto];
+				auto clone_binary = [&](uint32_t& idx) {
+					fused_binary_proto bp = c.fused_binary_protos[idx];
+					cellify(bp.left); cellify(bp.right);
+					c.fused_binary_protos.push_back(bp); idx = static_cast<uint32_t>(c.fused_binary_protos.size() - 1);
+				};
+				if (cp.index_binary != k_invalid_u32) { clone_binary(cp.index_binary); for (auto& step : cp.index_chain_ext) { clone_binary(step); } }
+				else { cellify(cp.index); }
+				cellify(cp.store_value);
+				c.fused_index_protos.push_back(cp);
+				append(vm_instruction{opcode::op_c_index_store, static_cast<uint32_t>(c.fused_index_protos.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
-			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), 0}, ip); break;
+			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::jump: append(vm_instruction{opcode::op_c_jump, op.target + shift, 0, 0}, ip); break;
 			case ir::guard: {
-				const uint32_t alias = op.a < loop.slot_to_cell.size() ? loop.slot_to_cell[op.a] : k_invalid_u32;
+				const uint32_t alias = op.a < current.size() ? current[op.a] : k_invalid_u32;
 				append(vm_instruction{opcode::op_c_guard, op.a, (alias == k_invalid_u32 ? 0xFFu : alias) | (op.guarded << 8), static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
 			case ir::placeholder: append(vm_instruction{opcode::op_c_guard, 0, k_invalid_u32, 0}, ip); break;   // a counted loop has no head compare
 			}
+			while (next_def < defs.size() && defs[next_def].first == ip) { current[cells[defs[next_def].second].slot] = defs[next_def].second; ++next_def; }   // the definition takes effect after its instruction
 		};
 		if (counted != k_invalid_u32) { emit(head_op, head); }
 		for (size_t k = 0; k < ops.size(); ++k) { emit(ops[k], first + k); }
@@ -2679,9 +2705,29 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
 		} else {
 			const counted_for_proto& p = c.counted_for_protos[counted];
-			auto int_cop = [&](const fused_operand& o) { return o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : loop.slot_to_cell[o.slot]; };
-			append(vm_instruction{opcode::op_c_cfor_back, loop.slot_to_cell[p.var.slot], int_cop(p.end), int_cop(p.step)}, back);
+			auto int_cop = [&](const fused_operand& o) { return o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : current[o.slot]; };
+			append(vm_instruction{opcode::op_c_cfor_back, current[p.var.slot], int_cop(p.end), int_cop(p.step)}, back);
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
+		}
+		// liveness of compiler values per copy instruction: a definition is live from the instruction after it through its
+		// last read (a miss there re-runs the read on the general form, which needs the slot to hold this value); a dead
+		// definition is never flushed, so it cannot overwrite the live one of the same slot
+		loop.live_temps.assign(loop.origin.size(), 0);
+		{
+			std::vector<uint32_t> cur = loop.slot_to_cell;
+			std::vector<size_t> def_at(cells.size(), 0);
+			size_t nd = 0;
+			const size_t base = counted != k_invalid_u32 ? 1 : 0;   // the counted head placeholder precedes the ops
+			for (size_t k = 0; k < ops.size(); ++k) {
+				const ir_op& op = ops[k];
+				const size_t here = base + k, ip = first + k;
+				for (uint8_t r = 0; r < op.nreads; ++r) {
+					const uint32_t cl = op.reads[r] < cur.size() ? cur[op.reads[r]] : k_invalid_u32;
+					if (cl == k_invalid_u32 || !cells[cl].temp) continue;
+					for (size_t m = def_at[cl] + 1; m <= here && m < loop.live_temps.size(); ++m) { loop.live_temps[m] |= uint64_t(1) << cl; }
+				}
+				while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_at[defs[nd].second] = here; ++nd; }
+			}
 		}
 		c.cell_loops.push_back(std::move(loop));
 	}

@@ -274,6 +274,14 @@ namespace jai {
         // execute). Proofs are never serialized - a loaded jaibite re-derives them.
         void type_proofs(bool on);
         bool type_proofs() const;
+        // === THE MIDDLE END'S SWITCH (docs/typed_regions_design.md, the pinned forms onward) ===
+        // On by default. The VM's proof-based elisions and passes over closed regions (the forms
+        // that skip a check the region analysis proved redundant, the passes that rewrite a region)
+        // follow this switch; off, the region runs its checked canonical form, observationally
+        // identical (the differential gate is `jaiscript_fuzz --no-passes`). Takes effect at the
+        // next compile; a chunk already compiled keeps its form.
+        void ir_passes(bool on);
+        bool ir_passes() const;
         // Diagnostic builds only (JAISCRIPT_VM_PROFILE): restart the VM's opcode and
         // per-script-function accounting here, so what the process prints at exit covers
         // the window from this call on. No effect in ordinary builds.

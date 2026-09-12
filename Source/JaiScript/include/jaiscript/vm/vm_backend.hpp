@@ -209,6 +209,7 @@ namespace jai::vm {
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
         std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
+        uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -1625,9 +1626,10 @@ namespace jai::vm {
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
-        JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins);
+        // checked: the per-read kind checks; false for the pinned forms, whose operand cells the emission proved hold the kind
+        JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins, bool checked);
+        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins, bool checked);
+        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins, bool checked);
         JAI_FORCEINLINE op_status exec_c_arith_any(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_mov(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins);

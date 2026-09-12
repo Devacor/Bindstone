@@ -692,6 +692,7 @@ struct engine::implementation {
     uint64_t check_surface_epoch_ = 0;
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
     bool type_proofs_ = true;
+    bool ir_passes_ = true;
     proof_stats last_proof_stats_;
 
     // Program closure (docs/static_checking.md "Programs"): a unit with literal top-level
@@ -1942,6 +1943,14 @@ void engine::type_proofs(bool on) {
 
 bool engine::type_proofs() const {
     return impl->type_proofs_;
+}
+
+void engine::ir_passes(bool on) {
+    impl->ir_passes_ = on;   // the next compile follows it
+}
+
+bool engine::ir_passes() const {
+    return impl->ir_passes_;
 }
 
 void engine::vm_profile_reset() {

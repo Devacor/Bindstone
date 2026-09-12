@@ -28,6 +28,8 @@ namespace jai::vm {
         void typed_lowering(bool on) { typed_lowering_ = on; }
         // the listing tool and the tests: each closed region records its canonical operations (chunk::cell_loop::ir_text)
         void ir_listing(bool on) { ir_listing_ = on; }
+        // the middle end's switch (engine::ir_passes): off, no proof-based elision and no pass; the regions run their checked forms
+        void ir_passes(bool on) { ir_passes_ = on; }
 
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
@@ -70,6 +72,7 @@ namespace jai::vm {
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
+        bool ir_passes_ = true;
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl);

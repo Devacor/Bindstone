@@ -187,6 +187,7 @@ namespace jai::fuzz {
 		size_t memory_cap_bytes = 64 * 1024 * 1024;
 		bool proofs = true;                       // engine::type_proofs (the proof differential gate flips it)
 		bool param_alias = true;                  // engine::parameter_alias (the elision differential gate flips it)
+		bool passes = true;                       // engine::ir_passes (the middle end's differential gate flips it)
 	};
 
 	inline bool contains_ci(const std::string& hay, const std::string& needle) {
@@ -200,6 +201,7 @@ namespace jai::fuzz {
 		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
 		eng->type_proofs(cfg.proofs);
 		eng->parameter_alias(cfg.param_alias);
+		eng->ir_passes(cfg.passes);
 		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
@@ -279,12 +281,13 @@ namespace jai::fuzz {
 			"\n      vm    (len " + std::to_string(b.size()) + "): ..." + excerpt(b);
 	}
 
-	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true) {
+	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true, bool passes = true) {
 		compare_result cr;
 		run_config interp_cfg;
 		interp_cfg.budget_seconds = budget_seconds;
 		interp_cfg.proofs = proofs;
 		interp_cfg.param_alias = param_alias;
+		interp_cfg.passes = passes;
 		run_config vm_cfg = interp_cfg;
 		vm_cfg.use_vm = true;
 		cr.interp = run_program(p, interp_cfg);

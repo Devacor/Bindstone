@@ -17,6 +17,7 @@ import time
 CONFIGURATIONS = (
 	("JaiScript VM serial", "jai_gloom", "vm", 0, 1),
 	("JaiScript VM 8 workers", "jai_gloom", "vm", 8, 8),
+	("Squirrel 3.2", "gloom_squirrel", "squirrel", 0, 1),
 	("Lua 5.4.8", "gloom_lua", "lua", 0, 1),
 	("Lua 5.5.1", "gloom_lua55", "lua55", 0, 1),
 	("LuaJIT 2.1 JIT", "gloom_luajit", "luajit-jit", 0, 1),
@@ -97,7 +98,7 @@ class WindowsMachine:
 			more = self.kernel.Process32FirstW(handle,ctypes.byref(entry))
 			while more:
 				name = entry.name.lower()
-				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_lua","jaiscript")):
+				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript")):
 					result.append({"name":name,"pid":entry.pid})
 				more = self.kernel.Process32NextW(handle,ctypes.byref(entry))
 		finally:
@@ -318,6 +319,7 @@ def main():
 	script_paths=list((jai_workload_root/"examples/gloom/scripts").glob("*.jai"))
 	script_paths+=list((jai_workload_root/"examples/jaidoom/scripts").glob("*.jai"))
 	script_paths+=list((root/"examples/gloom/ports").rglob("*.lua"))
+	script_paths+=list((jai_workload_root/"examples/gloom/ports/squirrel/scripts").glob("*.nut"))
 	script_paths += [jai_workload_root/"examples/jaidoom/demo.json",jai_workload_root/"examples/jaidoom/wads/doom1.wad"] if "timedemo" in workloads else []
 	workload_hashes={str(p):file_hash(p) for p in script_paths}
 	metadata={"runner_sha256":file_hash(pathlib.Path(__file__).resolve()),"created_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
@@ -365,6 +367,7 @@ def main():
 			command=[str(exe),"--smoke","--backend",config["backend"],"--workers",str(config["workers"]),
 				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad"]
 			if config["target"]=="jai_gloom":command+=["--scripts",str(jai_workload_root/"examples/gloom/scripts")]
+			elif config["target"]=="gloom_squirrel":command+=["--scripts",str(jai_workload_root/"examples/gloom/ports/squirrel/scripts")]
 		else:
 			command=[str(exe),"--no-debug","--no-pause","--backend="+config["backend"]]
 			if not cold:command+=["--benchmark-main=1"]

@@ -202,6 +202,38 @@ which raises its own text. The original back edge becomes `op_cells_cfor_back`: 
 compare through the counted state's cached pointers, then the entry for the next iteration. A store
 value with no other use in the loop is a cell of adopted kind.
 
+### The contract
+
+Admission is a translation, run once per chunk after the typed lowering, from the loop body's instructions
+into canonical operations over admitted values, followed by a legality pass; nothing else decides. The
+values: semantic locals (frame slots, identity the slot, kind pinned by a typed use or adopted from the slot
+at entry), compiler values (the temps of an expression, live inside their statement, any kind lands),
+environment values (globals read once at entry), container bindings (arrays resolved once at entry through a
+slot, a plain reference, an environment name or a pinned table entry), snapshots (a guard's container value,
+live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
+binary operators, pinned kinds as `op_c_arith`, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
+`cmp` with its test (`op_c_cmp` and `op_c_jcmp` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for
+run-time kinds; a head's false edge exits the block), `load` (`op_c_load`, through a site row the typed
+lowering built or the translation builds for a general read), `store` (`op_c_index_store`), `math`
+(`op_c_math`), `jump`, the back edge (`op_c_back` or `op_c_cfor_back`) and `guard` (`op_c_guard`). A
+landing's conversion contract belongs to the operation: a stamped decl lands its declared kind (a float
+decl widens an int), a store lands the slot's kind, a compiler value lands any kind; every other case is a
+miss onto the general form, which owns every conversion and every error text.
+
+Every copy instruction carries its origin (`cell_loop::origin`): a miss flushes the dirty values and resumes
+the general form at that instruction, which re-runs whole (the encoding is one cell instruction per original
+instruction; the origin table, not position arithmetic, is what the runtime consults). Legality after
+translation: a container binding's slot is never written inside the body; a compiler value is defined before
+it is read inside its own statement; a snapshot's slot is written only by its own guard between the guard
+and its read (the guard restores the snapshot when the slot holds another table, since temps are reused per
+statement); a pinned table entry is admitted only when no store site of the loop writes that table (checked
+at entry). A refusal names its class and its first offending instruction: `representation` (a value the model
+does not take: strings, maps, members, getters, nested typed arrays, a local of two kinds), `effect` (a call,
+an exit, a binding write, a scope), `translation` (a supported core operation in an encoding the translation
+does not normalize yet: a coverage gap), `malformed` (a lifetime rule failed), `head` (a loop form the model
+does not take). The profile prints the closed and refused loops per function (`cell translation`), and the
+disassembly lists them under each chunk (`-- cell loop`, `-- open loop`).
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

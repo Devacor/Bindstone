@@ -6817,6 +6817,8 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_mov: st = exec_c_mov(f, ci); break;
 		case opcode::op_c_math: st = exec_c_math(f, ci); break;
 		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ci); break;
+		case opcode::op_c_cmp_any: st = exec_c_cmp_any(f, ci, true); break;
+		case opcode::op_c_jcmp_any: st = exec_c_cmp_any(f, ci, false); break;
 		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 		}
 		if (st == op_status::failed) return st;
@@ -6915,16 +6917,16 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
-	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+	if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	int64_t right_bits;
 	if (ins.c & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.c & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		right_bits = cs.payload[ins.c];
 	}
 	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -6943,7 +6945,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 		case opcode::op_t_shr_ii: ok = b >= 0 && b <= 63; if (ok) { r = a >> b; } break;
 		default: ok = false; break;
 		}
-		if (!ok) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (!ok) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		cs.payload[dk] = static_cast<int64_t>(r);
 	} else {
 		const script_float a = cell_float_of_bits(cs.payload[ins.b]), b = cell_float_of_bits(right_bits);
@@ -6956,7 +6958,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 		case opcode::op_t_mod_ff: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
 		default: ok = false; break;
 		}
-		if (!ok) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (!ok) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		cs.payload[dk] = cell_bits_of_float(r);
 	}
 	cs.kind[dk] = kind;
@@ -6972,16 +6974,16 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t lk = ins.a & k_cell_index_mask;
-	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (cs.kind[lk] != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+	if (cs.kind[lk] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 	int64_t right_bits;
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 		right_bits = cs.payload[ins.b];
 	}
 	bool truthy;
@@ -7015,6 +7017,74 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instructio
 	return {};
 }
 
+// a compare whose kinds the cells decide: the general kernel's int row and its int / float promotion row (the fused
+// compare-jump's numeric fast path); any other kind is the caller's miss
+bool vm_backend::cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy) {
+	cell_state& cs = *f.cells;
+	const token_type op = static_cast<token_type>(ins.a >> k_cell_op_shift);
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	auto read = [&](uint32_t o, uint8_t& k, int64_t& b) -> bool {
+		if (o & k_typed_const_bit) {
+			const script_value& rc = f.code->constants[o & ~k_typed_const_bit];
+			k = static_cast<uint8_t>(rc.raw_storage_index());
+			if (k != kint && k != kflt) return false;
+			b = k == kint ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
+			return true;
+		}
+		k = cs.kind[o];
+		if (k != kint && k != kflt) return false;
+		b = cs.payload[o];
+		return true;
+	};
+	uint8_t lk, rk; int64_t lb, rb;
+	if (!read(ins.a & k_cell_index_mask, lk, lb) || !read(ins.b, rk, rb)) return false;
+	if (lk == kint && rk == kint) {
+		const script_int a = static_cast<script_int>(lb), b = static_cast<script_int>(rb);
+		switch (op) {
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		case token_type::greater_equal: truthy = a >= b; break;
+		case token_type::equal_equal: truthy = a == b; break;
+		case token_type::bang_equal: truthy = a != b; break;
+		default: return false;
+		}
+		return true;
+	}
+	const script_float a = lk == kint ? static_cast<script_float>(static_cast<script_int>(lb)) : cell_float_of_bits(lb);
+	const script_float b = rk == kint ? static_cast<script_float>(static_cast<script_int>(rb)) : cell_float_of_bits(rb);
+	switch (op) {
+	case token_type::less: truthy = a < b; break;
+	case token_type::less_equal: truthy = a <= b; break;
+	case token_type::greater: truthy = a > b; break;
+	case token_type::greater_equal: truthy = a >= b; break;
+	case token_type::equal_equal: truthy = a == b; break;
+	case token_type::bang_equal: truthy = a != b; break;
+	default: return false;
+	}
+	return true;
+}
+
+// the head form exits the block on false (flush, then the loop's exit); the interior form skips to its copy target
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	bool truthy;
+	if (!cell_cmp_any(f, ins, truthy)) {
+		if (head) { cells_miss(f, loop, loop.head, 0); }
+		else { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 3); }
+		return {};
+	}
+	if (truthy) { ++f.ip; return {}; }
+	if (head) {
+		JAI_CELLS_COUNT(4);
+		cells_flush(f, loop);   // the loop's exit: materialize, then continue after the loop
+	}
+	f.ip = ins.c;
+	return {};
+}
+
 // a write into a cell by the cell's kind (every cell holds its slot's kind from the entry): the same kind takes the
 // payload, a temp takes any kind (no declared type behind it), a float declaration widens an int (the decl's
 // int -> float row); anything else is the caller's miss (a declared-type conversion the general form owns)
@@ -7040,7 +7110,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instru
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	const token_type op = static_cast<token_type>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
-	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	auto read = [&](uint32_t o, uint8_t& k, int64_t& b) -> bool {
 		if (o & k_typed_const_bit) {
@@ -7056,7 +7126,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instru
 		return true;
 	};
 	uint8_t lk, rk; int64_t lb, rb;
-	if (!read(ins.b, lk, lb) || !read(ins.c, rk, rb)) { cells_miss(f, loop, original_ip, 1); return {}; }
+	if (!read(ins.b, lk, lb) || !read(ins.c, rk, rb)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	uint8_t kind; int64_t out; bool ok = true;
 	if (lk == kint && rk == kint) {
 		const script_int a = static_cast<script_int>(lb), b = static_cast<script_int>(rb);
@@ -7088,7 +7158,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instru
 		}
 		kind = kflt; out = cell_bits_of_float(r);
 	}
-	if (!ok || !cell_land(f, loop, dk, kind, out)) { cells_miss(f, loop, original_ip, 1); return {}; }
+	if (!ok || !cell_land(f, loop, dk, kind, out)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	++f.ip;
 	return {};
 }
@@ -7098,20 +7168,20 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, const vm_instruction&
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
-	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	uint8_t kind; int64_t bits;
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
 		kind = static_cast<uint8_t>(rc.raw_storage_index());
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = static_cast<int64_t>(rc.unchecked_as_int()); }
 		else if (kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(rc.unchecked_as_float()); }
-		else { cells_miss(f, loop, original_ip, 1); return {}; }
+		else { cells_miss(f, loop, original_ip(), 1); return {}; }
 	} else {
 		kind = cs.kind[ins.b];
-		if (kind != static_cast<uint8_t>(script_value::TYPEID_INT) && kind != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (kind != static_cast<uint8_t>(script_value::TYPEID_INT) && kind != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		bits = cs.payload[ins.b];
 	}
-	if (!cell_land(f, loop, ins.a, kind, bits)) { cells_miss(f, loop, original_ip, 1); return {}; }
+	if (!cell_land(f, loop, ins.a, kind, bits)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	++f.ip;
 	return {};
 }
@@ -7123,7 +7193,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	const detail::math_fn fn = static_cast<detail::math_fn>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
-	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t sk = cs.kind[ins.b];
 	int64_t bits;
 	if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -7131,10 +7201,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 	} else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
 		const script_float x = cell_float_of_bits(cs.payload[ins.b]);
 		auto r = detail::checked_float_to_integer(fn == detail::math_fn::ifloor ? std::floor(x) : x);
-		if (!r) { cells_miss(f, loop, original_ip, 1); return {}; }
+		if (!r) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		bits = static_cast<int64_t>(r.value());
-	} else { cells_miss(f, loop, original_ip, 1); return {}; }
-	if (!cell_land(f, loop, dk, static_cast<uint8_t>(script_value::TYPEID_INT), bits)) { cells_miss(f, loop, original_ip, 1); return {}; }
+	} else { cells_miss(f, loop, original_ip(), 1); return {}; }
+	if (!cell_land(f, loop, dk, static_cast<uint8_t>(script_value::TYPEID_INT), bits)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	++f.ip;
 	return {};
 }
@@ -14399,6 +14469,8 @@ vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code
 		st = profile_chunk_stats{};
 		st.name = code.function_name;
 		st.census = census_chunk(code, symbolizer_);
+		st.refusals = code.cell_refusals;
+		st.closed_loops = code.cell_loops.size();
 		st.lines.assign(code.code.size(), 0);
 		for (size_t ip = 0; ip < code.code.size(); ++ip) {
 			const ast_node* stmt = ip < code.stmt_nodes.size() ? code.stmt_nodes[ip] : nullptr;
@@ -14929,6 +15001,19 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
+		{
+			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
+			size_t closed = 0, by_class[8] = {};
+			for (const auto& [code, st] : profile_chunks_) { closed += st.closed_loops; for (const auto& r : st.refusals) { ++by_class[r.reason < 8 ? r.reason : 0]; } }
+			fprintf(stderr, "[vm-profile] cell translation: loops closed %llu | refused: head %llu, representation %llu, effect %llu, translation %llu, malformed %llu, no cells %llu, too many cells %llu\n",
+				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7]);
+			for (const auto& [code, st] : profile_chunks_) {
+				for (const auto& r : st.refusals) {
+					fprintf(stderr, "[vm-profile]   open loop: %s line %u (ips %u..%u): %s at ip %u (%s)\n", st.name.empty() ? "<top level>" : st.name.c_str(),
+						r.head < st.lines.size() ? st.lines[r.head] : 0u, r.head, r.back, chunk::cell_refusal_name(r.reason), r.ip, std::string(opcode_name(static_cast<opcode>(r.op))).c_str());
+				}
+			}
+		}
 		{
 			// the areas resident at dump time (a warm-up allocates them before the reset): every call record's
 			// payload plus kind capacity, and the bookkeeping the raw area rides on

@@ -97,6 +97,8 @@ namespace jai::vm {
             std::string name;
             std::string file;
             std::vector<uint32_t> lines;
+            std::vector<chunk::cell_refusal> refusals;   // the loops the translation refused (copied once from the chunk)
+            size_t closed_loops = 0;
             std::vector<uint64_t> ip_cycles;
             std::vector<uint64_t> ip_counts;
             uint64_t inclusive_cycles = 0;
@@ -1560,6 +1562,8 @@ namespace jai::vm {
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
         JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head);
+        bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins);

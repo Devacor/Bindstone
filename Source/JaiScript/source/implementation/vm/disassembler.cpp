@@ -203,6 +203,12 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 		out << "\n";
 	}
 
+	for (const auto& loop : ch.cell_loops) {
+		out << "-- cell loop " << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "") << "\n";
+	}
+	for (const auto& r : ch.cell_refusals) {
+		out << "-- open loop " << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";
+	}
 	for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
 		if (ch.closure_protos[i].body_chunk) {
 			out << "\n-- closure proto " << i << (ch.closure_protos[i].body_chunk->needs_frame_env ? " (env: frame) --\n" : " (env: lazy) --\n");

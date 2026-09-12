@@ -2270,6 +2270,7 @@ namespace jai {
         // caller has PROVEN raw_storage_index() matches; tag/engine/kind stay untouched
         void unchecked_set_int_payload(script_int v) noexcept { storage_.get<script_int>() = v; }
         void unchecked_set_float_payload(script_float v) noexcept { storage_.get<script_float>() = v; }
+        void unchecked_set_bool_payload(script_bool v) noexcept { storage_.get<script_bool>() = v; }
         
         // Extract object_holder for class_instance operations
         // Returns nullptr if not actually storing an object (uses current_type, not defined_type)

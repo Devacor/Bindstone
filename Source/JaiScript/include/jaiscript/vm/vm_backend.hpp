@@ -1601,6 +1601,9 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head);
         JAI_FORCEINLINE op_status exec_c_neg(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_bnot(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_lnot(frame& f, const vm_instruction& ins);     // the truthiness inverted, a bool
+        JAI_FORCEINLINE op_status exec_c_cmpval(frame& f, const vm_instruction& ins);   // a comparison as a value, a bool
+        bool cell_truthy(frame& f, uint32_t operand, bool& truthy);                    // the language's truthiness of an int, a float or a bool cell or constant
         // a call inside the block: the probe, the pushes and the call run the general executors verbatim; the landing after the
         // return re-reads what the callee could have touched and lands the result by the declared-type rule
         op_status exec_c_probe(frame& f, const vm_instruction& ins);

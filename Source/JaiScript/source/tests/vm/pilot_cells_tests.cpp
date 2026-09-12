@@ -1319,7 +1319,7 @@ public:
 			check_eq(size_t(0), unaries, "no general UNARY left in the bodies: " + listing);
 			check_true(listing.find("UNARY_TEMP") != std::string::npos && listing.find("C_NEG") != std::string::npos && listing.find("C_BNOT") != std::string::npos, "the rows and their copies: " + listing);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
-			check_eq(size_t(4), closed, "the four numeric loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
+			check_eq(size_t(5), closed, "the four numeric loops and the ! loop close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("value_doors_close", [this]() {
 			// draw_sprite's `int fiv = math::itrunc((fy - y0f) * dv)` (a math call as a declaration's value), a math call as a store's
@@ -1475,6 +1475,35 @@ var mixed = function(int n) { for (int i = 0; i < n; ++i) { V[i] = i + 0.5; } re
 			check_ge(closed, size_t(5), "the stores with value binaries close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 			size_t pushing = 0; for (size_t at = listing.find("\tBINARY_FUSED op="); at != std::string::npos; at = listing.find("\tBINARY_FUSED op=", at + 1)) { ++pushing; }
 			check_eq(size_t(0), pushing, "no pushing fused binary feeds an element store: " + listing);
+		});
+		test("bools_are_cells", [this]() {
+			// draw_seg's `if (solid)`, `if (fsky && bsky)`, `if (!solid && ...)`, `bool painted = false; painted = true;`: bool locals
+			// and globals are cells; a truth test is the language's truthiness of an int, a float or a bool (a local or an
+			// environment value, as a head or in a body), `!x` and a comparison land bools, a bool argument boxes, a bool result
+			// lands, a bool into an int declaration takes the general conversion
+			const char* defs = R"JAI(
+bool NIGHTMARE = true; bool RUNNING = true; int TICKS = 0; var FLAG = false;
+var is_odd = function(int x) -> bool { return (x & 1) == 1; };
+var take = function(bool b, int x) -> int { if (b) { return x; } return -x; };
+var seg = function(int n, bool solid, bool fsky, bool bsky) { int acc = 0; for (int x = 0; x < n; ++x) { bool painted = false; if (solid) { acc = acc + 1; painted = true; } if (fsky && bsky) { acc = acc + 10; } if (!solid && x > 1) { acc = acc + 100; } if (painted) { acc = acc + 1000; } } return acc; };
+var values = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { bool lt = i < 2; bool odd = is_odd(i); var neg = !lt; int t = take(lt, i); acc = acc + t; if (odd) { acc = acc + 1; } if (neg) { acc = acc + 5; } } return acc; };
+var env_tests = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (NIGHTMARE) { acc = acc + 1; } if (!RUNNING) { acc = acc + 100; } if (FLAG) { acc = acc + 1000; } FLAG = i == 1; } return acc; };
+var head = function() { int acc = 0; while (RUNNING) { TICKS = TICKS + 1; acc = acc + 1; if (TICKS >= 4) { RUNNING = false; } } return acc; };
+var narrow = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { bool b = i < 2; int q = b; acc = acc + q; } return acc; };
+var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < n; ++i) { f = f + 0.5; if (f) { acc = acc + 1; } var nz = !f; if (nz) { acc = acc + 10; } } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(seg(4, true, true, false));", "4004" }, { "to_string(seg(4, false, true, true));", "240" }, { "to_string(values(4));", "8" },
+				{ "to_string(env_tests(3));", "1003" }, { "to_string(head()) + \" \" + to_string(RUNNING);", "4 false" }, { "to_string(narrow(3));", "2" }, { "to_string(floats(4));", "13" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(6), closed, "every loop over bools closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

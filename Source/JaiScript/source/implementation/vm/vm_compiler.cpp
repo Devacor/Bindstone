@@ -2329,7 +2329,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		};
 		auto env_cell = [&](const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at) -> uint32_t {
 			for (size_t e = 0; e < env_ops.size(); ++e) {
-				if (env_ops[e].operand.symbol != o.symbol) continue;
+				if (c.symbols[env_ops[e].operand.symbol] != c.symbols[o.symbol]) continue;   // one cell per name: the symbol table is not deduplicated
 				for (auto& cl : cells) {
 					if (cl.env_operand == e) { if (cl.kind == 0) { cl.kind = kind; } else if (kind != 0 && cl.kind != kind) { refuse(chunk::cell_refusal_representation, at); } }
 				}
@@ -2339,6 +2339,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			cells.push_back(nc);
 			env_ops.push_back(chunk::cell_loop::env_operand_ref{ o, cache_slot });
 			return static_cast<uint32_t>(env_ops.size() - 1);
+		};
+		// an environment value a store lands on (a global, or the member a bare name resolves to; `::name` stays general): the
+		// same cell its reads share, defined by the landing; kinds at run time against the stamp read at entry
+		auto env_written = [&](uint32_t symbol_index, uint8_t landing, size_t at) -> uint32_t {
+			fused_operand o; o.symbol = symbol_index; o.ident_node = at < c.ident_nodes.size() ? c.ident_nodes[at] : k_invalid_u32;
+			const uint32_t e = env_cell(o, 0, static_cast<uint32_t>(at * 3 + 2), at);
+			for (auto& cl : cells) { if (cl.env_operand == e) { cl.defined = true; cl.landing = landing; } }
+			return e;
 		};
 		// a value operand: an int or float literal, a frame slot (a cell of the given or adopted kind) or an environment value
 		auto value = [&](ir_op& op, const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at, uint32_t& out) -> bool {
@@ -2421,7 +2429,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_binary_fused_decl || st.op == opcode::op_binary_fused_temp || st.op == opcode::op_binary_fused_store) {
 				// arith the typed lowering left general (an environment value or an unclassed operand): kinds at run time, landing in
 				// a stamped scalar decl, a compiler value or a no-result frame-slot store
-				uint32_t bidx = st.a, dst = k_invalid_u32; uint8_t landing = k_typed_dst_temp; type_info* stamp = nullptr;
+				uint32_t bidx = st.a, dst = k_invalid_u32, env_dst = k_invalid_u32; uint8_t landing = k_typed_dst_temp; type_info* stamp = nullptr;
 				if (st.op == opcode::op_binary_fused_temp) { dst = st.b; }
 				else if (st.a < c.fused_binary_dst_protos.size()) {
 					const fused_binary_dst_proto& dp = c.fused_binary_dst_protos[st.a];
@@ -2433,18 +2441,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }   // a string, bool or class local
 						dst = static_cast<uint32_t>(decl->slot_index); landing = k_typed_dst_decl;
 					} else {
-						if (dp.slot == k_invalid_u32 || (dp.flags & store_flag_global_only)) { refuse(chunk::cell_refusal_effect, ip); break; }   // a global written: a binding write
+						if (dp.flags & store_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`: the global environment only, a binding the block does not hold
 						if (dp.flags & store_flag_ref_alias) { refuse(chunk::cell_refusal_representation, ip); break; }
 						if (!(dp.flags & store_flag_no_result)) { refuse(chunk::cell_refusal_translation, ip); break; }   // an assignment whose value is used
-						dst = dp.slot; landing = k_typed_dst_store;
+						if (dp.slot == k_invalid_u32) { env_dst = env_written(dp.symbol, k_typed_dst_store, ip); }   // an environment value written
+						else { dst = dp.slot; landing = k_typed_dst_store; }
 					}
 				}
-				if (bidx >= c.fused_binary_protos.size() || dst == k_invalid_u32 || dst >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (bidx >= c.fused_binary_protos.size() || (env_dst == k_invalid_u32 && (dst == k_invalid_u32 || dst >= k_typed_slot_mask))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const fused_binary_proto& bp = c.fused_binary_protos[bidx];
 				if (!arith_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				use_slot(dst, stamp_kind(stamp), true, landing, stamp, ip);
-				op.kind = ir::arith; op.tok = bp.op; op.a = dst; op.writes = dst;
+				if (env_dst != k_invalid_u32) { op.kind = ir::arith; op.tok = bp.op; op.a = k_ir_env_bit | env_dst; }
+				else { use_slot(dst, stamp_kind(stamp), true, landing, stamp, ip); op.kind = ir::arith; op.tok = bp.op; op.a = dst; op.writes = dst; }
 			} else if (st.op == opcode::op_t_store_const || st.op == opcode::op_t_store_mov || st.op == opcode::op_t_decl_mov || st.op == opcode::op_t_decl_const) {
 				// mov: the source's payload into a stamped scalar decl or a no-result frame-slot store
 				const bool decl = st.op == opcode::op_t_decl_mov || st.op == opcode::op_t_decl_const;
@@ -2592,7 +2601,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// x op= y the typed lowering left general (a slot the checker could not pin, a float literal): arith with the
 				// compound landing, kinds at run time (a kind change on the slot misses onto the general conversion)
 				const compound_fused_proto& cp = c.compound_fused_protos[st.a];
-				if (cp.slot == k_invalid_u32 || cp.slot >= k_typed_slot_mask || (cp.kind_flags & compound_flag_global_only)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (cp.slot >= k_typed_slot_mask && cp.slot != k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (cp.kind_flags & compound_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`
 				if (!(cp.kind_flags & compound_flag_no_result) || cp.rhs_proto != k_invalid_u32 || (cp.kind_flags & compound_flag_old_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint8_t tok;
 				switch (cp.kind_flags & compound_kind_mask) {
@@ -2605,8 +2615,26 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				if (tok == 0) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, cp.rhs, 0, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				use_slot(cp.slot, 0, false, 0, nullptr, ip); use_slot(cp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
-				op.kind = ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);
+				if (cp.slot == k_invalid_u32) {
+					const uint32_t e = k_ir_env_bit | env_written(cp.symbol, k_typed_dst_compound, ip);   // an environment value stepped in place
+					op.kind = ir::arith; op.tok = tok; op.a = e; op.b = e;
+				} else {
+					use_slot(cp.slot, 0, false, 0, nullptr, ip); use_slot(cp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
+					op.kind = ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);
+				}
+			} else if (st.op == opcode::op_incdec && st.b == k_invalid_u32 && !(st.c & incdec_flag_global_only) && (st.c & incdec_flag_no_result)) {
+				// ++g / g-- as a statement on an environment value: arith by one landing on the environment cell
+				const uint32_t e = k_ir_env_bit | env_written(st.a, k_typed_dst_compound, ip);
+				op.kind = ir::arith; op.tok = static_cast<uint8_t>((st.c & incdec_flag_increment) ? token_type::plus : token_type::minus); op.a = e; op.b = e; op.c = k_typed_const_bit | int_one();
+			} else if ((st.op == opcode::op_load || st.op == opcode::op_const) && ip + 1 < back && code[ip + 1].op == opcode::op_store && code[ip + 1].b == k_invalid_u32 && !(code[ip + 1].c & (store_flag_ref_alias | store_flag_global_only)) && (code[ip + 1].c & store_flag_no_result) &&
+			           (st.op == opcode::op_const ? (st.a < c.constants.size() && st.a < k_typed_slot_mask && (c.constants[st.a].raw_storage_index() == script_value::TYPEID_INT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_FLOAT)) : (st.a != k_invalid_u32 && st.a < k_typed_slot_mask && st.c == 0))) {
+				// `g = x;` / `g = 1;` on an environment value: the general pair (a push, a store) is one move onto the environment cell
+				if (st.op == opcode::op_const) { op.b = k_typed_const_bit | st.a; }
+				else { use_slot(st.a, 0, false, 0, nullptr, ip); op.b = st.a; slot_read(op, st.a); }
+				op.kind = ir::mov; op.a = k_ir_env_bit | env_written(code[ip + 1].a, k_typed_dst_store, ip + 1);
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the store's place: no copy instruction
+				++ip;
 			} else if (st.op == opcode::op_incdec && st.b != k_invalid_u32 && st.b < k_typed_slot_mask) {
 				// ++x / x-- as a statement on a slot the typed lowering left general: arith by one with the compound landing
 				if (st.c & incdec_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }
@@ -2719,6 +2747,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					cc.consumer = 2; cc.dst = cn.b;
 					use_slot(cn.b, 0, true, k_typed_dst_store, nullptr, consumer_ip);
 					land.writes = cn.b;
+				} else if (cn.op == opcode::op_store && cn.b == k_invalid_u32 && !(cn.c & (store_flag_ref_alias | store_flag_global_only)) && (cn.c & store_flag_no_result)) {
+					cc.consumer = 2; cc.dst = k_ir_env_bit | env_written(cn.a, k_typed_dst_store, consumer_ip);   // an environment value takes the result
 				} else { refuse(chunk::cell_refusal_of(cn.op), consumer_ip); break; }   // the result flows into an operation without a door yet
 				for (const auto& arg : cc.args) {
 					// a compiler temp passed as an argument stays live to the call (a miss ahead of it re-runs the pushes from the slot)
@@ -2790,6 +2820,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask |= uint64_t(1) << k; } }
+		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].env_operand != k_invalid_u32) { loop.env_mask |= uint64_t(1) << k; } }
 		auto env_slot = [&](uint32_t e) -> uint32_t { for (const auto& cl : cells) { if (cl.env_operand == e) return cl.slot; } return k_invalid_u32; };
 		// the binding at the instruction being emitted: a slot's current definition (a temp slot advances to its next
 		// definition once the emission passes the defining instruction; a local or an environment value has one cell); an
@@ -2803,6 +2834,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			return current[operand & k_typed_slot_mask];
 		};
 		auto dst_of = [&](uint32_t operand) -> uint32_t {
+			if (operand & k_ir_env_bit) return cell_of(operand);   // an environment value has one cell
 			if (pending_def != k_invalid_u32 && cells[pending_def].slot == (operand & k_typed_slot_mask)) return pending_def;
 			return cell_of(operand);
 		};
@@ -2810,7 +2842,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		auto synthetic = [&](fused_operand& o) {
 			if (!env_scalar(o)) return;
 			for (size_t e = 0; e < env_ops.size(); ++e) {
-				if (env_ops[e].operand.symbol == o.symbol) { fused_operand d; d.slot = env_slot(static_cast<uint32_t>(e)); d.symbol = o.symbol; d.direct = true; o = d; return; }
+				if (c.symbols[env_ops[e].operand.symbol] == c.symbols[o.symbol]) { fused_operand d; d.slot = env_slot(static_cast<uint32_t>(e)); d.symbol = o.symbol; d.direct = true; o = d; return; }
 			}
 		};
 		auto site_operand = [&](fused_operand o, uint32_t& out) { synthetic(o); out = o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : current[o.slot]; };   // the copy's rows name cells

@@ -320,6 +320,15 @@ widens, a var lands any kind); the flush writes the payload back through the res
 when the storage still holds that kind and stamp, and a call, which may read or rewrite the environment, has the
 written cells flushed ahead of its probe and re-read after its return.
 
+A bool is a cell kind beside int and float (payload 0 or 1, the canonical bool stamp): a bool local, environment value
+or compiler value enters, lands and flushes like the numeric kinds, and a bool cell takes bools only (an int
+declaration fed a bool, or a bool fed an int, is the general conversion). A truth test is an operation of its own
+(the `!` token on the compare ops): the language's truthiness of an int, a float or a bool, on a local or an
+environment value, as a head (`while (RUNNING)`) or in a body (`if (solid)`, `if (!x)` through the jump's sense).
+`!x` as a value inverts that truthiness into a bool, and a comparison as a value (`bool lt = i < 2`, a comparison
+argument) runs the compare kernel and lands a bool. A general move the typed rows left alone (a bool constant
+declared or stored, a bool copied from a slot) is one move by the declared-type rule.
+
 An element store's value binary is a value like a unary or a math call there: `a[i] = e op f` lands the binary in a
 compiler temp (its fused binary rewritten to land there) and the store takes the temp as a direct operand, so the
 typed store lane's shape holds and the block reads the value as a cell.

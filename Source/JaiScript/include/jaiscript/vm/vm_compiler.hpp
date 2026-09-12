@@ -65,6 +65,12 @@ namespace jai::vm {
             // reference declarations bound to a value the unit declares (a value slot, a program-level value
             // declaration, an alias already plain), slot -> symbol: their dereference is a cell, never a getter
             std::unordered_map<uint32_t, uint64_t> plain_refs;
+            // slots a reference or a capture may reach (declarations and parameters the parser marked escaping, reference
+            // parameters): user code run by a hoisted read may rebind them, so they never stay in place ahead of such a read
+            std::unordered_set<uint32_t> escaping;
+            // value slots declared int, float or bool: they hold that kind at every point, so a unary or an intrinsic over
+            // one runs no user operator or conversion
+            std::unordered_set<uint32_t> primitive_slots;
             bool active = false;
         };
 
@@ -81,6 +87,13 @@ namespace jai::vm {
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         bool quiet_partner(const expression* e);
+        bool private_local(const expression* e);       // a frame slot no user code can rebind: a value declaration, not escaping
+        bool primitive_local(const expression* e);     // a private local declared int, float or bool
+        bool quiet_read(const expression* e);          // a hoisted read that cannot run user code (a private container of proven element class over a quiet index; a unary or an intrinsic over a quiet operand)
+        bool quiet_index(const expression* e);         // a literal, a private local or a quiet read (never a binary: a custom numeric operator is user code)
+        bool observing_hoist_in(const expression* e);  // a subtree holding a hoisted read that may run user code
+        bool env_reference_candidate(const expression* e);   // an environment name this unit does not declare as a value: its read may run a getter (a reference to a property) or raise
+        bool hoist_in(const expression* e);            // a subtree holding a hoisted read, intrinsic or unary, quiet or not
         // a call to a one-argument math:: intrinsic whose result a compiler temp can carry (none = not one)
         detail::math_fn math_temp_operand(const expression* e) const;
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
@@ -97,7 +110,7 @@ namespace jai::vm {
         bool binary_lands_fused(binary_expr* b);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
-        void guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard);
+        void guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard, bool always);
         static uint8_t operand_expect(const binary_expr* node);
         bool try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags);
         chunk* chunk_ = nullptr;

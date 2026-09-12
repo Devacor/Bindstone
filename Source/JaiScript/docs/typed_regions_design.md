@@ -164,6 +164,17 @@ slot's reference is not a plain cell (an element, field, map or property referen
 raise), and the readers take the slot itself otherwise, so a getter runs once and in its place and a plain
 alias pays one tag test.
 
+A closed loop may branch inside itself: a typed compare-jump or a jump whose target lies forward inside the
+loop or at its back edge is copied as a cell branch (`op_c_jcmp`, `op_c_jump`), so one-arm and two-arm
+diamonds over typed work, a `continue` and a guarded store close; a branch that leaves the loop (a `break`,
+an early return) keeps it open. A container guard inside the loop is a no-op in the copy (`op_c_nop`): the
+entry resolves the container once and refuses a reference that is not a plain cell.
+
+A temp that holds an element the checker could not class (a read through a `var&` container) is a cell
+too: its kind is pinned by a typed consumer (an index fold, a compare) or adopted at entry from the
+slot's current value, the cell load lands the element's own kind, and every consumer checks the kind
+at run time as it does for any cell, so a mismatch is a miss onto the general form.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

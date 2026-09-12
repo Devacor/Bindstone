@@ -208,6 +208,9 @@ namespace jai::vm {
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
         op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
+        op_c_jcmp,          // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
+        op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
+        op_c_nop,           // a container guard's place in the copy (the entry checked the slot)
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -325,6 +328,9 @@ namespace jai::vm {
             case opcode::op_c_load: return "C_LOAD";
             case opcode::op_c_index_store: return "C_INDEX_STORE";
             case opcode::op_c_back: return "C_BACK";
+            case opcode::op_c_jcmp: return "C_JCMP";
+            case opcode::op_c_jump: return "C_JUMP";
+            case opcode::op_c_nop: return "C_NOP";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

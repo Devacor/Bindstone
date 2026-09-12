@@ -6634,8 +6634,10 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const script_value* s = frame_slot(f, cl.slot);
-		const type_info* canonical = cl.kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
-		if (!s || s->raw_storage_index() != cl.kind || s->type_info_raw() != canonical || s->get_engine() != engine_) {
+		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
+		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
+		const type_info* canonical = want == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
+		if (!s || (want != static_cast<uint8_t>(script_value::TYPEID_INT) && want != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || s->raw_storage_index() != want || s->type_info_raw() != canonical || s->get_engine() != engine_) {
 			JAI_CELLS_COUNT(1);
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
@@ -6658,7 +6660,11 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 			const script_value* cp = site.cont_slot != k_invalid_u32
 				? frame_slot(f, site.cont_slot)
 				: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? ci.c * 3 + 2 : ci.c * 3);
-			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+				// a guarded site materializes a non-plain reference per read on the general form; the block resolves once
+				if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) { cp = nullptr; }
+				else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
+			}
 			bool borrowed = false;
 			node = cp ? lane_element_source(*cp, borrowed) : nullptr;
 		} else if (ci.op == opcode::op_c_index_store) {
@@ -6688,8 +6694,9 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		if (cl.live_in) {
 			const script_value* s = frame_slot(f, cl.slot);
-			cs.payload[k] = cl.kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(s->unchecked_as_int()) : cell_bits_of_float(s->unchecked_as_float());
-			cs.kind[k] = cl.kind;
+			const uint8_t kind = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());   // adopted above
+			cs.payload[k] = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(s->unchecked_as_int()) : cell_bits_of_float(s->unchecked_as_float());
+			cs.kind[k] = kind;
 			JAI_CELLS_COUNT(3);
 		} else {
 			cs.kind[k] = 0;   // defined inside the body before any read; empty until then
@@ -6711,6 +6718,9 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 		case opcode::op_c_load: st = exec_c_load(f, ci); break;
 		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
+		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci); break;
+		case opcode::op_c_jump: f.ip = ci.a; break;
+		case opcode::op_c_nop: ++f.ip; break;
 		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 		}
 		if (st == op_status::failed) return st;
@@ -6819,6 +6829,37 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 	return {};
 }
 
+// an interior typed compare-jump: the head's comparison, but a false result stays in the block (it skips the arm)
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
+	const uint32_t lk = ins.a & k_cell_index_mask;
+	const uint32_t original_ip = static_cast<uint32_t>(loop.head + 1 + (f.ip - (loop.copy_head + 1)));
+	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	if (cs.kind[lk] != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+	int64_t right_bits;
+	if (ins.b & k_typed_const_bit) {
+		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
+	} else {
+		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip, 3); return {}; }
+		right_bits = cs.payload[ins.b];
+	}
+	bool truthy;
+	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+		const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(right_bits);
+		switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
+	} else {
+		const script_float a = cell_float_of_bits(cs.payload[lk]), b = cell_float_of_bits(right_bits);
+		switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
+	}
+	if (truthy) { ++f.ip; } else { f.ip = ins.c; }
+	return {};
+}
+
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
 JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
@@ -6846,8 +6887,22 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 	}
 	if (!ok || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
 	const size_t at = static_cast<size_t>(index);
-	const uint8_t expect = site.decl_expect;
+	uint8_t expect = site.decl_expect;
 	int64_t bits;
+	if (expect == 0xFF) {
+		// an unclassed temp lands the element's own kind; its consumers check the kind as they do for every cell
+		switch (node->kind()) {
+		case script_array::kind_t::i64: expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
+		case script_array::kind_t::f64: expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
+		case script_array::kind_t::hetero: {
+			const size_t ei = node->values()[at].raw_storage_index();
+			if (ei != script_value::TYPEID_INT && ei != script_value::TYPEID_FLOAT) return miss();
+			expect = static_cast<uint8_t>(ei);
+			break;
+		}
+		default: return miss();
+		}
+	}
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
 		if (expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = node->ints()[at]; }

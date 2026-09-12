@@ -1610,6 +1610,58 @@ var nested_break = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { 
 			check_eq(size_t(7), closed, "every loop with an exit closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 			check(listing.find("C_EXIT") != std::string::npos, "the exits are in the copies: " + listing);
 		});
+		test("a_callee_may_reload_arm_operators_or_unwind_through_the_block", [this]() {
+			// the call door's boundaries through a native callee: one that rebinds the function the loop calls (the probe resolves
+			// the callee at every call), one that rebinds a container the loop reads by name and one that rebinds the container a
+			// var& local aliases (the landing checks the sites by identity), one that arms custom numeric operators (the landing
+			// leaves the block for the general form from then on), and a throw out of a callee that unwinds through the looping
+			// frame into its caller's catch (the record's cell state resets for the next call); the interpreter is the oracle
+			const char* defs = R"JAI(
+var f = function(int i) -> int { return i; };
+var f2 = function(int i) -> int { return i * 100; };
+array<int> G = [1, 2, 3, 4, 5, 6, 7, 8];
+array<int> G2 = [10, 20, 30, 40, 50, 60, 70, 80];
+var swap_f_at = function(int i, int at) -> void { if (i == at) { host_swap_f(); } };
+var rebind_g_at = function(int i, int at) -> void { if (i == at) { host_rebind_g(); } };
+var arm_at = function(int i, int at) -> void { if (i == at) { host_arm_ops(); } };
+var calls_f = function(int n, int at) { int acc = 0; for (int i = 0; i < n; ++i) { swap_f_at(i, at); int r = f(i); acc = acc + r; } return acc; };
+var reads_g = function(int n, int at) { int acc = 0; for (int i = 0; i < n; ++i) { rebind_g_at(i, at); acc = acc + G[i]; } return acc; };
+var reads_alias = function(int n, int at) { var& g = G; int acc = 0; for (int i = 0; i < n; ++i) { rebind_g_at(i, at); acc = acc + g[i]; } return acc; };
+var armed = function(int n, int at) { int acc = 0; float w = 0.5; for (int i = 0; i < n; ++i) { arm_at(i, at); int r = f(i); acc = acc + r * 2; w = w + r; } return to_string(acc) + " " + to_string(w); };
+var boom = function(int i) -> int { if (i == 3) { throw "boom " + to_string(i); } return i; };
+var looping = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int b = boom(i); acc = acc + b * 10; } return acc; };
+var across = function(int n) { string s = ""; try { s = to_string(looping(n)); } catch (e) { s = "caught " + e; } return s + "|" + to_string(looping(2)); };
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				e->add_function("host_swap_f", [raw]() { raw->execute("f = f2;"); });
+				e->add_function("host_rebind_g", [raw]() { raw->execute("G = G2;"); });
+				e->add_function("host_arm_ops", [raw]() { raw->set_has_custom_numeric_operators(true); });
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(calls_f(6, 3));", "1203" }, { "to_string(calls_f(6, 0));", "1500" }, { "to_string(calls_f(6, 9));", "15" },
+				{ "to_string(reads_g(6, 2));", "183" }, { "to_string(reads_alias(6, 2));", "183" }, { "to_string(reads_g(6, 0));", "210" },
+				{ "armed(6, 3);", "30 15.500000" }, { "armed(6, 0);", "30 15.500000" }, { "across(6);", "caught boom 3|10" }, { "across(2);", "10|10" },
+			};
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(defs) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(5), closed, "the five loops with calls close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

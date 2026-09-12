@@ -363,8 +363,15 @@ namespace jai::vm {
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
             uint32_t counted = k_invalid_u32;
             std::vector<cell> cells;
-            std::vector<uint32_t> slot_to_cell;   // indexed by frame slot (and the env cells' synthetic slots); k_invalid_u32 = not a cell
+            // indexed by frame slot (and the env cells' synthetic slots): the slot's FIRST cell, k_invalid_u32 = not a cell. A
+            // compiler temp slot may carry several cells, one per definition of another kind; the emission advances the
+            // binding as it passes each definition and the copy names cells directly, so this table is emission-time only
+            std::vector<uint32_t> slot_to_cell;
             std::vector<uint32_t> origin;         // per copy instruction (copy_head + k): the original instruction it stands for (the miss path's map)
+            // per copy instruction: the temp cells whose definition is live there (defined earlier, read at or after it),
+            // the only temps a miss at that instruction flushes; temp_mask = every temp cell
+            std::vector<uint64_t> live_temps;
+            uint64_t temp_mask = 0;
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;
         };

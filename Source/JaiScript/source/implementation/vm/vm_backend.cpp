@@ -6608,8 +6608,12 @@ void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
 
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
+	// a compiler value is flushed only where the general continuation reads it (its definition is live at this
+	// instruction): a temp slot carries one cell per definition kind, and a dead definition must not overwrite the live one
+	const size_t at = f.ip - loop.copy_head;
+	const uint64_t pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : ~uint64_t(0));
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
-		if (!(cs.dirty & (uint64_t(1) << k)) || cs.kind[k] == 0) continue;
+		if (!(pending & (uint64_t(1) << k)) || cs.kind[k] == 0) continue;
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		script_value* s = frame_slot(f, cl.slot);
 		if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -6744,7 +6748,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any) {
-			const chunk::typed_site& site = f.code->typed_sites[ci.c];
+			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			const script_value* cp = site.cont_slot != k_invalid_u32
 				? frame_slot(f, site.cont_slot)
 				: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? ci.c * 3 + 2 : ci.c * 3);
@@ -7270,14 +7274,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const uint32_t original_ip = ins.c;
-	const chunk::typed_site& site = f.code->typed_sites[original_ip];
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];   // the copy's own row: its operands name cells
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 2); return {}; };
 	const script_array* node = cs.site_node[f.ip - loop.copy_head];   // resolved at entry
 	if (!node) return miss();
 	auto read_int = [&](uint32_t o, script_int& out) -> bool {
 		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
-		const uint32_t k = loop.slot_to_cell[o & k_typed_slot_mask];
-		if (k == k_invalid_u32 || cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		const uint32_t k = o;   // a cell position (the emission built the row, so it is in range)
+		if (cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
 		out = static_cast<script_int>(cs.payload[k]);
 		return true;
 	};
@@ -7343,8 +7347,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
 	auto cell_int = [&](const fused_operand& o, script_int& out) -> bool {
 		if (o.const_index != k_invalid_u32) { const script_value& v = f.code->constants[o.const_index]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
-		if (o.slot == k_invalid_u32 || o.slot >= loop.slot_to_cell.size()) return false;
-		const uint32_t k = loop.slot_to_cell[o.slot];
+		const uint32_t k = o.slot;   // the copy's proto names cells (an empty operand never reaches here)
 		if (k == k_invalid_u32 || cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
 		out = static_cast<script_int>(cs.payload[k]);
 		return true;
@@ -7360,8 +7363,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		else return miss();
 		vstamp = v.get_type_info(); veng = v.get_engine();
 	} else {
-		if (p.store_value.slot == k_invalid_u32 || p.store_value.slot >= loop.slot_to_cell.size()) return miss();
-		const uint32_t k = loop.slot_to_cell[p.store_value.slot];
+		const uint32_t k = p.store_value.slot;   // a cell position
 		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
 		vkind = cs.kind[k]; vbits = cs.payload[k];
 		const chunk::cell_loop::cell& vc = loop.cells[k];

@@ -193,6 +193,15 @@ carry it. A guarded container that is an element reference into a hetero array (
 is resolved once at entry like a plain cell when no store site of the loop writes that table; a store into
 the table refuses the block, since the general form re-reads the entry at every guard.
 
+A counted loop (`for (int i = lit; i cmp end; i += step)`, the `op_cfor_prep` / `op_cfor_back` form) closes
+under the same body rules with the var, the end and the step as int cells. Its copy has no head compare
+(the head slot is a placeholder, so the copy stays one instruction per original) and its back edge is
+`op_c_cfor_back`: the step on the var cell, the compare against the end cell or literal, then the body
+again or the exit with the counted state popped; a step that overflows misses onto the general back edge,
+which raises its own text. The original back edge becomes `op_cells_cfor_back`: the general step and
+compare through the counted state's cached pointers, then the entry for the next iteration. A store
+value with no other use in the loop is a cell of adopted kind.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

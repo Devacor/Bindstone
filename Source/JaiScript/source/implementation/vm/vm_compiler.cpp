@@ -140,6 +140,14 @@ namespace {
 			case opcode::op_c_load:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
+			case opcode::op_c_jcmp:
+			case opcode::op_c_jump:
+			case opcode::op_c_guard:
+			case opcode::op_c_arith_any:
+			case opcode::op_c_mov:
+			case opcode::op_c_math:
+			case opcode::op_cells_cfor_back:
+			case opcode::op_c_cfor_back:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -279,6 +287,14 @@ namespace {
 			case opcode::op_c_load:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
+			case opcode::op_c_jcmp:
+			case opcode::op_c_jump:
+			case opcode::op_c_guard:
+			case opcode::op_c_arith_any:
+			case opcode::op_c_mov:
+			case opcode::op_c_math:
+			case opcode::op_cells_cfor_back:
+			case opcode::op_c_cfor_back:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2142,13 +2158,29 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// as cell instructions; the original back edge becomes the entry; the originals stay as the
 	// general form a miss returns to.
 	const size_t original_size = code.size();
+	auto int_operand = [&](const fused_operand& o) {   // a counted loop's end or step: an int literal or a direct frame slot
+		if (o.const_index != k_invalid_u32) return o.const_index < c.constants.size() && o.const_index < k_typed_slot_mask && c.constants[o.const_index].raw_storage_index() == script_value::TYPEID_INT;
+		return o.direct && o.slot != k_invalid_u32 && o.slot < k_typed_slot_mask && !o.is_subscript() && o.member_node == k_invalid_u32;
+	};
 	for (size_t back = 0; back < original_size; ++back) {
 		const vm_instruction be = code[back];
-		if (be.op != opcode::op_loop_back) continue;
-		const size_t head = be.a;
-		if (head >= back) continue;
-		const vm_instruction hd = code[head];
-		if (!(hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff) || hd.c != back + 1) continue;
+		size_t head; vm_instruction hd{}; uint32_t counted = k_invalid_u32;
+		if (be.op == opcode::op_loop_back) {
+			head = be.a;
+			if (head >= back) continue;
+			hd = code[head];
+			if (!(hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff) || hd.c != back + 1) continue;
+		} else if (be.op == opcode::op_cfor_back && be.a < c.counted_for_protos.size()) {
+			// a counted loop (for (int i = lit; i cmp end; i += step)): the body from body_ip to the back edge; the var,
+			// the end and the step are int cells and the copy's back edge steps and compares in the block
+			const counted_for_proto& p = c.counted_for_protos[be.a];
+			if (p.body_ip == k_invalid_u32 || p.body_ip == 0 || p.body_ip > back) continue;
+			if (!(p.var.direct && p.var.slot != k_invalid_u32 && p.var.slot < k_typed_slot_mask && p.var.const_index == k_invalid_u32) || !int_operand(p.end) || !int_operand(p.step)) continue;
+			head = p.body_ip - 1;
+			counted = be.a;
+		} else {
+			continue;
+		}
 		// gather the scalar slots with their kinds; any disagreement or unknown kind keeps the loop open
 		std::vector<chunk::cell_loop::cell> cells;
 		std::vector<chunk::cell_loop::env_operand_ref> env_ops;
@@ -2208,8 +2240,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (t->base_type == script_value_type::jai_float_type) return static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 			return 0;
 		};
-		const uint8_t head_kind = hd.op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-		use_slot(hd.a, head_kind, false, 0, nullptr); use_slot(hd.b, head_kind, false, 0, nullptr);
+		if (counted == k_invalid_u32) {
+			const uint8_t head_kind = hd.op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+			use_slot(hd.a, head_kind, false, 0, nullptr); use_slot(hd.b, head_kind, false, 0, nullptr);
+		} else {
+			const counted_for_proto& p = c.counted_for_protos[counted];
+			use_slot(p.var.slot, static_cast<uint8_t>(script_value::TYPEID_INT), true, k_typed_dst_compound, nullptr);   // stepped in place by the back edge
+			if (p.end.const_index == k_invalid_u32) { use_slot(p.end.slot, static_cast<uint8_t>(script_value::TYPEID_INT), false, 0, nullptr); }
+			if (p.step.const_index == k_invalid_u32) { use_slot(p.step.slot, static_cast<uint8_t>(script_value::TYPEID_INT), false, 0, nullptr); }
+		}
 		for (size_t ip = head + 1; ip < back && closed; ++ip) {
 			const vm_instruction st = code[ip];
 			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
@@ -2254,9 +2293,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				auto operand_slot = [&](const fused_operand& o, uint8_t kind) {
 					if (o.const_index != k_invalid_u32) return;
 					if (kind == static_cast<uint8_t>(script_value::TYPEID_INT) && env_scalar(o)) { env_cell(o, kind, static_cast<uint32_t>(ip * 3)); return; }
-					if (o.slot == k_invalid_u32 || !o.direct) { closed = false; return; }
-					if (kind == 0) { const int k = find_cell(o.slot); if (k < 0) { closed = false; return; } return; }
-					use_slot(o.slot, kind, false, 0, nullptr);
+					if (o.slot == k_invalid_u32 || !o.direct || o.slot >= k_typed_slot_mask) { closed = false; return; }
+					use_slot(o.slot, kind, false, 0, nullptr);   // a value with no other use is a cell of adopted kind (the entry takes the slot's int or float)
 				};
 				if (fp.index_binary != k_invalid_u32) {
 					const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
@@ -2337,7 +2375,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		if (!closed || cells.empty() || cells.size() > 64) continue;
 		chunk::cell_loop loop;
-		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.exit_ip = hd.c;
+		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.counted = counted;
+		loop.exit_ip = counted == k_invalid_u32 ? hd.c : c.counted_for_protos[counted].exit_ip;
 		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && cl.slot > max_slot) max_slot = cl.slot; }
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the env cells' synthetic slots
 		loop.cells = cells;
@@ -2352,7 +2391,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.copy_head = static_cast<uint32_t>(code.size());
 		const uint32_t loop_index = static_cast<uint32_t>(c.cell_loops.size());
 		auto append = [&](vm_instruction ins, size_t from_ip) { code.push_back(ins); c.stmt_nodes.push_back(from_ip < c.stmt_nodes.size() ? c.stmt_nodes[from_ip] : nullptr); };
-		append(vm_instruction{opcode::op_c_cmp, (static_cast<uint32_t>(hd.op) << k_cell_op_shift) | cell_of(hd.a), cell_of(hd.b), hd.c}, head);
+		if (counted == k_invalid_u32) {
+			append(vm_instruction{opcode::op_c_cmp, (static_cast<uint32_t>(hd.op) << k_cell_op_shift) | cell_of(hd.a), cell_of(hd.b), hd.c}, head);
+		} else {
+			// a counted loop has no head compare: a placeholder keeps the copy one instruction per original (the entry
+			// and the back edge start at the body)
+			append(vm_instruction{opcode::op_c_guard, 0, k_invalid_u32, 0}, head);
+		}
 		for (size_t ip = head + 1; ip < back; ++ip) {
 			const vm_instruction st = code[ip];
 			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
@@ -2427,8 +2472,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 		}
 		loop.copy_back = static_cast<uint32_t>(code.size());
-		append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back);
-		code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
+		if (counted == k_invalid_u32) {
+			append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back);
+			code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
+		} else {
+			const counted_for_proto& p = c.counted_for_protos[counted];
+			auto int_cop = [&](const fused_operand& o) { return o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : loop.slot_to_cell[o.slot]; };
+			append(vm_instruction{opcode::op_c_cfor_back, loop.slot_to_cell[p.var.slot], int_cop(p.end), int_cop(p.step)}, back);
+			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
+		}
 		c.cell_loops.push_back(std::move(loop));
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }

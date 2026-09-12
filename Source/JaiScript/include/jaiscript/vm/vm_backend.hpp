@@ -1555,6 +1555,11 @@ namespace jai::vm {
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
         type_info* temp_stamp_for(const script_array& node, size_t at) const;
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
+        op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
+        bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
+        op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
+        op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
+        JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins);

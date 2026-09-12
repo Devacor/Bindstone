@@ -359,6 +359,9 @@ namespace jai::vm {
             // any kind lands
             struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; };
             uint32_t head, back, copy_head, copy_back, exit_ip;
+            // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
+            // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
+            uint32_t counted = k_invalid_u32;
             std::vector<cell> cells;
             std::vector<uint32_t> slot_to_cell;   // indexed by frame slot (and the env cells' synthetic slots); k_invalid_u32 = not a cell
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };

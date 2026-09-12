@@ -5528,6 +5528,19 @@ op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 		f.ip = p.generic_update_ip;
 		return {};
 	}
+	bool again;
+	VM_TRY(cfor_advance(st, again));
+	if (again) {
+		f.ip = p.body_ip;
+	} else {
+		cfor_states_.pop_back();
+		f.ip = p.exit_ip;
+	}
+	return {};
+}
+
+// the counted back edge's step and compare on the general slot: again = the loop continues
+op_status vm_backend::cfor_advance(counted_for_state& st, bool& again) {
 	const script_int i = st.var->unchecked_as_int();
 	const script_int step = st.step_ptr ? *st.step_ptr : st.step_val;
 	script_int next;
@@ -5538,12 +5551,7 @@ op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 	}
 	st.var->unchecked_as_int_ref() = next;
 	const script_int end = st.end_ptr ? *st.end_ptr : st.end_val;
-	if (cfor_compare(st.cmp, next, end)) {
-		f.ip = p.body_ip;
-	} else {
-		cfor_states_.pop_back();
-		f.ip = p.exit_ip;
-	}
+	again = cfor_compare(st.cmp, next, end);
 	return {};
 }
 
@@ -6628,6 +6636,43 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	f.ip = original_ip;
 }
 
+// a counted loop's back edge that is also a block entry: the general step and compare (the state's cached pointers,
+// the overflow text), then the next iteration runs as a block when the cells admit it
+op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) {
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
+	if (cfor_states_.empty()) {
+		return raise_(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
+	}
+	counted_for_state& st = cfor_states_.back();
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return raise_from(execution_limit_failure());
+	}
+	if (!st.fast) {
+		f.ip = p.generic_update_ip;
+		return {};
+	}
+	if (st.var->raw_storage_index() != script_value::TYPEID_INT) [[unlikely]] {
+		st.fast = false;
+		f.ip = p.generic_update_ip;
+		return {};
+	}
+	bool again;
+	VM_TRY(cfor_advance(st, again));
+	if (!again) {
+		cfor_states_.pop_back();
+		f.ip = p.exit_ip;
+		return {};
+	}
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || !cells_enter(f, loop)) { f.ip = p.body_ip; return {}; }
+	cell_state& cs = *f.cells;
+	cs.loop = ins.a;
+	cs.dirty = 0;
+	JAI_CELLS_COUNT(0);
+	f.ip = loop.copy_head + 1;   // the copy's head slot is a placeholder: a counted loop's block starts at its body
+	return cells_run(f, loop);
+}
+
 // the original back edge: budget poll, then the entry guards on the live-in slots and the unboxing
 op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
@@ -6635,7 +6680,17 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
 	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
 	// rebound to its own area at every push, so a reused record never aliases another frame's cells
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed) { f.ip = loop.head; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || !cells_enter(f, loop)) { f.ip = loop.head; return {}; }
+	cell_state& cs = *f.cells;
+	cs.loop = ins.a;
+	cs.dirty = 0;
+	JAI_CELLS_COUNT(0);
+	f.ip = loop.copy_head;
+	return cells_run(f, loop);
+}
+
+// the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
+bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	// every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's
 	// canonical stamp and engine: the general form's first iteration established it, and a landing whose
@@ -6647,7 +6702,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
 			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
 			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
-			if (!v || (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (cl.kind != 0 && vk != cl.kind)) { JAI_CELLS_COUNT(1); f.ip = loop.head; return {}; }
+			if (!v || (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (cl.kind != 0 && vk != cl.kind)) { JAI_CELLS_COUNT(1); return false; }
 			continue;
 		}
 		if (cl.temp) continue;   // a compiler temp: written before read inside its statement, no declared type
@@ -6660,8 +6715,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
 #endif
-			f.ip = loop.head;
-			return {};
+			return false;
 		}
 	}
 	// the load and store sites' containers, resolved once per entry: the body has no call, no rebinding and no
@@ -6700,12 +6754,12 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
 			}
 		} else { continue; }
-		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); f.ip = loop.head; return {}; }
+		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); return false; }
 		cs.site_node[ip - loop.copy_head] = node;
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (uint32_t ip = loop.copy_head; ip < loop.copy_back; ++ip) {
-			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); f.ip = loop.head; return {}; }
+			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); return false; }
 		}
 	}
 	if (cs.payload.size() < loop.cells.size()) {
@@ -6739,13 +6793,14 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 			JAI_CELLS_COUNT(3);
 		}
 	}
-	cs.loop = ins.a;
-	cs.dirty = 0;
-	JAI_CELLS_COUNT(0);
-	f.ip = loop.copy_head;
-	// the copy runs as one block from here, each cell instruction through its own handler and
-	// no outer dispatch between them; an exit or a miss flushes (cs.loop clears) and leaves f.ip on the
-	// general form, a raise returns its status; the budget is polled at the cell back edge as before
+	return true;
+}
+
+// the copy runs as one block from here, each cell instruction through its own handler and no outer dispatch
+// between them; an exit or a miss flushes (cs.loop clears) and leaves f.ip on the general form, a raise returns
+// its status; the budget is polled at the cell back edge as before
+op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
+	cell_state& cs = *f.cells;
 	for (;;) {
 		const vm_instruction& ci = f.code->code[f.ip];
 		op_status st = op_status::ok;
@@ -6761,11 +6816,52 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci); break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ci); break;
 		case opcode::op_c_math: st = exec_c_math(f, ci); break;
+		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ci); break;
 		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 		}
 		if (st == op_status::failed) return st;
 		if (cs.loop == k_invalid_u32) return {};   // flushed at an exit or a miss: f.ip is the general form's
 	}
+}
+// a counted loop's cell back edge: the step on the var cell (an overflow misses onto the general back edge, which
+// raises its own text), the compare against the end cell or literal, then the body again or the exit
+JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	if (execution_limit_exhausted()) [[unlikely]] {
+		cells_flush(f, loop);   // the error and the debugger see materialized slots
+		f.ip = loop.back;
+		return raise_from(execution_limit_failure());
+	}
+	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
+	auto read = [&](uint32_t o, script_int& v) -> bool {
+		if (o & k_typed_const_bit) {
+			const script_value& rc = f.code->constants[o & ~k_typed_const_bit];
+			if (rc.raw_storage_index() != script_value::TYPEID_INT) return false;
+			v = rc.unchecked_as_int();
+			return true;
+		}
+		if (cs.kind[o] != kint) return false;
+		v = static_cast<script_int>(cs.payload[o]);
+		return true;
+	};
+	script_int step, end, next;
+	if (cs.kind[ins.a] != kint || !read(ins.c, step) || !read(ins.b, end)) { cells_miss(f, loop, loop.back, 0); return {}; }
+	const script_int i = static_cast<script_int>(cs.payload[ins.a]);
+	if (!(p.step_subtract ? ints::try_sub(i, step, next) : ints::try_add(i, step, next))) { cells_miss(f, loop, loop.back, 0); return {}; }
+	cs.payload[ins.a] = static_cast<int64_t>(next);
+	cs.dirty |= uint64_t(1) << ins.a;
+	if (cfor_compare(p.cmp, next, end)) {
+		JAI_CELLS_COUNT(2);
+		f.ip = loop.copy_head + 1;
+		return {};
+	}
+	JAI_CELLS_COUNT(4);
+	cells_flush(f, loop);   // the loop's exit: materialize, pop the counted state, continue after the loop
+	cfor_states_.pop_back();
+	f.ip = p.exit_ip;
+	return {};
 }
 JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
@@ -7184,7 +7280,6 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	++f.ip;
 	return {};
 }
-
 
 
 // The proven index: a direct slot or literal, or the int fold with its chain steps (the
@@ -14397,7 +14492,6 @@ void vm_backend::profile_reset() {
 	}
 }
 
-
 void vm_backend::dump_slot_census() const {
 	struct row { const profile_chunk_stats* st; uint64_t excl; };
 	std::vector<row> rows;
@@ -15257,6 +15351,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				f.ip = ins.a;
 				continue;
 			case opcode::op_cells_back: VM_TRY_OP_SHARED(exec_cells_back(f, ins)); continue;
+			case opcode::op_cells_cfor_back: VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins)); continue;
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {

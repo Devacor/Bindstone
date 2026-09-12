@@ -1321,6 +1321,27 @@ public:
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(4), closed, "the four numeric loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
+		test("value_doors_close", [this]() {
+			// draw_sprite's `int fiv = math::itrunc((fy - y0f) * dv)` (a math call as a declaration's value), a math call as a store's
+			// and an element store's value, trace_block_dz's `VX_X[LD_V1[i]]` (an element read as the index of an environment
+			// array), and truth tests on int and float locals as a loop head and inside a body, all landing the same on both
+			// backends with proofs on and off, every one of those loops closing, no general MATH or INDEX left in them
+			const char* defs =
+				"array<float> VX_X = [0.5, 1.5, 2.5, 3.5]; array<int> LD_V1 = [2, 0, 3, 1]; array<int> O = [0, 0, 0, 0];"
+				" var d1 = function(int y0, int y1, float y0f, float dv, int h) { int acc = 0; for (int fy = y0; fy <= y1; ++fy) { int fiv = math::itrunc((fy - y0f) * dv); if (fiv < 0 || fiv >= h) { continue; } acc = acc + fiv; } return acc; };"
+				" var d2 = function(int n) { float acc = 0.0; float r = 0.0; int i = 0; while (i < n) { r = math::sqrt(acc + 1.0); O[i] = math::itrunc(r * 2.0); acc = acc + r; i = i + 1; } return to_string(acc) + \",\" + to_string(O[0] + O[1] + O[2] + O[3]); };"
+				" var d3 = function(int n) { float acc = 0.0; int i = 0; while (i < n) { float ax = VX_X[LD_V1[i]]; acc = acc + ax; i = i + 1; } return acc; };"
+				" var d4 = function(int n) { int acc = 0; while (n) { acc = acc + n; n = n - 1; } return acc; };"
+				" var d5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int m = i % 3; if (m) { acc = acc + 1; } float f = 0.5 * i; if (f) { acc = acc + 10; } i = i + 1; } return acc; };";
+			const std::string script = std::string(defs) + " to_string(d1(2, 7, 1.5, 0.75, 6)) + \",\" + d2(4) + \",\" + to_string(d3(4)) + \",\" + to_string(d4(5)) + \",\" + to_string(d5(6));";
+			both(script, "", "value doors");
+			both(script, "", "value doors, proofs off", false);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(5), closed, "every value-door loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
+			size_t general = 0; for (const char* op : {"\tMATH ", "\tINDEX "}) { for (size_t at = listing.find(op); at != std::string::npos; at = listing.find(op, at + 1)) { ++general; } }
+			check_eq(size_t(0), general, "no general MATH or INDEX left in the bodies (the declarations at the top level are the script's own): " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

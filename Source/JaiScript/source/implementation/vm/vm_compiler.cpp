@@ -1526,15 +1526,15 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 		if (assign->target->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(assign->target.get());
 			if (assign->op.type == token_type::equal && callable_.active && ident->names_value_decl && !ident->global_qualified &&
-			    (fusable_index_expr(assign->value.get()) || unary_temp_operand(assign->value.get()))) {
-				// `x = a[i];` or `x = -e;` in statement position: the value lands in a compiler temp (the T_LOAD row, the unary
-				// row) and the move row takes it, two destination-addressed instructions in place of a push and a store
+			    value_temp_operand(assign->value.get())) {
+				// `x = a[i];`, `x = -e;` or `x = math::f(e);` in statement position: the value lands in a compiler temp (the T_LOAD
+				// row, the unary row, the math row) and the move row takes it, two destination-addressed instructions in place
+				// of a push and a store
 				const uint32_t dst = identifier_slot_operand(ident);
 				const size_t temp_mark = temp_next_;
 				fused_operand src;
 				const bool landed = dst != k_invalid_u32 && dst < k_typed_slot_mask &&
-				    (unary_temp_operand(assign->value.get()) ? (compile_unary_into_temp(assign->value, src), true)
-				                                             : compile_subscript_into_temp(assign->value, operand_expect(static_cast<const binary_expr*>(assign->value.get())), src));
+				    compile_value_into_temp(assign->value, fusable_index_expr(assign->value.get()) ? operand_expect(static_cast<const binary_expr*>(assign->value.get())) : 0xFF, src);
 				if (landed) {
 					uint32_t flags = store_flag_no_result | store_flag_rhs_lvalue;
 					if (assign->typed_store_provable) flags |= store_flag_type_provable;
@@ -2275,9 +2275,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const vm_instruction& ci = code[cmp_ip];
 				if (ci.op >= opcode::op_t_jlt_ii && ci.op <= opcode::op_t_jne_ff && ci.c == back + 1) break;
 				if (ci.op == opcode::op_fused_cmp_jump && ci.a == back + 1 && ci.b < c.fused_binary_protos.size()) break;
+				// a truth test on a local as the head (`while (n)`): the load and its exit jump
+				if (ci.op == opcode::op_load && ci.a != k_invalid_u32 && ci.a < k_typed_slot_mask && ci.c == 0 && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;
 			}
 			if (cmp_ip >= back) { refuse(chunk::cell_refusal_head, head); cmp_ip = head; }
 			hd = code[cmp_ip];
+			if (hd.op == opcode::op_load) { hd = code[cmp_ip + 1]; hd.op = opcode::op_jump_if_false; }   // the exit is the jump's target (read below as hd.a)
 		} else {
 			if (be.a >= c.counted_for_protos.size()) continue;
 			const counted_for_proto& p = c.counted_for_protos[be.a];
@@ -2362,6 +2365,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (p.step.const_index == k_invalid_u32) { use_slot(p.step.slot, kint, false, 0, nullptr, head); }
 			head_op.kind = ir::placeholder;
 		}
+		auto int_zero = [&]() -> uint32_t {   // the literal 0 a truth test compares against, minted once per chunk
+			for (size_t k = 0; k < c.constants.size() && k < k_typed_slot_mask; ++k) { if (c.constants[k].raw_storage_index() == script_value::TYPEID_INT && c.constants[k].unchecked_as_int() == 0) return static_cast<uint32_t>(k); }
+			c.constants.push_back(script_value(static_cast<script_int>(0), static_cast<engine*>(nullptr)));
+			return static_cast<uint32_t>(c.constants.size() - 1);
+		};
 		auto int_one = [&]() -> uint32_t {   // the literal 1 of ++x and x--, minted once per chunk
 			for (size_t k = 0; k < c.constants.size() && k < k_typed_slot_mask; ++k) { if (c.constants[k].raw_storage_index() == script_value::TYPEID_INT && c.constants[k].unchecked_as_int() == 1) return static_cast<uint32_t>(k); }
 			c.constants.push_back(script_value(static_cast<script_int>(1), static_cast<engine*>(nullptr)));
@@ -2373,7 +2381,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (counted == k_invalid_u32 && ip == cmp_ip) {
 				// the head compare: its false edge is the loop's exit
 				op.kind = ir::cmp; op.head = true;
-				if (st.op == opcode::op_fused_cmp_jump) {
+				if (st.op == opcode::op_load) {
+					// `while (n)`: the language's truthiness of an int or a float is nonzero (a NaN is true, a negative zero is
+					// false, as the general test has them), so the head is a compare against zero; the jump's copy is a placeholder
+					use_slot(st.a, 0, false, 0, nullptr, ip); slot_read(op, st.a);
+					op.tok = static_cast<uint8_t>(token_type::bang_equal); op.a = st.a; op.b = k_typed_const_bit | int_zero(); op.target = code[ip + 1].a;
+					ops.push_back(op);
+					op = ir_op{}; op.kind = ir::placeholder;
+					++ip;
+				} else if (st.op == opcode::op_fused_cmp_jump) {
 					const fused_binary_proto& bp = c.fused_binary_protos[st.b];
 					op.tok = bp.op; op.target = st.a;
 					if (!cmp_tok(bp.op) || !value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_head, ip); break; }
@@ -2498,6 +2514,24 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
 				use_slot(st.a, kind, false, 0, nullptr, ip); use_slot(st.b, kind, false, 0, nullptr, ip);
 				op.kind = ir::cmp; op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
+			} else if (st.op == opcode::op_load && st.a != k_invalid_u32 && st.a < k_typed_slot_mask && st.c == 0 && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false)) {
+				// a truth test on a local inside the body (`if (x)`, `if (!x)` through its sense): a compare against zero with the
+				// jump's sense; a slot of another kind refuses at the entry
+				const vm_instruction& j = code[ip + 1];
+				if (!(j.a > ip + 1 && j.a <= back)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }
+				bool targeted = false;
+				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) {
+					const vm_instruction& n = code[ip2];
+					const uint32_t t = (n.op == opcode::op_jump || n.op == opcode::op_jump_if_true || n.op == opcode::op_jump_if_false || n.op == opcode::op_fused_cmp_jump) ? n.a
+					                 : (n.op >= opcode::op_t_jlt_ii && n.op <= opcode::op_t_jne_ff) ? n.c : k_invalid_u32;
+					targeted = t == ip + 1;
+				}
+				if (targeted) { refuse(chunk::cell_refusal_malformed, ip + 1); break; }
+				use_slot(st.a, 0, false, 0, nullptr, ip); slot_read(op, st.a);
+				op.kind = ir::cmp; op.tok = static_cast<uint8_t>(token_type::bang_equal); op.a = st.a; op.b = k_typed_const_bit | int_zero(); op.target = j.a; op.sense = j.op == opcode::op_jump_if_true;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::placeholder;   // the jump's place
+				++ip;
 			} else if (st.op == opcode::op_binary_fused && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false) && st.a < c.fused_binary_protos.size()) {
 				// a comparison used as a value and the jump that consumes it (the || and && chains, !e): one cmp with the jump's
 				// sense; the pair's origin is the value instruction (a miss re-runs it whole and the general jump follows), the
@@ -2614,7 +2648,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		chunk::cell_loop loop;
 		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.counted = counted;
-		loop.exit_ip = counted != k_invalid_u32 ? c.counted_for_protos[counted].exit_ip : (hd.op == opcode::op_fused_cmp_jump ? hd.a : hd.c);
+		loop.exit_ip = counted != k_invalid_u32 ? c.counted_for_protos[counted].exit_ip : (hd.op == opcode::op_fused_cmp_jump || hd.op == opcode::op_jump_if_false ? hd.a : hd.c);
 		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && cl.slot > max_slot) max_slot = cl.slot; }
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
@@ -2829,7 +2863,7 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 	if (fusable_member_container(b->left.get()) && operand_index) return true;
 	// a[b[i]]: the nested arm lands the inner read in a temp first (a slot container, so nothing raises ahead of it)
 	if (b->left->get_type() == node_type::identifier_expr && typed_lowering_ && temps_active_ && chunk_ && chunk_->is_function_body &&
-	    quiet_partner(b->left.get()) && fusable_index_expr(b->right.get())) return true;
+	    (quiet_partner(b->left.get()) || env_identifier(b->left.get())) && fusable_index_expr(b->right.get())) return true;
 	if (b->left->get_type() == node_type::identifier_expr) {
 		if (binary_expr* rb = index_binary_candidate(b->right.get())) {
 			binary_expr* spine[8];
@@ -2863,6 +2897,25 @@ bool vm_compiler::quiet_partner(const expression* e) {
 		return !id->global_qualified && identifier_slot_operand(id) != k_invalid_u32;
 	}
 	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
+}
+
+// an identifier that is not a frame slot resolves in the environment inside a fused op, as a lifted binary's environment
+// operand does; only an undefined name could observe that it resolves after an inner read (the accepted exception)
+bool vm_compiler::env_identifier(const expression* e) {
+	if (!e || e->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+	return !id->global_qualified && identifier_slot_operand(id) == k_invalid_u32;
+}
+
+// a value that lands in a compiler temp wherever a consumer wants an operand: an element read, a pure math call, a unary
+bool vm_compiler::value_temp_operand(const expression* e) {
+	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e);
+}
+
+bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
+	if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, out); return true; }
+	if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, out); return true; }
+	return fusable_index_expr(e.get()) && compile_subscript_into_temp(e, expect, out);
 }
 
 // A call to math::itrunc, ifloor, floor, ceil, sqrt, abs, sin, cos, tan or a degree conversion with exactly one
@@ -3077,7 +3130,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	// Nested index `a[b[i]]` on a slot container: the inner read lands in a temp first (container a is a
 	// slot, so nothing that could raise precedes the inner read), then the outer read takes the ident/temp shape
 	if (expr->left->get_type() == node_type::identifier_expr && fusable_index_expr(expr->right.get()) &&
-	    quiet_partner(expr->left.get()) && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
+	    (quiet_partner(expr->left.get()) || env_identifier(expr->left.get())) && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
 		fused_operand inner;
 		fused_operand container;
 		const bool ref_container = reference_slot_operand(expr->left.get());
@@ -3589,9 +3642,9 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	} else if (no_result && fusable_index_expr(value.get()) &&
 	           compile_subscript_into_temp(value, operand_expect(static_cast<const binary_expr*>(value.get())), p.store_value)) {
 		value_operand = true;   // `a[i] = b[j]`: the element read lands in a temp, the store takes it as an operand
-	} else if (no_result && unary_temp_operand(value.get())) {
-		compile_unary_into_temp(value, p.store_value);
-		value_operand = true;   // `a[i] = -e`: the unary lands in a temp
+	} else if (no_result && (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none)) {
+		compile_value_into_temp(value, 0xFF, p.store_value);
+		value_operand = true;   // `a[i] = -e` or `a[i] = math::f(e)`: the value lands in a temp
 	}
 	if (!value_operand) {
 		compile_expression(value);
@@ -4123,13 +4176,13 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		return;
 	}
 
-	if (decl->initializer && callable_.active && unary_temp_operand(decl->initializer.get()) &&
+	if (decl->initializer && callable_.active && (unary_temp_operand(decl->initializer.get()) || math_temp_operand(decl->initializer.get()) != detail::math_fn::none) &&
 	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
 	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
-		// `T v = -e;`: the unary lands in a compiler temp and the move row takes it, no push
+		// `T v = -e;` or `T v = math::f(e);`: the value lands in a compiler temp and the move row takes it, no push
 		const size_t temp_mark = temp_next_;
 		fused_operand src;
-		compile_unary_into_temp(decl->initializer, src);
+		compile_value_into_temp(decl->initializer, 0xFF, src);
 		const size_t ip = chunk_->code.size();
 		chunk::typed_site& site = typed_site_at(ip);
 		site.orig = vm_instruction{opcode::op_load, src.slot, src.symbol, 0};

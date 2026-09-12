@@ -353,6 +353,16 @@ declares) must be defined on every path to each of its reads (the must-define da
 untaken branch does not reach a read after the join; a region that fails is refused as malformed. The listing
 prints each closed region's operations with their targets, writes and reads (`-- ir`).
 
+A pinned cell (a declared int, float or bool) holds its kind for the whole block, since every write lands that kind or
+misses and the verifier proves no read ahead of a first declaration; an arithmetic or compare whose operand cells are
+pinned to its kind (constants of that kind included) is emitted in its unchecked form (`C_ARITH_P`, `C_CMP_P`,
+`C_JCMP_P`), the same handler with the per-read kind checks folded away; an adopted kind (a `var`, an unproven slot)
+keeps the checked form.
+
+`engine::ir_passes(bool)` is the switch over every proof-based elision and pass of the region compiler (the pinned
+forms first); off, a region runs its checked canonical form, observationally identical, and `jaiscript_fuzz
+--no-passes` is the differential gate, as `--no-proofs` is for the typed lowering.
+
 A landing after a call re-validates in proportion to what the call could have changed: the copy's sites are a list,
 the entry records how each site's container is reached (its frame slot, or its environment binding) and each
 environment cell's binding with the environment and its epoch, and a landing whose environment and epoch still

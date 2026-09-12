@@ -1683,6 +1683,54 @@ var cont = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i ==
 			check(listing.find(":exit->exit") != std::string::npos, "the break is an exit: " + listing);
 			check(listing.find(":jump->back") != std::string::npos, "the continue jumps to the back edge: " + listing);
 		});
+		test("pinned_operations_skip_their_kind_checks", [this]() {
+			// a loop over declared ints and floats runs its arithmetic and compares in the pinned forms; a var local (an adopted kind)
+			// keeps the checked forms and a kind change inside the loop still lands the same; an int declared from a float
+			// converts through the general form on both backends
+			const char* defs = R"JAI(
+var ints = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 3 - 1; if (t > 4) { acc = acc + t; } } return acc; };
+var flts = function(int n) { float acc = 0.0; float k = 0.5; int i = 0; while (i < n) { acc = acc + k * 1.5; if (acc > 3.0) { acc = acc - 1.0; } i = i + 1; } return math::itrunc(acc * 100.0); };
+var adopted = function(int n) { var v = 1; int acc = 0; for (int i = 0; i < n; ++i) { v = v + i; if (i == 2) { v = v * 1.5; } acc = acc + math::itrunc(v); } return to_string(acc) + " " + type_of(v); };
+var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < n; ++i) { f = f + 1.25; int q = f; acc = acc + q; } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = { { "to_string(ints(6));", "38" }, { "to_string(flts(8));", "300" }, { "adopted(5);", "31 float" }, { "to_string(narrows(4));", "13" } };
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			check(listing.find("C_ARITH_P") != std::string::npos && listing.find("C_JCMP_P") != std::string::npos && listing.find("C_CMP_P") != std::string::npos, "the pinned forms are emitted: " + listing);
+			const std::string adopted_listing = listing_of("var adopted = function(int n) { var v = 1; int acc = 0; for (int i = 0; i < n; ++i) { v = v + i; acc = acc + math::itrunc(v); } return acc; };");
+			check(adopted_listing.find("C_ARITH_ANY") != std::string::npos, "an adopted kind keeps the run-time kinds: " + adopted_listing);
+			// the switch off: the checked forms only, the same results (the differential the fuzz's --no-passes chain runs)
+			auto run_passes_off = [&](bool vm, const std::string& script) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				e->ir_passes(false);
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (const probe& p : probes) { check_eq(run_passes_off(false, std::string(defs) + " " + p.call), run_passes_off(true, std::string(defs) + " " + p.call), std::string(p.call) + " passes off: both backends"); }
+			{
+				auto e = engine::make();
+				e->set_backend(backend_type::vm);
+				stdlib::register_all(*e);
+				auto* symbolizer = e->get_symbolizer();
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(defs, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "the pinned defs parse");
+				(void)jai::detail::run_static_check(*e, parse_result.value());
+				jai::vm::vm_compiler compiler(symbolizer);
+				compiler.ir_passes(false);
+				const std::string off = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+				check(off.find("C_ARITH_P") == std::string::npos && off.find("C_JCMP_P") == std::string::npos && off.find("C_CMP_P") == std::string::npos && off.find("C_ARITH ") != std::string::npos, "the switch off emits the checked forms only: " + off);
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

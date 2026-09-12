@@ -1113,6 +1113,7 @@ void vm_backend::exec_yield(frame& f, const vm_instruction& ins) {
 
 std::shared_ptr<chunk> vm_backend::compile_only(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	return compiler_.compile_program(declarations);
 }
 
@@ -6955,15 +6956,21 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	for (;;) {
 		const vm_instruction& ci = f.code->code[f.ip];
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
+#endif
 		op_status st = op_status::ok;
 		switch (ci.op) {
-		case opcode::op_c_cmp: st = exec_c_cmp(f, ci); break;
-		case opcode::op_c_arith: st = exec_c_arith(f, ci); break;
+		case opcode::op_c_cmp: st = exec_c_cmp(f, ci, true); break;
+		case opcode::op_c_arith: st = exec_c_arith(f, ci, true); break;
+		case opcode::op_c_arith_p: st = exec_c_arith(f, ci, false); break;
+		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ci, false); break;
+		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ci, false); break;
 		case opcode::op_c_load: st = exec_c_load(f, ci, false); break;
 		case opcode::op_c_load_any: st = exec_c_load(f, ci, true); break;
 		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
-		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci); break;
+		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
 		case opcode::op_c_jump: f.ip = ci.a; break;
 		case opcode::op_c_guard: st = exec_c_guard(f, ci); break;
 		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci); break;
@@ -7160,7 +7167,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction
 	f.ip = loop.copy_head;
 	return {};
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins, bool checked) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -7168,10 +7175,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	bool truthy;
-	if (cs.kind[lk] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+	if (checked && cs.kind[lk] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cs.payload[lk]), b = rc.unchecked_as_int();
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -7180,7 +7187,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 		}
 	} else {
-		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+		if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(cs.payload[ins.b]);
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -7195,7 +7202,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 	f.ip = ins.c;
 	return {};
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins, bool checked) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -7203,14 +7210,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
+	if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	int64_t right_bits;
 	if (ins.c & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.c & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
+		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
+		if (checked && cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		right_bits = cs.payload[ins.c];
 	}
 	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -7252,7 +7259,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 }
 
 // an interior typed compare-jump: the head's comparison, but a false result stays in the block (it skips the arm)
-JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction& ins, bool checked) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -7260,14 +7267,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (cs.kind[lk] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
+	if (checked && cs.kind[lk] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 	int64_t right_bits;
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
+		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
+		if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 		right_bits = cs.payload[ins.b];
 	}
 	bool truthy;
@@ -14933,6 +14940,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_cells_), std::end(profile_cells_), 0ull);
 	std::fill(std::begin(profile_cells_refused_slot_), std::end(profile_cells_refused_slot_), 0ull);
 	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
+	std::fill(std::begin(profile_cell_ops_), std::end(profile_cell_ops_), 0ull);
 	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
@@ -15424,6 +15432,9 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
+		fprintf(stderr, "[vm-profile] cell instructions by opcode (measured span):");
+		for (size_t k = 0; k < 256; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
+		fprintf(stderr, "\n");
 		{
 			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
 			size_t closed = 0, by_class[8] = {};
@@ -15950,6 +15961,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	return run_program(compiler_.compile_program(declarations));
 }
 
@@ -15957,6 +15969,7 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 	auto program = std::static_pointer_cast<chunk>(compiled_slot);
 	if (!program) {
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+		compiler_.ir_passes(!engine_ || engine_->ir_passes());
 		program = compiler_.compile_program(declarations);
 		compiled_slot = program;
 	}
@@ -16100,6 +16113,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 	}
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
 	chunk_cache_.emplace(body.get(), chunk_cache_entry{compiled, body});
 	return compiled;

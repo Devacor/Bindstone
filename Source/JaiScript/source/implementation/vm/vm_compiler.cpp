@@ -163,6 +163,9 @@ namespace {
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
 			case opcode::op_c_exit:
+			case opcode::op_c_arith_p:
+			case opcode::op_c_cmp_p:
+			case opcode::op_c_jcmp_p:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -323,6 +326,9 @@ namespace {
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
 			case opcode::op_c_exit:
+			case opcode::op_c_arith_p:
+			case opcode::op_c_cmp_p:
+			case opcode::op_c_jcmp_p:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2936,6 +2942,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (operand & k_ir_env_bit) return current[env_slot(operand & ~k_ir_env_bit)];
 			return current[operand & k_typed_slot_mask];
 		};
+		// a pinned operand: a cell whose declared kind is the operation's (its kind byte never differs inside the block: every
+		// write lands it or misses, and the verifier proved no read ahead of a first declaration), or a constant of that kind;
+		// the operation then needs no per-read kind check
+		auto pinned_operand = [&](uint32_t cellop, uint8_t k) -> bool {
+			if (!ir_passes_) return false;   // the switch off: the checked forms only
+			if (cellop & k_typed_const_bit) { const uint32_t ci = cellop & ~k_typed_const_bit; return ci < c.constants.size() && static_cast<uint8_t>(c.constants[ci].raw_storage_index()) == k; }
+			return cellop < cells.size() && cells[cellop].kind == k;
+		};
 		auto dst_of = [&](uint32_t operand) -> uint32_t {
 			if (operand & k_ir_env_bit) return cell_of(operand);   // an environment value has one cell
 			if (pending_def != k_invalid_u32 && cells[pending_def].slot == (operand & k_typed_slot_mask)) return pending_def;
@@ -2976,7 +2990,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			pending_def = next_def < defs.size() && defs[next_def].first == ip ? defs[next_def].second : k_invalid_u32;
 			switch (op.kind) {
 			case ir::arith:
-				if (op.fast != opcode::op_halt) { append(vm_instruction{opcode::op_c_arith, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
+				if (op.fast != opcode::op_halt) {
+					const uint8_t k = op.fast <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+					const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
+					append(vm_instruction{pinned_operand(b2, k) && pinned_operand(c2, k) ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+				}
 				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
 				break;
 			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), 0}, ip); break;
@@ -2984,7 +3002,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t bits = op.sense ? 0x80000000u : 0u;
 				if (!op.head) { fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 1, op.target, bits }); }   // an interior target: patched to its copy position
 				const uint32_t target = op.head ? op.target : bits;
-				if (op.fast != opcode::op_halt) { append(vm_instruction{op.head ? opcode::op_c_cmp : opcode::op_c_jcmp, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
+				if (op.fast != opcode::op_halt) {
+					const uint8_t k = op.fast <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+					const uint32_t a2 = cell_of(op.a), b2 = cell_of(op.b);
+					const bool p = pinned_operand(a2, k) && pinned_operand(b2, k);
+					append(vm_instruction{op.head ? (p ? opcode::op_c_cmp_p : opcode::op_c_cmp) : (p ? opcode::op_c_jcmp_p : opcode::op_c_jcmp), (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | a2, b2, target}, ip);
+				}
 				else { append(vm_instruction{op.head ? opcode::op_c_cmp_any : opcode::op_c_jcmp_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
 				break;
 			}
@@ -4479,6 +4502,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 		vm_compiler body_compiler(symbolizer_, builtins_);
 		body_compiler.typed_lowering(typed_lowering_);
 		body_compiler.ir_listing(ir_listing_);
+		body_compiler.ir_passes(ir_passes_);
 		proto.body_chunk = body_compiler.compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
 	}
 

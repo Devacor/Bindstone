@@ -877,6 +877,44 @@ public:
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("108,48,", 0) == 0, "the plain aliases land: " + vm);
 		});
+		test("a_closed_loop_may_branch_inside_itself", [this]() {
+			// Astra's diamond fixtures in while form, the texture loop's guarded arm, a continue, a break (leaves the loop
+			// open) and an overflow inside the taken arm: the same on both backends, proofs on and off
+			const std::string script = R"(
+				function diamond(int n) -> int { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; }
+				function guarded(var& pix, var& pal, var& tp, int n, int th) -> int { int acc = 0; int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; acc = acc + pix[y]; y = y + 1; } return acc; }
+				function cont(int n) -> int { int total = 0; for (int i = 0; i < n; ++i) { if (i == 1) { continue; } total += i; } return total; }
+				function brk(int n) -> int { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; }
+				function ovf(int n) -> string { int total = 9223372036854775800; int seen = 0; int i = 0; try { while (i < n) { seen = i; if ((i % 2) == 0) { total += i; } else { total -= 1; } i = i + 1; } } catch (err) { return "throw:" + err + "|" + to_string(seen); } return to_string(total); }
+				var PIX = [0, 0, 0, 0, 0, 0, 0, 0]; var PAL = []; for (int k = 0; k < 64; ++k) { PAL.push(k * 2); } var TP = [3, 1, 4, 1, 5, 9, 2, 6];
+				to_string(diamond(6)) + "," + to_string(diamond(0)) + "," + to_string(diamond(1)) + "," + to_string(guarded(PIX, PAL, TP, 8, 8)) + "," + to_string(cont(10)) + "," + to_string(brk(10)) + "," + ovf(12);
+			)";
+			both(script, "", "branching cells");
+			both(script, "", "branching cells, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("-3,0,0,62,44,10,throw:", 0) == 0 && vm.find("|6") != std::string::npos, "diamonds, the guarded arm, continue, break and the overflow in the arm: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			auto listing_of = [&](const char* src) {
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(src, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parse_result = p.parse();
+				check_true(parse_result.has_value(), "snippet parses");
+				(void)jai::detail::run_static_check(*e, parse_result.value());
+				jai::vm::vm_compiler compiler(symbolizer);
+				return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			};
+			const std::string d = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; };");
+			check_true(d.find("CELLS_BACK") != std::string::npos && d.find("C_JCMP") != std::string::npos && d.find("C_JUMP") != std::string::npos, "the two-arm diamond closes with cell branches: " + d);
+			const std::string g = listing_of("var f = function(var& pix, var& pal, var& tp, int n, int th) { int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; y = y + 1; } return y; };");
+			check_true(g.find("CELLS_BACK") != std::string::npos && g.find("C_JCMP") != std::string::npos && g.find("C_NOP") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
+			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
+			check_true(b.find("CELLS_BACK") == std::string::npos, "a break leaves the loop open: " + b);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

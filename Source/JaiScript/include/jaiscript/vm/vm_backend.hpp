@@ -1557,6 +1557,7 @@ namespace jai::vm {
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);

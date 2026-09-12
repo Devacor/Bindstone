@@ -2160,7 +2160,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (k < 0) {
 				chunk::cell_loop::cell nc{ slot, kind, 0, !is_write, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
-			} else if (cells[k].kind != kind) { closed = false; return; }
+			} else if (cells[k].kind == 0) { cells[k].kind = kind; }   // an adopted kind takes the first typed use's
+			else if (kind != 0 && cells[k].kind != kind) { closed = false; return; }
 			if (is_write) { cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp; }
 		};
 		const uint8_t head_kind = hd.op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
@@ -2177,10 +2178,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
 				const chunk::typed_site& site = c.typed_sites[ip];
-				// a scalar decl with a stamp only: an unstamped decl lands the element's own tag, which a raw cell loses
-				if ((site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_INT) && site.decl_expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (!site.stamp && !site.temp)) { closed = false; break; }
+				// a scalar decl with a stamp, or a compiler temp: an unstamped decl lands the element's own tag, which a raw
+				// cell loses; a temp of an unclassed element (a read through a var& container) is a cell whose kind its
+				// consumers pin or the entry adopts from the slot's current value
+				const bool classed = site.decl_expect == static_cast<uint8_t>(script_value::TYPEID_INT) || site.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				if ((!classed && !site.temp) || (!site.stamp && !site.temp)) { closed = false; break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], static_cast<uint8_t>(script_value::TYPEID_INT), false, 0, nullptr); }
-				use_slot(st.a, site.decl_expect, true, k_typed_dst_decl, site.stamp);
+				use_slot(st.a, classed ? site.decl_expect : 0, true, k_typed_dst_decl, site.stamp);
 				continue;
 			}
 			if (st.op == opcode::op_index_store_fused && st.c != 0 && st.a < c.fused_index_protos.size() && c.fused_index_protos[st.a].typed_lane) {
@@ -2203,6 +2207,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (fp.store_value.const_index == k_invalid_u32) { operand_slot(fp.store_value, 0); }
 				continue;
 			}
+			if (st.op >= opcode::op_t_jlt_ii && st.op <= opcode::op_t_jne_ff && st.c > ip && st.c <= back) {
+				// an interior typed compare-jump forward inside the loop (or to its back edge): a branch the copy keeps
+				const uint8_t kind = st.op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				use_slot(st.a, kind, false, 0, nullptr); use_slot(st.b, kind, false, 0, nullptr);
+				continue;
+			}
+			if (st.op == opcode::op_jump && st.a > ip && st.a <= back) { continue; }   // an arm's end, a continue
+			if (st.op == opcode::op_operand_temp && st.c == 1) { continue; }   // a container guard: the entry checks the slot
 			closed = false;
 		}
 		if (!closed || cells.empty() || cells.size() > 64) continue;
@@ -2227,6 +2239,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				append(vm_instruction{opcode::op_c_arith, (static_cast<uint32_t>(st.op) << k_cell_op_shift) | cell_of(st.a & k_typed_slot_mask), cell_of(st.b), cell_of(st.c)}, ip);
 			} else if (st.op == opcode::op_t_load) {
 				append(vm_instruction{opcode::op_c_load, cell_of(st.a), loop_index, static_cast<uint32_t>(ip)}, ip);
+			} else if (st.op >= opcode::op_t_jlt_ii && st.op <= opcode::op_t_jne_ff) {
+				// the copy is one instruction per original, so a target inside the loop moves by the copy's offset
+				append(vm_instruction{opcode::op_c_jcmp, (static_cast<uint32_t>(st.op) << k_cell_op_shift) | cell_of(st.a), cell_of(st.b), st.c + (loop.copy_head - loop.head)}, ip);
+			} else if (st.op == opcode::op_jump) {
+				append(vm_instruction{opcode::op_c_jump, st.a + (loop.copy_head - loop.head), 0, 0}, ip);
+			} else if (st.op == opcode::op_operand_temp) {
+				append(vm_instruction{opcode::op_c_nop, 0, 0, 0}, ip);
 			} else {
 				append(vm_instruction{opcode::op_c_index_store, st.a, loop_index, static_cast<uint32_t>(ip)}, ip);
 			}
@@ -2290,6 +2309,9 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 	const bool operand_index = b->right->get_type() == node_type::identifier_expr || b->right->get_type() == node_type::literal_expr;
 	if (b->left->get_type() == node_type::identifier_expr && operand_index) return true;
 	if (fusable_member_container(b->left.get()) && operand_index) return true;
+	// a[b[i]]: the nested arm lands the inner read in a temp first (a slot container, so nothing raises ahead of it)
+	if (b->left->get_type() == node_type::identifier_expr && typed_lowering_ && temps_active_ && chunk_ && chunk_->is_function_body &&
+	    quiet_partner(b->left.get()) && fusable_index_expr(b->right.get())) return true;
 	if (b->left->get_type() == node_type::identifier_expr) {
 		if (binary_expr* rb = index_binary_candidate(b->right.get())) {
 			binary_expr* spine[8];

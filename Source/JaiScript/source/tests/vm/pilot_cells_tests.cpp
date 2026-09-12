@@ -1226,10 +1226,9 @@ public:
 			check_true(vm.rfind("31,11.000000,62,", 0) == 0, "the var, the float sum and the auto: " + vm);
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
-			// v5's widening store from a local (`acc = t`, a LOAD and STORE pair) and v6's assignment from an element read
-			// (`last = h[i]`, a pushing read and STORE) are stack pairs the table names for row 116c
-			check_eq(size_t(4), closed, "the four value-model loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(INDEX_FUSED)") != std::string::npos && listing.find("(STORE)") != std::string::npos, "the two stack pairs are named gaps: " + listing);
+			// v5's widening store from a local (`acc = t`) and v6's assignment from an element read (`last = h[i]`) are move
+			// rows since row 118b (a LOAD and STORE pair, a pushing read and STORE before it), so all six close
+			check_eq(size_t(6), closed, "the six value-model loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
 		});
 		test("temps_are_values_per_definition", [this]() {
 			// a compiler temp reused by consecutive statements with different kinds (draw_seg's column loop: an int element
@@ -1250,6 +1249,30 @@ public:
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(2), closed, "both loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
+		});
+		test("moves_are_one_row", [this]() {
+			// a statement-position move from a slot, a literal or an element read is one destination-addressed row whatever the
+			// checker proved: the widening store, the var store, the unproven same-kind store, the literal into a float, the
+			// element read into a var and into a typed local; the row's guard is total (the same-type payload test, else the
+			// exact general pair), so proofs on and off land the same, the listing has no general STORE left in these bodies,
+			// and every loop closes
+			const char* defs =
+				"array<int> A = [3, 1, 4, 1, 5]; var H = [1, 2.5, 3];"
+				" var m1 = function(int n) { float acc = 0.0; int t = 0; int i = 0; while (i < n) { t = A[i]; acc = t; i = i + 1; } return acc; };"
+				" var m2 = function(var p, int n) { var q = 0; int i = 0; while (i < n) { q = p; p = i; i = i + 1; } return q; };"
+				" var m3 = function(int n) { float f = 0.0; int k = 0; int i = 0; while (i < n) { f = 2; k = 7; i = i + 1; } return f + k; };"
+				" var m4 = function(int n) { var last = 0; int e = 0; int i = 0; while (i < n) { last = H[i]; e = A[i]; i = i + 1; } return to_string(last) + \",\" + to_string(e); };"
+				" var m5 = function(int n) { float w = 0.0; int i = 0; while (i < n) { w = A[i]; i = i + 1; } return w; };";
+			const std::string script = std::string(defs) + " to_string(m1(5)) + \",\" + to_string(m2(9, 4)) + \",\" + to_string(m3(3)) + \",\" + m4(3) + \",\" + to_string(m5(5)) + \",\" + type_of(m2(2.5, 0));";
+			both(script, "", "moves");
+			both(script, "", "moves, proofs off", false);
+			const std::string listing = listing_of(defs);
+			size_t stores = 0; for (size_t at = listing.find("\tSTORE "); at != std::string::npos; at = listing.find("\tSTORE ", at + 1)) { ++stores; }
+			size_t moves = 0; for (size_t at = listing.find("T_STORE_MOV"); at != std::string::npos; at = listing.find("T_STORE_MOV", at + 1)) { ++moves; }
+			check_eq(size_t(0), stores, "no general STORE left in the move bodies: " + listing);
+			check_true(moves >= 7, "the moves are rows: " + std::to_string(moves));
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(5), closed, "every move loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

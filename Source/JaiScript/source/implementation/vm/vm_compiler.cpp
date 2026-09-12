@@ -1519,6 +1519,28 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
 		if (assign->target->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(assign->target.get());
+			if (assign->op.type == token_type::equal && callable_.active && ident->names_value_decl && !ident->global_qualified &&
+			    fusable_index_expr(assign->value.get())) {
+				// `x = a[i];` in statement position: the read lands in a compiler temp (the T_LOAD row) and the move row takes
+				// it, two destination-addressed instructions in place of a pushing read and a store
+				const uint32_t dst = identifier_slot_operand(ident);
+				const size_t temp_mark = temp_next_;
+				fused_operand src;
+				if (dst != k_invalid_u32 && dst < k_typed_slot_mask &&
+				    compile_subscript_into_temp(assign->value, operand_expect(static_cast<const binary_expr*>(assign->value.get())), src)) {
+					uint32_t flags = store_flag_no_result | store_flag_rhs_lvalue;
+					if (assign->typed_store_provable) flags |= store_flag_type_provable;
+					if (assign->static_store_proof == proof_same_type) flags |= store_flag_same_type;
+					const size_t ip = chunk_->code.size();
+					chunk::typed_site& site = typed_site_at(ip);
+					site.orig = vm_instruction{opcode::op_load, src.slot, src.symbol, 0};
+					site.orig2 = vm_instruction{opcode::op_store, add_symbol(ident->symbol_id), dst, flags};
+					emit(opcode::op_t_store_mov, dst, src.slot, flags);
+					note_ident_node(ip, assign->target);
+					temp_next_ = temp_mark;   // the read's temp dies into the move
+					return true;
+				}
+			}
 			compile_expression(assign->value);
 			if (assign->op.type == token_type::equal) {
 				uint32_t flags = store_flag_no_result;
@@ -1820,7 +1842,7 @@ chunk::typed_site& vm_compiler::typed_site_at(size_t ip) {
 // emitted becomes one typed move and no DECL_VAR follows. The op's guard is the decl fast
 // path's admission; its fallback is the pair it replaced.
 bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl) {
-	if (!typed_lowering_ || !callable_.active) return false;
+	if (!callable_.active) return false;
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
 	    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) return false;
 	auto& code = chunk_->code;
@@ -1852,11 +1874,13 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 	return false;
 }
 
-// `x = y;` / `x = 5;` in statement position onto a parse-proven typed value slot with a
-// same-type proof: the LOAD or CONST becomes one typed move and no STORE follows
+// `x = y;` / `x = 5;` in statement position onto a frame slot: the LOAD or CONST becomes one move row and no STORE
+// follows. The row's guard is total (the same-type payload test on the live slot, else the exact general pair replayed
+// from the typed site), so it is the general form of the move and needs neither a proof nor the proofs flag; the
+// proofs flag gates the arithmetic and compare rows only
 bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags) {
-	if (!typed_lowering_ || !callable_.active) return false;
-	const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
+	if (!callable_.active) return false;
+	const uint32_t need = store_flag_no_result;
 	if ((flags & need) != need || (flags & (store_flag_ref_alias | store_flag_global_only))) return false;
 	const uint32_t dst = identifier_slot_operand(ident);
 	if (dst == k_invalid_u32 || dst >= k_typed_slot_mask) return false;

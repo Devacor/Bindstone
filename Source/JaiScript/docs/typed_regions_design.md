@@ -273,6 +273,12 @@ its cloned store protos. A definition is live from the instruction after it thro
 writes a slot only from a live definition, so a dead value never overwrites the one the general continuation
 reads.
 
+The move rows (`op_t_store_mov`, `op_t_store_const`, `op_t_decl_mov`, `op_t_decl_const`) are the general form
+of a statement-position move from a slot or a literal, and `x = a[i];` lands its read in a compiler temp and
+moves it with the same row. Their guard is total: the same-type payload test on the live slot lands in place,
+anything else replays the exact general pair from the typed site, so a proof adds nothing to their soundness and
+they are emitted with proofs on or off. The proofs flag gates the arithmetic and compare rows only.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

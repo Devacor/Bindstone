@@ -313,6 +313,13 @@ the block first. The copy is not one instruction per original: an argument the c
 carries have no copy instruction, a call has four, and branch targets and guard offsets map through the copy
 positions.
 
+An environment scalar a body writes (a fused store, a compound, an increment, a move or a call result landing on a
+global, or on the member a bare name resolves to; `::name` stays general) is the same environment cell its reads
+share, written by the declared-type rule against the stamp read at entry (an int global takes ints, a float global
+widens, a var lands any kind); the flush writes the payload back through the resolution the reads use, in place
+when the storage still holds that kind and stamp, and a call, which may read or rewrite the environment, has the
+written cells flushed ahead of its probe and re-read after its return.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

@@ -372,6 +372,7 @@ namespace jai::vm {
             // the only temps a miss at that instruction flushes; temp_mask = every temp cell
             std::vector<uint64_t> live_temps;
             uint64_t temp_mask = 0;
+            uint64_t env_mask = 0;    // every environment cell: the ones a body writes are flushed ahead of a call and at every exit
             bool has_sites = false;   // a load or store site in the copy: the entry and every landing after a call resolve the containers
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;

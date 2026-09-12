@@ -1411,6 +1411,43 @@ var values = function(int n) { int acc = 0; float r = 2.5; for (int i = 0; i < n
 			size_t calls = 0; for (size_t at = listing.find("\tC_CALL "); at != std::string::npos; at = listing.find("\tC_CALL ", at + 1)) { ++calls; }
 			check_eq(size_t(15), calls, "one C_CALL per call in a closed loop: " + listing);
 		});
+		test("globals_written_inside_a_block", [this]() {
+			// draw_seg's REMAIN = REMAIN - 1: an environment scalar written by a fused store, a compound, an increment, a move and a
+			// call result; the head reading the written value; the value seen by a callee (written back ahead of the call) and
+			// rewritten by one (re-read after it); a var global changing kind; an int global fed a float (the general conversion);
+			// a float global fed ints; a throw after the write (the catch sees the written value)
+			const char* defs = R"JAI(
+int REMAIN = 10; var V = 1; int T = 1; float F = 0.0; int SEEN = 0;
+var peek = function() -> int { return REMAIN; };
+var poke = function(int v) -> void { REMAIN = v; };
+var boom = function() -> void { throw "boom"; };
+var count_down = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN = REMAIN - 1; acc = acc + REMAIN; } return acc; };
+var compound = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN -= 2; REMAIN--; acc = acc + REMAIN; } return acc; };
+var head = function() { int acc = 0; while (REMAIN > 0) { REMAIN = REMAIN - 1; acc = acc + 1; } return acc; };
+var seen_by_callee = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN = REMAIN + 1; int p = peek(); acc = acc + p; } return acc; };
+var written_by_callee = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN = REMAIN + 1; poke(100); acc = acc + REMAIN; } return acc; };
+var var_kind = function(int n) { for (int i = 0; i < n; ++i) { V = V * 1.5; } return to_string(V) + " " + type_of(V); };
+var narrow = function(int n) { try { for (int i = 0; i < n; ++i) { T = T * 1.5; } } catch (e) { return "caught " + to_string(T); } return to_string(T); };
+var widen = function(int n) { for (int i = 0; i < n; ++i) { F = F + i; } return to_string(F); };
+var thrown = function(int n) { try { for (int i = 0; i < n; ++i) { REMAIN = REMAIN + 10; if (i == 1) { boom(); } } } catch (e) { return to_string(REMAIN) + " " + e; } return to_string(REMAIN); };
+var mov = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN = i; SEEN = 7; acc = acc + REMAIN + SEEN; } return acc; };
+var from_call = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REMAIN = peek(); acc = acc + REMAIN; } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(count_down(3));", "24" }, { "to_string(compound(2));", "11" }, { "to_string(head());", "10" }, { "to_string(seen_by_callee(3));", "36" },
+				{ "to_string(written_by_callee(3));", "300" }, { "var_kind(2);", "2.250000 float" }, { "narrow(2);", "" }, { "widen(3);", "3.000000" },
+				{ "thrown(3);", "30 boom" }, { "to_string(mov(3));", "24" }, { "to_string(from_call(2));", "20" },
+				{ "count_down(2); to_string(REMAIN);", "8" }, { "head(); to_string(REMAIN);", "0" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(11), closed, "every loop writing a global closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

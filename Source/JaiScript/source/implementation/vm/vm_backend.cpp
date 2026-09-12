@@ -6646,7 +6646,7 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	const uint64_t pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : ~uint64_t(0));
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		if (!(pending & (uint64_t(1) << k)) || cs.kind[k] == 0) continue;
-		cell_flush_one(f, loop, k);
+		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
 	}
 	cs.reset();
 }
@@ -6676,6 +6676,32 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 		script_value nv(v, engine_);
 		if (stamp != engine_->get_type_info_float()) { nv.set_type_info(type_info_ptr{stamp}); }
 		frame_slot_set(f, cl.slot, std::move(nv));
+	}
+}
+
+// an environment value the block wrote: the payload back through the same resolution the reads use (the global, or the
+// member a bare name resolves to); in place when the storage holds the kind and stamp read at entry, else a fresh value
+// with that stamp, which is what the general store leaves for a same-type or a var-typed target
+JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop::env_operand_ref& er = loop.env_operands[loop.cells[k].env_operand];
+	script_value* p = const_cast<script_value*>(fused_cmp_operand(f, er.operand, er.cache_slot));
+	if (!p) return;   // the name resolves to nothing here: unreachable without a call, and a call flushes first
+	type_info* stamp = cs.stamp[k];
+	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+		const script_int v = static_cast<script_int>(cs.payload[k]);
+		if (p->raw_storage_index() == script_value::TYPEID_INT && p->get_engine() == engine_ && p->type_info_raw() == stamp) { JAI_CELLS_COUNT(8); p->unchecked_set_int_payload(v); return; }
+		JAI_CELLS_COUNT(9);
+		script_value nv(v, engine_);
+		if (stamp && stamp != engine_->get_type_info_int()) { nv.set_type_info(type_info_ptr{stamp}); }
+		*p = std::move(nv);
+	} else {
+		const script_float v = cell_float_of_bits(cs.payload[k]);
+		if (p->raw_storage_index() == script_value::TYPEID_FLOAT && p->get_engine() == engine_ && p->type_info_raw() == stamp) { JAI_CELLS_COUNT(8); p->unchecked_set_float_payload(v); return; }
+		JAI_CELLS_COUNT(9);
+		script_value nv(v, engine_);
+		if (stamp && stamp != engine_->get_type_info_float()) { nv.set_type_info(type_info_ptr{stamp}); }
+		*p = std::move(nv);
 	}
 }
 
@@ -6847,7 +6873,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);   // resolved above: an int or a float
 			const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
 			cs.payload[k] = vk == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(v->unchecked_as_int()) : cell_bits_of_float(v->unchecked_as_float());
-			cs.kind[k] = vk; cs.stamp[k] = nullptr;
+			cs.kind[k] = vk; cs.stamp[k] = const_cast<type_info*>(v->type_info_raw());   // the landing rule for a write judges against the stamp read here
 		} else if (cl.temp) {
 			cs.kind[k] = 0; cs.stamp[k] = nullptr;   // a temp: empty until the body writes it (its slot may hold another statement's value)
 		} else {
@@ -6917,6 +6943,11 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	if (f.cells->dirty & loop.env_mask) [[unlikely]] {
+		// the callee and the verbatim environment pushes read the environment: written values go back first
+		for (uint32_t k = 0; k < loop.cells.size(); ++k) { if ((f.cells->dirty >> k) & 1 && loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } }
+		f.cells->dirty &= ~loop.env_mask;
+	}
 	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip]);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
 	++f.ip;

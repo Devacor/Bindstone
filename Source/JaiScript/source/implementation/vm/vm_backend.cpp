@@ -4405,6 +4405,12 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	script_value operand = std::move(stack_.back());
 	stack_.pop_back();
+	// an element read arrives as a reference wrapper (the rhs-lvalue shape): the unary consumes the VALUE like every
+	// other consumer (KEEP BYTE-PARALLEL with the interpreter's unary); copy out through a temp, the holder owns the target
+	if (operand.is_reference()) {
+		script_value derefed = operand.deref();
+		operand = std::move(derefed);
+	}
 
 	// `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
 	// full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
@@ -4775,6 +4781,29 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 		return raise_from(result);
 	}
 	frame_slot_set(f, ins.b, std::move(result.value()));
+	return {};
+}
+
+// a unary over an operand into a compiler temp: the operand lands on the stack and the general unary runs verbatim
+// (its texts, its bound decode, its truthiness), then the result lands in the temp instead of staying pushed
+op_status vm_backend::exec_unary_temp(frame& f, const vm_instruction& ins) {
+	if (ins.a != k_invalid_u32) {
+		const fused_operand& arg = f.code->fused_binary_protos[ins.a].left;
+		if (arg.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, arg.const_index)); }
+		else {
+			std::optional<script_value> scratch;
+			const script_value* v = fused_subscript_value(f, arg, scratch, f.ip * 3);   // the identifier ladder raises before it hands back null
+			if (!v) return op_status::failed;
+			stack_.push_back(v->deref());   // LOAD pushes the referent
+		}
+	}
+	VM_TRY(exec_unary(f, vm_instruction{opcode::op_unary, ins.c, 0, 0}));
+	script_value r = std::move(stack_.back());
+	stack_.pop_back();
+	const size_t ri = r.raw_storage_index();
+	if (ri == script_value::TYPEID_INT) { typed_land_int(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), r.unchecked_as_int()); return {}; }
+	if (ri == script_value::TYPEID_FLOAT) { typed_land_float(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), r.unchecked_as_float()); return {}; }
+	frame_slot_set(f, ins.b, std::move(r));
 	return {};
 }
 
@@ -6848,6 +6877,8 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ci); break;
 		case opcode::op_c_cmp_any: st = exec_c_cmp_any(f, ci, true); break;
 		case opcode::op_c_jcmp_any: st = exec_c_cmp_any(f, ci, false); break;
+		case opcode::op_c_neg: st = exec_c_neg(f, ci); break;
+		case opcode::op_c_bnot: st = exec_c_bnot(f, ci); break;
 		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 		}
 		if (st == op_status::failed) return st;
@@ -7194,6 +7225,51 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instru
 		kind = kflt; out = cell_bits_of_float(r);
 	}
 	if (!ok || !cell_land(f, loop, dk, kind, out)) { cells_miss(f, loop, original_ip(), 1); return {}; }
+	++f.ip;
+	return {};
+}
+
+// unary minus on a value: the general kernel's rows (an int negates through the checked negation, so INT64_MIN misses
+// onto the kernel's overflow text; a float keeps IEEE negation, so a zero's sign flips as the kernel's does)
+JAI_FORCEINLINE op_status vm_backend::exec_c_neg(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
+	uint8_t sk; int64_t sb;
+	if (ins.b & k_typed_const_bit) {
+		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		sk = static_cast<uint8_t>(rc.raw_storage_index());
+		if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) { sb = static_cast<int64_t>(rc.unchecked_as_int()); }
+		else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { sb = cell_bits_of_float(rc.unchecked_as_float()); }
+		else return miss();
+	} else { sk = cs.kind[ins.b]; sb = cs.payload[ins.b]; }
+	if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+		script_int r;
+		if (!ints::try_neg(static_cast<script_int>(sb), r)) return miss();
+		if (!cell_land(f, loop, ins.a, sk, static_cast<int64_t>(r))) return miss();
+	} else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+		if (!cell_land(f, loop, ins.a, sk, cell_bits_of_float(-cell_float_of_bits(sb)))) return miss();
+	} else return miss();
+	++f.ip;
+	return {};
+}
+
+// complement on an int value; anything else misses onto the general unary
+JAI_FORCEINLINE op_status vm_backend::exec_c_bnot(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	int64_t sb;
+	if (ins.b & k_typed_const_bit) {
+		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		if (rc.raw_storage_index() != script_value::TYPEID_INT) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
+		sb = static_cast<int64_t>(rc.unchecked_as_int());
+	} else {
+		if (cs.kind[ins.b] != static_cast<uint8_t>(script_value::TYPEID_INT)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
+		sb = cs.payload[ins.b];
+	}
+	if (!cell_land(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_INT), ~sb)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
 	++f.ip;
 	return {};
 }
@@ -15286,6 +15362,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
 			case opcode::op_math_temp: VM_TRY_OP_SHARED(exec_math_temp(f, ins)); break;
+			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;

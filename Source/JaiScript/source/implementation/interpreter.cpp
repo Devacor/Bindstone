@@ -3926,6 +3926,12 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
         return {};
     }
     script_value operand = pop_value();
+    // an element read arrives as a reference wrapper (the rhs-lvalue shape): the unary consumes the VALUE like every
+    // other consumer (KEEP BYTE-PARALLEL with vm_backend::exec_unary); copy out through a temp, the holder owns the target
+    if (operand.is_reference()) {
+        script_value derefed = operand.deref();
+        operand = std::move(derefed);
+    }
 
     // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
     // full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,

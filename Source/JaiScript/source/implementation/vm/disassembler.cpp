@@ -198,6 +198,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				}
 				break;
 			default:
+				out << " " << ins.a << " " << ins.b << " " << ins.c;   // the typed rows and the cell copies: slots, cells, constants behind their bit, targets
 				break;
 		}
 		out << "\n";

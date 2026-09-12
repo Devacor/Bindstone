@@ -911,7 +911,7 @@ public:
 			const std::string d = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; };");
 			check_true(d.find("CELLS_BACK") != std::string::npos && d.find("C_JCMP") != std::string::npos && d.find("C_JUMP") != std::string::npos, "the two-arm diamond closes with cell branches: " + d);
 			const std::string g = listing_of("var f = function(var& pix, var& pal, var& tp, int n, int th) { int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; y = y + 1; } return y; };");
-			check_true(g.find("CELLS_BACK") != std::string::npos && g.find("C_JCMP") != std::string::npos && g.find("C_NOP") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
+			check_true(g.find("CELLS_BACK") != std::string::npos && g.find("C_JCMP") != std::string::npos && g.find("C_GUARD") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
 			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
 			check_true(b.find("CELLS_BACK") == std::string::npos, "a break leaves the loop open: " + b);
 		});
@@ -947,6 +947,67 @@ public:
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the texture shape with a global view width closes: " + listing);
+		});
+		test("a_flat_column_loop_closes_over_var_globals_math_and_clamps", [this]() {
+			// JaiDOOM's draw_flat_col: var globals in the arithmetic (CENTERY, VIEW_X, VIEW_Y, VW), a float / int division,
+			// itrunc into a band, clamps, a continue, the texture as an element reference into a table; a float CENTERY
+			// (a conversion at the int decl) and a pixel table aliasing the texture table keep the general form's results;
+			// the same pixels on both backends, proofs on and off
+			const std::string script = R"(
+				var VW = 4; var VIEWH = 16; var CENTERY = 3; var VIEW_X = 0.5; var VIEW_Y = 0.25; var VIEW_Z = 41.0; var FOCALY = 60.0;
+				var PIX = []; for (int k = 0; k < 64; ++k) { PIX.push(0); }
+				var PALCM = []; for (int k = 0; k < 8192; ++k) { PALCM.push(k % 251); }
+				var FLATS = []; for (int t = 0; t < 2; ++t) { var f = []; for (int k = 0; k < 4096; ++k) { f.push((k * (7 + t)) % 64); } FLATS.push(f); }
+				function flat_col(int x, int y0, int y1, var& flat, float planeh, float raydx, float raydy, int light) -> int {
+					if (y0 < 0) { y0 = 0; }
+					if (y1 >= VIEWH) { y1 = VIEWH - 1; }
+					float dz = (VIEW_Z - planeh) * FOCALY;
+					int bandbase = ((255 - light) >> 3) - 1;
+					var& pix = PIX; var& palcm = PALCM;
+					for (int y = y0; y <= y1; ++y) {
+						int dy = y - CENTERY;
+						if (dy == 0) { continue; }
+						float z = dz / dy;
+						float wx = VIEW_X + raydx * z;
+						float wy = VIEW_Y + raydy * z;
+						int band = bandbase + math::itrunc(z * 0.001953125);
+						if (band < 0) { band = 0; }
+						if (band > 31) { band = 31; }
+						pix[y * VW + x] = palcm[band * 256 + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]];
+					}
+					int acc = 0; for (int k = 0; k < 64; ++k) { acc = acc + pix[k] * (k + 1); }
+					return acc;
+				}
+				var& cflat = FLATS[1];
+				int a = flat_col(1, -2, 40, cflat, 20.0, 0.7, -0.3, 96);
+				int b = flat_col(2, 0, 15, FLATS[0], -8.0, 1.9, 0.4, 200);
+				CENTERY = 2.5; string c = ""; try { c = to_string(flat_col(3, 0, 15, cflat, 20.0, 0.7, -0.3, 96)); } catch (err) { c = "throw:" + err; }
+				CENTERY = 3; PIX = FLATS; string d = ""; try { d = to_string(flat_col(1, 0, 3, cflat, 20.0, 0.7, -0.3, 96)); } catch (err) { d = "throw:" + err; }
+				to_string(a) + "," + to_string(b) + "," + c + "," + d + "," + to_string(FLATS[1].size()) + "," + type_of(FLATS[1]);
+			)";
+			both(script, "", "flat column");
+			both(script, "", "flat column, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find(",") != std::string::npos, "ran: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "var VW = 4; var CENTERY = 3; var VIEW_X = 0.5; var VIEW_Y = 0.25;"
+			                 " var f = function(var& pix, var& palcm, var& flat, int x, int y0, int y1, float dz, float raydx, float raydy, int bandbase) {"
+			                 " for (int y = y0; y <= y1; ++y) { int dy = y - CENTERY; if (dy == 0) { continue; } float z = dz / dy; float wx = VIEW_X + raydx * z; float wy = VIEW_Y + raydy * z;"
+			                 " int band = bandbase + math::itrunc(z * 0.001953125); if (band < 0) { band = 0; } if (band > 31) { band = 31; }"
+			                 " pix[y * VW + x] = palcm[band * 256 + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]]; } return y0; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_ARITH_ANY") != std::string::npos && listing.find("C_MATH") != std::string::npos && listing.find("C_MOV") != std::string::npos, "the flat column loop closes: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

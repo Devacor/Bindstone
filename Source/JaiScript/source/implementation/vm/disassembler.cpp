@@ -205,7 +205,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 	}
 
 	for (const auto& loop : ch.cell_loops) {
-		out << "-- cell loop " << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "") << "\n";
+		out << "-- cell loop " << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "");
+		if (!loop.calls.empty()) { out << " (calls " << loop.calls.size() << ")"; }
+		out << "\n";
 	}
 	for (const auto& r : ch.cell_refusals) {
 		out << "-- open loop " << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";

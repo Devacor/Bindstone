@@ -299,6 +299,20 @@ counted loop whose bound or step is an environment scalar enters the block (the 
 through a pointer at every back edge and no cell instruction writes a global, so the environment cell read once
 at entry holds the same value).
 
+A call inside a body is one operation of the block (the design note's section 9). Its arguments are values: a cell
+boxed at the call, a constant or an environment name pushed as the general instruction pushes it, or a computed
+argument (a fused binary, an element read, a math call or a unary over a slot) landing in a compiler value of its
+own ahead of the call. The callee probe, the pushes and the call run the general executors verbatim over three
+copy instructions at the call's place, the callee runs in the dispatcher with the caller parked on the call's copy,
+and the landing after the return lands the result by the declared-type rule into a scalar declaration or a
+no-result store, or drops a statement's. The call is the effect point: a slot argument's cell is flushed ahead of
+the call so a by-reference parameter binds the current value and its kind is checked after it (a local that
+escaped is the slot's from then on), the environment values are re-read, the container sites re-resolved, and any
+change misses at the consumer with the result on the stack; a callee that raises into the caller's handler flushes
+the block first. The copy is not one instruction per original: an argument the call boxes and a jump a compare
+carries have no copy instruction, a call has four, and branch targets and guard offsets map through the copy
+positions.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

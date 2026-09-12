@@ -203,11 +203,11 @@ namespace jai::vm {
         uint64_t profile_typed_inplace_[4] = {};
         // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
-        uint64_t profile_cells_[11] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site
+        uint64_t profile_cells_[13] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
-        uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store
+        uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -595,8 +595,15 @@ namespace jai::vm {
         }
         void land_call_result(frame& caller, script_value&& v) {
             if (next_op_discards_result(caller)) { caller.ip += 2; return; }
+            if (block_landing_discards_result(caller)) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
             stack_.push_back(std::move(v));
             ++caller.ip;
+        }
+        bool block_landing_discards_result(const frame& caller) const noexcept {
+            const auto& code = caller.code->code;
+            if (caller.ip + 1 >= code.size() || code[caller.ip + 1].op != opcode::op_c_land) return false;
+            const vm_instruction& land = code[caller.ip + 1];
+            return caller.code->cell_loops[land.b].calls[land.a].consumer == 0;
         }
         script_value* frame_slot(frame& f, size_t slot) noexcept {
             if (f.window_backed) {
@@ -1062,6 +1069,25 @@ namespace jai::vm {
                 return own;
             }
             return script_value(*node, engine_);
+        }
+        // the CONST instruction's push: literals are engine-less parse-time templates, re-materialized with the engine
+        JAI_FORCEINLINE void push_constant(const chunk& code, uint32_t index) {
+            const script_value& tmpl = code.constants[index];
+            const auto& storage = tmpl.get_storage();
+            switch (storage.index()) {
+            case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
+            case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
+            case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(code, index, storage.get<strong_ptr<script_string>>())); break;
+            case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
+            case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
+            case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
+            default: {
+                script_value copy = tmpl;
+                copy.set_engine(engine_);
+                stack_.push_back(std::move(copy));
+                break;
+            }
+            }
         }
         bool object_defines_custom_equality(const script_value& v) const;
         std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
@@ -1566,11 +1592,24 @@ namespace jai::vm {
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status cells_run_cold(frame& f, const chunk::cell_loop& loop, const vm_instruction& ci);   // the call door's instructions, off the block loop's hot switch
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
         JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head);
         JAI_FORCEINLINE op_status exec_c_neg(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_bnot(frame& f, const vm_instruction& ins);
+        // a call inside the block: the probe, the pushes and the call run the general executors verbatim; the landing after the
+        // return re-reads what the callee could have touched and lands the result by the declared-type rule
+        op_status exec_c_probe(frame& f, const vm_instruction& ins);
+        op_status exec_c_args(frame& f, const vm_instruction& ins);
+        op_status exec_c_call(frame& f, const vm_instruction& ins);
+        op_status cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);
+        op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
+        bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
+        JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins);

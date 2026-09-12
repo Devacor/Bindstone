@@ -372,8 +372,17 @@ namespace jai::vm {
             // the only temps a miss at that instruction flushes; temp_mask = every temp cell
             std::vector<uint64_t> live_temps;
             uint64_t temp_mask = 0;
+            bool has_sites = false;   // a load or store site in the copy: the entry and every landing after a call resolve the containers
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;
+            // a call inside the block: the probe, the pushes, the call and the landing are four copy instructions over one
+            // descriptor. An argument is a cell (boxed at the call; a slot's cell is flushed first so a by-reference parameter
+            // binds the current value) or a push the block runs verbatim (a constant, an environment name, a slot the loop
+            // holds no cell for). The consumer lands the result into dst by the declared-type rule (1 = a scalar declaration,
+            // 2 = a no-result store) or drops it (0 = a statement).
+            struct call_arg { uint8_t kind; uint32_t v; uint32_t ip; };   // kind 0 = a slot (a cell or verbatim, decided at emission), 1 = cell v, 2 = the push at ip verbatim
+            struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; };
+            std::vector<cell_call> calls;
         };
         std::vector<cell_loop> cell_loops;
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
@@ -406,7 +415,7 @@ namespace jai::vm {
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
             case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
-            case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast:
+            case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused:
                 return cell_refusal_translation;
             case opcode::op_get_member: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
             case opcode::op_this: case opcode::op_super: case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_probe_member:

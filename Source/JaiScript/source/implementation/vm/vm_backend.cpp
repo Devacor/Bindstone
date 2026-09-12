@@ -6646,31 +6646,37 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	const uint64_t pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : ~uint64_t(0));
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		if (!(pending & (uint64_t(1) << k)) || cs.kind[k] == 0) continue;
-		const chunk::cell_loop::cell& cl = loop.cells[k];
-		script_value* s = frame_slot(f, cl.slot);
-		if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-			const script_int v = static_cast<script_int>(cs.payload[k]);
-			type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_int());
-			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
-			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
-			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); continue; }
-			JAI_CELLS_COUNT(9);
-			script_value nv(v, engine_);
-			if (stamp != engine_->get_type_info_int()) { nv.set_type_info(type_info_ptr{stamp}); }
-			frame_slot_set(f, cl.slot, std::move(nv));
-		} else {
-			const script_float v = cell_float_of_bits(cs.payload[k]);
-			type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_float());
-			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
-			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
-			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); continue; }
-			JAI_CELLS_COUNT(9);
-			script_value nv(v, engine_);
-			if (stamp != engine_->get_type_info_float()) { nv.set_type_info(type_info_ptr{stamp}); }
-			frame_slot_set(f, cl.slot, std::move(nv));
-		}
+		cell_flush_one(f, loop, k);
 	}
 	cs.reset();
+}
+
+// one cell's payload back to its slot with the stamp the landing rule gives it: in place when the slot already holds the kind
+JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop::cell& cl = loop.cells[k];
+	script_value* s = frame_slot(f, cl.slot);
+	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+		const script_int v = static_cast<script_int>(cs.payload[k]);
+		type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_int());
+		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
+		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); return; }
+		JAI_CELLS_COUNT(9);
+		script_value nv(v, engine_);
+		if (stamp != engine_->get_type_info_int()) { nv.set_type_info(type_info_ptr{stamp}); }
+		frame_slot_set(f, cl.slot, std::move(nv));
+	} else {
+		const script_float v = cell_float_of_bits(cs.payload[k]);
+		type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_float());
+		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
+		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); return; }
+		JAI_CELLS_COUNT(9);
+		script_value nv(v, engine_);
+		if (stamp != engine_->get_type_info_float()) { nv.set_type_info(type_info_ptr{stamp}); }
+		frame_slot_set(f, cl.slot, std::move(nv));
+	}
 }
 
 void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
@@ -6737,39 +6743,11 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	return cells_run(f, loop);
 }
 
-// the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
-bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+// the load and store sites' containers, resolved at the entry and again after every call inside the block (a callee may
+// replace or grow a container the block reads): false = a site whose container is not a plain array node
+bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
-	// every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's
-	// canonical stamp and engine: the general form's first iteration established it, and a landing whose
-	// slot holds another kind (a declared-type conversion on a store) stays on the general form
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
-		const chunk::cell_loop::cell& cl = loop.cells[k];
-		if (cl.env_operand != k_invalid_u32) {
-			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
-			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
-			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
-			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
-			if (!v || (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (cl.kind != 0 && vk != cl.kind)) { JAI_CELLS_COUNT(1); return false; }
-			continue;
-		}
-		if (cl.temp) continue;   // a compiler temp: written before read inside its statement, no declared type
-		const script_value* s = frame_slot(f, cl.slot);
-		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
-		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
-		const type_info* canonical = want == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
-		// the slot's stamp is the local's declared type: the canonical int or float, or the any stamp of a var (the landing
-		// rule follows it: int lands ints, float widens ints, any lands any kind); any other stamp is another value model
-		const type_info* st = s ? s->type_info_raw() : nullptr;
-		if (!s || (want != static_cast<uint8_t>(script_value::TYPEID_INT) && want != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || s->raw_storage_index() != want || (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) || s->get_engine() != engine_) {
-			JAI_CELLS_COUNT(1);
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_cells_refused_slot_[k < 64 ? k : 63];
-#endif
-			return false;
-		}
-	}
-	// the load and store sites' containers, resolved once per entry: the body has no call, no rebinding and no
+	// the load and store sites' containers: the body has no rebinding and no
 	// store to a container slot, so a node's identity holds until the exit or the miss (a miss re-enters through
 	// this resolution); a site whose container is not a plain array node (a getter-backed reference, a typed var
 	// array) keeps the loop on the general form, which runs the site's own resolution every time
@@ -6808,14 +6786,50 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
 			}
 		} else { continue; }
-		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
+		if (!node) { return false; }
 		cs.site_node[ip - loop.copy_head] = node;
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (uint32_t ip = loop.copy_head; ip < loop.copy_back; ++ip) {
-			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
+			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { return false; }
 		}
 	}
+	return true;
+}
+
+// the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
+bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+	cell_state& cs = *f.cells;
+	// every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's
+	// canonical stamp and engine: the general form's first iteration established it, and a landing whose
+	// slot holds another kind (a declared-type conversion on a store) stays on the general form
+	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+		const chunk::cell_loop::cell& cl = loop.cells[k];
+		if (cl.env_operand != k_invalid_u32) {
+			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
+			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
+			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
+			if (!v || (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || (cl.kind != 0 && vk != cl.kind)) { JAI_CELLS_COUNT(1); return false; }
+			continue;
+		}
+		if (cl.temp) continue;   // a compiler temp: written before read inside its statement, no declared type
+		const script_value* s = frame_slot(f, cl.slot);
+		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
+		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
+		const type_info* canonical = want == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
+		// the slot's stamp is the local's declared type: the canonical int or float, or the any stamp of a var (the landing
+		// rule follows it: int lands ints, float widens ints, any lands any kind); any other stamp is another value model
+		const type_info* st = s ? s->type_info_raw() : nullptr;
+		if (!s || (want != static_cast<uint8_t>(script_value::TYPEID_INT) && want != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || s->raw_storage_index() != want || (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) || s->get_engine() != engine_) {
+			JAI_CELLS_COUNT(1);
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_cells_refused_slot_[k < 64 ? k : 63];
+#endif
+			return false;
+		}
+	}
+	if (loop.has_sites && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
 	if (cs.payload.size() < loop.cells.size()) {
 #ifdef JAISCRIPT_VM_PROFILE
 		if (cs.payload.empty()) { ++profile_cells_records_; }
@@ -6879,11 +6893,130 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_jcmp_any: st = exec_c_cmp_any(f, ci, false); break;
 		case opcode::op_c_neg: st = exec_c_neg(f, ci); break;
 		case opcode::op_c_bnot: st = exec_c_bnot(f, ci); break;
-		default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
+		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 		if (st == op_status::failed) return st;
 		if (cs.loop == k_invalid_u32) return {};   // flushed at an exit or a miss: f.ip is the general form's
 	}
+}
+// the call door's four instructions, kept off the block loop's hot switch so its code generation is the scalar ops' alone
+op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, const vm_instruction& ci) {
+	switch (ci.op) {
+	case opcode::op_c_probe: return exec_c_probe(f, ci);
+	case opcode::op_c_args: return exec_c_args(f, ci);
+	case opcode::op_c_call: return exec_c_call(f, ci);
+	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
+	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
+	}
+}
+// a call inside the block (design_row118_canonical_lowering.md section 9): the probe, the pushes, the call and the landing
+// are four copy instructions over one descriptor; the general executors run verbatim underneath, so the callee sees the
+// stack and the pending register the general form gives it and its errors are the general ones (an error materializes
+// the block and leaves f.ip on the general instruction, as every cell op does)
+op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip]);
+	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
+	++f.ip;
+	return {};
+}
+// the arguments in order: a cell boxes its payload (a slot's cell is flushed first, so a by-reference parameter binds the
+// current value; an adopted-kind local's copy carries its slot's stamp, as the general load's does), a verbatim push runs
+// the general instruction; this instruction's ip is an argument zone, so a C++ throw here is the frame's own
+op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	for (size_t i = 0; i < cc.args.size(); ++i) {
+		const chunk::cell_loop::call_arg& a = cc.args[i];
+		if (a.kind == 1) {
+			const uint32_t k = a.v;
+			const chunk::cell_loop::cell& cl = loop.cells[k];
+			const uint8_t kind = cs.kind[k];
+			if (kind != kint && kind != kflt) [[unlikely]] {
+				// a value the block never defined (unreachable by construction): undo the probe and the pushes, re-run from the probe
+				stack_.truncate(stack_.size() - i);
+				pending_callees_.pop_back();
+				cells_miss(f, loop, cc.probe_ip, 4);
+				return {};
+			}
+			if (((cs.dirty >> k) & 1) && !cl.temp && cl.env_operand == k_invalid_u32) { cell_flush_one(f, loop, k); cs.dirty &= ~(uint64_t(1) << k); }
+			script_value v = kind == kint ? script_value(static_cast<script_int>(cs.payload[k]), engine_) : script_value(cell_float_of_bits(cs.payload[k]), engine_);
+			if (cl.kind == 0 && cs.stamp[k]) { v.set_type_info(type_info_ptr{cs.stamp[k]}); }
+			stack_.push_back(std::move(v));
+		} else {
+			const vm_instruction& oi = f.code->code[a.v];
+			if (oi.op == opcode::op_load) {
+				const op_status st = exec_load(f, oi);
+				if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = a.v; return st; }
+			} else {
+				push_constant(*f.code, oi.a);
+			}
+		}
+	}
+	++f.ip;
+	return {};
+}
+op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7); JAI_CELLS_COUNT(11);
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	const op_status st = exec_call_from_scratch(f, f.code->code[cc.call_ip]);
+	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.call_ip; return st; }
+	if (switch_to_) return {};   // the callee runs in the dispatcher; the caller parks here and land_call_result steps it to the landing
+	if (is_unwinding_) [[unlikely]] { cells_flush(f, loop); f.ip = cc.call_ip; return {}; }   // the callee raised ahead of its frame: the dispatcher unwinds from the general ip
+	if (cc.consumer == 0) { stack_.pop_back(); }   // a native callee landed its result: a statement drops it here, as the general dispatch does
+	++f.ip;   // the consumer runs here
+	return cells_land(f, loop, cc);
+}
+// the landing after a call: the call is an effect point, so what it could have reached is checked or re-read first (a
+// slot argument's kind, since a by-reference parameter boxes the caller's slot; the environment values; the container
+// sites; the numeric-operator and debugger states), then the result lands by the declared-type rule or is dropped; any
+// change misses at the consumer with the result on the stack, exactly the general form's state there
+op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
+	cell_state& cs = *f.cells;
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
+	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer_ip, 4); return {}; };
+	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return miss();
+	for (const chunk::cell_loop::call_arg& a : cc.args) {
+		if (a.kind != 1) continue;
+		const chunk::cell_loop::cell& cl = loop.cells[a.v];
+		if (cl.temp || cl.env_operand != k_invalid_u32) continue;
+		const script_value* s = frame_slot(f, cl.slot);
+		if (!s || s->raw_storage_index() != cs.kind[a.v]) return miss();   // the local escaped by reference: the slot is the value from here on
+	}
+	for (uint32_t k = 0; !loop.env_operands.empty() && k < loop.cells.size(); ++k) {
+		const chunk::cell_loop::cell& cl = loop.cells[k];
+		if (cl.env_operand == k_invalid_u32) continue;
+		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+		const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
+		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k]) return miss();
+		cs.payload[k] = cs.kind[k] == kint ? static_cast<int64_t>(v->unchecked_as_int()) : cell_bits_of_float(v->unchecked_as_float());
+	}
+	if (loop.has_sites && !cells_resolve_sites(f, loop)) return miss();
+	if (cc.consumer == 0) { ++f.ip; return {}; }   // a statement's result was never pushed (land_call_result) or was dropped by the native path
+	const script_value& top = stack_.back().deref();
+	const size_t vi = top.raw_storage_index();
+	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT) return miss();
+	const uint8_t kind = static_cast<uint8_t>(vi);
+	const int64_t bits = kind == kint ? static_cast<int64_t>(top.unchecked_as_int()) : cell_bits_of_float(top.unchecked_as_float());
+	if (!cell_land(f, loop, cc.dst, kind, bits)) return miss();
+	stack_.pop_back();
+	++f.ip;
+	return {};
+}
+// the dispatcher reaches the landing when a callee returned to the caller parked on the call's copy
+op_status vm_backend::cells_resume(frame& f, const vm_instruction& ins) {
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
+	if (!f.cells || f.cells->loop != ins.b) [[unlikely]] { f.ip = cc.consumer_ip; return {}; }   // no block is active here: the general consumer takes the result
+	const op_status st = cells_land(f, loop, cc);
+	if (st == op_status::failed || f.cells->loop == k_invalid_u32) return st;   // a miss: f.ip is the general consumer's
+	return cells_run(f, loop);
 }
 // a counted loop's cell back edge: the step on the var cell (an overflow misses onto the general back edge, which
 // raises its own text), the compare against the end cell or literal, then the body again or the exit
@@ -13687,6 +13820,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 				rec.catch_env_pushed = true;
 			}
 		}
+		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
 		f.ip = rec.handler_ip;
 		rec.in_catch = true;
 		return true;
@@ -15132,9 +15266,9 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
-		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
+		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
-			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_[7],
+			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
 		{
 			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
@@ -15258,26 +15392,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 
-			case opcode::op_const: {
-				// Literals are engine-less parse-time templates; re-materialize with the engine
-				const script_value& tmpl = f.code->constants[ins.a];
-				const auto& storage = tmpl.get_storage();
-				switch (storage.index()) {
-					case script_value::TYPEID_INT: stack_.push_back(script_value(storage.get<script_int>(), engine_)); break;
-					case script_value::TYPEID_FLOAT: stack_.push_back(script_value(storage.get<script_float>(), engine_)); break;
-					case script_value::TYPEID_STRING: stack_.push_back(literal_string_value(*f.code, ins.a, storage.get<strong_ptr<script_string>>())); break;
-					case script_value::TYPEID_CHAR: stack_.push_back(script_value(storage.get<script_char>(), engine_)); break;
-					case script_value::TYPEID_BOOL: stack_.push_back(script_value(storage.get<script_bool>(), engine_)); break;
-					case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
-					default: {
-						script_value copy = tmpl;
-						copy.set_engine(engine_);
-						stack_.push_back(std::move(copy));
-						break;
-					}
-				}
-				break;
-			}
+			case opcode::op_const: push_constant(*f.code, ins.a); break;
 
 			case opcode::op_null: stack_.push_back(make_null()); break;
 			case opcode::op_true: stack_.push_back(script_value(true, engine_)); break;
@@ -15571,8 +15686,23 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				f.ip = ins.a;
 				continue;
-			case opcode::op_cells_back: VM_TRY_OP_SHARED(exec_cells_back(f, ins)); continue;
-			case opcode::op_cells_cfor_back: VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins)); continue;
+			// a block that made a call: the callee runs here with the caller parked on the call's copy (land_call_result steps it to
+			// the landing, whose case resumes the block); a callee that raised ahead of its frame unwinds from here
+			case opcode::op_cells_back:
+				VM_TRY_OP_SHARED(exec_cells_back(f, ins));
+				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
+				continue;
+			case opcode::op_cells_cfor_back:
+				VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins));
+				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
+				continue;
+			case opcode::op_c_land:
+				VM_TRY_OP_SHARED(cells_resume(f, ins));
+				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
+				continue;
 
 		case opcode::op_return: {
 				if (call_records_top_ == records_base) {

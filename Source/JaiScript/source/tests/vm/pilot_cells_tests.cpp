@@ -1360,6 +1360,57 @@ public:
 			size_t unaries = 0; for (const char* op : {"\tUNARY ", "\tUNARY_TEMP "}) { for (size_t at = listing.find(op); at != std::string::npos; at = listing.find(op, at + 1)) { ++unaries; } }
 			check_eq(size_t(1), unaries, "the one unary left is -x on the variable: " + listing);
 		});
+		test("calls_inside_a_block", [this]() {
+			// draw_seg's shape: a call landing in a declaration, a statement call with a computed and a reference argument, float
+			// math around them, an element read of a var& container guarding a continue; and every effect a callee can have on the
+			// block, re-read after the call: a global the loop reads, an array the loop reads (grown by the callee), an int& taken
+			// on a loop local (the slot is the value from then on), a float result into an int declaration (the checked conversion
+			// and its rejection), a throw out of the callee into the caller's catch (materialized locals), a recursive callee, a
+			// zero-argument callee, a string result into a var, and the argument values: a negation, a math call, an element read,
+			// an environment name
+			const char* defs = R"JAI(
+int K = 1; array<int> G = [1, 2, 3, 4, 5, 6]; var FLATS = [[10, 20], [30, 40]]; array<int> DONE = [0, 1, 0, 0, 1, 0];
+var light_band = function(int light, float dist) -> int { return light + math::itrunc(dist); };
+var col = function(int x, int y0, int y1, var& flat, float ph, float rdx, float rdy, int light) -> int { return x + y0 + y1 + flat[0] + math::itrunc(ph + rdx + rdy) + light; };
+var seg = function(int n, var& done) { int acc = 0; float dist = 1.5; int light = 3; var& cflat = FLATS[1]; float fceil = 2.0;
+  for (int x = 0; x < n; ++x) { if (done[x] != 0) { continue; } float rdx = x * 0.5; float rdy = rdx + 1.0; int band = light_band(light, dist); acc = col(x, band + 1, acc, cflat, fceil, rdx, rdy, light); }
+  return acc; };
+var bump = function() -> int { K = K + 1; return K; };
+var globals = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + K; int r = bump(); acc = acc + r; } return acc; };
+var grow = function(var& a) -> int { a.push(9); return a.size(); };
+var arrays = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + G[i]; int s = grow(G); acc = acc + s; } return acc; };
+var inc = function(int& v) -> void { v = v + 100; };
+var escape = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 2; inc(t); acc = acc + t; } return acc; };
+var half = function(int a) -> float { return a * 0.5; };
+var narrow = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int q = half(i * 4); acc = acc + q; } return acc; };
+var huge = function(int a) -> float { return 1e300; };
+var rejects = function(int n) { int acc = 0; try { for (int i = 0; i < n; ++i) { acc = acc + i; int q = huge(i); acc = acc + q; } } catch (e) { return to_string(acc) + " " + e; } return to_string(acc); };
+var boom = function(int i) -> int { if (i == 2) { throw "boom at " + to_string(i); } return i; };
+var thrown = function(int n) { int acc = 0; float f = 0.5; try { for (int i = 0; i < n; ++i) { int b = boom(i); acc = acc + b; f = f * 2.0; } } catch (e) { return to_string(acc) + " " + to_string(f) + " " + e; } return to_string(acc); };
+var fact = function(int k) -> int { if (k <= 1) { return 1; } return k * fact(k - 1); };
+var recursive = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int fk = fact(i); acc = acc + fk; } return acc; };
+var tick = function() -> int { return 7; };
+var zero = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = tick(); acc = acc + t; } return acc; };
+var name = function(int i) -> string { return "n" + to_string(i); };
+var strings = function(int n) { var s = ""; for (int i = 0; i < n; ++i) { var w = name(i); s = s + w; } return s; };
+var values = function(int n) { int acc = 0; float r = 2.5; for (int i = 0; i < n; ++i) { int a1 = light_band(-i, r); int a2 = light_band(math::itrunc(r), 1.0); int a3 = light_band(G[i], 2.0); int a4 = light_band(K, 0.5); acc = acc + a1 + a2 + a3 + a4; } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(seg(6, DONE));", "184" }, { "to_string(globals(3));", "15" }, { "to_string(arrays(3));", "30" }, { "to_string(escape(3));", "306" },
+				{ "to_string(narrow(3));", "6" }, { "rejects(3);", "" }, { "thrown(4);", "1 2.000000 boom at 2" }, { "to_string(recursive(5));", "34" },
+				{ "to_string(zero(3));", "21" }, { "strings(3);", "n0n1n2" }, { "to_string(values(3));", "27" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(11), closed, "every loop with a call closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			size_t calls = 0; for (size_t at = listing.find("\tC_CALL "); at != std::string::npos; at = listing.find("\tC_CALL ", at + 1)) { ++calls; }
+			check_eq(size_t(15), calls, "one C_CALL per call in a closed loop: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

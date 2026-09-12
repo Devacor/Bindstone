@@ -225,6 +225,10 @@ namespace jai::vm {
         op_c_jcmp_any,      // a = token_type << 24 | left cell or const, b = right cell or const, c = copy target: an interior compare-jump, kinds from the cells
         op_c_neg,           // a = dst cell, b = src cell or const: unary minus (an int overflow misses)
         op_c_bnot,          // a = dst cell, b = src cell or const: complement (an int only)
+        op_c_probe,         // a = the loop's call index, b = cell loop index, c = the original probe's ip: the callee probe run verbatim
+        op_c_args,          // a = call index, b = cell loop index, c = the original call's ip: the arguments pushed in order (cells boxed, other pushes verbatim); its ip is an argument zone
+        op_c_call,          // a = call index, b = cell loop index, c = the original call's ip: the call; the caller parks here and resumes at the landing
+        op_c_land,          // a = call index, b = cell loop index, c = the consumer's ip: the bindings re-read, the result landed by the declared-type rule or dropped
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -355,6 +359,10 @@ namespace jai::vm {
             case opcode::op_c_jcmp_any: return "C_JCMP_ANY";
             case opcode::op_c_neg: return "C_NEG";
             case opcode::op_c_bnot: return "C_BNOT";
+            case opcode::op_c_probe: return "C_PROBE";
+            case opcode::op_c_args: return "C_ARGS";
+            case opcode::op_c_call: return "C_CALL";
+            case opcode::op_c_land: return "C_LAND";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

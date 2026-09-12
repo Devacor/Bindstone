@@ -352,12 +352,31 @@ namespace jai::vm {
         // a miss returns to (ip mapped by offset). Each cell records its slot, its expected kind, whether
         // the loop reads it before writing it (live-in: unboxed at entry), whether the body defines it
         // (flushed on exit or miss) and the landing that defines it (a decl carries its stamp).
+        // a set of cells, up to 128: the dirty cells of a running block, the compiler values, the environment values,
+        // the values live at a copy instruction
+        struct cell_mask {
+            uint64_t w[2] = {0, 0};
+            void set(uint32_t k) noexcept { w[k >> 6] |= uint64_t(1) << (k & 63); }
+            void clear(uint32_t k) noexcept { w[k >> 6] &= ~(uint64_t(1) << (k & 63)); }
+            bool test(uint32_t k) const noexcept { return ((w[k >> 6] >> (k & 63)) & 1) != 0; }
+            bool any() const noexcept { return (w[0] | w[1]) != 0; }
+            void reset() noexcept { w[0] = 0; w[1] = 0; }
+            cell_mask operator~() const noexcept { cell_mask r; r.w[0] = ~w[0]; r.w[1] = ~w[1]; return r; }
+            cell_mask operator&(const cell_mask& o) const noexcept { cell_mask r; r.w[0] = w[0] & o.w[0]; r.w[1] = w[1] & o.w[1]; return r; }
+            cell_mask operator|(const cell_mask& o) const noexcept { cell_mask r; r.w[0] = w[0] | o.w[0]; r.w[1] = w[1] | o.w[1]; return r; }
+            cell_mask& operator|=(const cell_mask& o) noexcept { w[0] |= o.w[0]; w[1] |= o.w[1]; return *this; }
+            cell_mask& operator&=(const cell_mask& o) noexcept { w[0] &= o.w[0]; w[1] &= o.w[1]; return *this; }
+            static cell_mask all() noexcept { cell_mask r; r.w[0] = ~uint64_t(0); r.w[1] = ~uint64_t(0); return r; }
+        };
+        static constexpr uint32_t k_cell_limit = 128;
         struct cell_loop {
             // env_operand: the environment scalar this cell holds (index into env_operands; k_invalid_u32 = a frame
             // slot); such a cell has a synthetic slot above the frame's, is resolved once at entry and never written
             // temp: a compiler temp (written before read inside its statement, no declared type): no entry guard, no unbox,
             // any kind lands
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; };
+            // first_decl: the loop's first write to the cell is its declaration (a local the body declares: it enters empty and its
+            // flush stamps with decl_stamp, the declaration's type, whatever later stores land)
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; };
             uint32_t head, back, copy_head, copy_back, exit_ip;
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
@@ -370,10 +389,10 @@ namespace jai::vm {
             std::vector<uint32_t> origin;         // per copy instruction (copy_head + k): the original instruction it stands for (the miss path's map)
             // per copy instruction: the temp cells whose definition is live there (defined earlier, read at or after it),
             // the only temps a miss at that instruction flushes; temp_mask = every temp cell
-            std::vector<uint64_t> live_temps;
-            uint64_t temp_mask = 0;
-            uint64_t env_mask = 0;    // every environment cell: the ones a body writes are flushed ahead of a call and at every exit
-            bool has_sites = false;   // a load or store site in the copy: the entry and every landing after a call resolve the containers
+            std::vector<cell_mask> live_temps;
+            cell_mask temp_mask;
+            cell_mask env_mask;       // every environment cell: the ones a body writes are flushed ahead of a call and at every exit
+            std::vector<uint32_t> sites;   // the load and store sites' copy ips: the entry resolves their containers, a landing after a call checks them
             struct env_operand_ref { fused_operand operand; uint32_t cache_slot; };
             std::vector<env_operand_ref> env_operands;
             // a call inside the block: the probe, the pushes, the call and the landing are four copy instructions over one

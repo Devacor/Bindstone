@@ -1505,6 +1505,84 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(6), closed, "every loop over bools closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
+		test("a_block_holds_up_to_128_cells", [this]() {
+			// draw_seg's column loop holds more than 64 cells (its locals, the outer locals it reads, its compiler values, its
+			// argument values and its environment values); a loop over 80 locals closes and lands the same, one over 140 stays open
+			auto wide = [](int n) {
+				std::string s = "var f = function(int n) { ";
+				for (int i = 0; i < n; ++i) { s += "int a" + std::to_string(i) + " = " + std::to_string(i) + "; "; }
+				s += "for (int k = 0; k < 3; ++k) { ";
+				for (int i = 0; i < n; ++i) { s += "a" + std::to_string(i) + " = a" + std::to_string(i) + " + k; "; }
+				s += "} int acc = 0; ";
+				for (int i = 0; i < n; ++i) { s += "acc = acc + a" + std::to_string(i) + "; "; }
+				s += "return acc; };";
+				return s;
+			};
+			// the limit's boundary: n locals and the counter are n + 1 cells; 127 locals close, 128 stay open
+			for (int n : {63, 64, 65, 127}) { both(wide(n) + " to_string(f(3));", std::to_string(n * (n - 1) / 2 + n * 3), (std::to_string(n) + " locals").c_str()); check(listing_of(wide(n)).find("-- cell loop ") != std::string::npos, std::to_string(n) + " locals close"); }
+			both(wide(128) + " to_string(f(3));", std::to_string(128 * 127 / 2 + 128 * 3), "128 locals"); check(listing_of(wide(128)).find("too many cells") != std::string::npos, "128 locals stay open");
+			const std::string w80 = wide(80), w140 = wide(140);
+			both(w80 + " to_string(f(3));", std::to_string(80 * 79 / 2 + 80 * 3), "80 cells");   // each local: its index plus 0 + 1 + 2
+			both(w140 + " to_string(f(3));", std::to_string(140 * 139 / 2 + 140 * 3), "140 cells");
+			const std::string l80 = listing_of(w80), l140 = listing_of(w140);
+			check(l80.find("-- cell loop ") != std::string::npos, "80 cells close: " + l80.substr(l80.find("-- open") == std::string::npos ? l80.size() : l80.find("-- open"), 200));
+			check(l140.find("too many cells") != std::string::npos, "140 cells stay open: " + l140.substr(l140.find("-- ") == std::string::npos ? l140.size() : l140.find("-- "), 200));
+		});
+		test("body_declared_locals_enter_empty", [this]() {
+			// draw_seg's column loop declares locals inside branches the first iterations never take, so their slots held
+			// placeholders at every entry and the block was refused; a local the body declares enters empty, its declaration is
+			// the first write (an int takes ints, a float widens, a var takes any kind), and the loop lands the same on both backends
+			const char* defs = R"JAI(
+var branches = function(int n) { int acc = 0; for (int x = 0; x < n; ++x) { if (x > 2) { int v = x * 2; float w = v; acc = acc + v + math::itrunc(w); } if (x == 4) { var any = x; acc = acc + any; } float f = x * 0.5; acc = acc + math::itrunc(f); } return acc; };
+var late = function(int n) { int acc = 0; for (int x = 0; x < n; ++x) { if (x >= 1) { int q = x; acc = acc + q; } } return acc; };
+var clamped = function(int n) { int acc = 0; for (int x = 0; x < n; ++x) { int c1 = x - 1; if (c1 > 2) { c1 = 2; } var w = x; if (x > 3) { w = 3; } acc = acc + c1 + w; } return acc + w_kind(n); };
+var w_kind = function(int n) { var w = 1; for (int x = 0; x < n; ++x) { var v = x; if (x > 1) { v = x * 0.5; } w = v; } return math::itrunc(w * 10); };
+)JAI";
+			both(std::string(defs) + " to_string(branches(6));", "58", "locals declared in branches");
+			both(std::string(defs) + " to_string(branches(6));", "", "proofs off", false);
+			both(std::string(defs) + " to_string(late(5));", "10", "a local declared past the first iteration");
+			both(std::string(defs) + " to_string(clamped(6));", "43", "body-declared locals re-assigned in a branch");
+			both(std::string(defs) + " type_of(w_kind(4)) + to_string(w_kind(4));", "int15", "a var declared in the body changes kind");
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(4), closed, "the four loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
+		});
+		test("a_landing_sees_what_the_call_changed", [this]() {
+			// the landing after a call re-checks the containers by identity and re-reads the environment cells through their
+			// bindings: a callee that rebinds the container a var& local aliases, that rebinds a container the loop names, that
+			// grows the container, that writes a scalar global the loop reads, or that needs a frame environment (the epoch
+			// moves) lands the same on both backends
+			const char* defs = R"JAI(
+array<int> D = [1, 2, 3, 4, 5, 6, 7, 8];
+array<int> E = [10, 20, 30, 40, 50, 60, 70, 80];
+var D2 = [1, 2, 3, 4, 5, 6, 7, 8];
+array<int> W = [5, 6, 7, 8];
+int G = 100;
+function swap_d(int i) -> void { if (i == 3) { D = E; } }
+function swap_d2(int i) -> void { if (i == 3) { D2 = [10, 20, 30, 40, 50, 60, 70, 80]; } }
+function bump_g(int i) -> void { G = G + i; }
+function grow_w(int i) -> void { if (i == 2) { W.push(1000); W.push(2000); } }
+function env_callee(int i) -> int { var f = function() { return i * 2; }; return f(); }
+var through_ref = function(int n) { var& d = D; int acc = 0; for (int i = 0; i < n; ++i) { swap_d(i); acc = acc + d[i]; } return acc; };
+var by_name = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { swap_d(i); acc = acc + D[i]; } return acc; };
+var through_ref2 = function(int n) { var& d = D2; int acc = 0; for (int i = 0; i < n; ++i) { swap_d2(i); acc = acc + d[i]; } return acc; };
+var reads_g = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { bump_g(i); acc = acc + G; } return acc; };
+var grows = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { grow_w(i); acc = acc + W[i]; } return acc; };
+var via_env = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int v = env_callee(i); acc = acc + v + G; } return acc; };
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "to_string(through_ref(8));", "306" }, { "to_string(by_name(8));", "306" }, { "to_string(through_ref2(8));", "306" },
+				{ "to_string(reads_g(5));", "520" }, { "to_string(grows(6));", "3026" }, { "to_string(via_env(4));", "412" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(6), closed, "the six loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

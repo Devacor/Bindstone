@@ -207,6 +207,8 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 	for (const auto& loop : ch.cell_loops) {
 		out << "-- cell loop " << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "");
 		if (!loop.calls.empty()) { out << " (calls " << loop.calls.size() << ")"; }
+		out << " cells";
+		for (const auto& cl : loop.cells) { out << " " << (cl.env_operand != k_invalid_u32 ? "env" : cl.temp ? "t" : "s") << cl.slot << ":" << static_cast<unsigned>(cl.kind); }   // slot:kind (kinds: 0 adopted, 1 int, 2 float, 5 bool)
 		out << "\n";
 	}
 	for (const auto& r : ch.cell_refusals) {

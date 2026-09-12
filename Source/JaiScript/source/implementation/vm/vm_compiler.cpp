@@ -2328,6 +2328,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (cells[k].kind == 0) { cells[k].kind = kind; }   // an adopted kind takes the first typed use's
 			else if (kind != 0 && cells[k].kind != kind) { refuse(chunk::cell_refusal_representation, at); return; }   // two kinds on one local: the general form's conversion
 			if (is_write) {
+				if (!cells[k].defined && !cells[k].live_in && landing == k_typed_dst_decl) { cells[k].first_decl = true; cells[k].decl_stamp = stamp; }   // declared by the body
 				cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp;
 				if (landing == k_typed_dst_temp) { cells[k].temp = true; defs.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(k)); }
 			}
@@ -2802,7 +2803,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ops.push_back(op);
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
-		if (refusal == chunk::cell_refusal_none && cells.size() > 64) { refuse(chunk::cell_refusal_too_many_cells, back); }
+		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
 		// legality and lifetimes: a container binding's slot is never written; a compiler value is defined earlier in the body
 		// than it is read (a temp is undefined at entry, so a read ahead of every write in the body would only ever miss); a
 		// snapshot's slot is written only by its own guard between the guard and its read (temps are reused across statements,
@@ -2845,8 +2846,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.env_operands = env_ops;
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding
-		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask |= uint64_t(1) << k; } }
-		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].env_operand != k_invalid_u32) { loop.env_mask |= uint64_t(1) << k; } }
+		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask.set(k); } }
+		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].env_operand != k_invalid_u32) { loop.env_mask.set(k); } }
 		auto env_slot = [&](uint32_t e) -> uint32_t { for (const auto& cl : cells) { if (cl.env_operand == e) return cl.slot; } return k_invalid_u32; };
 		// the binding at the instruction being emitted: a slot's current definition (a temp slot advances to its next
 		// definition once the emission passes the defining instruction; a local or an environment value has one cell); an
@@ -3014,7 +3015,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store) { loop.has_sites = true; break; } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store) { loop.sites.push_back(ip2); } }
 		for (const fixup& fx : fixups) {
 			const uint32_t to = copy_at[fx.target - head];   // a target without a copy instruction lands on the next one
 			if (fx.field == 0) { code[fx.at].a = to; }
@@ -3024,7 +3025,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// liveness of compiler values per copy instruction: a definition is live from the instruction after it through its
 		// last read (a miss there re-runs the read on the general form, which needs the slot to hold this value); a dead
 		// definition is never flushed, so it cannot overwrite the live one of the same slot
-		loop.live_temps.assign(loop.origin.size(), 0);
+		loop.live_temps.assign(loop.origin.size(), chunk::cell_mask{});
 		{
 			std::vector<uint32_t> cur = loop.slot_to_cell;
 			std::vector<size_t> def_end(cells.size(), 0);   // per compiler value: the copy offset after its defining instruction(s)
@@ -3036,7 +3037,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (uint8_t r = 0; r < op.nreads; ++r) {
 					const uint32_t cl = op.reads[r] < cur.size() ? cur[op.reads[r]] : k_invalid_u32;
 					if (cl == k_invalid_u32 || !cells[cl].temp) continue;
-					for (size_t m = def_end[cl]; m < here_end && m < loop.live_temps.size(); ++m) { loop.live_temps[m] |= uint64_t(1) << cl; }
+					for (size_t m = def_end[cl]; m < here_end && m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(cl); }
 				}
 				while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_end[defs[nd].second] = here_end; ++nd; }
 			}

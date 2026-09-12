@@ -207,6 +207,7 @@ namespace jai::vm {
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
+        std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
@@ -465,12 +466,20 @@ namespace jai::vm {
             std::vector<uint8_t> kind;
             std::vector<type_info*> stamp;   // per cell: the slot's type stamp at entry (a local's declared type: int, float or any); null for temps and env values
             uint32_t loop = k_invalid_u32;
-            uint64_t dirty = 0;
+            chunk::cell_mask dirty;
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
+            // how each site's container is reached (recorded by the resolution): its frame slot, or its environment binding; a landing
+            // after a call re-checks the node's identity through that path instead of resolving again. An environment cell's binding
+            // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
+            std::vector<uint32_t> site_slot;
+            std::vector<const script_value*> site_env;
+            std::vector<const script_value*> env_ptr;
+            const environment* env_of = nullptr;
+            uint64_t env_serial = 0;
             // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call; container bindings
             // do not change within a call, so the entry is not attempted again until the next call
             uint64_t refused_loops = 0;
-            void reset() { loop = k_invalid_u32; dirty = 0; }
+            void reset() { loop = k_invalid_u32; dirty.reset(); }
             void reset_call() { reset(); refused_loops = 0; }
         };
 
@@ -1612,6 +1621,7 @@ namespace jai::vm {
         op_status cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
+        bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take

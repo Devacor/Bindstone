@@ -80,6 +80,9 @@ namespace jai::vm {
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
         bool unary_temp_operand(const expression* e);
         void compile_unary_into_temp(const expression_ptr& e, fused_operand& out);
+        bool env_identifier(const expression* e);
+        bool value_temp_operand(const expression* e);
+        bool compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         // the register-file lift's classification (compile_binary), shared with the fused index emitter
         bool lift_operand_shape(const expression* e);
         bool lift_temp_only(const expression* e);

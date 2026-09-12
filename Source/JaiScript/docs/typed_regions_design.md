@@ -287,6 +287,13 @@ of `op_math_temp`): the lift, the flat pre-step, a math argument, a declaration,
 element store take it as an operand, the general unary runs verbatim underneath, and the cell copy lands neg and
 bnot (`op_c_neg`, `op_c_bnot`) with the checked negation's overflow as a miss.
 
+A pure math call as a declaration's, a store's or an element store's value lands in a compiler temp (the
+math row) and moves, as a unary does; the nested index `a[b[i]]` takes an environment identifier as its
+container (the name resolves inside the op, as a lifted binary's environment operand does); and the translation
+takes a truth test on a local, as a loop head (`while (n)`) or inside a body (`if (x)`), as a compare against
+zero with the jump's sense, the language's truthiness for an int or a float (a slot of another kind refuses at
+the entry).
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

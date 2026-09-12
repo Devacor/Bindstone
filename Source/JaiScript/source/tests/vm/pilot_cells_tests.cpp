@@ -915,6 +915,39 @@ public:
 			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
 			check_true(b.find("CELLS_BACK") == std::string::npos, "a break leaves the loop open: " + b);
 		});
+		test("an_environment_scalar_in_a_store_index_is_a_read_only_cell", [this]() {
+			// JaiDOOM's pix[y * VW + x] with VW a global: the loop closes with VW resolved once at entry; a float VW and a
+			// reference VW keep the general form; a VW changed between calls is read anew at each entry
+			const std::string script = R"(
+				var VW = 4;
+				var PIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+				function col(var& pix, var& pal, var& tp, int x, int n) -> int { int acc = 0; int y = 0; while (y < n) { int iv = (y * 5) % 8 - 2; if (iv < 0) { iv = iv + 8; } pix[y * VW + x] = pal[tp[iv]]; acc = acc + pix[y * VW + x]; y = y + 1; } return acc; }
+				var PAL = []; for (int k = 0; k < 64; ++k) { PAL.push(k * 3); } var TP = [3, 1, 4, 1, 5, 9, 2, 6];
+				int a = col(PIX, PAL, TP, 1, 4);
+				VW = 2; int b = col(PIX, PAL, TP, 0, 4);
+				VW = 1.5; string c = ""; try { c = to_string(col(PIX, PAL, TP, 0, 4)); } catch (err) { c = "throw:" + err; }
+				to_string(a) + "," + to_string(b) + "," + c + "," + to_string(PIX[1]) + "," + to_string(PIX[5]);
+			)";
+			both(script, "", "env cell");
+			both(script, "", "env cell, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("", 0) == 0 && vm.find(",") != std::string::npos, "ran: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "var VW = 4; var f = function(var& pix, var& pal, var& tp, int x, int n) { int y = 0; while (y < n) { int iv = (y * 5) % 8 - 2; if (iv < 0) { iv = iv + 8; } pix[y * VW + x] = pal[tp[iv]]; y = y + 1; } return y; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the texture shape with a global view width closes: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

@@ -2151,6 +2151,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (!(hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff) || hd.c != back + 1) continue;
 		// gather the scalar slots with their kinds; any disagreement or unknown kind keeps the loop open
 		std::vector<chunk::cell_loop::cell> cells;
+		std::vector<chunk::cell_loop::env_operand_ref> env_ops;
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = 0; k < cells.size(); ++k) { if (cells[k].slot == slot) return static_cast<int>(k); } return -1; };
 		bool closed = true;
 		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp) {
@@ -2187,11 +2188,38 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				use_slot(st.a, classed ? site.decl_expect : 0, true, k_typed_dst_decl, site.stamp);
 				continue;
 			}
-			if (st.op == opcode::op_index_store_fused && st.c != 0 && st.a < c.fused_index_protos.size() && c.fused_index_protos[st.a].typed_lane) {
+			// a no-result index store on the typed lane, or one the lane refused only for an environment scalar in its
+			// index (the heads need direct operands; a cell resolves the scalar at entry): the same container shape,
+			// every index operand an int literal, a frame slot or an environment scalar
+			auto store_lane_shape = [&](const fused_index_proto& fp) {
+				if (fp.typed_lane) return true;
+				if (fp.container.const_index != k_invalid_u32 || fp.container.member_node != k_invalid_u32 || fp.container.is_subscript() || fp.container.load_flags != 0) return false;
+				auto ok = [&](const fused_operand& o) {
+					if (o.const_index != k_invalid_u32) return o.const_index < c.constants.size() && c.constants[o.const_index].raw_storage_index() == script_value::TYPEID_INT;
+					if (o.direct && o.slot != k_invalid_u32) return true;
+					return o.slot == k_invalid_u32 && o.symbol != k_invalid_u32 && !o.is_subscript() && o.member_node == k_invalid_u32 && o.load_flags == 0;
+				};
+				if (fp.index_binary == k_invalid_u32) return ok(fp.index);
+				const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
+				if (!is_index_chain_arith(static_cast<token_type>(bp.op)) || !ok(bp.left) || !ok(bp.right)) return false;
+				for (const uint32_t step : fp.index_chain_ext) { if (step >= c.fused_binary_protos.size() || !is_index_chain_arith(static_cast<token_type>(c.fused_binary_protos[step].op)) || !ok(c.fused_binary_protos[step].right)) return false; }
+				return true;
+			};
+			if (st.op == opcode::op_index_store_fused && st.c != 0 && st.a < c.fused_index_protos.size() && store_lane_shape(c.fused_index_protos[st.a])) {
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				// the index (and its fold operands) are int cells; the value's kind comes from its other uses
 				auto operand_slot = [&](const fused_operand& o, uint8_t kind) {
 					if (o.const_index != k_invalid_u32) return;
+					if (o.slot == k_invalid_u32 && !o.direct && kind == static_cast<uint8_t>(script_value::TYPEID_INT) && o.symbol != k_invalid_u32 &&
+					    !o.is_subscript() && o.member_node == k_invalid_u32 && o.load_flags == 0) {
+						// an environment scalar (a global such as a view width): nothing in a cell body can change it, so the
+						// entry resolves it once into a read-only cell (a synthetic slot, assigned after the frame slots)
+						for (size_t e = 0; e < env_ops.size(); ++e) { if (env_ops[e].operand.symbol == o.symbol) { return; } }
+						chunk::cell_loop::cell nc{ k_invalid_u32, kind, 0, true, false, nullptr, static_cast<uint32_t>(env_ops.size()) };
+						cells.push_back(nc);
+						env_ops.push_back(chunk::cell_loop::env_operand_ref{ o, static_cast<uint32_t>(ip * 3) });
+						return;
+					}
 					if (o.slot == k_invalid_u32 || !o.direct) { closed = false; return; }
 					if (kind == 0) { const int k = find_cell(o.slot); if (k < 0) { closed = false; return; } return; }
 					use_slot(o.slot, kind, false, 0, nullptr);
@@ -2220,8 +2248,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (!closed || cells.empty() || cells.size() > 64) continue;
 		chunk::cell_loop loop;
 		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.exit_ip = hd.c;
+		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && cl.slot > max_slot) max_slot = cl.slot; }
+		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the env cells' synthetic slots
 		loop.cells = cells;
-		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.slot > max_slot) max_slot = cl.slot; }
+		loop.env_operands = env_ops;
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { loop.slot_to_cell[cells[k].slot] = k; }
 		auto cell_of = [&](uint32_t operand) -> uint32_t {
@@ -2247,7 +2277,32 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_operand_temp) {
 				append(vm_instruction{opcode::op_c_nop, 0, 0, 0}, ip);
 			} else {
-				append(vm_instruction{opcode::op_c_index_store, st.a, loop_index, static_cast<uint32_t>(ip)}, ip);
+				uint32_t proto_index = st.a;
+				if (!env_ops.empty()) {
+					// the copy reads env cells through synthetic-slot operands: a clone of the proto (and of its index
+					// binaries) with each environment scalar replaced; the original proto stays the general form's
+					auto synthetic = [&](fused_operand& o) {
+						if (o.const_index != k_invalid_u32 || o.slot != k_invalid_u32 || o.direct || o.symbol == k_invalid_u32) return;
+						for (const auto& cl : cells) {
+							if (cl.env_operand != k_invalid_u32 && env_ops[cl.env_operand].operand.symbol == o.symbol) {
+								fused_operand d; d.slot = cl.slot; d.symbol = o.symbol; d.direct = true; o = d; return;
+							}
+						}
+					};
+					fused_index_proto cp = c.fused_index_protos[st.a];
+					bool cloned = false;
+					auto clone_binary = [&](uint32_t& idx) {
+						fused_binary_proto bp = c.fused_binary_protos[idx];
+						synthetic(bp.left); synthetic(bp.right);
+						if (bp.left.slot != c.fused_binary_protos[idx].left.slot || bp.right.slot != c.fused_binary_protos[idx].right.slot) {
+							c.fused_binary_protos.push_back(bp); idx = static_cast<uint32_t>(c.fused_binary_protos.size() - 1); cloned = true;
+						}
+					};
+					if (cp.index_binary != k_invalid_u32) { clone_binary(cp.index_binary); for (auto& step : cp.index_chain_ext) { clone_binary(step); } }
+					else { synthetic(cp.index); cloned = cp.index.slot != c.fused_index_protos[st.a].index.slot; }
+					if (cloned) { c.fused_index_protos.push_back(cp); proto_index = static_cast<uint32_t>(c.fused_index_protos.size() - 1); }
+				}
+				append(vm_instruction{opcode::op_c_index_store, proto_index, loop_index, static_cast<uint32_t>(ip)}, ip);
 			}
 		}
 		loop.copy_back = static_cast<uint32_t>(code.size());

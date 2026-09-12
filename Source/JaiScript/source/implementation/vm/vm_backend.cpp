@@ -6633,6 +6633,13 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// slot holds another kind (a declared-type conversion on a store) stays on the general form
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
+		if (cl.env_operand != k_invalid_u32) {
+			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
+			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
+			if (!v || v->raw_storage_index() != script_value::TYPEID_INT) { JAI_CELLS_COUNT(1); f.ip = loop.head; return {}; }
+			continue;
+		}
 		const script_value* s = frame_slot(f, cl.slot);
 		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
 		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
@@ -6692,7 +6699,12 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	}
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
-		if (cl.live_in) {
+		if (cl.env_operand != k_invalid_u32) {
+			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);   // resolved above: an int
+			cs.payload[k] = static_cast<int64_t>(v->unchecked_as_int());
+			cs.kind[k] = static_cast<uint8_t>(script_value::TYPEID_INT);
+		} else if (cl.live_in) {
 			const script_value* s = frame_slot(f, cl.slot);
 			const uint8_t kind = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());   // adopted above
 			cs.payload[k] = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(s->unchecked_as_int()) : cell_bits_of_float(s->unchecked_as_float());

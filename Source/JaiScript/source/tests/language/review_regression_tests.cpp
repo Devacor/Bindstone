@@ -107,6 +107,31 @@ public:
                 check_eq(std::string("5|0|"), run("function probe() -> int { var data = [3]; var& value = data[0]; value += 2; return value; } got = probe();"), label + " control: a live element");
             }
         });
+        test("a_program_scope_compound_on_a_removed_element_is_catchable_on_both_backends", [this]() {
+            // Astra's compound_program_scope probe: `value += 2` on a reference to a removed element at program scope. Both
+            // backends dereferenced the target raw and the host exception escaped the script's catch at program scope
+            // (inside a function the call boundary converted it); 118.1b made the interpreter's read checked, this row the
+            // VM's, so the catch sees the language's error at every scope on both backends
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                jai::stdlib::register_all(*e);
+                e->static_checking(check_mode::off);
+                const std::string label = vm ? "vm" : "interp";
+                auto run = [&](const char* src) {
+                    try { return e->execute(src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                };
+                check_eq(std::string("Reference to a removed array element|finished"),
+                         run(R"(string msg = ""; try { var data = [3]; var& value = data[0]; data.pop(); value += 2; } catch (err) { msg = err; } return msg + "|finished";)"),
+                         label + " a removed array element at program scope");
+                check_eq(std::string("Reference to a removed map entry|finished"),
+                         run(R"(string msg = ""; try { var data = {"key": 3}; var& value = data["key"]; data.erase("key"); value -= 2; } catch (err) { msg = err; } return msg + "|finished";)"),
+                         label + " a removed map entry at program scope");
+                check_eq(std::string("22|finished"),
+                         run(R"(string msg = ""; var got = 0; try { var data = [3]; var& value = data[0]; data.pop(); data.push(20); value += 2; got = value; } catch (err) { msg = err; } return to_string(got) + msg + "|finished";)"),
+                         label + " control: a restored element at program scope");
+            }
+        });
         test("a_raising_left_operand_stops_the_expression_on_both_backends", [this]() {
             // Astra's fuzz seed 1449: a missing instance field on the LEFT raises through the
             // interpreter's unwinding flag with a placeholder value, and the interpreter went on to

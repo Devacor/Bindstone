@@ -6167,9 +6167,13 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		// roles 0/1, and cache entries are provenance-checked by {env, epoch}, not symbol
 		const script_value* guarded = nullptr;
 		if (p.container_guard != k_invalid_u32) {
-			// the guard materialized a reference that is not a plain cell ahead of the index: read that, not the slot again
-			const script_value* s = direct_operand(f, p.container);
-			if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) { guarded = frame_slot(f, p.container_guard); }
+			// the guard materialized the container ahead of the index (every time, or a reference that is not a plain cell): read
+			// that, not the binding again
+			if (p.guard_always) { guarded = frame_slot(f, p.container_guard); }
+			else {
+				const script_value* s = direct_operand(f, p.container);
+				if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) { guarded = frame_slot(f, p.container_guard); }
+			}
 		}
 		const script_value* resolved = guarded ? guarded : fused_ident_value(f, p.container, cscratch,
 		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
@@ -6573,6 +6577,7 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 		const script_value* cp = site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
 			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
+		if (cp && site.guard_always) { cp = frame_slot(f, site.guard_temp); }   // the guard took the container's value ahead of the index
 		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
 			if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) { cp = frame_slot(f, site.guard_temp); }   // the guard materialized it ahead of the index
 			else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }   // a getter-backed reference: the kernel reads it exactly once
@@ -7326,8 +7331,11 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instructio
 	const uint32_t alias = ins.b & 0xFFu, guarded = ins.b >> 8;
 	if (alias != 0xFFu) { cs.dirty.clear(alias); }
 	if (guarded != 0xFFFFFFu) {
-		const script_value* s = direct_operand(f, f.code->fused_binary_protos[f.code->code[ins.c].a].left);
-		if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) {
+		// the plain-cell form (c = 1) restores a reference that is not a plain cell; the always form (c = 2) restores every container
+		const vm_instruction& orig = f.code->code[ins.c];
+		const fused_operand& src = f.code->fused_binary_protos[orig.a].left;
+		const script_value* s = orig.c == 2 ? fused_cmp_operand(f, src, static_cast<size_t>(ins.c) * 3) : direct_operand(f, src);
+		if (s && (orig.c == 2 || (s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)))) {
 			const script_array* node = cs.site_node[guarded];
 			script_value* g = frame_slot(f, ins.a);
 			if (!g || g->raw_storage_index() != script_value::TYPEID_ARRAY || g->unchecked_array_node() != node) { frame_slot_set(f, ins.a, script_value(s->deref())); }
@@ -8132,6 +8140,7 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	const bool folded = p.index_binary != k_invalid_u32;
 	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
+	if (p.guard_always) { cp = frame_slot(f, p.container_guard); if (!cp) return false; }   // the guard took the container's value ahead of the index
 	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
 		if (p.container_guard != k_invalid_u32 && !ref_plain_cell(*cp)) {
 			cp = frame_slot(f, p.container_guard);   // the guard materialized it ahead of the index

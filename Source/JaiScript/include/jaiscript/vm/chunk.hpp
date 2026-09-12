@@ -320,6 +320,9 @@ namespace jai::vm {
         // a reference-slot container guarded ahead of the index (op_operand_temp c = 1): the temp that holds its
         // materialized value when the slot's reference is not a plain cell; the readers take the slot otherwise
         uint32_t container_guard = k_invalid_u32;
+        // the guard's always form (op_operand_temp c = 2): the container's value is taken ahead of an index that may run user
+        // code (a custom numeric operator, a getter, an operator[]), whatever the slot holds; the readers take the temp every time
+        bool guard_always = false;
     };
 
     struct chunk {
@@ -476,6 +479,7 @@ namespace jai::vm {
             bool temp = false;
             bool speculative = false;
             uint32_t guard_temp = k_invalid_u32;   // fused_index_proto::container_guard, flattened
+            bool guard_always = false;             // fused_index_proto::guard_always, flattened
         };
         std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;

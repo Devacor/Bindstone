@@ -15,6 +15,8 @@
 
 namespace jai::vm {
 
+static bool primitive_declared_type(const type_info* t);   // defined with the quietness predicates below
+
 using jai::detail::body_walker;
 
 namespace {
@@ -672,6 +674,8 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	for (const auto& p : parameters) {
 		uint64_t id = p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name);
 		callable_.declared.insert(id);
+		if (p.slot_index != SIZE_MAX && (p.is_reference || p.ref_escaping)) { callable_.escaping.insert(static_cast<uint32_t>(p.slot_index)); }
+		if (p.slot_index != SIZE_MAX && !p.is_reference && primitive_declared_type(p.type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(p.slot_index)); }
 #ifdef JAISCRIPT_VM_PROFILE
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
@@ -2170,7 +2174,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.decl_expect = fp.decl_expect;
 			site.temp = fp.decl_temp;
 			site.speculative = fp.speculative;
-			site.guard_temp = fp.container_guard;
+			site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
 			chunk_ = &c;
 			typed_site_at(ip) = site;
 			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
@@ -2636,8 +2640,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_jump) {
 				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }   // a break leaves the loop
 				op.kind = ir::jump; op.target = st.a;
-			} else if (st.op == opcode::op_operand_temp && st.c == 1) {
-				// guard: a snapshot definition; its read is the first load after it whose site names this slot
+			} else if (st.op == opcode::op_operand_temp && (st.c == 1 || st.c == 2)) {
+				// guard (the plain-cell form or the always form): a snapshot definition; its read is the first load after it whose site
+				// names this slot; the site itself is keyed on the original container, resolved at entry and after every effect point
 				op.kind = ir::guard; op.a = st.b;
 				for (size_t ip2 = ip + 1; ip2 < back; ++ip2) {
 					const vm_instruction& n = code[ip2];
@@ -2645,6 +2650,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					                 : n.op == opcode::op_index_fused_decl && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
 					if (g == st.b) { op.guarded = static_cast<uint32_t>(ip2 - head); break; }
 				}
+			} else if (st.op == opcode::op_operand_temp && st.c == 0 && st.a < c.fused_binary_protos.size()) {
+				// a value snapshot of a scalar operand (an identifier user code could rebind, read ahead of a hoisted read that may run
+				// it): the block runs no user code between its operations, so the snapshot is a move into the temp
+				if (st.b >= k_typed_slot_mask || !value(op, c.fused_binary_protos[st.a].left, 0, static_cast<uint32_t>(ip * 3), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(st.b, 0, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::mov; op.a = st.b; op.writes = st.b;
 			} else if (st.op == opcode::op_compound_fused && st.a < c.compound_fused_protos.size()) {
 				// x op= y the typed lowering left general (a slot the checker could not pin, a float literal): arith with the
 				// compound landing, kinds at run time (a kind change on the slot misses onto the general conversion)
@@ -3046,7 +3057,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					site.decl_expect = fp.decl_temp || stamp_kind(fp.decl_type) == 0 ? 0xFF : stamp_kind(fp.decl_type);   // a var or auto decl lands the element's own kind
 					site.temp = fp.decl_temp || (op.writes != k_invalid_u32 && op.writes >= static_cast<uint32_t>(c.local_count));   // an argument's value is a compiler value too
 					site.speculative = fp.speculative;
-					site.guard_temp = fp.container_guard;
+					site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
 				} else {
 					site = c.typed_sites[ip];   // a T_LOAD's row with its slot operands rebound to cells
 					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
@@ -3264,6 +3275,78 @@ bool vm_compiler::env_identifier(const expression* e) {
 	return !id->global_qualified && identifier_slot_operand(id) == k_invalid_u32;
 }
 
+// a declared type whose slot holds a primitive at every point: a unary or an intrinsic over such a slot runs no user operator or conversion
+static bool primitive_declared_type(const type_info* t) {
+	return t && (t->base_type == script_value_type::jai_int_type || t->base_type == script_value_type::jai_float_type || t->base_type == script_value_type::jai_bool_type);
+}
+
+// a frame slot no user code can rebind: a value declaration (not a reference) that no reference or capture reaches; it may
+// stay an in-op operand ahead of any hoisted read (design_row118 section 3: an operand resolved inside its operation only
+// when nothing evaluated after it in the source can run user code)
+bool vm_compiler::private_local(const expression* e) {
+	if (!e || e->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+	if (id->global_qualified || !id->names_value_decl) return false;
+	const uint32_t slot = identifier_slot_operand(id);
+	return slot != k_invalid_u32 && callable_.escaping.count(slot) == 0;
+}
+
+bool vm_compiler::primitive_local(const expression* e) {
+	if (!private_local(e)) return false;
+	return callable_.primitive_slots.count(identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e)))) != 0;
+}
+
+// a hoisted read that cannot run user code: a subscript whose container is a private local (a reference or an environment
+// name may reach a getter while the receiver resolves) and whose element class the checker proved (an array or a map, never
+// a class instance with an operator[]) over a quiet index; a math intrinsic or a unary over a literal, a quiet read or a
+// private local declared int, float or bool (a class in a var local could run a user conversion or operator)
+bool vm_compiler::quiet_read(const expression* e) {
+	if (!e) return false;
+	if (fusable_index_expr(e)) {
+		const auto* b = static_cast<const binary_expr*>(e);
+		if (operand_expect(b) == 0xFF || !private_local(b->left.get())) return false;
+		return quiet_index(b->right.get());
+	}
+	const expression* arg = nullptr;
+	if (math_temp_operand(e) != detail::math_fn::none) { arg = static_cast<const call_expr*>(e)->arguments[0].get(); }
+	else if (unary_temp_operand(e)) { arg = static_cast<const unary_expr*>(e)->operand.get(); }
+	if (!arg) return false;
+	return arg->get_type() == node_type::literal_expr || primitive_local(arg) || quiet_read(arg);
+}
+
+// a binary is never quiet: a custom numeric operator (engine::set_has_custom_numeric_operators) makes int + int user code,
+// and the compiler holds no operator identity fact
+bool vm_compiler::quiet_index(const expression* e) {
+	if (!e) return false;
+	return e->get_type() == node_type::literal_expr || private_local(e) || quiet_read(e);
+}
+
+// a subtree with a hoisted read that may run user code: the operands the language reads before it must not stay in place
+bool vm_compiler::observing_hoist_in(const expression* e) {
+	if (!e) return false;
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e)) return !quiet_read(e);
+	if (e->get_type() != node_type::binary_expr) return false;
+	const auto* b = static_cast<const binary_expr*>(e);
+	return observing_hoist_in(b->left.get()) || observing_hoist_in(b->right.get());
+}
+
+// an environment name the unit does not declare as a value (another unit's global, a host name, a reference declaration at
+// program scope such as `var& P = box.values`): its read may run a getter or raise, so it keeps its place ahead of any
+// hoisted read; a value the unit declares dereferences a cell (the plain-reference proof's rule)
+bool vm_compiler::env_reference_candidate(const expression* e) {
+	if (!env_identifier(e)) return false;
+	return !static_cast<identifier_expr*>(const_cast<expression*>(e))->names_known_value;
+}
+
+// a subtree with a hoisted read, intrinsic or unary of any quietness: it runs ahead of the operation's own operands
+bool vm_compiler::hoist_in(const expression* e) {
+	if (!e) return false;
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e)) return true;
+	if (e->get_type() != node_type::binary_expr) return false;
+	const auto* b = static_cast<const binary_expr*>(e);
+	return hoist_in(b->left.get()) || hoist_in(b->right.get());
+}
+
 // a value that lands in a compiler temp wherever a consumer wants an operand: an element read, a pure math call, a unary
 bool vm_compiler::value_temp_operand(const expression* e) {
 	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e);
@@ -3428,17 +3511,19 @@ void vm_compiler::materialize_operand_temp(const expression_ptr& e, fused_operan
 	out.direct = true;
 }
 
-// A reference-slot container ahead of a hoisted read: the guard (op_operand_temp, c = 1) materializes the
-// container into `guard` only when the slot's reference is not a plain cell, so a getter runs once and in its
-// place; the read's container operand stays the slot and the readers take the temp when the guard filled it
-void vm_compiler::guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard) {
+// A container ahead of a hoisted read: the guard (op_operand_temp, c = 1) materializes a reference-slot container
+// into `guard` only when the slot's reference is not a plain cell, so a getter runs once and in its place; the
+// always form (c = 2) takes the container's value every time, ahead of an index that may run user code which
+// could rebind the container (design_row118 section 3); either way the read's container operand stays the
+// original one, so a region's site is keyed on it, and the readers take the temp when the guard filled it
+void vm_compiler::guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard, bool always) {
 	fused_binary_proto p;
 	p.left = make_fused_operand(e);
 	chunk_->fused_binary_protos.push_back(std::move(p));
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-	emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t, 1);
+	emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t, always ? 2u : 1u);
 	container = make_fused_operand(e);
 	guard = t;
 }
@@ -3491,12 +3576,18 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 		fused_operand inner;
 		fused_operand container;
 		const bool ref_container = reference_slot_operand(expr->left.get());
+		// the outer binding is read before the inner read in the language's order: ahead of an inner read that may run user
+		// code its value is taken (a reference too: the callback may rebind what it names), ahead of a quiet one a reference
+		// is dereferenced (its getter); a private local needs neither
+		const bool snap_container = (!quiet_read(expr->right.get()) && !private_local(expr->left.get())) || env_reference_candidate(expr->left.get());   // an environment name that may be a reference to a property reads first either way: its getter, or its error, precedes the inner read
 		uint32_t guard = k_invalid_u32;
-		if (ref_container) { guard_container_temp(expr->left, container, guard); }   // its dereference precedes the inner read
+		if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
+		else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }
 		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
-			p.container = ref_container ? container : make_fused_operand(expr->left);
+			p.container = (ref_container || snap_container) ? container : make_fused_operand(expr->left);
 			p.container_guard = guard;
+			p.guard_always = snap_container;
 			p.index = inner;
 			chunk_->fused_index_protos.push_back(p);
 			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
@@ -3561,15 +3652,17 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				// direct operands and the outer read takes the T_LOAD row when the binary's class is proven
 				fused_operand container;
 				const bool ref_container = reference_slot_operand(expr->left.get());
+				const bool snap_container = (observing_hoist_in(rb) && !private_local(expr->left.get())) || (env_reference_candidate(expr->left.get()) && hoist_in(rb));   // read before the index's reads; a reference container's value too; an environment name that may be a property reference reads ahead of any hoisted read
 				uint32_t guard = k_invalid_u32;
-				if (ref_container) { guard_container_temp(expr->left, container, guard); }   // its dereference precedes the reads
+				if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
+				else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }   // its dereference precedes quiet reads
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(rb->op.type);
 				auto side = [&](const expression_ptr& e, fused_operand& out, bool ahead_of_a_read) {
 					if (fusable_index_expr(e.get())) {
 						if (compile_subscript_into_temp(e, operand_expect(static_cast<const binary_expr*>(e.get())), out)) { bp.elem_read_operand = true; }
-					} else if (ahead_of_a_read && reference_slot_operand(e.get())) {
-						materialize_operand_temp(e, out);
+					} else if (ahead_of_a_read && (reference_slot_operand(e.get()) || (e->get_type() == node_type::identifier_expr && !private_local(e.get()) && !quiet_read(rb->right.get())))) {
+						materialize_operand_temp(e, out);   // its value precedes a read that may run user code
 					} else {
 						out = make_fused_operand(e);
 					}
@@ -3578,8 +3671,9 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				side(rb->right, bp.right, false);
 				stamp_typed_class(bp, rb);
 				fused_index_proto p;
-				p.container = ref_container ? container : make_fused_operand(expr->left);
+				p.container = (ref_container || snap_container) ? container : make_fused_operand(expr->left);
 				p.container_guard = guard;
+				p.guard_always = snap_container;
 				chunk_->fused_binary_protos.push_back(bp);
 				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 				chunk_->fused_index_protos.push_back(p);
@@ -3592,9 +3686,9 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				// is dereferenced ahead of the index (the interpreter's container-before-index order)
 				const size_t temp_mark = temp_next_;
 				fused_operand container;
-				const bool ref_container = reference_slot_operand(expr->left.get());
+				const bool snap_container = !private_local(expr->left.get());   // the tree holds a binary (a custom numeric operator is user code): the container's value precedes it
 				uint32_t guard = k_invalid_u32;
-				if (ref_container) { guard_container_temp(expr->left, container, guard); }
+				if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
 				compile_expression(expr->right);
 				vm_instruction& last = chunk_->code.back();
 				if (last.op != opcode::op_binary_fused) {
@@ -3609,8 +3703,9 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				last.op = opcode::op_binary_fused_temp;
 				last.b = t;
 				fused_index_proto p;
-				p.container = ref_container ? container : make_fused_operand(expr->left);
+				p.container = snap_container ? container : make_fused_operand(expr->left);
 				p.container_guard = guard;
+				p.guard_always = snap_container;
 				p.index = fused_operand{};
 				p.index.slot = t;
 				p.index.symbol = temp_symbol_index();
@@ -3744,7 +3839,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
 			if (lsub) { hoist_into_temp(expr->left, proto.left); }
-			else if (reference_slot_operand(expr->left.get())) { materialize_operand_temp(expr->left, proto.left); }   // its dereference precedes the read
+			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_reference_candidate(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get()))))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
 			else { proto.left = make_fused_operand(expr->left); }
 			if (rsub) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
@@ -3756,10 +3851,15 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	}
 
 	const uint32_t shape = binary_shape(expr.get());
-	if (shape != binary_shape_none) {
+	// the left operand is read before the right in the language's order: an in-op subscript on the right may run user code
+	// (an operator[] on a class instance, a getter behind the container) that rebinds a left identifier user code can reach,
+	// so that identifier's value is taken ahead of the op (a private local needs no snapshot); without temps the general
+	// pushes keep the order
+	const bool snap_left_in_op = shape != binary_shape_none && fusable_subscript_operand(expr->right.get()) && expr->left->get_type() == node_type::identifier_expr && !private_local(expr->left.get()) && !quiet_read(expr->right.get());
+	if (shape != binary_shape_none && (!snap_left_in_op || (temps_active_ && chunk_->is_function_body))) {
 		fused_binary_proto proto;
 		proto.op = static_cast<uint8_t>(expr->op.type);
-		proto.left = make_fused_operand(expr->left);
+		if (snap_left_in_op) { materialize_operand_temp(expr->left, proto.left); } else { proto.left = make_fused_operand(expr->left); }
 		proto.right = make_fused_operand(expr->right);
 		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
@@ -3800,7 +3900,8 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// before the sink writes).
 			auto sequence_left = [&](fused_operand& lo, const expression* l, const expression* r) {
 				const bool ref_left = reference_slot_operand(l) && (temp_only(r) || !operand_shape(r));
-				if (!ref_left && (!lo.is_subscript() || operand_shape(r))) { return; }
+				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_reference_candidate(l) && hoist_in(r)));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read
+				if (!ref_left && !snap_left && (!lo.is_subscript() || operand_shape(r))) { return; }
 				fused_binary_proto p;
 				p.left = std::move(lo);
 				chunk_->fused_binary_protos.push_back(std::move(p));
@@ -4524,6 +4625,8 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 
 void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& decl) {
 	const bool is_reference = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
+	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
+	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
 
 	// Locals declared through env fallback in lambda contexts keep working because the
 	// slot decision below mirrors identifier loads (declared symbols keep parser slots).

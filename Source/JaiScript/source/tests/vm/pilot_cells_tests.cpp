@@ -1831,6 +1831,82 @@ var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n
 			check(listing.find("effect at") != std::string::npos, "the refusal is an effect refusal: " + listing);
 			check(listing.find(":probe") != std::string::npos, "the probe is an operation of the region: " + listing);
 		});
+		test("a_read_that_may_run_user_code_never_runs_ahead_of_an_earlier_operand", [this]() {
+			// Astra's second finding and its follow-ups: the outer container of a nested read, or the left operand of a fused
+			// binary, is read before the inner read in the language's order; when that read may run user code (an operator[] on a
+			// var container, a getter-backed reference as the index or as the receiver, a class operator or a custom numeric
+			// operator inside the index) and the operand is a binding user code could rebind (a global, a local captured by
+			// reference, a reference parameter to such a binding), the operand's value is taken ahead of the read on both
+			// backends; a private local keeps the fused shape without a snapshot. The fixture is a C++ box bound as a global by reference
+			// with a free arm() (a method call on the box would touch its properties), armed after the references are bound
+			struct stepper { bool armed = false; };
+			const char* defs = R"JAI(
+var P = [10];
+var X = 5;
+var R = [10, 20];
+var D = [1, 2, 3];
+array<int> grid_source = [5, 6, 7];
+var& PR = box.grid;
+array<int> P2 = [10, 20];
+array<int> Other = [30, 40, 50, 60];
+array<int> Q2 = [0, 1, 2];
+class Index { var target = null; Index(var f) { target = f; } int operator[](int i) { target(); return 0; } }
+class Vec { int v = 0; Vec(int a) { v = a; } function operator+(int o) -> int { X = 100; return v + o; } }
+var global_rebind = function() { var Q = Index([]() { P = [90]; }); return to_string(P[Q[0]]) + "|" + to_string(P[0]); };
+var local_rebind = function() { var L = [10]; var Q = Index([&L]() { L = [90]; }); return to_string(L[Q[0]]) + "|" + to_string(L[0]); };
+var lift_rebind = function() { var Q = Index([]() { X = 100; }); int r = X + Q[0]; return to_string(r) + "|" + to_string(X); };
+var typed_getter = function() { array<int> Q = [0]; var& idx = box.number; arm(); return to_string(P[Q[idx]]) + "|" + to_string(P[0]); };
+var private_operator = function() { Vec q = Vec(1); int r = X + R[q + 0]; return to_string(r) + "|" + to_string(X); };
+var by_ref = function(var& p) { var& s = box.source; arm(); return to_string(p[s[0]]) + "|" + to_string(D[0]); };
+var ref_param_rebind = function() { return by_ref(D); };
+var typed_receiver = function() { array<int>& t = box.grid; arm(); int r = X + t[0]; return to_string(r) + "|" + to_string(X); };
+var numeric_operator = function() { array<int> Q = [0, 0]; int i = 0; install_plus(); int r = P[Q[i + 0]]; int p0 = P[0]; return to_string(r * 1000 + p0); };
+var outer_ref = function() { array<int> Q = [0]; arm(); string m = ""; try { int r = PR[Q[2]]; m = to_string(r); } catch (e) { m = "caught"; } return m + "|" + to_string(X); };
+var guard_reuse = function(int n) { int s = 0; int i = 0; string m = ""; try { while (i < n) { s = s + P2[Q2[i + 0]]; s = s + Other[Q2[i + 0]]; i = i + 1; } } catch (e) { m = "caught"; } return m + "|" + to_string(s); };
+var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + (p + A[i]); } return acc; };
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				stepper source;   // outlives the engine below
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				dynamic_binder<stepper>(*e, "Stepper")
+					.property("number", [raw](stepper& s) -> int64_t { if (s.armed) { raw->execute("P = [90];"); } return 0; }, nullptr)
+					.property("source", [raw](stepper& s) -> script_value { if (s.armed) { raw->execute("D = [7, 8, 9];"); } return raw->execute("[0]"); }, nullptr)
+					.property("grid", [raw](stepper& s) -> script_value { if (s.armed) { raw->execute("X = 100;"); } return raw->get_variable("grid_source"); }, nullptr)
+					.build();
+				e->add_global_ref("box", source);
+				e->add_function("arm", [&source]() { source.armed = true; });
+				e->add_function("install_plus", [raw]() {
+					raw->add_function("+", [raw](script_int a, script_int b) { raw->execute("P = [90];"); return a + b; });
+					raw->set_has_custom_numeric_operators(true);
+				});
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "global_rebind();", "10|90" }, { "local_rebind();", "10|90" }, { "lift_rebind();", "5|100" }, { "typed_getter();", "10|90" },
+				{ "private_operator();", "25|100" }, { "ref_param_rebind();", "1|7" }, { "typed_receiver();", "10|100" }, { "numeric_operator();", "10090" }, { "outer_ref();", "caught|100" }, { "guard_reuse(3);", "caught|100" },
+				{ "to_string(private_stays(4));", "410" },
+			};
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(defs) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
+			const std::string priv = listing_of("var f = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + (p + A[i]); } return acc; };");
+			check(priv.find("OPERAND_TEMP") == std::string::npos && priv.find("-- cell loop") != std::string::npos, "a private local ahead of a proven read keeps the fused shape and the loop closes: " + priv);
+			const std::string reuse = listing_of("array<int> P2 = [10, 20]; array<int> Other = [30, 40, 50, 60]; array<int> Q2 = [0, 1, 2]; var f = function(int n) { int s = 0; int i = 0; while (i < n) { s = s + P2[Q2[i + 0]]; s = s + Other[Q2[i + 0]]; i = i + 1; } return s; };");
+			check(reuse.find("-- cell loop") != std::string::npos, "two guarded global containers in one body still close as a block (the miss path restores each snapshot): " + reuse);
+			const std::string snap = listing_of("var f = function(var& t, var& pal, int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + pal[t[i + 1] + 1]; } return acc; };");
+			check(snap.find("-- cell loop") != std::string::npos, "a guarded container ahead of an index that may run user code still closes as a block: " + snap);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

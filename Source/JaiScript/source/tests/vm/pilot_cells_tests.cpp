@@ -1274,6 +1274,27 @@ public:
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(5), closed, "every move loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
+		test("a_removed_map_entry_refuses_the_block", [this]() {
+			// Astra's finding (2026-09-11): the entry dereferenced a guarded map-entry reference before the loop's own code ran,
+			// so a key erased since the reference was taken raised the removed-entry text at admission on a path the general
+			// form never takes; admission is non-observing, the stale entry refuses the block, and the text appears only where
+			// the loop itself reads the entry (the taken companion), on both backends, proofs on and off
+			const char* defs =
+				"var untaken = function(int n, int zero, int one) { var table = {\"key\": [10, 20]}; var& pixels = table[\"key\"]; table.erase(\"key\"); int total = 0; int i = 0;"
+				" while (i < n) { if (i < zero) { total = total + pixels[(i + zero) * (one + zero)]; } total = total + i; i = i + 1; } return total; };"
+				" var taken = function(int n, int zero, int one) { var table = {\"key\": [10, 20]}; var& pixels = table[\"key\"]; table.erase(\"key\"); int total = 0; int i = 0;"
+				" while (i < n) { if (i >= one) { total = total + pixels[(i + zero) * (one + zero)]; } i = i + 1; } return total; };";
+			const std::string untaken_script = std::string(defs) + " to_string(untaken(1, 0, 1)) + \",\" + to_string(untaken(3, 0, 1));";
+			const std::string taken_script = std::string(defs) + " string r = \"\"; try { r = to_string(taken(3, 0, 1)); } catch (err) { r = \"caught:\" + err; } r;";
+			both(untaken_script, "0,3", "the untaken branch never touches the removed entry");
+			both(untaken_script, "0,3", "the untaken branch, proofs off", false);
+			both(taken_script, "", "the taken branch raises the removed-entry text");
+			both(taken_script, "", "the taken branch, proofs off", false);
+			const std::string vm = run_on(true, taken_script);
+			check_true(vm.find("removed map entry") != std::string::npos, "the text where the loop reads it: " + vm);
+			const std::string listing = listing_of(defs);
+			check_true(listing.find("-- cell loop ") != std::string::npos, "the probe loops close, so the entry is what refuses: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

@@ -4707,9 +4707,12 @@ static bool ref_plain_cell(const script_value& v) noexcept {
 }
 
 // a reference to a map entry (a table keyed by name or lump): its dereference is silent, and no cell store writes a map
+// a reference to a map entry whose key is still present: admission is non-observing, so a key erased since the reference
+// was taken refuses the block (the general form raises where the loop reads it, never at the entry)
 static bool ref_map_entry(const script_value& v) noexcept {
 	const auto* h = v.get_reference_holder();
-	return h && h->container_map && h->has_map_key && !h->has_cell && !h->container && !h->property && !h->owner_instance;
+	if (!(h && h->container_map && h->has_map_key && !h->has_cell && !h->container && !h->property && !h->owner_instance)) return false;
+	return h->container_map->find(*h->cell()) != h->container_map->end();
 }
 
 // an element reference into a hetero array (a texture table's entry): its dereference is silent and, absent a store

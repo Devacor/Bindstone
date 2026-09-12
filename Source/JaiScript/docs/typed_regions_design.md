@@ -245,7 +245,10 @@ angle conversions land a float). `x op= y` and `++x` / `x--` in statement positi
 lowering left general are `arith` with the compound landing, kinds at run time.
 
 A guarded container that is a reference to a map entry (a sprite table keyed by lump) is admitted like a pinned
-table entry: no cell store writes a map, so the entry holds for the block. A container site that refuses the
+table entry while its key is present: no cell store writes a map, so the entry holds for the block. Admission is
+non-observing: a missing or dead binding refuses the block, it never raises, and the general form raises only
+where the program reaches the read (a key erased since the reference was taken is such a binding). A container
+site that refuses the
 entry marks the loop in the call record's cell state and the entry is not attempted again in that call (the
 refusal valve): a binding does not change within a call, and the guards would otherwise run at every back edge
 for nothing.

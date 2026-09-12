@@ -4397,6 +4397,52 @@ public:
     }
 };
 
+class loop_frame_storage_tests : public suite {
+public:
+    loop_frame_storage_tests() : suite("Loop Frame Storage") {}
+
+    void forge_tests() override {
+        auto run_both = [](const std::string& src) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto expect = [this, run_both](const std::string& src, const std::string& expected, const char* what) {
+            auto [i_out, v_out] = run_both(src);
+            check_eq(expected, i_out, std::string(what) + " (interpreter)");
+            check_eq(expected, v_out, std::string(what) + " (vm)");
+        };
+
+        test("loop_bodies_that_move_the_frame_keep_their_counter_and_variable", [expect]() {
+            // a lambda's frame grows as the body declares (a slot past the reserved count), and its callees push frames of
+            // other sizes: the counted loop's counter and bound, and the range loop's variable, are read and written through
+            // pointers re-resolved after every body run; the loop runs every iteration with the live values on both backends
+            const std::string defs =
+                "int ITER = 0; array<int> DONE = [0, 1, 0, 0, 1, 0]; array<int> A = [1, 2, 3, 4, 5, 6];"
+                " var light_band = function(int light, float dist) -> int { return light + math::itrunc(dist); };"
+                " var col = function(int x, int y0, int y1, float ph, float rdx, float rdy, int light) -> int { return x + y0 + y1 + 30 + math::itrunc(ph + rdx + rdy) + light; };";
+            expect(defs + " var seg = function(int n, var& done) { int acc = 0; float dist = 1.5; int light = 3; float fceil = 2.0;"
+                          " for (int x = 0; x < n; ++x) { ITER = ITER + 1; if (done[x] != 0) { continue; } float rdx = x * 0.5; float rdy = rdx + 1.0; int band = light_band(light, dist); acc = col(x, band + 1, acc, fceil, rdx, rdy, light); } return acc; };"
+                          " to_string(seg(6, DONE)) + \" \" + to_string(ITER);", "184 6", "a counted loop with a continue and two calls");
+            expect(defs + " var walk = function() { int acc = 0; for (auto v : A) { ITER = ITER + 1; if (v == 2) { continue; } float rdx = v * 0.5; float rdy = rdx + 1.0; int band = light_band(v, 1.5); acc = col(v, band + 1, acc, 2.0, rdx, rdy, 3); } return acc; };"
+                          " to_string(walk()) + \" \" + to_string(ITER);", "247 6", "a range loop with a continue and two calls");
+            expect(defs + " var bound = function(int n) { int acc = 0; int step = 1; for (int x = 0; x < n; x += step) { float rdx = x * 0.5; int band = light_band(x, rdx); acc = col(x, band, acc, 2.0, rdx, 1.0, 3); } return acc; };"
+                          " to_string(bound(5));", "208", "a variable bound and step");
+            expect(defs + " var text = function() { int acc = 0; for (auto c : \"abc\") { float rdx = 0.5; int band = light_band(1, rdx); acc = col(acc, band, 1, 2.0, rdx, 1.0, 3) + cast<int>(c); } return acc; };"
+                          " to_string(text());", "408", "a string range loop");
+        });
+    }
+};
+
 class return_value_semantics_tests : public suite {
 public:
     return_value_semantics_tests() : suite("Return Value Semantics") {}
@@ -4721,3 +4767,5 @@ using return_value_semantics_tests = jai::foundry::tests::return_value_semantics
 FOUNDRY_REGISTER(return_value_semantics_tests)
 using compound_order_tests = jai::foundry::tests::compound_order_tests;
 FOUNDRY_REGISTER(compound_order_tests)
+using loop_frame_storage_tests = jai::foundry::tests::loop_frame_storage_tests;
+FOUNDRY_REGISTER(loop_frame_storage_tests)

@@ -7718,7 +7718,8 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                                 shared_parameters_for(func_decl.get()),
                                 func_decl->return_type,
                                 func_decl->body,
-                                ns_env  // Environment with namespace variables
+                                ns_env,  // Environment with namespace variables
+                                func_decl->local_count
                             );
                             return backend->execute_callable(payload, args);
                         }
@@ -8999,7 +9000,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             shared_parameters_for(expr),
             expr->return_type,
             lambdaBody,
-            needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
+            needs_capture_env ? final_closure_env : nullptr,  // Only use closure env if we have captures
+            expr->local_count   // the frame reserves every slot up front, as a named function's does
         );
         if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
     }
@@ -10064,6 +10066,24 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 if (hasReturnValue_ || hasYieldRequest_) break;
                                 if (hasContinueRequest_) hasContinueRequest_ = false;
 
+                                // The body can move the frame's locals (a declaration at a new slot grows the vector, a
+                                // callee's frame reallocates the call stack): the cached counter, bound and step pointers
+                                // are re-resolved before they are read again (a use-after-free otherwise; Debug's fill
+                                // tripped the kind guard into the general path, Release read the stale bytes)
+                                if (init_var->slot_index != SIZE_MAX && !call_stack_.empty()) { var_ptr = call_stack_.back().get_local(init_var->slot_index); }
+                                else { var_ptr = environment_->get_value_ptr(var_id); }
+                                if (!var_ptr) [[unlikely]] { fell_through = true; break; }
+                                if (end_var_id != UINT64_MAX) {
+                                    script_value* end_sv = resolve_local_or_env(end_var_slot, end_var_id);
+                                    end_target = end_sv ? &end_sv->deref() : nullptr;
+                                    if (!end_target) [[unlikely]] { fell_through = true; break; }
+                                }
+                                if (step_var_id != UINT64_MAX) {
+                                    script_value* step_sv = resolve_local_or_env(step_var_slot, step_var_id);
+                                    step_target = step_sv ? &step_sv->deref() : nullptr;
+                                    if (!step_target) [[unlikely]] { fell_through = true; break; }
+                                }
+
                                 // General-path parity: honor body writes to the loop variable —
                                 // adopt int writes into the native counter; on a type change run
                                 // the real update once, then continue via the fallthrough loop
@@ -10516,6 +10536,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
+                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
+                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
+                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                if (!loop_var_ptr) [[unlikely]] {
+                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                }
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -10626,6 +10654,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
+                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
+                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
+                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                if (!loop_var_ptr) [[unlikely]] {
+                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                }
                 if (replaying) {
                     replaying = false;
                 } else {
@@ -10712,6 +10748,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
+                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
+                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
+                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                if (!loop_var_ptr) [[unlikely]] {
+                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                }
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -10800,6 +10844,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
             while (replaying || !handle->done()) {
                 const bool resume_body = replaying;
+                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
+                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
+                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                if (!loop_var_ptr) [[unlikely]] {
+                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
+                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
+                }
                 if (replaying) {
                     // First replayed iteration: the current element is already restored;
                     // the body dispatch below fast-forwards to the yield point

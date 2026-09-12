@@ -3843,6 +3843,13 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				if (!no_result) { stack_.push_back(std::move(result.value())); }
 				return {};
 			}
+			if (refHolder && !refHolder->plain_cell()) {
+				// an element, map-entry or field reference is read through the checked twin of deref: a removed element or entry
+				// is the language's catchable error here, at every scope (KEEP BYTE-PARALLEL with the interpreter's compound
+				// assignment, which reads such a target after the right-hand side the same way)
+				auto alive = detail::ref_checked_deref(*varPtr);
+				if (!alive) [[unlikely]] { return raise_from(alive); }
+			}
 		}
 		script_value& target = varPtr->deref();
 		auto leftType = target.type();

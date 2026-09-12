@@ -167,9 +167,11 @@ alias pays one tag test.
 A closed loop may branch inside itself: a typed compare-jump or a jump whose target lies forward inside the
 loop or at its back edge is copied as a cell branch (`op_c_jcmp`, `op_c_jump`), so one-arm and two-arm
 diamonds over typed work, a `continue` and a guarded store close; a branch that leaves the loop (a `break`,
-an early return) keeps it open. A container guard inside the loop keeps its place in the copy (`op_c_guard`,
-which only clears the dirty bit of a dead temp cell sharing the guard's slot): the entry resolves the
-container once and refuses a reference that is neither a plain cell nor a pinned table entry (below).
+an early return) keeps it open. A container guard inside the loop keeps its place in the copy (`op_c_guard`:
+it clears the dirty bit of a dead temp cell sharing the guard's slot and, for a pinned table entry, restores
+the site's snapshot in the slot when another table sits there, so a miss's general form reads the handle it
+expects): the entry resolves the container once and refuses a reference that is neither a plain cell nor a
+pinned table entry (below).
 
 A temp that holds an element the checker could not class (a read through a `var&` container) is a cell
 too: its kind is pinned by a typed consumer (an index fold, a compare) or adopted at entry from the

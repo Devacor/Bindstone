@@ -1561,6 +1561,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_arith_any(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_mov(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
         JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);

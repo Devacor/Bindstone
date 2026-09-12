@@ -6685,8 +6685,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 				// against the store sites: nothing else in a body can rewrite the entry the reference names)
 				if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) {
 					const script_array* table = ref_pinned_element_container(*cp);
-					if (!table || pinned_count == 4) { cp = nullptr; }
-					else { pinned[pinned_count++] = table; cp = &cp->deref(); frame_slot_set(f, site.guard_temp, script_value(*cp)); }   // the guard slot holds the handle a miss's general form reads
+					if (!table || pinned_count == 4) { cp = nullptr; } else { pinned[pinned_count++] = table; cp = &cp->deref(); }
 				} else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			}
 			bool borrowed = false;
@@ -6758,7 +6757,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci); break;
 		case opcode::op_c_jump: f.ip = ci.a; break;
-		case opcode::op_c_guard: if (ci.b != k_invalid_u32) { f.cells->dirty &= ~(uint64_t(1) << ci.b); } ++f.ip; break;
+		case opcode::op_c_guard: st = exec_c_guard(f, ci); break;
 		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci); break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ci); break;
 		case opcode::op_c_math: st = exec_c_math(f, ci); break;
@@ -6898,6 +6897,25 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 		switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 	}
 	if (truthy) { ++f.ip; } else { f.ip = ins.c; }
+	return {};
+}
+
+// a container guard's place in the copy: the dead temp cell sharing the slot loses its dirty bit, and a pinned table
+// entry's snapshot is restored in the slot when another table sits there (two guarded sites in different statements
+// share one temp), so the general form after a later miss reads this site's handle as it would on its own
+JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	const uint32_t alias = ins.b & 0xFFu, guarded = ins.b >> 8;
+	if (alias != 0xFFu) { cs.dirty &= ~(uint64_t(1) << alias); }
+	if (guarded != 0xFFFFFFu) {
+		const script_value* s = direct_operand(f, f.code->fused_binary_protos[f.code->code[ins.c].a].left);
+		if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) {
+			const script_array* node = cs.site_node[guarded];
+			script_value* g = frame_slot(f, ins.a);
+			if (!g || g->raw_storage_index() != script_value::TYPEID_ARRAY || g->unchecked_array_node() != node) { frame_slot_set(f, ins.a, script_value(s->deref())); }
+		}
+	}
+	++f.ip;
 	return {};
 }
 

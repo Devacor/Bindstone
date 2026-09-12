@@ -1009,6 +1009,36 @@ public:
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_ARITH_ANY") != std::string::npos && listing.find("C_MATH") != std::string::npos && listing.find("C_MOV") != std::string::npos, "the flat column loop closes: " + listing);
 		});
+		test("two_pinned_tables_sharing_a_guard_slot_keep_their_own_snapshots", [this]() {
+			// Astra's review probes (guard_slot_reuse, guard_slot_reuse_kind): two guarded element-reference reads in
+			// different statements share one guard-temp slot; a bounds miss and a kind miss at the first read must resume
+			// the general form on the first table's handle, not the second's
+			const char* body = R"(
+				function probe(var& a, var& b, int n, int zero, int one) -> int {
+					int total = 0;
+					int i = 0;
+					while (i < n) {
+						int x = a[(i + zero) * (one + zero)];
+						int y = b[(zero + zero) * (one + zero)];
+						total = total + x + y;
+						i = i + 1;
+					}
+					return total;
+				}
+				var& a = rows[0];
+				var& b = rows[1];
+				string r = ""; try { r = to_string(probe(a, b, 4, 0, 1)); } catch (e) { r = "caught:" + e; }
+				r + "|" + to_string(probe(a, b, 2, 0, 1));
+			)";
+			const std::string bounds = std::string("var rows = [[10,20], [100,101,102,103,104,105]];") + body;
+			const std::string kind = std::string("var rows = [[10,20,\"bad\",40], [100,101,102,103,104,105]];") + body;
+			both(bounds, "caught:Array index 2 out of bounds for array of size 2|230", "bounds miss on the first table");
+			both(bounds, "", "bounds miss on the first table, proofs off", false);
+			both(kind, "", "kind miss on the first table");
+			both(kind, "", "kind miss on the first table, proofs off", false);
+			const std::string vm = run_on(true, kind);
+			check_true(vm.rfind("caught:", 0) == 0 && vm.find("declared int") != std::string::npos && vm.find("|230") != std::string::npos, "the kind miss raises the declaration's text: " + vm);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

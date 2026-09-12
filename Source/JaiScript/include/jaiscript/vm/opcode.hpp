@@ -210,7 +210,7 @@ namespace jai::vm {
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
         op_c_jcmp,          // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
         op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
-        op_c_guard,         // a container guard's place in the copy: a = guard slot, b = the temp cell aliasing it (dirty bit cleared) or k_invalid_u32
+        op_c_guard,         // a container guard's place in the copy: a = guard slot, b = aliasing temp cell (low byte, 0xFF none) | guarded load's copy offset << 8 (0xFFFFFF none), c = original ip
         op_c_arith_any,     // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: kinds from the cells
         op_c_mov,           // a = dst cell, b = src cell or const bit | index: a typed move's copy
         op_c_math,          // a = math_fn << 24 | dst cell, b = src cell: itrunc / ifloor on a cell

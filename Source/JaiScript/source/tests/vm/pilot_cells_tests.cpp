@@ -1168,8 +1168,8 @@ public:
 			check_eq(size_t(5), closed, "every spelling closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
-			// the translation's refusals are recorded per loop: a call is an effect, a break is an effect, a string append is
-			// a representation (a string is not an admitted value), a member access is a representation, a tree deeper than
+			// the translation's refusals are recorded per loop: a call is an effect (a break was one until row 119f, a string append
+			// a representation until row 122: both close now), a member access is a representation, a tree deeper than
 			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
@@ -1181,7 +1181,7 @@ public:
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
-			check_true(listing.find(": representation at") != std::string::npos && listing.find("(COMPOUND_FUSED)") != std::string::npos, "the string append and the member access are representations: " + listing);
+			check_true(listing.find(": representation at") != std::string::npos && listing.find("(GET_MEMBER)") != std::string::npos, "the member access is a representation: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
@@ -2020,6 +2020,97 @@ var conversion = function(int n) { array<int> Q = [0, 1, 2, 3]; int total = 0; i
 					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
 				}
 			}
+		});
+		test("strings_append_in_a_block", [this]() {
+			// vid_row_half's shape (a var string built from string elements of var arrays and an environment string), an alias taken
+			// before the loop (the first append misses and the general form unshares), the interned literal, a char appended as text,
+			// an int appended (the mismatch text), a callee keeping a copy (the append after it misses), a typed array<string>, a
+			// declared string local, a var that stops being a string mid-loop; all the same on both backends, proofs on and off
+			const char* defs = R"JAI(
+var PAL_FG = ["a", "b"]; var PAL_BG = ["c", "d"]; var HALFG = "h"; array<int> PIX = [0, 1, 1, 0, 1, 0, 0, 1]; array<string> WORDS = ["x", "y", "z"]; var KEEP = "";
+var row_half = function(int cy, int vw) { var row = ""; int fg = -1; int bg = -1; int ti = cy * 2 * vw; int bi = ti + vw; for (int x = 0; x < vw; ++x) { int top = PIX[ti + x]; int bot = PIX[bi + x]; if (top != fg) { row += PAL_FG[top]; fg = top; } if (bot != bg) { row += PAL_BG[bot]; bg = bot; } row += HALFG; } return row; };
+var aliased = function(int n) { var s = ""; var s2 = s; for (int i = 0; i < n; ++i) { s += HALFG; } return s + "|" + s2; };
+var chars = function(int n) { var s = ""; for (int i = 0; i < n; ++i) { s += 'x'; s += HALFG; } return s; };
+var ints = function(int n) { var s = ""; try { for (int i = 0; i < n; ++i) { s += HALFG; s += i; } } catch (e) { return s + "|" + e; } return s; };
+var keep = function(string v) -> void { KEEP = v; };
+var kept = function(int n) { var s = ""; for (int i = 0; i < n; ++i) { s += HALFG; keep(s); } return s + "|" + KEEP; };
+var typed = function(int n) { var s = ""; for (int i = 0; i < n; ++i) { s += WORDS[i % 3]; } return s; };
+var declared = function(int n) { string s = "s:"; for (int i = 0; i < n; ++i) { s += WORDS[i % 3]; s += "-"; } return s; };
+var flips = function(int n) { var s = ""; try { for (int i = 0; i < n; ++i) { s += HALFG; if (i == 1) { s = 5; } } } catch (e) { return "caught " + e; } return to_string(s); };
+var selfs = function(int n) { var s = "ab"; for (int i = 0; i < n; ++i) { s += s; } return s; };
+var aliased_src = function(int n) { var s = "a"; var t = s; for (int i = 0; i < n; ++i) { s += t; } return s + "|" + t; };
+var summed = function(var& data, int n) { int acc = 0; try { for (int i = 0; i < n; ++i) { acc = acc + data[i % 8]; } } catch (e) { return "throw|" + to_string(acc); } return to_string(acc); };
+var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
+)JAI";
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = {
+				{ "row_half(0, 4);", "adhbchhadh" }, { "aliased(3);", "hhh|" }, { "chars(2);", "xhxh" }, { "ints(2);", "" }, { "kept(3);", "hhh|hhh" },
+				{ "typed(5);", "xyzxy" }, { "declared(3);", "s:x-y-z-" }, { "flips(3);", "" }, { "selfs(3);", "abababababababab" }, { "aliased_src(3);", "aaaa|a" }, { "summed(MIXED, 8);", "throw|14" },
+			};
+			for (const probe& p : probes) {
+				both(std::string(defs) + " " + p.call, p.expected, p.call);
+				both(std::string(defs) + " " + p.call, "", (std::string(p.call) + " proofs off").c_str(), false);
+			}
+			// the memory cap reached inside the loop: the general form's text and post-state on both backends
+			auto capped = [&](bool vm) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				e->memory_cap(65536);
+				try { return e->execute(std::string(defs) + " var big = function(int n) { var s = \"\"; try { for (int i = 0; i < n; ++i) { s += WORDS[i % 3]; s += HALFG; } } catch (e) { return \"caught|\" + e; } return \"no cap\"; }; big(100000);").as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string ci = capped(false), cv = capped(true);
+			check_eq(ci, cv, "the memory cap inside the loop: both backends");
+			check(ci.find("|") != std::string::npos, "the cap raised inside the loop and was caught: " + ci);
+			const std::string listing = listing_of(defs);
+			size_t appends = 0; for (size_t at = listing.find("\tC_APPEND "); at != std::string::npos; at = listing.find("\tC_APPEND ", at + 1)) { ++appends; }
+			check(appends >= 10, "the appends are cell operations (" + std::to_string(appends) + "): " + listing);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(10), closed, "ten loops close, the char append's stays general (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			check(listing.find(":append") != std::string::npos, "the IR names the append: " + listing);
+		});
+		test("a_string_environment_cell_is_re_borrowed_after_every_effect_point", [this]() {
+			// Astra's rebase requirement for row 122 on the stable chain: the string cells' nodes are re-read in cells_reland, so a callee
+			// that rebinds the environment string (flip(i): TEXT = "b" at i == 2, a call taking only an int, so the loop stays admitted)
+			// and a getter observed by the callee probe that rebinds it (var& F = box.callable, armed from i == 2) both show in the
+			// next append; the fixture is a C++ box bound as a global by reference with a free arm()
+			struct stepper { bool armed = false; };
+			const char* defs = R"JAI(
+var TEXT = "a";
+var& F = box.callable;
+function target(int a) -> int { return a; }
+function flip(int i) -> void { if (i == 2) { TEXT = "b"; } }
+function by_call() { var s = ""; int i = 0; while (i < 5) { flip(i); s += TEXT; i = i + 1; } return s + "|" + TEXT; }
+function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(); } int z = F(i); s += TEXT; i = i + 1; } return s + "|" + TEXT; }
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				stepper source;   // outlives the engine below
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				dynamic_binder<stepper>(*e, "Stepper")
+					.property("callable", [raw](stepper& s) -> script_value { if (s.armed) { raw->execute("TEXT = \"b\";"); } return raw->get_variable("target"); }, nullptr)
+					.build();
+				e->add_global_ref("box", source);
+				e->add_function("arm", [&source]() { source.armed = true; });
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = { { "by_call();", "aabbb|b" }, { "by_getter();", "aabbb|b" } };
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(defs) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
+			const std::string listing = listing_of("var TEXT = \"a\"; function flip(int i) -> void { if (i == 2) { TEXT = \"b\"; } } var f = function() { var s = \"\"; int i = 0; while (i < 5) { flip(i); s += TEXT; i = i + 1; } return s; };");
+			check(listing.find("-- cell loop") != std::string::npos && listing.find("C_APPEND") != std::string::npos, "the loop with the int-only call closes and appends in place: " + listing);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

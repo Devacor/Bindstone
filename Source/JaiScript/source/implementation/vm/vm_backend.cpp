@@ -6614,23 +6614,23 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 		script_value* s = frame_slot(f, cl.slot);
 		if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int v = static_cast<script_int>(cs.payload[k]);
-			type_info* stamp = cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_int();
+			type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_int());
 			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
 			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
 			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); continue; }
 			JAI_CELLS_COUNT(9);
 			script_value nv(v, engine_);
-			if (cl.landing == k_typed_dst_decl && cl.stamp) { nv.set_type_info(type_info_ptr{cl.stamp}); }
+			if (stamp != engine_->get_type_info_int()) { nv.set_type_info(type_info_ptr{stamp}); }
 			frame_slot_set(f, cl.slot, std::move(nv));
 		} else {
 			const script_float v = cell_float_of_bits(cs.payload[k]);
-			type_info* stamp = cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_float();
+			type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : engine_->get_type_info_float());
 			const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
 			                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
 			if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); continue; }
 			JAI_CELLS_COUNT(9);
 			script_value nv(v, engine_);
-			if (cl.landing == k_typed_dst_decl && cl.stamp) { nv.set_type_info(type_info_ptr{cl.stamp}); }
+			if (stamp != engine_->get_type_info_float()) { nv.set_type_info(type_info_ptr{stamp}); }
 			frame_slot_set(f, cl.slot, std::move(nv));
 		}
 	}
@@ -6722,7 +6722,10 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
 		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
 		const type_info* canonical = want == static_cast<uint8_t>(script_value::TYPEID_INT) ? engine_->get_type_info_int() : engine_->get_type_info_float();
-		if (!s || (want != static_cast<uint8_t>(script_value::TYPEID_INT) && want != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || s->raw_storage_index() != want || s->type_info_raw() != canonical || s->get_engine() != engine_) {
+		// the slot's stamp is the local's declared type: the canonical int or float, or the any stamp of a var (the landing
+		// rule follows it: int lands ints, float widens ints, any lands any kind); any other stamp is another value model
+		const type_info* st = s ? s->type_info_raw() : nullptr;
+		if (!s || (want != static_cast<uint8_t>(script_value::TYPEID_INT) && want != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) || s->raw_storage_index() != want || (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) || s->get_engine() != engine_) {
 			JAI_CELLS_COUNT(1);
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
@@ -6740,7 +6743,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	for (uint32_t ip = loop.copy_head; ip < loop.copy_back; ++ip) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
-		if (ci.op == opcode::op_c_load) {
+		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any) {
 			const chunk::typed_site& site = f.code->typed_sites[ci.c];
 			const script_value* cp = site.cont_slot != k_invalid_u32
 				? frame_slot(f, site.cont_slot)
@@ -6781,7 +6784,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 #ifdef JAISCRIPT_VM_PROFILE
 		if (cs.payload.empty()) { ++profile_cells_records_; }
 #endif
-		cs.payload.resize(loop.cells.size()); cs.kind.resize(loop.cells.size());
+		cs.payload.resize(loop.cells.size()); cs.kind.resize(loop.cells.size()); cs.stamp.resize(loop.cells.size());
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t bytes = static_cast<uint64_t>(cs.payload.capacity()) * sizeof(int64_t) + static_cast<uint64_t>(cs.kind.capacity());
 		if (bytes > profile_cells_area_bytes_max_) { profile_cells_area_bytes_max_ = bytes; }
@@ -6794,9 +6797,9 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);   // resolved above: an int or a float
 			const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
 			cs.payload[k] = vk == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(v->unchecked_as_int()) : cell_bits_of_float(v->unchecked_as_float());
-			cs.kind[k] = vk;
+			cs.kind[k] = vk; cs.stamp[k] = nullptr;
 		} else if (cl.temp) {
-			cs.kind[k] = 0;   // a temp: empty until the body writes it (its slot may hold another statement's value)
+			cs.kind[k] = 0; cs.stamp[k] = nullptr;   // a temp: empty until the body writes it (its slot may hold another statement's value)
 		} else {
 			// live-in or body-defined alike: the slot holds the general form's last value of the cell's kind (checked
 			// above), so a read ahead of the body's write sees what the general form would, and a landing whose kind
@@ -6805,6 +6808,9 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			const uint8_t kind = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());   // adopted above
 			cs.payload[k] = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(s->unchecked_as_int()) : cell_bits_of_float(s->unchecked_as_float());
 			cs.kind[k] = kind;
+			// the landing rule reads the stamp only where the kind is decided at run time (an adopted kind: a var or an unproven
+			// slot); a pinned cell's slot carries the canonical stamp, checked above, and its landing is the declared kind
+			cs.stamp[k] = cl.kind != 0 ? nullptr : const_cast<type_info*>(s->type_info_raw());   // restored by the flush when recorded
 			JAI_CELLS_COUNT(3);
 		}
 	}
@@ -6822,7 +6828,8 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		switch (ci.op) {
 		case opcode::op_c_cmp: st = exec_c_cmp(f, ci); break;
 		case opcode::op_c_arith: st = exec_c_arith(f, ci); break;
-		case opcode::op_c_load: st = exec_c_load(f, ci); break;
+		case opcode::op_c_load: st = exec_c_load(f, ci, false); break;
+		case opcode::op_c_load_any: st = exec_c_load(f, ci, true); break;
 		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci); break;
@@ -7110,10 +7117,13 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 	cell_state& cs = *f.cells;
 	const uint8_t have = cs.kind[dk];
 	if (have != kind && !loop.cells[dk].temp) {
-		if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT) && loop.cells[dk].landing == k_typed_dst_decl) {
-			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;
+		const type_info* st = cs.stamp[dk];
+		if (st && st->base_type == script_value_type::jai_any_type) {
+			// a var: the language lands any kind; the flush keeps the any stamp
+		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;   // a float slot widens an int (decl or store)
 		} else {
-			return false;
+			return false;   // an int slot fed a float: the general form's checked conversion
 		}
 	}
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty |= uint64_t(1) << dk;
@@ -7253,7 +7263,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 
 
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
-JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
+// adopted: the destination's kind is decided at run time (a var, an inferred auto or an unproven local), so the landing
+// runs the declared-type rule on a kind change; a pinned or compiler-value destination lands in place unconditionally
+JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins, bool adopted) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
@@ -7315,9 +7327,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 	}
 	default: return miss();
 	}
-	cs.payload[ins.a] = bits;
-	cs.kind[ins.a] = expect;
-	cs.dirty |= uint64_t(1) << ins.a;
+	if (!adopted || cs.kind[ins.a] == expect) { cs.payload[ins.a] = bits; cs.kind[ins.a] = expect; cs.dirty |= uint64_t(1) << ins.a; }
+	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
 	++f.ip;
 	return {};
 }

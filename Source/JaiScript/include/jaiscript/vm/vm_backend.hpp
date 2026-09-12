@@ -463,6 +463,7 @@ namespace jai::vm {
         struct cell_state {
             std::vector<int64_t> payload;
             std::vector<uint8_t> kind;
+            std::vector<type_info*> stamp;   // per cell: the slot's type stamp at entry (a local's declared type: int, float or any); null for temps and env values
             uint32_t loop = k_invalid_u32;
             uint64_t dirty = 0;
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
@@ -1576,7 +1577,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
-        JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins, bool adopted);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared

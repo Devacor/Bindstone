@@ -161,6 +161,7 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_exit:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -320,6 +321,7 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_exit:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2211,7 +2213,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval };   // skip: an instruction with no copy (a boxed argument, a carried jump)
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit };   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
 	struct ir_op {
 		ir kind = ir::placeholder;
 		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
@@ -2414,6 +2416,30 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (size_t ip = first; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
 			const vm_instruction st = code[ip];
 			ir_op op;
+			{
+				// an exit statement (a return, or a break that leaves the loop): the block ends at its first instruction and the general
+				// form runs the statement whole (its pushes, region exits, scope pops and the return or jump), so any expression may
+				// appear in it; the instructions it spans have no copy, and a jump to its first instruction lands on the exit
+				const ast_node* sn = ip < c.stmt_nodes.size() ? c.stmt_nodes[ip] : nullptr;
+				const bool is_return = sn && sn->get_type() == node_type::return_stmt;
+				const bool is_break = sn && sn->get_type() == node_type::break_stmt;
+				if (is_return || is_break) {
+					size_t end = ip;
+					bool terminal = false;
+					for (; end < back && end < c.stmt_nodes.size() && c.stmt_nodes[end] == sn; ++end) {
+						const opcode o = code[end].op;
+						if (is_return && (o == opcode::op_return || o == opcode::op_return_ident || o == opcode::op_return_binary)) { terminal = true; ++end; break; }
+						if (is_break && o == opcode::op_jump) { terminal = code[end].a > back; ++end; break; }   // a break out of a switch stays inside
+					}
+					if (terminal) {
+						op.kind = ir::exit; op.target = static_cast<uint32_t>(is_break && end == ip + 1 ? code[ip].a : ip);   // a bare break lands on its target
+						ops.push_back(op);
+						for (size_t k = ip + 1; k < end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
+						ip = end - 1;
+						continue;
+					}
+				}
+			}
 			if (counted == k_invalid_u32 && ip == cmp_ip) {
 				// the head compare: its false edge is the loop's exit
 				op.kind = ir::cmp; op.head = true;
@@ -2546,7 +2572,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::math; op.tok = st.c; op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
 			} else if (st.op >= opcode::op_t_jlt_ii && st.op <= opcode::op_t_jne_ff) {
 				// cmp + test inside the body: the false edge stays inside the loop (or reaches its back edge)
-				if (!(st.c > ip && st.c <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (!(st.c > ip)) { refuse(chunk::cell_refusal_effect, ip); break; }   // an edge past the back edge exits the block
 				const uint8_t kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
 				use_slot(st.a, kind, false, 0, nullptr, ip); use_slot(st.b, kind, false, 0, nullptr, ip);
 				op.kind = ir::cmp; op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
@@ -2554,7 +2580,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// a truth test on a local or an environment value inside the body (`if (x)`, `if (!x)` through its sense, `if (NIGHTMARE)`):
 				// the truthiness of its int, float or bool with the jump's sense; a slot of another kind refuses at the entry
 				const vm_instruction& j = code[ip + 1];
-				if (!(j.a > ip + 1 && j.a <= back)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }
+				if (!(j.a > ip + 1)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }   // an edge past the back edge exits the block
 				bool targeted = false;
 				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) {
 					const vm_instruction& n = code[ip2];
@@ -2575,7 +2601,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const fused_binary_proto& bp = c.fused_binary_protos[st.a];
 				const vm_instruction& j = code[ip + 1];
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }   // a truth test on an arithmetic value: a gap
-				if (!(j.a > ip + 1 && j.a <= back)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }
+				if (!(j.a > ip + 1)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }   // an edge past the back edge exits the block
 				bool targeted = false;
 				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) {
 					const vm_instruction& n = code[ip2];
@@ -2594,7 +2620,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op = ir_op{}; op.kind = ir::skip;   // the jump's place: no copy instruction
 				++ip;
 			} else if (st.op == opcode::op_fused_cmp_jump && st.b < c.fused_binary_protos.size()) {
-				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (!(st.a > ip)) { refuse(chunk::cell_refusal_effect, ip); break; }   // an edge past the back edge exits the block
 				const fused_binary_proto& bp = c.fused_binary_protos[st.b];
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -2997,6 +3023,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::skip: break;
+			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
 			case ir::lnot: append(vm_instruction{opcode::op_c_lnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::cmpval: append(vm_instruction{opcode::op_c_cmpval, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
 			}
@@ -3016,8 +3043,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		copy_at[back - head] = loop.copy_back;
 		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store) { loop.sites.push_back(ip2); } }
+		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
+		auto exit_at = [&](uint32_t target) -> uint32_t {
+			for (const auto& x : exits) { if (x.first == target) return x.second; }
+			const uint32_t at = static_cast<uint32_t>(code.size());
+			append(vm_instruction{opcode::op_c_exit, target, 0, 0}, back);
+			exits.emplace_back(target, at);
+			return at;
+		};
 		for (const fixup& fx : fixups) {
-			const uint32_t to = copy_at[fx.target - head];   // a target without a copy instruction lands on the next one
+			const uint32_t to = fx.target > back ? exit_at(fx.target) : copy_at[fx.target - head];   // a target without a copy instruction lands on the next one; one past the back edge exits
 			if (fx.field == 0) { code[fx.at].a = to; }
 			else if (fx.field == 1) { code[fx.at].c = to | fx.bits; }
 			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 8); }

@@ -341,6 +341,11 @@ until the declaration runs, in a branch the general form has not taken), its dec
 lands by the declared kind (an int declaration takes ints, a float declaration widens an int, a var or auto
 declaration takes any kind), and a read of an empty cell misses like any other kind mismatch.
 
+An exit ends a block: a `return` statement or a `break` that leaves the loop ends it at the statement's first
+instruction, the cells flush and the general form runs the statement whole (its pushes, region exits, scope pops
+and the return or jump), so any expression may appear in it; a compare whose taken edge leaves the loop lands on
+an exit appended after the copy's back edge (`C_EXIT`, its operand the general ip).
+
 A landing after a call re-validates in proportion to what the call could have changed: the copy's sites are a list,
 the entry records how each site's container is reached (its frame slot, or its environment binding) and each
 environment cell's binding with the environment and its epoch, and a landing whose environment and epoch still

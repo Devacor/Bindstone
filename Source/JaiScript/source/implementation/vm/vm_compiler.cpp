@@ -3089,6 +3089,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::jump: fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, 0}, ip); break;
 			case ir::guard: {
+				{
+					const vm_instruction& orig = code[ip];
+					const fused_operand& src = c.fused_binary_protos[orig.a].left;
+					// an environment name's plain-cell guard: no copy (the site is a plain node once admitted, so the guard would never
+					// materialize); the flush nulls its temp, so the general form's readers resolve the binding themselves after a miss
+					if (orig.c == 1 && src.slot == k_invalid_u32 && src.const_index == k_invalid_u32) { loop.env_guard_temps.push_back(op.a); break; }
+				}
 				const uint32_t alias = op.a < current.size() ? current[op.a] : k_invalid_u32;
 				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 2, static_cast<uint32_t>(head + op.guarded), alias == k_invalid_u32 ? 0xFFu : alias });   // the guarded read's copy offset
 				append(vm_instruction{opcode::op_c_guard, op.a, 0, static_cast<uint32_t>(ip)}, ip);
@@ -3582,7 +3589,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 		const bool snap_container = (!quiet_read(expr->right.get()) && !private_local(expr->left.get())) || env_reference_candidate(expr->left.get());   // an environment name that may be a reference to a property reads first either way: its getter, or its error, precedes the inner read
 		uint32_t guard = k_invalid_u32;
 		if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
-		else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }
+		else if (ref_container || env_identifier(expr->left.get())) { guard_container_temp(expr->left, container, guard, false); }   // a reference slot's dereference, or an environment binding checked at run time (a redeclaration after this unit compiled may make it a reference to a property)
 		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
 			p.container = (ref_container || snap_container) ? container : make_fused_operand(expr->left);
@@ -3655,7 +3662,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				const bool snap_container = (observing_hoist_in(rb) && !private_local(expr->left.get())) || (env_reference_candidate(expr->left.get()) && hoist_in(rb));   // read before the index's reads; a reference container's value too; an environment name that may be a property reference reads ahead of any hoisted read
 				uint32_t guard = k_invalid_u32;
 				if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
-				else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }   // its dereference precedes quiet reads
+				else if (ref_container || env_identifier(expr->left.get())) { guard_container_temp(expr->left, container, guard, false); }   // its dereference precedes quiet reads; an environment binding is checked at run time
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(rb->op.type);
 				auto side = [&](const expression_ptr& e, fused_operand& out, bool ahead_of_a_read) {
@@ -3839,7 +3846,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
 			if (lsub) { hoist_into_temp(expr->left, proto.left); }
-			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_reference_candidate(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get()))))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
+			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_identifier(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get()))))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
 			else { proto.left = make_fused_operand(expr->left); }
 			if (rsub) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
@@ -3855,7 +3862,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// (an operator[] on a class instance, a getter behind the container) that rebinds a left identifier user code can reach,
 	// so that identifier's value is taken ahead of the op (a private local needs no snapshot); without temps the general
 	// pushes keep the order
-	const bool snap_left_in_op = shape != binary_shape_none && fusable_subscript_operand(expr->right.get()) && expr->left->get_type() == node_type::identifier_expr && !private_local(expr->left.get()) && !quiet_read(expr->right.get());
+	const bool snap_left_in_op = shape != binary_shape_none && fusable_subscript_operand(expr->right.get()) && expr->left->get_type() == node_type::identifier_expr && (env_identifier(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get())));   // an environment binding may be a reference to a property by run time: it reads first ahead of the subscript either way
 	if (shape != binary_shape_none && (!snap_left_in_op || (temps_active_ && chunk_->is_function_body))) {
 		fused_binary_proto proto;
 		proto.op = static_cast<uint8_t>(expr->op.type);
@@ -3900,7 +3907,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// before the sink writes).
 			auto sequence_left = [&](fused_operand& lo, const expression* l, const expression* r) {
 				const bool ref_left = reference_slot_operand(l) && (temp_only(r) || !operand_shape(r));
-				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_reference_candidate(l) && hoist_in(r)));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read
+				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_identifier(l) && hoist_in(r)));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read
 				if (!ref_left && !snap_left && (!lo.is_subscript() || operand_shape(r))) { return; }
 				fused_binary_proto p;
 				p.left = std::move(lo);

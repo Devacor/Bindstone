@@ -4749,9 +4749,25 @@ static const script_array* ref_pinned_element_container(const script_value& v) n
 
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
-		// the container guard: a plain cell (or no reference at all) needs no snapshot, the readers take the slot
-		const script_value* s = direct_operand(f, f.code->fused_binary_protos[ins.a].left);
-		if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
+		const fused_operand& src = f.code->fused_binary_protos[ins.a].left;
+		if (src.slot != k_invalid_u32 || src.const_index != k_invalid_u32) {
+			// the container guard over a slot: a plain cell (or no reference at all) needs no snapshot, the readers take the slot
+			const script_value* s = direct_operand(f, src);
+			if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
+		} else {
+			// the guard over an environment name (or a member): the binding is resolved once here, ahead of the reads that follow; a
+			// resolution that ran a getter (a property reference, a bare C++ property) leaves its value in the temp for the readers,
+			// any other leaves null and the readers resolve the binding themselves (a redeclaration after the function compiled,
+			// `var& P = box.values`, is met at run time, never assumed from the unit's declarations)
+			bool observed = false;
+			std::optional<script_value> scratch;
+			const script_value* v = fused_ident_value(f, src, scratch, f.ip * 3, &observed);
+			if (!v) return op_status::failed;
+			if (!observed) { frame_slot_set(f, ins.b, script_value(std::monostate{}, engine_)); return {}; }
+			script_value out = *v;
+			frame_slot_set(f, ins.b, std::move(out));
+			return {};
+		}
 	}
 	std::optional<script_value> scratch;
 	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
@@ -6170,6 +6186,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			// the guard materialized the container ahead of the index (every time, or a reference that is not a plain cell): read
 			// that, not the binding again
 			if (p.guard_always) { guarded = frame_slot(f, p.container_guard); }
+			else if (p.container.slot == k_invalid_u32 && p.container.const_index == k_invalid_u32) { guarded = frame_slot(f, p.container_guard); if (guarded && guarded->is_null()) { guarded = nullptr; } }   // an environment name: the guard left its value when its resolution ran a getter, null otherwise
 			else {
 				const script_value* s = direct_operand(f, p.container);
 				if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) { guarded = frame_slot(f, p.container_guard); }
@@ -6574,7 +6591,9 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
 #endif
 	if (!has_custom_numeric_ops_) {
-		const script_value* cp = site.cont_slot != k_invalid_u32
+		const script_value* gcp = site.guard_temp != k_invalid_u32 && !site.guard_always && site.cont_slot == k_invalid_u32 ? frame_slot(f, site.guard_temp) : nullptr;   // an environment name's guard: its value when the resolution ran a getter, null otherwise
+		if (gcp && gcp->is_null()) { gcp = nullptr; }
+		const script_value* cp = gcp ? gcp : site.cont_slot != k_invalid_u32
 			? frame_slot(f, site.cont_slot)
 			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
 		if (cp && site.guard_always) { cp = frame_slot(f, site.guard_temp); }   // the guard took the container's value ahead of the index
@@ -6670,6 +6689,7 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 		if (!pending.test(k) || cs.kind[k] == 0) continue;
 		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
 	}
+	for (const uint32_t t : loop.env_guard_temps) { frame_slot_set(f, t, script_value(std::monostate{}, engine_)); }   // an environment name's guard temp: null, so the general form's readers resolve the binding themselves
 	cs.reset();
 }
 
@@ -6833,6 +6853,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			const size_t cache_slot = site.fold_count ? ci.c * 3 + 2 : ci.c * 3;
+			if (site.cont_slot == k_invalid_u32 && cache_slot < f.code->env_lookup_cache.size()) {
+				// an environment binding that is a reference to a property or an element is not a plain node: its getter or its error
+				// belongs to every read, so the loop stays on the general form (the cache holds the binding the general form resolved)
+				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
+			}
 			const script_value* cp = site.cont_slot != k_invalid_u32
 				? frame_slot(f, site.cont_slot)
 				: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, cache_slot);
@@ -6854,6 +6880,10 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		} else if (ci.op == opcode::op_c_index_store) {
 			const fused_index_proto& p = f.code->fused_index_protos[ci.a];
 			const size_t cache_slot = p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3;
+			if (!(p.container.const_index == k_invalid_u32 && p.container.direct) && cache_slot < f.code->env_lookup_cache.size()) {
+				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];   // a store through a property or element reference stays general (as the loads above)
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
+			}
 			const script_value* cp = fast_operand(f, p.container, cache_slot);
 			if (p.container.const_index == k_invalid_u32 && p.container.direct) { cs.site_slot[k] = p.container.slot; } else if (p.container.const_index == k_invalid_u32) { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
@@ -6898,6 +6928,12 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		if (cl.env_operand != k_invalid_u32) {
 			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
 			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+			if (er.cache_slot < f.code->env_lookup_cache.size()) {
+				// the binding the general form resolved: a reference to a property or an element is never a cell (its getter or its
+				// error belongs to every read), read here without dereferencing it
+				const env_lookup_cache_entry& e = f.code->env_lookup_cache[er.cache_slot];
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) { JAI_CELLS_COUNT(1); return false; }
+			}
 			const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
 			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
 			if (!v || (vk != static_cast<uint8_t>(script_value::TYPEID_INT) && vk != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && vk != static_cast<uint8_t>(script_value::TYPEID_BOOL)) || (cl.kind != 0 && vk != cl.kind)) {
@@ -7114,6 +7150,10 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		if (cl.env_operand == k_invalid_u32) continue;
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+		if (!(env_ok && cs.env_ptr[k]) && er.cache_slot < f.code->env_lookup_cache.size()) {
+			const env_lookup_cache_entry& e = f.code->env_lookup_cache[er.cache_slot];   // redeclared by the callee as a reference to a property or an element: the general form's business
+			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
+		}
 		const script_value* v = env_ok && cs.env_ptr[k] ? cs.env_ptr[k] : fused_cmp_operand(f, er.operand, er.cache_slot);
 		// the kind and the declaration stamp both as at entry: a callee that redeclared the global with another declared type
 		// (a reload of `var G` as `int G`, the raw kind unchanged) changes the landing rule, so it misses at the consumer
@@ -8138,7 +8178,9 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
 	// op later as exactly this copy; every other element falls to the kernel untouched
 	const bool folded = p.index_binary != k_invalid_u32;
-	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	const script_value* gcp = p.container_guard != k_invalid_u32 && !p.guard_always && p.container.slot == k_invalid_u32 && p.container.const_index == k_invalid_u32 ? frame_slot(f, p.container_guard) : nullptr;   // an environment name's guard: its value when the resolution ran a getter, null otherwise
+	if (gcp && gcp->is_null()) { gcp = nullptr; }
+	const script_value* cp = gcp ? gcp : fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
 	if (p.guard_always) { cp = frame_slot(f, p.container_guard); if (!cp) return false; }   // the guard took the container's value ahead of the index
 	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter

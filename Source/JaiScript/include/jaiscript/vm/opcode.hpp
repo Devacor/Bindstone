@@ -208,7 +208,7 @@ namespace jai::vm {
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
         op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
-        op_c_jcmp,          // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
+        op_c_jcmp,          // (c bit 31 = jump when true: a comparison value followed by JUMP_IF_TRUE) // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
         op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
         op_c_guard,         // a container guard's place in the copy: a = guard slot, b = aliasing temp cell (low byte, 0xFF none) | guarded load's copy offset << 8 (0xFFFFFF none), c = original ip
         op_c_arith_any,     // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: kinds from the cells

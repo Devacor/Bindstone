@@ -1114,8 +1114,7 @@ public:
 						int base = (sx * pw / w) * ph;
 						for (int sy = 0; sy < h; ++sy) {
 							int py = y0 + sy;
-							if (py < 0) { continue; }
-							if (py >= VH) { continue; }
+							if (py < 0 || py >= VH) { continue; }
 							int texel = tp[base + sy * ph / h];
 							if (texel >= 0) { pix[py * VW + px] = palcm[texel]; }
 						}
@@ -1144,8 +1143,9 @@ public:
 			                 " var f_or = function(int h, int y0) { int acc = 0; for (int sy = 0; sy < h; ++sy) { int py = y0 + sy; if (py < 0 || py >= VH) { continue; } acc = acc + py; } return acc; };");
 			check_true(listing.find("C_JCMP_ANY") != std::string::npos && listing.find("CELLS_CFOR_BACK") != std::string::npos, "the patch loop closes over its env compare: " + listing);
 			check_true(listing.find("C_CMP_ANY") != std::string::npos, "the env-headed while closes: " + listing);
-			// the || chain compiles as a comparison value and JUMP_IF_TRUE: a translation gap the table names (row 116b)
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the || chain is a named translation gap: " + listing);
+			// the || chain (a comparison value and JUMP_IF_TRUE) is one cmp with a jump sense: f_or closes too
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(3), closed, "f, g and f_or close: " + listing);
 		});
 		test("translation_equivalence_the_same_loop_in_every_spelling_closes_the_same_way", [this]() {
 			// one meaning, five spellings: the step as ++i, i += 1 and i = i + 1; the loop as a while, an identifier-start for
@@ -1168,17 +1168,44 @@ public:
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect, a break is an effect, a string append is
-			// a translation gap (the compound form), a member access is a representation
+			// a representation (a string is not an admitted value), a member access is a representation, a stack-form unary
+			// minus is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
 				" var f1 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + g(i); i = i + 1; } return acc; };"
 				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
 				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
-				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };");
+				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };"
+				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = -i; acc = acc + v; i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
-			check_true(listing.find(": translation at") != std::string::npos, "the string append is a translation gap: " + listing);
-			check_true(listing.find(": representation at") != std::string::npos, "the member access is a representation: " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(UNARY)") != std::string::npos, "the unary minus is a translation gap: " + listing);
+			check_true(listing.find(": representation at") != std::string::npos && listing.find("(COMPOUND_FUSED)") != std::string::npos, "the string append and the member access are representations: " + listing);
+		});
+		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
+			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
+			// math on int and float values (abs of INT64_MIN takes the kernel's overflow text), x += y and ++x on var slots
+			// (kinds at run time: a kind change on the slot lands through the general conversion); the same on both backends
+			const char* defs =
+				"var LIMIT = 6; array<int> B = [3, 1, 4, 1, 5, 9, 2, 6];"
+				" var h1 = function(int n) { int acc = 0; int i = 0; while (i < n * 2) { acc = acc + i; i = i + 1; } return acc; };"
+				" var h2 = function(int n) { int acc = 0; int i = 0; while (i < LIMIT + n) { acc = acc + i; i = i + 1; } return acc; };"
+				" var h3 = function(var& b, int n) { int acc = 0; int i = 0; while (i < b[n]) { acc = acc + b[i]; i = i + 1; } return acc; };"
+				" var m1 = function(float x0, int n) { float acc = 0.0; float x = x0; int i = 0; while (i < n) { acc = acc + math::floor(x) + math::ceil(x) + math::sqrt(x + 2.0) + math::abs(x - 3.0) + math::sin(x) + math::cos(x) + math::tan(x) + math::radians_to_degrees(x) + math::degrees_to_radians(x); x = x + 0.75; i = i + 1; } return acc; };"
+				" var m2 = function(int n) { int acc = 0; int i = -n; while (i < n) { acc = acc + math::abs(i) + math::itrunc(math::sqrt(i * i)); i = i + 1; } return acc; };"
+				" var m3 = function(int n) { int acc = 0; int i = 0; int v = -9223372036854775807 - 1; while (i < n) { if (i == 2) { acc = acc + math::abs(v); } i = i + 1; } return acc; };"
+				" var c1 = function(var v, int n) { int i = 0; while (i < n) { v += 2; ++i; } return v; };"
+				" var c2 = function(var v, int n) { int i = 0; while (i < n) { v += 0.5; i++; } return v; };"
+				" var c3 = function(int n) { int i = 0; var k = 0; while (i < n) { k -= 3; k *= 2; k %= 1000; i = i + 1; } return k; };";
+			const std::string script = std::string(defs) + " string r = to_string(h1(5)) + \",\" + to_string(h2(3)) + \",\" + to_string(h3(B, 4)) + \",\" + to_string(m1(0.5, 6)) + \",\" + to_string(m2(4)) + \",\" + to_string(c1(1, 5)) + \",\" + to_string(c1(1.5, 5)) + \",\" + to_string(c2(1, 4)) + \",\" + to_string(c3(6));"
+			                           " try { r = r + \",\" + to_string(m3(4)); } catch (err) { r = r + \",throw:\" + err; } r;";
+			both(script, "", "head spans, math, compounds");
+			both(script, "", "head spans, math, compounds, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("45,36,", 0) == 0 && vm.find("throw:Integer overflow in math::abs") != std::string::npos, "the head spans and the abs overflow: " + vm);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(9), closed, "every loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

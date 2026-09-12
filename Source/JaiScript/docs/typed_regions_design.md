@@ -234,6 +234,22 @@ does not normalize yet: a coverage gap), `malformed` (a lifetime rule failed), `
 does not take). The profile prints the closed and refused loops per function (`cell translation`), and the
 disassembly lists them under each chunk (`-- cell loop`, `-- open loop`).
 
+A comparison used as a value and the `JUMP_IF_TRUE` or `JUMP_IF_FALSE` that consumes it (the `||` and `&&`
+chains, `!e`) translate to one `cmp` whose target word carries the jump's sense (never an inverted operator,
+since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a
+placeholder no branch may target. A compare-headed loop's head is the span from the back edge's target to the
+compare: the condition's temps and reads translate like the body and run every iteration before the compare,
+and the compare's miss resumes at its own origin. `math` covers the pure one-argument intrinsics (`itrunc` and
+`ifloor` land an int, `abs` keeps its argument's kind, `floor`, `ceil`, `sqrt`, `sin`, `cos`, `tan` and the
+angle conversions land a float). `x op= y` and `++x` / `x--` in statement position on a slot the typed
+lowering left general are `arith` with the compound landing, kinds at run time.
+
+A guarded container that is a reference to a map entry (a sprite table keyed by lump) is admitted like a pinned
+table entry: no cell store writes a map, so the entry holds for the block. A container site that refuses the
+entry marks the loop in the call record's cell state and the entry is not attempted again in that call (the
+refusal valve): a binding does not change within a call, and the guards would otherwise run at every back edge
+for nothing.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

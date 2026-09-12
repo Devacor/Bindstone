@@ -2178,6 +2178,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		uint32_t writes = k_invalid_u32;         // the slot the operation writes (a local or a compiler value)
 		uint32_t container = k_invalid_u32;      // load and store: the container slot when the binding is a frame slot
 		bool head = false;
+		bool sense = false;                      // cmp: jump when true (a comparison value followed by JUMP_IF_TRUE)
 	};
 	constexpr uint32_t k_ir_env_bit = 0x40000000u;
 	auto stamp_kind = [](const type_info* t) -> uint8_t {
@@ -2223,7 +2224,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	for (size_t back = 0; back < original_size; ++back) {
 		const vm_instruction be = code[back];
 		if (be.op != opcode::op_loop_back && be.op != opcode::op_cfor_back) continue;
-		size_t head; vm_instruction hd{}; uint32_t counted = k_invalid_u32;
+		size_t head; vm_instruction hd{}; uint32_t counted = k_invalid_u32; size_t cmp_ip = 0;
 		uint8_t refusal = chunk::cell_refusal_none; uint32_t refusal_ip = static_cast<uint32_t>(back);
 		auto refuse = [&](uint8_t why, size_t at) { if (refusal == chunk::cell_refusal_none) { refusal = why; refusal_ip = static_cast<uint32_t>(at); } };
 		if (be.op == opcode::op_loop_back) {
@@ -2233,10 +2234,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			bool generic_of_counted = false;
 			for (size_t ip = head + 1; ip < back; ++ip) { if (code[ip].op == opcode::op_cfor_back || code[ip].op == opcode::op_cells_cfor_back) { generic_of_counted = true; break; } }
 			if (generic_of_counted) continue;
-			hd = code[head];
-			const bool typed_head = hd.op >= opcode::op_t_jlt_ii && hd.op <= opcode::op_t_jne_ff && hd.c == back + 1;
-			const bool any_head = hd.op == opcode::op_fused_cmp_jump && hd.a == back + 1 && hd.b < c.fused_binary_protos.size();
-			if (!typed_head && !any_head) { refuse(chunk::cell_refusal_head, head); }
+			// the head compare: a typed compare-jump or a general one whose false edge is the exit; the instructions before it
+			// (the condition's temps and reads) are the head span, translated like the body and run every iteration
+			cmp_ip = head;
+			for (; cmp_ip < back; ++cmp_ip) {
+				const vm_instruction& ci = code[cmp_ip];
+				if (ci.op >= opcode::op_t_jlt_ii && ci.op <= opcode::op_t_jne_ff && ci.c == back + 1) break;
+				if (ci.op == opcode::op_fused_cmp_jump && ci.a == back + 1 && ci.b < c.fused_binary_protos.size()) break;
+			}
+			if (cmp_ip >= back) { refuse(chunk::cell_refusal_head, head); cmp_ip = head; }
+			hd = code[cmp_ip];
 		} else {
 			if (be.a >= c.counted_for_protos.size()) continue;
 			const counted_for_proto& p = c.counted_for_protos[be.a];
@@ -2300,30 +2307,39 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			return ok;
 		};
-		std::vector<ir_op> ops;   // one per body instruction, head + 1 .. back - 1
+		// one operation per instruction of the loop span: a compare-headed loop from its head (the head span, then the
+		// compare, then the body), a counted loop from its body behind a placeholder
+		std::vector<ir_op> ops;
 		ir_op head_op;
-		if (refusal == chunk::cell_refusal_none) {
-			if (counted != k_invalid_u32) {
-				const counted_for_proto& p = c.counted_for_protos[counted];
-				use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, head);   // stepped in place by the back edge
-				if (p.end.const_index == k_invalid_u32) { use_slot(p.end.slot, kint, false, 0, nullptr, head); }
-				if (p.step.const_index == k_invalid_u32) { use_slot(p.step.slot, kint, false, 0, nullptr, head); }
-				head_op.kind = ir::placeholder;
-			} else if (hd.op == opcode::op_fused_cmp_jump) {
-				const fused_binary_proto& bp = c.fused_binary_protos[hd.b];
-				head_op.kind = ir::cmp; head_op.head = true; head_op.tok = bp.op; head_op.target = hd.a;
-				if (!cmp_tok(bp.op) || !value(head_op, bp.left, 0, static_cast<uint32_t>(head * 3), head, head_op.a) || !value(head_op, bp.right, 0, static_cast<uint32_t>(head * 3 + 1), head, head_op.b)) { refuse(chunk::cell_refusal_head, head); }
-			} else {
-				const uint8_t head_kind = hd.op <= opcode::op_t_jne_ii ? kint : kflt;
-				use_slot(hd.a, head_kind, false, 0, nullptr, head); use_slot(hd.b, head_kind, false, 0, nullptr, head);
-				head_op.kind = ir::cmp; head_op.head = true; head_op.fast = hd.op; head_op.a = hd.a; head_op.b = hd.b; head_op.target = hd.c;
-				slot_read(head_op, hd.a); slot_read(head_op, hd.b);
-			}
+		const size_t first = counted != k_invalid_u32 ? head + 1 : head;
+		if (refusal == chunk::cell_refusal_none && counted != k_invalid_u32) {
+			const counted_for_proto& p = c.counted_for_protos[counted];
+			use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, head);   // stepped in place by the back edge
+			if (p.end.const_index == k_invalid_u32) { use_slot(p.end.slot, kint, false, 0, nullptr, head); }
+			if (p.step.const_index == k_invalid_u32) { use_slot(p.step.slot, kint, false, 0, nullptr, head); }
+			head_op.kind = ir::placeholder;
 		}
-		for (size_t ip = head + 1; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
+		auto int_one = [&]() -> uint32_t {   // the literal 1 of ++x and x--, minted once per chunk
+			for (size_t k = 0; k < c.constants.size() && k < k_typed_slot_mask; ++k) { if (c.constants[k].raw_storage_index() == script_value::TYPEID_INT && c.constants[k].unchecked_as_int() == 1) return static_cast<uint32_t>(k); }
+			c.constants.push_back(script_value(static_cast<script_int>(1), static_cast<engine*>(nullptr)));
+			return static_cast<uint32_t>(c.constants.size() - 1);
+		};
+		for (size_t ip = first; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
 			const vm_instruction st = code[ip];
 			ir_op op;
-			if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
+			if (counted == k_invalid_u32 && ip == cmp_ip) {
+				// the head compare: its false edge is the loop's exit
+				op.kind = ir::cmp; op.head = true;
+				if (st.op == opcode::op_fused_cmp_jump) {
+					const fused_binary_proto& bp = c.fused_binary_protos[st.b];
+					op.tok = bp.op; op.target = st.a;
+					if (!cmp_tok(bp.op) || !value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_head, ip); break; }
+				} else {
+					const uint8_t head_kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
+					use_slot(st.a, head_kind, false, 0, nullptr, ip); use_slot(st.b, head_kind, false, 0, nullptr, ip);
+					op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
+				}
+			} else if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
 				const uint8_t kind = st.op <= opcode::op_t_shr_ii ? kint : kflt;
 				const uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
 				type_info* stamp = landing == k_typed_dst_decl && ip < c.typed_sites.size() ? c.typed_sites[ip].stamp : nullptr;
@@ -2408,13 +2424,22 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::store; op.proto = st.a;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {
-				// math: itrunc / ifloor of a value into a compiler value (the kernel's own conversion runs in the block)
+				// math: a pure one-argument intrinsic of a value into a compiler value (the kernel's rows run in the block): itrunc
+				// and ifloor land an int, abs the argument's kind, the float family a float
 				const detail::math_fn fn = static_cast<detail::math_fn>(st.c);
 				const fused_operand& src = c.fused_binary_protos[st.a].left;
-				if (fn != detail::math_fn::itrunc && fn != detail::math_fn::ifloor) { refuse(chunk::cell_refusal_translation, ip); break; }   // the float family: a gap
+				uint8_t rk = kflt;
+				switch (fn) {
+				case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
+				case detail::math_fn::abs_: rk = 0; break;
+				case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
+				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: break;
+				default: refuse(chunk::cell_refusal_translation, ip); break;
+				}
+				if (refusal != chunk::cell_refusal_none) break;
 				if (!direct_slot(src)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(src.slot, 0, false, 0, nullptr, ip);
-				use_slot(st.b, kint, true, k_typed_dst_temp, nullptr, ip);
+				use_slot(st.b, rk, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::math; op.tok = st.c; op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
 			} else if (st.op >= opcode::op_t_jlt_ii && st.op <= opcode::op_t_jne_ff) {
 				// cmp + test inside the body: the false edge stays inside the loop (or reaches its back edge)
@@ -2422,6 +2447,31 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
 				use_slot(st.a, kind, false, 0, nullptr, ip); use_slot(st.b, kind, false, 0, nullptr, ip);
 				op.kind = ir::cmp; op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
+			} else if (st.op == opcode::op_binary_fused && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false) && st.a < c.fused_binary_protos.size()) {
+				// a comparison used as a value and the jump that consumes it (the || and && chains, !e): one cmp with the jump's
+				// sense; the pair's origin is the value instruction (a miss re-runs it whole and the general jump follows), the
+				// jump's copy is a placeholder no branch may target
+				const fused_binary_proto& bp = c.fused_binary_protos[st.a];
+				const vm_instruction& j = code[ip + 1];
+				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }   // a truth test on an arithmetic value: a gap
+				if (!(j.a > ip + 1 && j.a <= back)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }
+				bool targeted = false;
+				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) {
+					const vm_instruction& n = code[ip2];
+					const uint32_t t = (n.op == opcode::op_jump || n.op == opcode::op_jump_if_true || n.op == opcode::op_jump_if_false || n.op == opcode::op_fused_cmp_jump) ? n.a
+					                 : (n.op >= opcode::op_t_jlt_ii && n.op <= opcode::op_t_jne_ff) ? n.c : k_invalid_u32;
+					targeted = t == ip + 1;
+				}
+				if (targeted) { refuse(chunk::cell_refusal_malformed, ip + 1); break; }
+				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				op.kind = ir::cmp; op.tok = bp.op; op.target = j.a; op.sense = j.op == opcode::op_jump_if_true;
+				if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.a & k_ir_env_bit) && !(op.b & k_ir_env_bit)) {
+					const opcode t = cmp_op(static_cast<token_type>(bp.op), bp.typed_class);   // the pinned form when the checker classed both operands
+					if (t != opcode::op_halt) { op.fast = t; use_slot(op.a, bp.typed_class == 1 ? kint : kflt, false, 0, nullptr, ip); use_slot(op.b, bp.typed_class == 1 ? kint : kflt, false, 0, nullptr, ip); }
+				}
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::placeholder;   // the jump's place
+				++ip;
 			} else if (st.op == opcode::op_fused_cmp_jump && st.b < c.fused_binary_protos.size()) {
 				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
 				const fused_binary_proto& bp = c.fused_binary_protos[st.b];
@@ -2440,6 +2490,31 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					                 : n.op == opcode::op_index_fused_decl && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
 					if (g == st.b) { op.guarded = static_cast<uint32_t>(ip2 - head); break; }
 				}
+			} else if (st.op == opcode::op_compound_fused && st.a < c.compound_fused_protos.size()) {
+				// x op= y the typed lowering left general (a slot the checker could not pin, a float literal): arith with the
+				// compound landing, kinds at run time (a kind change on the slot misses onto the general conversion)
+				const compound_fused_proto& cp = c.compound_fused_protos[st.a];
+				if (cp.slot == k_invalid_u32 || cp.slot >= k_typed_slot_mask || (cp.kind_flags & compound_flag_global_only)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (!(cp.kind_flags & compound_flag_no_result) || cp.rhs_proto != k_invalid_u32 || (cp.kind_flags & compound_flag_old_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				uint8_t tok;
+				switch (cp.kind_flags & compound_kind_mask) {
+				case compound_plus: tok = static_cast<uint8_t>(token_type::plus); break;
+				case compound_minus: tok = static_cast<uint8_t>(token_type::minus); break;
+				case compound_star: tok = static_cast<uint8_t>(token_type::star); break;
+				case compound_slash: tok = static_cast<uint8_t>(token_type::slash); break;
+				case compound_percent: tok = static_cast<uint8_t>(token_type::percent); break;
+				default: tok = 0; break;
+				}
+				if (tok == 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!value(op, cp.rhs, 0, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(cp.slot, 0, false, 0, nullptr, ip); use_slot(cp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
+				op.kind = ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);
+			} else if (st.op == opcode::op_incdec && st.b != k_invalid_u32 && st.b < k_typed_slot_mask) {
+				// ++x / x-- as a statement on a slot the typed lowering left general: arith by one with the compound landing
+				if (st.c & incdec_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (!(st.c & incdec_flag_no_result)) { refuse(chunk::cell_refusal_translation, ip); break; }   // the value is used
+				use_slot(st.b, 0, false, 0, nullptr, ip); use_slot(st.b, 0, true, k_typed_dst_compound, nullptr, ip);
+				op.kind = ir::arith; op.tok = static_cast<uint8_t>((st.c & incdec_flag_increment) ? token_type::plus : token_type::minus); op.a = st.b; op.b = st.b; op.c = k_typed_const_bit | int_one(); op.writes = st.b; slot_read(op, st.b);
 			} else {
 				// the class of the refusal is the first consumer's when the instruction is a pure push (a call's argument, a
 				// member's receiver): the push itself says nothing about why the loop stays general
@@ -2462,7 +2537,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			std::vector<uint32_t> defined;
 			std::vector<std::pair<uint32_t, uint32_t>> snapshots;   // slot, the read's ip (the guard is open until it)
 			for (size_t k = 0; k < ops.size() && refusal == chunk::cell_refusal_none; ++k) {
-				const size_t ip = head + 1 + k;
+				const size_t ip = first + k;
 				const ir_op& op = ops[k];
 				for (uint8_t r = 0; r < op.nreads; ++r) {
 					if (is_temp(op.reads[r]) && std::find(defined.begin(), defined.end(), op.reads[r]) == defined.end()) { refuse(chunk::cell_refusal_malformed, ip); }
@@ -2488,7 +2563,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		chunk::cell_loop loop;
 		loop.head = static_cast<uint32_t>(head); loop.back = static_cast<uint32_t>(back); loop.counted = counted;
-		loop.exit_ip = counted != k_invalid_u32 ? c.counted_for_protos[counted].exit_ip : head_op.target;
+		loop.exit_ip = counted != k_invalid_u32 ? c.counted_for_protos[counted].exit_ip : (hd.op == opcode::op_fused_cmp_jump ? hd.a : hd.c);
 		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && cl.slot > max_slot) max_slot = cl.slot; }
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
@@ -2527,7 +2602,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			case ir::mov: append(vm_instruction{opcode::op_c_mov, cell_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::cmp: {
-				const uint32_t target = op.head ? op.target : op.target + shift;
+				const uint32_t target = (op.head ? op.target : op.target + shift) | (op.sense ? 0x80000000u : 0u);
 				if (op.fast != opcode::op_halt) { append(vm_instruction{op.head ? opcode::op_c_cmp : opcode::op_c_jcmp, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
 				else { append(vm_instruction{op.head ? opcode::op_c_cmp_any : opcode::op_c_jcmp_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
 				break;
@@ -2593,8 +2668,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::placeholder: append(vm_instruction{opcode::op_c_guard, 0, k_invalid_u32, 0}, ip); break;   // a counted loop has no head compare
 			}
 		};
-		emit(head_op, head);
-		for (size_t k = 0; k < ops.size(); ++k) { emit(ops[k], head + 1 + k); }
+		if (counted != k_invalid_u32) { emit(head_op, head); }
+		for (size_t k = 0; k < ops.size(); ++k) { emit(ops[k], first + k); }
 		loop.copy_back = static_cast<uint32_t>(code.size());
 		if (counted == k_invalid_u32) {
 			append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back);

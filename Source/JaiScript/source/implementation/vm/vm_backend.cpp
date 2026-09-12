@@ -4706,6 +4706,12 @@ static bool ref_plain_cell(const script_value& v) noexcept {
 	return h && h->plain_cell();
 }
 
+// a reference to a map entry (a table keyed by name or lump): its dereference is silent, and no cell store writes a map
+static bool ref_map_entry(const script_value& v) noexcept {
+	const auto* h = v.get_reference_holder();
+	return h && h->container_map && h->has_map_key && !h->has_cell && !h->container && !h->property && !h->owner_instance;
+}
+
 // an element reference into a hetero array (a texture table's entry): its dereference is silent and, absent a store
 // into that table, names the same element for a block's whole run; the table, or null for every other shape
 static const script_array* ref_pinned_element_container(const script_value& v) noexcept {
@@ -6594,6 +6600,12 @@ namespace {
 // landing that defined it and hands the general dispatch the ORIGINAL instruction's ip. Flushing
 // reproduces the general form's slot state: payload in place when the slot already carries the
 // stamp the landing would give it, the full landing otherwise.
+// a container site refused the entry: the binding will not change within this call, so the loop is not tried again
+void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
+	const size_t index = static_cast<size_t>(&loop - f.code->cell_loops.data());
+	if (index < 64) { f.cells->refused_loops |= uint64_t(1) << index; }
+}
+
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
@@ -6664,7 +6676,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 		f.ip = p.exit_ip;
 		return {};
 	}
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || !cells_enter(f, loop)) { f.ip = p.body_ip; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = p.body_ip; return {}; }
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty = 0;
@@ -6680,7 +6692,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
 	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
 	// rebound to its own area at every push, so a reused record never aliases another frame's cells
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || !cells_enter(f, loop)) { f.ip = loop.head; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = loop.head; return {}; }
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty = 0;
@@ -6738,8 +6750,11 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 				// (a plain cell, or an element reference into a hetero array such as a texture table's entry, checked below
 				// against the store sites: nothing else in a body can rewrite the entry the reference names)
 				if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) {
-					const script_array* table = ref_pinned_element_container(*cp);
-					if (!table || pinned_count == 4) { cp = nullptr; } else { pinned[pinned_count++] = table; cp = &cp->deref(); }
+					if (ref_map_entry(*cp)) { cp = &cp->deref(); }   // a map entry (a sprite table keyed by lump): no store site writes a map, so it holds for the block
+					else {
+						const script_array* table = ref_pinned_element_container(*cp);
+						if (!table || pinned_count == 4) { cp = nullptr; } else { pinned[pinned_count++] = table; cp = &cp->deref(); }
+					}
 				} else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			}
 			bool borrowed = false;
@@ -6754,12 +6769,12 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
 			}
 		} else { continue; }
-		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); return false; }
+		if (!node) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
 		cs.site_node[ip - loop.copy_head] = node;
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (uint32_t ip = loop.copy_head; ip < loop.copy_back; ++ip) {
-			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); return false; }
+			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
 		}
 	}
 	if (cs.payload.size() < loop.cells.size()) {
@@ -6884,10 +6899,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	bool truthy;
-	if (cs.kind[lk] != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+	if (cs.kind[lk] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
-		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+		if (rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cs.payload[lk]), b = rc.unchecked_as_int();
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -6896,7 +6911,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 		}
 	} else {
-		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.head, 0); return {}; }
+		if (cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(cs.payload[ins.b]);
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -6994,7 +7009,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 		const script_float a = cell_float_of_bits(cs.payload[lk]), b = cell_float_of_bits(right_bits);
 		switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 	}
-	if (truthy) { ++f.ip; } else { f.ip = ins.c; }
+	// the sense: a plain compare-jump jumps when false; a comparison value followed by JUMP_IF_TRUE jumps when true
+	if (truthy != ((ins.c & 0x80000000u) != 0)) { ++f.ip; } else { f.ip = ins.c & 0x7FFFFFFFu; }
 	return {};
 }
 
@@ -7072,16 +7088,18 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp_any(frame& f, const vm_instruct
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	bool truthy;
 	if (!cell_cmp_any(f, ins, truthy)) {
-		if (head) { cells_miss(f, loop, loop.head, 0); }
+		if (head) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); }
 		else { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 3); }
 		return {};
 	}
-	if (truthy) { ++f.ip; return {}; }
 	if (head) {
+		if (truthy) { ++f.ip; return {}; }
 		JAI_CELLS_COUNT(4);
 		cells_flush(f, loop);   // the loop's exit: materialize, then continue after the loop
+		f.ip = ins.c;
+		return {};
 	}
-	f.ip = ins.c;
+	if (truthy != ((ins.c & 0x80000000u) != 0)) { ++f.ip; } else { f.ip = ins.c & 0x7FFFFFFFu; }
 	return {};
 }
 
@@ -7186,28 +7204,53 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, const vm_instruction&
 	return {};
 }
 
-// math::itrunc / ifloor on a cell: the kernel's own conversion (checked_float_to_integer), an int passes through
+// the pure one-argument math intrinsics on a value: the kernel's own rows (math_intrinsics.hpp): itrunc and ifloor
+// land an int through checked_float_to_integer (an int passes through), abs keeps the argument's kind (INT64_MIN
+// misses onto the kernel's overflow text), floor, ceil, sqrt, sin, cos, tan and the angle conversions land a float of
+// the promoted argument; any other kind or function is a miss
 JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
 	const detail::math_fn fn = static_cast<detail::math_fn>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
-	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
+	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
 	const uint8_t sk = cs.kind[ins.b];
+	const bool is_int = sk == static_cast<uint8_t>(script_value::TYPEID_INT);
+	if (!is_int && sk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
+	const script_int xi = static_cast<script_int>(cs.payload[ins.b]);
+	const script_float xd = is_int ? static_cast<script_float>(xi) : cell_float_of_bits(cs.payload[ins.b]);
+	uint8_t kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	int64_t bits;
-	if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-		bits = cs.payload[ins.b];
-	} else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
-		const script_float x = cell_float_of_bits(cs.payload[ins.b]);
-		auto r = detail::checked_float_to_integer(fn == detail::math_fn::ifloor ? std::floor(x) : x);
-		if (!r) { cells_miss(f, loop, original_ip(), 1); return {}; }
+	switch (fn) {
+	case detail::math_fn::itrunc:
+	case detail::math_fn::ifloor: {
+		kind = static_cast<uint8_t>(script_value::TYPEID_INT);
+		if (is_int) { bits = xi; break; }
+		auto r = detail::checked_float_to_integer(fn == detail::math_fn::ifloor ? std::floor(xd) : xd);
+		if (!r) return miss();
 		bits = static_cast<int64_t>(r.value());
-	} else { cells_miss(f, loop, original_ip(), 1); return {}; }
-	if (!cell_land(f, loop, dk, static_cast<uint8_t>(script_value::TYPEID_INT), bits)) { cells_miss(f, loop, original_ip(), 1); return {}; }
+		break;
+	}
+	case detail::math_fn::abs_:
+		if (is_int) { if (xi == INT64_MIN) return miss(); kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = xi < 0 ? -xi : xi; }
+		else { bits = cell_bits_of_float(std::fabs(xd)); }
+		break;
+	case detail::math_fn::floor_: bits = cell_bits_of_float(std::floor(xd)); break;
+	case detail::math_fn::ceil_: bits = cell_bits_of_float(std::ceil(xd)); break;
+	case detail::math_fn::sqrt_: bits = cell_bits_of_float(std::sqrt(xd)); break;
+	case detail::math_fn::sin_: bits = cell_bits_of_float(std::sin(xd)); break;
+	case detail::math_fn::cos_: bits = cell_bits_of_float(std::cos(xd)); break;
+	case detail::math_fn::tan_: bits = cell_bits_of_float(std::tan(xd)); break;
+	case detail::math_fn::radians_to_degrees: bits = cell_bits_of_float(xd * (180.0 / 3.14159265358979323846)); break;
+	case detail::math_fn::degrees_to_radians: bits = cell_bits_of_float(xd * (3.14159265358979323846 / 180.0)); break;
+	default: return miss();
+	}
+	if (!cell_land(f, loop, dk, kind, bits)) return miss();
 	++f.ip;
 	return {};
 }
+
 
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
 JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins) {
@@ -9231,7 +9274,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset();
+	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
@@ -15779,7 +15822,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset();
+	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
@@ -15979,7 +16022,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset();
+	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
@@ -16139,7 +16182,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset();
+	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,

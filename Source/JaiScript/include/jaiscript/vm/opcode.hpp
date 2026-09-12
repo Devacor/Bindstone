@@ -214,6 +214,8 @@ namespace jai::vm {
         op_c_arith_any,     // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: kinds from the cells
         op_c_mov,           // a = dst cell, b = src cell or const bit | index: a typed move's copy
         op_c_math,          // a = math_fn << 24 | dst cell, b = src cell: itrunc / ifloor on a cell
+        op_cells_cfor_back, // a = cell loop index: a counted loop's back edge (the general step and compare), then the block entry
+        op_c_cfor_back,     // a = var cell, b = end cell or const, c = step cell or const: the counted back edge inside the block
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -337,6 +339,8 @@ namespace jai::vm {
             case opcode::op_c_arith_any: return "C_ARITH_ANY";
             case opcode::op_c_mov: return "C_MOV";
             case opcode::op_c_math: return "C_MATH";
+            case opcode::op_cells_cfor_back: return "CELLS_CFOR_BACK";
+            case opcode::op_c_cfor_back: return "C_CFOR_BACK";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

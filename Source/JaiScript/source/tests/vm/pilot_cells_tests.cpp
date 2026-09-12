@@ -1039,6 +1039,47 @@ public:
 			const std::string vm = run_on(true, kind);
 			check_true(vm.rfind("caught:", 0) == 0 && vm.find("declared int") != std::string::npos && vm.find("|230") != std::string::npos, "the kind miss raises the declaration's text: " + vm);
 		});
+		test("a_counted_loop_runs_as_a_block_with_its_back_edge_stepping_in_the_cells", [this]() {
+			// for (int i = 0; i < n; ++i) (the counted form: pix_clear, the row loops): a clear into a typed global, a stride
+			// with a continue, an end changed inside the body (read fresh at every back edge), a step that overflows (the
+			// general back edge's text), zero iterations, a float and a string value into array<int> (the general store's
+			// conversion and rejection); the same on both backends, proofs on and off
+			const std::string script = R"(
+				array<int> PIX = []; for (int k = 0; k < 64; ++k) { PIX.push(0); }
+				var VW = 8; var VH = 8;
+				function clear_to(int color) -> int { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = color; } return PIX[0] + PIX[63]; }
+				function fill_any(var v) -> int { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = v; } return PIX[1]; }
+				function sum_stride(var& pix, int n, int step) -> int { int acc = 0; for (int i = 0; i < n; i += step) { acc = acc + pix[i]; if (i == 42) { continue; } acc = acc + 1; } return acc; }
+				function shrink(var& pix, int n) -> int { int hits = 0; for (int i = 0; i < n; ++i) { pix[i] = i; n = n - 2; hits = hits + 1; } return hits * 100 + pix[3]; }
+				function stepped(int n) -> string { int acc = 0; for (int i = 9223372036854775800; i < n; i += 4) { acc = acc + 1; } return to_string(acc); }
+				int a = clear_to(7);
+				int b = sum_stride(PIX, 64, 3) + sum_stride(PIX, 0, 3);
+				int c = shrink(PIX, 64);
+				string d = ""; try { d = stepped(9223372036854775807); } catch (err) { d = "throw:" + err; }
+				string e = ""; try { e = to_string(fill_any(2.5)); } catch (err) { e = "throw:" + err; }
+				string f = ""; try { f = to_string(fill_any("x")); } catch (err) { f = "throw:" + err; }
+				to_string(a) + "," + to_string(b) + "," + to_string(c) + "," + d + "," + e + "," + f + "," + to_string(PIX[2]);
+			)";
+			both(script, "", "counted loops");
+			both(script, "", "counted loops, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("14,", 0) == 0 && vm.find("throw:Integer overflow in '+='") != std::string::npos, "the clear and the overflow text: " + vm);
+			auto e = engine::make();
+			e->set_backend(backend_type::vm);
+			stdlib::register_all(*e);
+			auto* symbolizer = e->get_symbolizer();
+			const char* fn = "array<int> PIX = []; var VW = 8; var VH = 8; var f = function(int color) { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = color; } return n; };";
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex(fn, symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parse_result = p.parse();
+			check_true(parse_result.has_value(), "snippet parses");
+			(void)jai::detail::run_static_check(*e, parse_result.value());
+			jai::vm::vm_compiler compiler(symbolizer);
+			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
+			check_true(listing.find("CELLS_CFOR_BACK") != std::string::npos && listing.find("C_CFOR_BACK") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the counted clear loop closes: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

@@ -1620,6 +1620,7 @@ namespace jai::vm {
         op_status exec_c_args(frame& f, const vm_instruction& ins);
         op_status exec_c_call(frame& f, const vm_instruction& ins);
         op_status cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);
+        bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);   // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);   // after a call: every site's container is the node resolved at entry, reached the same way
@@ -1742,7 +1743,7 @@ namespace jai::vm {
         // return instead of a 56-byte checked_result per operand).
         const script_value* fused_ident_value(frame& f, const fused_operand& operand,
                                               std::optional<script_value>& scratch,
-                                              size_t cache_slot);
+                                              size_t cache_slot, bool* observed = nullptr);   // observed: the resolution ran a getter (a property reference, a bare C++ property)
         op_status exec_push_fused(frame& f, const vm_instruction& ins);
         op_status exec_index(frame& f, const vm_instruction& ins);
         op_status exec_index_impl(frame& f, const vm_instruction& ins);
@@ -1757,7 +1758,7 @@ namespace jai::vm {
         op_status exec_unary(frame& f, const vm_instruction& ins);
         op_status exec_call(frame& f, const vm_instruction& ins);
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)
-        op_status exec_probe_callee(frame& f, const vm_instruction& ins);
+        op_status exec_probe_callee(frame& f, const vm_instruction& ins, bool* observed = nullptr);
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         // Callee-first probe for member / computed callees (op_probe_member)
         op_status exec_probe_member(frame& f, const vm_instruction& ins);

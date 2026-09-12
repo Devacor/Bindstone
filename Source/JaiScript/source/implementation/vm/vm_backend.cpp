@@ -4491,21 +4491,28 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// the value behind a binding: a reference through a C++ property runs its getter on the dereference (user code), which a
+// cell block's callee probe must know (design_row118_canonical_lowering.md section 9); every other binding dereferences silently
+static JAI_FORCEINLINE script_value& binding_value(script_value& v, bool* observed) {
+	if (observed && v.is_reference()) { const auto* h = v.get_reference_holder(); if (h && h->property) { *observed = true; } }
+	return v.deref();
+}
+
 const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
                                                   std::optional<script_value>& scratch,
-                                                  size_t cache_slot) {
+                                                  size_t cache_slot, bool* observed) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
 	if (operand.load_flags & load_flag_global_only) {
 		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
 		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
-			return &g->deref();
+			return &binding_value(*g, observed);
 		}
 		raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* local = frame_slot(f, operand.slot)) {
-			return &local->deref();
+			return &binding_value(*local, observed);
 		}
 	}
 	if (operand.load_flags & load_flag_type_ctor) {
@@ -4539,7 +4546,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f)) {
 			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
-				return &own->deref();
+				return &binding_value(*own, observed);
 			}
 			if (operand.ident_node != k_invalid_u32 && bare_field_proof_frame(f)) {
 				const identifier_expr* idn = ident_node_of(*f.code, operand.ident_node);
@@ -4563,6 +4570,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					return &scratch.value();
 				}
 				if (member.what == detail::member_probe_hit::kind::cpp_property) {
+					if (observed) { *observed = true; }   // a getter: user code
 					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
 					                                           member.method_value, member.getter_id, sym);
 					if (!read) {
@@ -4579,19 +4587,19 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				return &scratch.value();
 			}
 			if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
-				return &cached->deref();
+				return &binding_value(*cached, observed);
 			}
 			if (script_value* beyond = f.locals->scope_floor
 			        ? f.locals->scope_floor->get_value_ptr(sym)
 			        : environment_->get_value_ptr(sym)) {
-				return &beyond->deref();
+				return &binding_value(*beyond, observed);
 			}
 			raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
 			return nullptr;
 		}
 	}
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
-		return &cached->deref();
+		return &binding_value(*cached, observed);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_env_resolve_[5];
@@ -4600,7 +4608,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper;
 	// env storage is deque-stable, so the pointer outlives this call like get_ref's did
 	if (script_value* env_val = environment_->get_value_ptr(sym)) {
-		return &env_val->deref();
+		return &binding_value(*env_val, observed);
 	}
 	if (script_value* this_ptr = current_this(f)) {
 		script_value& this_val = *this_ptr;
@@ -4608,6 +4616,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
 				if (uint64_t getter_id = detail::cpp_property_getter_id(instance.get(), sym)) {
+					if (observed) { *observed = true; }   // a getter: user code
 					auto read = detail::read_bare_cpp_property(this_val, instance.get(),
 					                                           instance->get_method(getter_id, false), getter_id, sym);
 					if (!read) {
@@ -7008,9 +7017,11 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	}
 }
 // a call inside the block (design_row118_canonical_lowering.md section 9): the probe, the pushes, the call and the landing
-// are four copy instructions over one descriptor; the general executors run verbatim underneath, so the callee sees the
-// stack and the pending register the general form gives it and its errors are the general ones (an error materializes
-// the block and leaves f.ip on the general instruction, as every cell op does)
+// are four copy instructions over one descriptor, the probe at its own place ahead of the argument values and the other
+// three at the call's; the general executors run verbatim underneath, so the callee sees the stack and the pending
+// register the general form gives it and its errors are the general ones (an error materializes the block and leaves
+// f.ip on the general instruction, as every cell op does). A miss between the probe and the pushes resumes the general
+// form at the first argument instruction with the callee parked, its own state after PROBE_CALLEE, never at the probe
 op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
@@ -7020,8 +7031,10 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		for (uint32_t k = 0; k < loop.cells.size(); ++k) { if (f.cells->dirty.test(k) && loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } }
 		f.cells->dirty &= ~loop.env_mask;
 	}
-	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip]);
+	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
+	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
+	if (observed && !cells_reland(f, loop, cc)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
 	return {};
 }
@@ -7041,10 +7054,9 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			const uint8_t kind = cs.kind[k];
 			if (kind != kint && kind != kflt && kind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) [[unlikely]] {
-				// a value the block never defined (unreachable by construction): undo the probe and the pushes, re-run from the probe
+				// a value the block never defined (unreachable by construction): undo the pushes, re-run from the first argument with the callee parked
 				stack_.truncate(stack_.size() - i);
-				pending_callees_.pop_back();
-				cells_miss(f, loop, cc.probe_ip, 4);
+				cells_miss(f, loop, cc.probe_ip + 1, 4);
 				return {};
 			}
 			if (cs.dirty.test(k) && !cl.temp && cl.env_operand == k_invalid_u32) { cell_flush_one(f, loop, k); cs.dirty.clear(k); }
@@ -7076,21 +7088,20 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 	++f.ip;   // the consumer runs here
 	return cells_land(f, loop, cc);
 }
-// the landing after a call: the call is an effect point, so what it could have reached is checked or re-read first (a
-// slot argument's kind, since a by-reference parameter boxes the caller's slot; the environment values; the container
-// sites; the numeric-operator and debugger states), then the result lands by the declared-type rule or is dropped; any
-// change misses at the consumer with the result on the stack, exactly the general form's state there
-op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
+// after an effect point inside the block (the call, or a callee probe whose resolution ran a getter): what user code could
+// have reached is checked or re-read (a slot argument's kind, since a by-reference parameter boxes the caller's slot; the
+// environment values; the string cells' nodes; the container sites; the numeric-operator and debugger states); false is a
+// miss, and the caller decides where the general form resumes
+bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
 	cell_state& cs = *f.cells;
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
-	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
-	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return miss();
+	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	for (const chunk::cell_loop::call_arg& a : cc.args) {
 		if (a.kind != 1) continue;
 		const chunk::cell_loop::cell& cl = loop.cells[a.v];
 		if (cl.temp || cl.env_operand != k_invalid_u32) continue;
 		const script_value* s = frame_slot(f, cl.slot);
-		if (!s || s->raw_storage_index() != cs.kind[a.v]) return miss();   // the local escaped by reference: the slot is the value from here on
+		if (!s || s->raw_storage_index() != cs.kind[a.v]) return false;   // the local escaped by reference: the slot is the value from here on
 	}
 	// the environment and its epoch as at entry: the bindings recorded there still answer (the lookup cache's own rule)
 	const bool env_ok = environment_.get() == cs.env_of && env_symbolizer_->env_epoch() == cs.env_serial;
@@ -7101,10 +7112,18 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 		const script_value* v = env_ok && cs.env_ptr[k] ? cs.env_ptr[k] : fused_cmp_operand(f, er.operand, er.cache_slot);
 		// the kind and the declaration stamp both as at entry: a callee that redeclared the global with another declared type
 		// (a reload of `var G` as `int G`, the raw kind unchanged) changes the landing rule, so it misses at the consumer
-		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k] || v->type_info_raw() != cs.stamp[k]) return miss();
+		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k] || v->type_info_raw() != cs.stamp[k]) return false;
 		cs.payload[k] = cs.kind[k] == kint ? static_cast<int64_t>(v->unchecked_as_int()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(v->unchecked_as_float()) : (v->unchecked_as_bool() ? 1 : 0);
 	}
-	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return miss();
+	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
+	return true;
+}
+// the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
+// change misses at the consumer with the result on the stack, exactly the general form's state there
+op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
+	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
+	if (!cells_reland(f, loop, cc)) return miss();
 	if (cc.consumer == 0) { ++f.ip; return {}; }   // a statement's result was never pushed (land_call_result) or was dropped by the native path
 	const script_value& top = stack_.back().deref();
 	const size_t vi = top.raw_storage_index();
@@ -9198,7 +9217,7 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 	return raise_(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
 }
 
-op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, bool* observed) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_p0 = __rdtsc();
 	++profile_probe_count_;
@@ -9209,7 +9228,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
 	std::optional<script_value> scratch;
-	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
 	if (!resolved) return op_status::failed;
 	const script_value& calleeVal = *resolved;
 	if (!calleeVal.is_function()) {

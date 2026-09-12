@@ -1761,6 +1761,76 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			}
 			check(run_with(true, std::string(defs) + " probe(4, 2);", true).find("int") != std::string::npos, "the redeclared int boundary holds after the call: " + run_with(true, std::string(defs) + " probe(4, 2);", true));
 		});
+		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
+			// Astra's third finding and its callee-getter follow-up: `take(V, G + 1)` where V is a global reference to a native
+			// property whose getter steps G, the same through a local reference slot, and `F(G + 1)` where F is a reference to a
+			// property whose getter returns the callee and steps G. Argument order is the source order on both backends: a computed
+			// argument after a verbatim load keeps the loop general (an effect refusal); the callee's resolution runs first, at its
+			// own place, and a getter observed there re-lands the block, so the loop with the getter-backed callee still closes.
+			// The fixture arms the getter after the references are bound, so no read during binding moves G; the getter sets G = 20 (idempotent, so how often it runs does not enter: a
+			// property argument converted by value can run its getter more than once on a first call, both backends the same, an
+			// open finding) and each iteration resets G = 10, so the order shows: 21 per call when the getter precedes G + 1, 11
+			// otherwise; before(3) computes a = 11 ahead of the getter (take_ab: 1100 per call, 2100 if the getter came first)
+			struct stepper { bool armed = false; };
+			const char* defs = R"JAI(
+var G = 10;
+var box = Stepper();
+var& V = box.number;
+var& F = box.callable;
+function target(int a) -> int { return a; }
+function take_b(int a, int b) -> int { return b; }
+function take_ab(int a, int b) -> int { return a * 100 + b; }
+function after(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(V, G + 1); acc = acc + z; } return to_string(acc); }
+function before(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_ab(G + 1, V); acc = acc + z; } return to_string(acc); }
+function via_local(int n) { var& p = box.number; box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(p, G + 1); acc = acc + z; } return to_string(acc); }
+function via_callee(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = F(G + 1); acc = acc + z; } return to_string(acc); }
+)JAI";
+			// the listing compiles the same four loops as lambdas held in vars: a named function body compiles on its first call
+			const char* listing_defs = R"JAI(
+var G = 10;
+var box = Stepper();
+var& V = box.number;
+var& F = box.callable;
+function target(int a) -> int { return a; }
+function take_b(int a, int b) -> int { return b; }
+function take_ab(int a, int b) -> int { return a * 100 + b; }
+var after = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(V, G + 1); acc = acc + z; } return to_string(acc); };
+var before = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_ab(G + 1, V); acc = acc + z; } return to_string(acc); };
+var via_local = function(int n) { var& p = box.number; box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(p, G + 1); acc = acc + z; } return to_string(acc); };
+var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = F(G + 1); acc = acc + z; } return to_string(acc); };
+)JAI";
+			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				dynamic_binder<stepper>(*e, "Stepper").constructor<>()
+					.method("arm", [](stepper& s) { s.armed = true; })
+					.property("number", [raw](stepper& s) -> int64_t { if (s.armed) { raw->execute("G = 20;"); } return 0; }, nullptr)
+					.property("callable", [raw](stepper& s) -> script_value { if (s.armed) { raw->execute("G = 20;"); } return raw->get_variable("target"); }, nullptr)
+					.build();
+				try { return e->execute(script).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			struct probe { const char* call; const char* expected; };
+			const probe probes[] = { { "after(3);", "63" }, { "before(3);", "3300" }, { "via_local(3);", "63" }, { "via_callee(3);", "63" } };
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					const std::string script = std::string(defs) + " " + p.call;
+					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					check_eq(std::string(p.expected), vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": expected");
+				}
+			}
+			const std::string listing = listing_of(listing_defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			size_t open = 0; for (size_t at = listing.find("-- open loop "); at != std::string::npos; at = listing.find("-- open loop ", at + 1)) { ++open; }
+			check_eq(size_t(2), open, "the computed argument after a verbatim load (an environment name, a reference slot) keeps its loop general: " + listing);
+			check_eq(size_t(2), closed, "the computed argument before the load, and the getter-backed callee, close: " + listing);
+			check(listing.find("effect at") != std::string::npos, "the refusal is an effect refusal: " + listing);
+			check(listing.find(":probe") != std::string::npos, "the probe is an operation of the region: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

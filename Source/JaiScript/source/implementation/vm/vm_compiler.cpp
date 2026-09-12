@@ -675,6 +675,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 #ifdef JAISCRIPT_VM_PROFILE
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
+		if (p.is_reference && p.slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(p.slot_index)); }   // its load dereferences the caller's binding, possibly through a getter
 	}
 	{
 		body_walker walker;
@@ -2220,7 +2221,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit };   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, probe };   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
 	struct ir_op {
 		ir kind = ir::placeholder;
 		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
@@ -2714,15 +2715,21 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const size_t consumer_ip = call_ip + 1;
 				chunk::cell_loop::cell_call cc; cc.probe_ip = static_cast<uint32_t>(ip); cc.call_ip = static_cast<uint32_t>(call_ip); cc.consumer_ip = static_cast<uint32_t>(consumer_ip);
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
-				ir_op probe_op; probe_op.kind = ir::skip; seq.push_back(probe_op);   // the probe runs at the call's place
+				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size()); seq.push_back(probe_op);   // the probe runs first, at its own place: its resolution may run a getter, which no argument value may precede
 				ir_op call_op; call_op.kind = ir::call; call_op.a = static_cast<uint32_t>(calls.size());
+				// argument evaluation stays in source order: a verbatim environment load or a reference-slot load runs the general
+				// instruction at C_ARGS and may run a getter (a reference to a property), so it is an effect barrier; a computed
+				// argument (its value made after the probe and ahead of the pushes) may not follow one; a slot cell boxed at C_ARGS
+				// and a constant have no effect and keep their place
+				bool effect_seen = false;
 				for (size_t a = ip + 1; a < call_ip && refusal == chunk::cell_refusal_none; ++a) {
 					const vm_instruction& ai = code[a];
-					ir_op ao; ao.kind = ir::skip; ao.origin = static_cast<uint32_t>(ip);   // a miss ahead of the call re-runs from the probe
+					ir_op ao; ao.kind = ir::skip; ao.origin = static_cast<uint32_t>(ip + 1);   // a miss between the probe and the pushes re-runs from the first argument instruction, the callee parked
 					const bool slot_load = ai.op == opcode::op_load && ai.a != k_invalid_u32 && ai.a < k_typed_slot_mask && ai.c == 0;
 					const vm_instruction* next = a + 1 < call_ip ? &code[a + 1] : nullptr;
 					if (slot_load && next && next->op == opcode::op_math && next->b == 1) {
 						// math::fn(slot) as an argument: the intrinsic into an argument value (the math arm's rows)
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						uint8_t rk = kflt;
 						switch (static_cast<detail::math_fn>(next->a)) {
 						case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
@@ -2741,6 +2748,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
 					} else if (slot_load && next && next->op == opcode::op_unary && (static_cast<token_type>(next->a) == token_type::minus || static_cast<token_type>(next->a) == token_type::tilde)) {
 						// -slot or ~slot as an argument: the unary into an argument value
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						const token_type tk = static_cast<token_type>(next->a);
 						const uint32_t t = arg_temp_next++;
 						use_slot(ai.a, 0, false, 0, nullptr, a);
@@ -2751,13 +2759,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
 					} else if (slot_load) {
 						// a slot: the cell the loop holds for it (the binding at the call, decided at emission), else the load runs verbatim
+						if (std::find(c.reference_slots.begin(), c.reference_slots.end(), ai.a) != c.reference_slots.end()) { effect_seen = true; }   // a reference slot never holds a cell: its load runs at C_ARGS and may run a getter
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, ai.a, static_cast<uint32_t>(a) });
 						seq.push_back(ao);
 					} else if (ai.op == opcode::op_const || (ai.op == opcode::op_load && ai.a == k_invalid_u32 && ai.c == 0)) {
+						if (ai.op == opcode::op_load) { effect_seen = true; }   // the load runs at C_ARGS: nothing computed may follow it
 						cc.args.push_back(chunk::cell_loop::call_arg{ 2, static_cast<uint32_t>(a), static_cast<uint32_t>(a) });   // a constant or an environment name: the general push
 						seq.push_back(ao);
 					} else if (ai.op == opcode::op_binary_fused && ai.a < c.fused_binary_protos.size()) {
 						// a computed argument: arith into an argument value (the pinned form when the checker classed both operands)
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						const fused_binary_proto& bp = c.fused_binary_protos[ai.a];
 						const bool arg_cmp = cmp_tok(bp.op);   // a comparison's bool is a value too
 						if (!arith_tok(bp.op) && !arg_cmp) { refuse(chunk::cell_refusal_translation, a); break; }
@@ -2774,6 +2785,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						seq.push_back(ao);
 					} else if (ai.op == opcode::op_index_fused && ai.a < c.fused_index_protos.size()) {
 						// an element read as an argument: the load into an argument value (the copy's own site row)
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						const fused_index_proto& fp = c.fused_index_protos[ai.a];
 						if (fp.index_chain_ext.size() > 2 || !container_operand(fp.container) || !index_values(ao, fp, a)) { refuse(chunk::cell_refusal_representation, a); break; }
 						const uint32_t t = arg_temp_next++;
@@ -2912,7 +2924,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.cells = cells;
 		loop.env_operands = env_ops;
 		if (ir_listing_) {
-			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit" };
+			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "probe" };
 			std::string text;
 			for (size_t k = 0; k < ops.size(); ++k) {
 				const ir_op& op = ops[k];
@@ -3075,7 +3087,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::neg: append(vm_instruction{opcode::op_c_neg, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::bnot: append(vm_instruction{opcode::op_c_bnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::call: {
-				// the probe, the pushes and the call at the call's place; a slot argument is the cell the loop holds for it here
+				// the pushes and the call at the call's place (the probe has its own, ahead); a slot argument is the cell the loop holds for it here
 				// (its latest definition), else its load runs verbatim; the pushes are an argument zone of their own
 				chunk::cell_loop::cell_call& cc = loop.calls[op.a];
 				for (auto& arg : cc.args) {
@@ -3083,7 +3095,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					const uint32_t cl = arg.v < current.size() ? current[arg.v] : k_invalid_u32;
 					if (cl != k_invalid_u32) { arg.kind = 1; arg.v = cl; } else { arg.kind = 2; arg.v = arg.ip; }
 				}
-				append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip);
 				c.call_arg_zones.emplace_back(static_cast<uint32_t>(code.size()), static_cast<uint32_t>(code.size() + 1));
 				append(vm_instruction{opcode::op_c_args, op.a, loop_index, cc.call_ip}, cc.probe_ip);
 				append(vm_instruction{opcode::op_c_call, op.a, loop_index, cc.call_ip}, cc.call_ip);
@@ -3095,6 +3106,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				append(vm_instruction{opcode::op_c_land, op.a, loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
+			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
 			case ir::skip: break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
 			case ir::lnot: append(vm_instruction{opcode::op_c_lnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
@@ -4516,6 +4528,7 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 	// Locals declared through env fallback in lambda contexts keep working because the
 	// slot decision below mirrors identifier loads (declared symbols keep parser slots).
 	if (is_reference) {
+		if (decl->slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(decl->slot_index)); }   // its load dereferences, possibly through a getter (a plain alias is taken back out below)
 		if (!decl->initializer) {
 			emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::uninitialized_reference),
 			     add_message("Reference variable must be initialized"), add_symbol(decl->name_id));
@@ -4530,7 +4543,7 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 				const bool plain = referent != k_invalid_u32
 					? (ident->names_value_decl || callable_.plain_refs.count(referent) != 0)
 					: ident->names_known_value;
-				if (plain) { callable_.plain_refs[static_cast<uint32_t>(decl->slot_index)] = decl->name_id; }
+				if (plain) { callable_.plain_refs[static_cast<uint32_t>(decl->slot_index)] = decl->name_id; std::erase(chunk_->reference_slots, static_cast<uint32_t>(decl->slot_index)); }
 			}
 			emit(opcode::op_decl_ref_ident, add_node(decl), add_symbol(ident->symbol_id));
 		} else {

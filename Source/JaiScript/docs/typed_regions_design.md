@@ -159,7 +159,10 @@ shared kernel and lands its value), so the binary reads a direct operand and tak
 checker classed the call; the call keeps its place in the operand order like a hoisted element read. An
 index expression that is an arithmetic tree computes into a temp (the fused binary the compiler emits
 last lands there) and the read is the identifier-plus-temp shape, which takes the `T_LOAD` row; a
-reference-slot container is dereferenced ahead of the index.
+reference-slot container is guarded ahead of the index: the guard materializes it into a temp only when the
+slot's reference is not a plain cell (an element, field, map or property reference, whose dereference can
+raise), and the readers take the slot itself otherwise, so a getter runs once and in its place and a plain
+alias pays one tag test.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload

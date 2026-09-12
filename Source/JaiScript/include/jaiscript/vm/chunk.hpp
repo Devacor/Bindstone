@@ -317,6 +317,9 @@ namespace jai::vm {
         // any runtime miss runs the general kernel unchanged.
         bool typed_lane = false;
         bool speculative = false;   // the lane came from elem_read_operand, not a proof (census: misses per site)
+        // a reference-slot container guarded ahead of the index (op_operand_temp c = 1): the temp that holds its
+        // materialized value when the slot's reference is not a plain cell; the readers take the slot otherwise
+        uint32_t container_guard = k_invalid_u32;
     };
 
     struct chunk {
@@ -383,6 +386,7 @@ namespace jai::vm {
             uint32_t index_proto = k_invalid_u32;
             bool temp = false;
             bool speculative = false;
+            uint32_t guard_temp = k_invalid_u32;   // fused_index_proto::container_guard, flattened
         };
         std::vector<typed_site> typed_sites;
         std::vector<counted_for_proto> counted_for_protos;

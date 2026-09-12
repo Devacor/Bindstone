@@ -4700,7 +4700,18 @@ const script_value* vm_backend::fused_subscript_value(frame& f, const fused_oper
 // Register-file sequencing producer: a subscript operand LEFT of a lifting subtree
 // reads (and raises) here, before that subtree computes, and lands RAW in its temp;
 // the outer op reads it back as an ordinary slot operand.
+// a reference whose dereference cannot raise (reference_holder::plain_cell): the guarded readers take the slot itself
+static bool ref_plain_cell(const script_value& v) noexcept {
+	const auto* h = v.get_reference_holder();
+	return h && h->plain_cell();
+}
+
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
+	if (ins.c == 1) {
+		// the container guard: a plain cell (or no reference at all) needs no snapshot, the readers take the slot
+		const script_value* s = direct_operand(f, f.code->fused_binary_protos[ins.a].left);
+		if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
+	}
 	std::optional<script_value> scratch;
 	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
 	if (!v) return op_status::failed;
@@ -6082,7 +6093,13 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	} else {
 		// binary-index sites park the container at role 2: binary_fused_compute owns
 		// roles 0/1, and cache entries are provenance-checked by {env, epoch}, not symbol
-		const script_value* resolved = fused_ident_value(f, p.container, cscratch,
+		const script_value* guarded = nullptr;
+		if (p.container_guard != k_invalid_u32) {
+			// the guard materialized a reference that is not a plain cell ahead of the index: read that, not the slot again
+			const script_value* s = direct_operand(f, p.container);
+			if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)) { guarded = frame_slot(f, p.container_guard); }
+		}
+		const script_value* resolved = guarded ? guarded : fused_ident_value(f, p.container, cscratch,
 		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
 		if (!resolved) return op_status::failed;
 		container_ptr = resolved;
@@ -6485,7 +6502,8 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 			? frame_slot(f, site.cont_slot)
 			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
 		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
-			cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr;   // a getter-backed reference: the kernel reads it exactly once
+			if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) { cp = frame_slot(f, site.guard_temp); }   // the guard materialized it ahead of the index
+			else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }   // a getter-backed reference: the kernel reads it exactly once
 		}
 		bool borrowed = false;
 		if (const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr) {
@@ -7266,8 +7284,13 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
 	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
-		if (!lane_deref_silent(*cp)) return false;   // a getter-backed reference: the kernel reads it exactly once
-		cp = &cp->deref();
+		if (p.container_guard != k_invalid_u32 && !ref_plain_cell(*cp)) {
+			cp = frame_slot(f, p.container_guard);   // the guard materialized it ahead of the index
+			if (!cp) return false;
+		} else {
+			if (!lane_deref_silent(*cp)) return false;   // a getter-backed reference: the kernel reads it exactly once
+			cp = &cp->deref();
+		}
 	}
 	bool borrowed = false;
 	const script_array* node = lane_element_source(*cp, borrowed);

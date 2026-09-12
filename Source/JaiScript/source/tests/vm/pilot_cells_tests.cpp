@@ -861,6 +861,22 @@ public:
 			size_t loads = 0; for (size_t at = listing.find("T_LOAD"); at != std::string::npos; at = listing.find("T_LOAD", at + 6)) { ++loads; }
 			check_true(loads == 2 && listing.find("INDEX") == std::string::npos, "both tree-indexed reads take the typed row: " + listing);
 		});
+		test("a_plain_alias_container_reads_through_the_guard_and_a_shrunken_element_reference_does_not", [this]() {
+			// the guard leaves a plain alias (a var& parameter, a var& of a same-unit or other-unit value) to the reader;
+			// an element reference whose array shrank is not plain: its dereference raises before the index, both backends
+			const std::string script = R"(
+				var PAL = []; for (int i = 0; i < 512; ++i) { PAL.push(i * 3); }
+				var TEX = [[0, 1, 2, 3], [4, 5, 6, 7]];
+				function texel(var& tp, var& pal, int base, int iv) -> int { var& p = pal; int v = p[base + tp[iv + 0]]; return v + pal[(base + 1) * 2 + tp[iv]]; }
+				function shrunk(int i) -> string { var rows = [[1, 2, 3], [4, 5, 6]]; var& r = rows[1]; rows.pop(); rows.pop(); try { return to_string(r[i + 0 + rows.size()]); } catch (err) { return "throw:" + err; } }
+				var& t0 = TEX[0];
+				to_string(texel(t0, PAL, 10, 2)) + "," + to_string(texel(TEX[1], PAL, 0, 3)) + "," + shrunk(9) + "," + shrunk(0);
+			)";
+			both(script, "", "guarded containers");
+			both(script, "", "guarded containers, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("108,48,", 0) == 0, "the plain aliases land: " + vm);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

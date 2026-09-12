@@ -2093,6 +2093,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.decl_expect = fp.decl_expect;
 			site.temp = fp.decl_temp;
 			site.speculative = fp.speculative;
+			site.guard_temp = fp.container_guard;
 			chunk_ = &c;
 			typed_site_at(ip) = site;
 			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
@@ -2402,6 +2403,21 @@ void vm_compiler::materialize_operand_temp(const expression_ptr& e, fused_operan
 	out.direct = true;
 }
 
+// A reference-slot container ahead of a hoisted read: the guard (op_operand_temp, c = 1) materializes the
+// container into `guard` only when the slot's reference is not a plain cell, so a getter runs once and in its
+// place; the read's container operand stays the slot and the readers take the temp when the guard filled it
+void vm_compiler::guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard) {
+	fused_binary_proto p;
+	p.left = make_fused_operand(e);
+	chunk_->fused_binary_protos.push_back(std::move(p));
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t, 1);
+	container = make_fused_operand(e);
+	guard = t;
+}
+
 // The kind a typed-proven binary's element read lands: int or float when the checker proved the pair,
 // any scalar (0xFF, the runtime kind) otherwise
 uint8_t vm_compiler::operand_expect(const binary_expr* node) {
@@ -2450,10 +2466,12 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 		fused_operand inner;
 		fused_operand container;
 		const bool ref_container = reference_slot_operand(expr->left.get());
-		if (ref_container) { materialize_operand_temp(expr->left, container); }   // its dereference precedes the inner read
+		uint32_t guard = k_invalid_u32;
+		if (ref_container) { guard_container_temp(expr->left, container, guard); }   // its dereference precedes the inner read
 		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
 			p.container = ref_container ? container : make_fused_operand(expr->left);
+			p.container_guard = guard;
 			p.index = inner;
 			chunk_->fused_index_protos.push_back(p);
 			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
@@ -2518,7 +2536,8 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				// direct operands and the outer read takes the T_LOAD row when the binary's class is proven
 				fused_operand container;
 				const bool ref_container = reference_slot_operand(expr->left.get());
-				if (ref_container) { materialize_operand_temp(expr->left, container); }   // its dereference precedes the reads
+				uint32_t guard = k_invalid_u32;
+				if (ref_container) { guard_container_temp(expr->left, container, guard); }   // its dereference precedes the reads
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(rb->op.type);
 				auto side = [&](const expression_ptr& e, fused_operand& out, bool ahead_of_a_read) {
@@ -2535,6 +2554,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				stamp_typed_class(bp, rb);
 				fused_index_proto p;
 				p.container = ref_container ? container : make_fused_operand(expr->left);
+				p.container_guard = guard;
 				chunk_->fused_binary_protos.push_back(bp);
 				p.index_binary = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
 				chunk_->fused_index_protos.push_back(p);
@@ -2548,7 +2568,8 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				const size_t temp_mark = temp_next_;
 				fused_operand container;
 				const bool ref_container = reference_slot_operand(expr->left.get());
-				if (ref_container) { materialize_operand_temp(expr->left, container); }
+				uint32_t guard = k_invalid_u32;
+				if (ref_container) { guard_container_temp(expr->left, container, guard); }
 				compile_expression(expr->right);
 				vm_instruction& last = chunk_->code.back();
 				if (last.op != opcode::op_binary_fused) {
@@ -2564,6 +2585,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				last.b = t;
 				fused_index_proto p;
 				p.container = ref_container ? container : make_fused_operand(expr->left);
+				p.container_guard = guard;
 				p.index = fused_operand{};
 				p.index.slot = t;
 				p.index.symbol = temp_symbol_index();

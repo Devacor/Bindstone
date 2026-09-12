@@ -168,6 +168,7 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
+			case opcode::op_c_append:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -331,6 +332,7 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
+			case opcode::op_c_append:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2225,7 +2227,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, probe };   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe };   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // append: the compound plus with run-time kinds (strings in place)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
 	struct ir_op {
 		ir kind = ir::placeholder;
 		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
@@ -2373,7 +2375,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (o.const_index != k_invalid_u32) {
 				if (o.const_index >= c.constants.size() || o.const_index >= k_typed_slot_mask) return false;
 				const size_t ci = c.constants[o.const_index].raw_storage_index();
-				if (kind == kint ? ci != script_value::TYPEID_INT : kind == kflt ? (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT) : (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL)) return false;
+				if (kind == kint ? ci != script_value::TYPEID_INT : kind == kflt ? (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT) : (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL && ci != script_value::TYPEID_STRING)) return false;
 				out = k_typed_const_bit | o.const_index;
 				return true;
 			}
@@ -2535,6 +2537,26 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
 				use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, site.temp ? k_typed_dst_temp : k_typed_dst_decl, site.temp ? nullptr : site.stamp, ip);
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
+			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && ip + 1 < back && code[ip + 1].op == opcode::op_compound_store
+			           && (code[ip + 1].c & compound_kind_mask) == compound_plus && (code[ip + 1].c & compound_flag_no_result) && !(code[ip + 1].c & (compound_flag_global_only | compound_flag_old_result))
+			           && code[ip + 1].b != k_invalid_u32 && code[ip + 1].b < k_typed_slot_mask) {
+				// `s += a[i]` on a slot the checker could not class: the element read lands in a statement temp of the element's own kind
+				// (a string is borrowed), and the compound is the append with run-time kinds; the pair's origin is the read (a miss at
+				// the append re-runs the push and the compound on the general form, so the temp is never flushed)
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				if (fp.index_chain_ext.size() > 2 || !container_operand(fp.container) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const uint32_t t = arg_temp_next++;
+				use_slot(t, 0, true, k_typed_dst_temp, nullptr, ip);
+				{ const int tk = find_cell(t); if (tk >= 0) { cells[tk].string_borrow = true; } }   // the append replays from this read on a miss, so a borrowed string may land here
+				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t;
+				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				ops.push_back(op);
+				const uint32_t dslot = code[ip + 1].b;
+				op = ir_op{};
+				use_slot(dslot, 0, false, 0, nullptr, ip + 1); use_slot(dslot, 0, true, k_typed_dst_compound, nullptr, ip + 1);
+				op.kind = ir::append; op.tok = static_cast<uint8_t>(token_type::plus); op.a = dslot; op.b = dslot; op.c = t; op.writes = dslot; slot_read(op, dslot);
+				op.origin = static_cast<uint32_t>(ip);
+				++ip;   // the compound is this iteration's second instruction
 			} else if (st.op == opcode::op_index_fused_decl && st.a < c.fused_index_protos.size()) {
 				// load the typed lowering left general (an environment value in the index, an unproven container): the same site
 				// row, built at emission (environment values take synthetic slots), landing in a stamped scalar decl or a compiler
@@ -2679,7 +2701,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					op.kind = ir::arith; op.tok = tok; op.a = e; op.b = e;
 				} else {
 					use_slot(cp.slot, 0, false, 0, nullptr, ip); use_slot(cp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
-					op.kind = ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);
+					op.kind = tok == static_cast<uint8_t>(token_type::plus) ? ir::append : ir::arith; op.tok = tok; op.a = cp.slot; op.b = cp.slot; op.writes = cp.slot; slot_read(op, cp.slot);   // plus on a slot: strings append in place, numbers add
 				}
 			} else if (st.op == opcode::op_incdec && st.b == k_invalid_u32 && !(st.c & incdec_flag_global_only) && (st.c & incdec_flag_no_result)) {
 				// ++g / g-- as a statement on an environment value: arith by one landing on the environment cell
@@ -2935,7 +2957,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.cells = cells;
 		loop.env_operands = env_ops;
 		if (ir_listing_) {
-			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "probe" };
+			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe" };
 			std::string text;
 			for (size_t k = 0; k < ops.size(); ++k) {
 				const ir_op& op = ops[k];
@@ -3120,6 +3142,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
 			case ir::skip: break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
+			case ir::append: append(vm_instruction{opcode::op_c_append, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
 			case ir::lnot: append(vm_instruction{opcode::op_c_lnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::cmpval: append(vm_instruction{opcode::op_c_cmpval, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
 			}

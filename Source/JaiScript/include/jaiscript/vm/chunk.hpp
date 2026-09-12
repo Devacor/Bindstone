@@ -380,7 +380,9 @@ namespace jai::vm {
             // any kind lands
             // first_decl: the loop's first write to the cell is its declaration (a local the body declares: it enters empty and its
             // flush stamps with decl_stamp, the declaration's type, whatever later stores land)
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; };
+            // string_borrow: a temp that may hold a borrowed string node, because its only consumer replays from the producer on a miss
+            // (the append pair); any other temp refuses a string element, since a miss at its consumer reads the temp's slot
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; };
             uint32_t head, back, copy_head, copy_back, exit_ip;
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop

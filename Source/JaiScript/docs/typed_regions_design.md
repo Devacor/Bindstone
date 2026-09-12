@@ -363,6 +363,14 @@ keeps the checked form.
 forms first); off, a region runs its checked canonical form, observationally identical, and `jaiscript_fuzz
 --no-passes` is the differential gate, as `--no-proofs` is for the typed lowering.
 
+A string is a cell kind: the cell borrows the string's node (the slot, the constant, the environment binding or the
+container keeps ownership), a string element loads into a statement temp, a string environment value is a cell, and
+`C_APPEND`, the compound plus with run-time kinds, appends in place when the destination's slot still holds the
+borrowed node uniquely and the memory cap accepts the bytes (any other case misses onto the general form, whose
+unshare, char-as-text and mismatch texts stand; numeric kinds are the any-kind arithmetic); a string cell is never
+flushed, and a slot-backed string cell is re-borrowed after every call. String moves, declarations from a string
+value, compares and concatenations into a new string keep the general form.
+
 A landing after a call re-validates in proportion to what the call could have changed: the copy's sites are a list,
 the entry records how each site's container is reached (its frame slot, or its environment binding) and each
 environment cell's binding with the environment and its epoch, and a landing whose environment and epoch still

@@ -2365,10 +2365,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_jump) {
 				append(vm_instruction{opcode::op_c_jump, st.a + (loop.copy_head - loop.head), 0, 0}, ip);
 			} else if (st.op == opcode::op_operand_temp) {
-				// the guard slot may be another statement's temp cell (temps are reused per statement): the copy's guard
-				// clears that dead cell's dirty bit so a later miss's flush leaves the handle the general form reads
+				// the guard slot may be another statement's temp cell and another guarded site's slot too (temps are reused per
+				// statement): the copy's guard clears the dead cell's dirty bit and restores this site's snapshot in the slot,
+				// so a later miss's general form reads the handle it expects; b packs the alias cell and the guarded load's
+				// copy offset (the first T_LOAD after the guard whose site names this slot)
 				const uint32_t alias = st.b < loop.slot_to_cell.size() ? loop.slot_to_cell[st.b] : k_invalid_u32;
-				append(vm_instruction{opcode::op_c_guard, st.b, alias, static_cast<uint32_t>(ip)}, ip);
+				uint32_t guarded = 0xFFFFFFu;
+				for (size_t ip2 = ip + 1; ip2 < back; ++ip2) {
+					if (code[ip2].op == opcode::op_t_load && ip2 < c.typed_sites.size() && c.typed_sites[ip2].guard_temp == st.b) { guarded = static_cast<uint32_t>(ip2 - head); break; }
+				}
+				append(vm_instruction{opcode::op_c_guard, st.b, (alias == k_invalid_u32 ? 0xFFu : alias) | (guarded << 8), static_cast<uint32_t>(ip)}, ip);
 			} else if (st.op == opcode::op_binary_fused_decl || st.op == opcode::op_binary_fused_temp || st.op == opcode::op_binary_fused_store) {
 				auto cop = [&](const fused_operand& o) -> uint32_t {
 					if (o.const_index != k_invalid_u32) return k_typed_const_bit | o.const_index;

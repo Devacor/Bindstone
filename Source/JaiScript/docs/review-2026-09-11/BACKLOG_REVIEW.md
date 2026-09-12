@@ -1,5 +1,7 @@
 # Compiler backlog review, 2026-09-11
 
+Update 2026-09-12: the two guard findings below are fixed and independently verified at 7fc75044 and its string-row descendant ee2af60c. See the resolution at the end of this document and the [final committed-tip comparison](../../examples/gloom/ports/RESULTS_FINAL_TIPS_2026-09-12.md).
+
 All fifteen implementation items through 121a and the newly flagged string-cell row have been reviewed. Fourteen of the original fifteen clear with their corrective commits. The remaining row, 118d, has two reproduced defects in the latest committed guard implementation, e5b8c649. A conservative repair passes the independent checks described below in an isolated source copy. It is a proposal for Fable, not a landed runtime fix.
 
 The original review base is bace83ee5a1ad1697c7753340028bf561350b19d. Sources came from local Git objects and Fable's exported patches. Builds, test hosts and raw evidence are under `Source/JaiScript/out/astra/backlog-drain-20260911/`. No Fable worktree was inspected or changed. No live runtime-owned file was edited.
@@ -130,3 +132,15 @@ The string-cell row improves JaiDOOM beyond the observed layout bands on the rep
 Source-review work and the requested comparisons are complete. The remaining implementation action belongs to Fable: repair the two committed guard defects and incorporate permanent regression tests before landing the dependent stack. The verified conservative patch and native/script controls are available in the raw evidence directory. The unmodified e5b8c649/e542c0b6 tips remain held; a different final repair needs its relevant controls and gates.
 
 One policy decision remains with Dev/Fable: do the pinned opcode variants justify their maintenance cost when the recorded isolated 121a pair is neutral? This review independently verifies the switch propagation, emitted forms and semantic controls; it does not add an isolated 121a speed claim. The verifier and switch support future passes either way. Expanding the opcode family should require a measured benefit.
+
+## Resolution on the final committed tips, 2026-09-12
+
+The original null-snapshot and temporary-reuse findings are fixed at stable 7fc7504443885bccb24b7825d4a08671a038107b and strings ee2af60c6052094fcea6692116e0b0f405ebd340. These are committed runtime sources with no Astra runtime overlays.
+
+Source review: 118d.3 adopts the always-snapshot rule, removes the null-sentinel readers and the environment guard's omission/cleanup paths, and checks the saved array against the validated site's node before resolving the source again. Admission still refuses observing reference bindings; post-call revalidation still refreshes changed nodes. The final string-row runtime diff matches its previously reviewed predecessor ignoring diff offsets.
+
+Verified by Astra: full Debug suites 3099 tests per backend at the stable tip and 3101 at the string tip; 384 semantic-corpus outcomes per tip; 160 original and 32 new guard-path outcomes in each configuration (Debug and Release) per tip; 18 game-hash runs per tip; string-specific 56 script and 16 native outcomes in each configuration. All pass. The new probes cover array replacement, content mutation with stable identity, temporary reuse between sites, and a new invocation after rebinding. Their listings confirm admitted guarded loops and calls where intended. Fable's full Release/XTHREAD/fuzz gates are separately recorded as reported.
+
+The committed-tip pair is complete and independently audited: 145 processes, 30 conformance gates, 108 accepted timings, seven retained busy exclusions; every hash and exit passes. Medians, padding bands and limitations are in [RESULTS_FINAL_TIPS_2026-09-12.md](../../examples/gloom/ports/RESULTS_FINAL_TIPS_2026-09-12.md). The stable worker padding outlier is retained and prevents small worker-performance claims.
+
+Raw evidence: out/astra/final-tips-20260912/. See REVIEW.md, source-inputs.json under each tip, debug-suites.json, pass-debug/, focused-debug/, focused-release/, guard-paths-debug/, guard-paths-release/, release-checks/, comparison/audit.json and noise-review.json. The previous failures and overlay measurements remain separate records. No remaining Astra correctness-review blocker applies to these two tips; Fable's ledger/client-gate/landing sequence remains its own work.

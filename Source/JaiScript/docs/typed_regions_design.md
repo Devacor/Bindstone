@@ -294,6 +294,11 @@ takes a truth test on a local, as a loop head (`while (n)`) or inside a body (`i
 zero with the jump's sense, the language's truthiness for an int or a float (a slot of another kind refuses at
 the entry).
 
+A negated numeric literal is a literal at parse time (`-1`, `-1.5`), so every consumer sees a constant, and a
+counted loop whose bound or step is an environment scalar enters the block (the general form reads the global
+through a pointer at every back edge and no cell instruction writes a global, so the environment cell read once
+at entry holds the same value).
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

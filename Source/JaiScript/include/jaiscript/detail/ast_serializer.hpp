@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 16;   // 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 17;   // 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.

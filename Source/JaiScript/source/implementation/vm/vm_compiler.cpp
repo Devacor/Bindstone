@@ -2287,7 +2287,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (p.body_ip == k_invalid_u32 || p.body_ip == 0 || p.body_ip > back) continue;
 			head = p.body_ip - 1;
 			counted = be.a;
-			if (!direct_slot(p.var) || !(int_const(p.end) || direct_slot(p.end)) || !(int_const(p.step) || direct_slot(p.step))) { refuse(chunk::cell_refusal_head, head); }
+			// the bound and the step may be environment scalars (`i < VW`): the general form reads the global through a pointer at
+			// every back edge and no cell instruction writes a global, so the environment cell read once at entry is the same value
+			if (!direct_slot(p.var) || !(int_const(p.end) || direct_slot(p.end) || env_scalar(p.end)) || !(int_const(p.step) || direct_slot(p.step) || env_scalar(p.step))) { refuse(chunk::cell_refusal_head, head); }
 		}
 		// the cells: semantic locals and compiler values by slot, environment values by symbol; kind 0 = adopted from the
 		// slot at entry, a typed use pins it; a landing's contract belongs to the operation that lands (stamp, landing)
@@ -2361,8 +2363,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (refusal == chunk::cell_refusal_none && counted != k_invalid_u32) {
 			const counted_for_proto& p = c.counted_for_protos[counted];
 			use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, head);   // stepped in place by the back edge
-			if (p.end.const_index == k_invalid_u32) { use_slot(p.end.slot, kint, false, 0, nullptr, head); }
-			if (p.step.const_index == k_invalid_u32) { use_slot(p.step.slot, kint, false, 0, nullptr, head); }
+			if (p.end.const_index == k_invalid_u32) { if (env_scalar(p.end)) { env_cell(p.end, kint, static_cast<uint32_t>(head * 3 + 1), head); } else { use_slot(p.end.slot, kint, false, 0, nullptr, head); } }
+			if (p.step.const_index == k_invalid_u32) { if (env_scalar(p.step)) { env_cell(p.step, kint, static_cast<uint32_t>(head * 3 + 2), head); } else { use_slot(p.step.slot, kint, false, 0, nullptr, head); } }
 			head_op.kind = ir::placeholder;
 		}
 		auto int_zero = [&]() -> uint32_t {   // the literal 0 a truth test compares against, minted once per chunk
@@ -2781,7 +2783,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
 		} else {
 			const counted_for_proto& p = c.counted_for_protos[counted];
-			auto int_cop = [&](const fused_operand& o) { return o.const_index != k_invalid_u32 ? (k_typed_const_bit | o.const_index) : current[o.slot]; };
+			auto int_cop = [&](fused_operand o) { if (o.const_index != k_invalid_u32) return k_typed_const_bit | o.const_index; synthetic(o); return current[o.slot]; };   // an environment bound reads its synthetic slot's cell
 			append(vm_instruction{opcode::op_c_cfor_back, current[p.var.slot], int_cop(p.end), int_cop(p.step)}, back);
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}

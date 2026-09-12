@@ -1342,6 +1342,24 @@ public:
 			size_t general = 0; for (const char* op : {"\tMATH ", "\tINDEX "}) { for (size_t at = listing.find(op); at != std::string::npos; at = listing.find(op, at + 1)) { ++general; } }
 			check_eq(size_t(0), general, "no general MATH or INDEX left in the bodies (the declarations at the top level are the script's own): " + listing);
 		});
+		test("negative_literals_and_environment_bounds", [this]() {
+			// -1 is a literal: `int other = -1` takes the constant row, `while (bm[i] != -1)` takes the fused compare and its loop
+			// closes (cross_check's head), -1.5 and -(-1) and INT64_MIN spelled as -9223372036854775807 - 1 land the same on both
+			// backends, -x on a variable keeps the unary; a counted loop whose bound is a global (render_view's `i < VW`) closes
+			const char* defs =
+				"int VW = 6; array<int> CL = [1, 1, 1, 1, 1, 1]; array<int> BM = [3, 7, 9, -1, 5];"
+				" var e1 = function() { int acc = 0; for (int i = 0; i < VW; ++i) { CL[i] = 0; acc = acc + i; } return acc + CL[0] + CL[5]; };"
+				" var e2 = function(var& bm) { int acc = 0; int i = 0; while (bm[i] != -1) { int other = -1; acc = acc + bm[i] + other; i = i + 1; } return acc; };"
+				" var e3 = function(int x) { float f = -1.5; int m = -(-1); int lo = -9223372036854775807 - 1; return to_string(f) + \",\" + to_string(m) + \",\" + to_string(lo) + \",\" + to_string(-x) + \",\" + type_of(-1) + \",\" + to_string(-0.0); };";
+			const std::string script = std::string(defs) + " to_string(e1()) + \",\" + to_string(e2(BM)) + \",\" + e3(7);";
+			both(script, "15,16,-1.500000,1,-9223372036854775808,-7,int,-0.000000", "negative literals and environment bounds");
+			both(script, "", "proofs off", false);
+			const std::string listing = listing_of(defs);
+			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
+			check_eq(size_t(2), closed, "the environment-bound loop and the -1 head close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
+			size_t unaries = 0; for (const char* op : {"\tUNARY ", "\tUNARY_TEMP "}) { for (size_t at = listing.find(op); at != std::string::npos; at = listing.find(op, at + 1)) { ++unaries; } }
+			check_eq(size_t(1), unaries, "the one unary left is -x on the variable: " + listing);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

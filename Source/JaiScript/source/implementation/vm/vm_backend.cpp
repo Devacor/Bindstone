@@ -7083,7 +7083,12 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
-		case opcode::op_c_jump: f.ip = ci.a; break;
+		case opcode::op_c_jump:
+			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
+			// original back edge with materialized slots)
+			if (ci.c == 1 && execution_limit_exhausted()) [[unlikely]] { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); break; }
+			f.ip = ci.a;
+			break;
 		case opcode::op_c_guard: st = exec_c_guard(f, ci); break;
 		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci); break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ci); break;

@@ -238,6 +238,7 @@ namespace jai::vm {
         op_c_jcmp_p,        // C_JCMP over pinned operand cells
         op_c_append,        // a = plus << 24 | dst cell, b = dst cell, c = src cell or const: the compound plus with run-time kinds (strings append in place, numbers add)
         op_c_push,          // a = push proto (the copy's, its value or index naming a cell), b = cell loop index, c = the original ip: recv.push(v) onto a frame-slot array by the push kernel's rows
+                            // C_JUMP's c = 1 marks an inner loop's back edge (the budget polls there)
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;

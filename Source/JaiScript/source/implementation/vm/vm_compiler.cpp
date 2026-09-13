@@ -2737,6 +2737,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::cmp; op.tok = bp.op; op.target = st.a;
+			} else if ((st.op == opcode::op_loop_back || st.op == opcode::op_cells_back) && ip != back) {
+				// an inner while loop's back edge (LOOP_BACK, or the CELLS_BACK of its own block): a backward jump to its head inside the
+				// outer block, ticking the execution budget as the general back edge does (a miss on exhaustion: the general form raises on
+				// the original back edge); the inner head's compare is a body cmp already, its exit a forward edge inside the body
+				const uint32_t inner_head = st.op == opcode::op_loop_back ? st.a : st.b;
+				if (!(inner_head >= first && inner_head < ip)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				op.kind = ir::jump; op.target = inner_head; op.tok = 1;   // 1: a back edge, the budget ticks
 			} else if (st.op == opcode::op_jump) {
 				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }   // a break leaves the loop
 				op.kind = ir::jump; op.target = st.a;
@@ -3220,7 +3227,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
-			case ir::jump: fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, 0}, ip); break;
+			case ir::jump: fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, op.tok}, ip); break;   // c = 1: an inner loop's back edge
 			case ir::guard: {
 				const uint32_t alias = op.a < current.size() ? current[op.a] : k_invalid_u32;
 				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 2, static_cast<uint32_t>(head + op.guarded), alias == k_invalid_u32 ? 0xFFu : alias });   // the guarded read's copy offset

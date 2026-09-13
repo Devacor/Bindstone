@@ -2341,6 +2341,76 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, narrow, proofs), run_on(true, narrow, proofs), std::string("a float into an int cell truncates in range and raises the general text out of range") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("an_outer_loop_closes_over_an_inner_while", [this]() {
+			// the ray step's column loop with its DDA while inside (GLOOM pure.jai 28) and render_view_impl's column loop with its
+			// two pixel whiles (render.jai 336): the outer counted loop closes as one block whose inner back edges are backward cell
+			// jumps; the results agree with the interpreter; an inner while that never exits raises the budget's text on both backends
+			const char* ray = "class Ws { int mw = 8; array<int> pack = []; array<float> odist = [0.0, 0.0, 0.0, 0.0]; array<int> okind = [0, 0, 0, 0]; }"
+			                  " var f = function(var& t, int n, float posx, float posy, float dirx, float planex) -> float {"
+			                  " int mw = t.mw; float acc = 0.0; float xstep = 2.0 / (n - 1.0);"
+			                  " for (int x = 0; x < n; ++x) {"
+			                  "  float camx = x * xstep - 1.0; float rdx = dirx + planex * camx; float rdy = 0.3 + 0.1 * camx;"
+			                  "  int mx = posx; int my = posy;"
+			                  "  float adx = rdx < 0.0 ? -rdx : rdx; float ady = rdy < 0.0 ? -rdy : rdy;"
+			                  "  float ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx; float ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;"
+			                  "  int stepx = rdx < 0.0 ? -1 : 1; int stepy = rdy < 0.0 ? -1 : 1;"
+			                  "  float sdx = rdx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx; float sdy = rdy < 0.0 ? (posy - my) * ddy : (my + 1.0 - posy) * ddy;"
+			                  "  int side = 0; int kind = 1; int guard = 0; bool hit = false;"
+			                  "  while (!hit && guard < 128) {"
+			                  "   if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; } else { sdy += ddy; my += stepy; side = 1; }"
+			                  "   int cell = my * mw + mx; int word = t.pack[cell / 15]; int c = (word >> ((cell % 15) * 4)) & 15;"
+			                  "   if (c != 0) { hit = true; kind = c; }"
+			                  "   guard = guard + 1;"
+			                  "  }"
+			                  "  float pdist = side == 0 ? sdx - ddx : sdy - ddy; pdist = pdist < 0.02 ? 0.02 : pdist;"
+			                  "  t.odist[x] = pdist; t.okind[x] = kind; acc = acc + pdist + guard;"
+			                  " }"
+			                  " return acc; };";
+			const std::string ray_listing = listing_of(ray);
+			check_true(ray_listing.find("-- open loop") == std::string::npos && ray_listing.find("C_JUMP") != std::string::npos, "the column loop closes over its DDA while: " + ray_listing);
+			const std::string ray_call = std::string(ray) + " var w = Ws(); array<int> pack = []; int word = 0; int fill = 0;"
+			                             " for (int cell = 0; cell < 64; ++cell) { int cx = cell % 8; int cy = cell / 8; int k = (cx == 0 || cy == 0 || cx == 7 || cy == 7) ? 1 : 0;"
+			                             "  word = word | (k << ((cell % 15) * 4)); fill = fill + 1; if (fill == 15) { pack.push(word); word = 0; fill = 0; } }"
+			                             " if (fill > 0) { pack.push(word); } w.pack = pack;"
+			                             " to_string(f(w, 4, 3.5, 3.5, 1.0, 0.66)) + \" \" + to_string(w.odist[1]) + \" \" + to_string(w.okind[3]) + \" \" + to_string(f(w, 4, 1.2, 6.1, -0.7, 0.2));";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, ray_call, proofs), in = run_on(false, ray_call, proofs);
+				check_eq(in, vm, std::string("the ray columns agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+			const char* cols = "var g = function(var& pix, var& strip, int cols, int vh, int vw, int pxw) -> int {"
+			                   " int touched = 0;"
+			                   " for (int ci = 0; ci < cols; ++ci) {"
+			                   "  int lineh = 1 + (ci * 7) % vh; lineh = lineh < 1 ? 1 : lineh; int y0 = (vh - lineh) / 2; int y1 = y0 + lineh;"
+			                   "  int cy0 = y0 < 0 ? 0 : y0; int cy1 = y1 > vh ? vh : y1; int tstep = 65536 / lineh; int tacc = (cy0 - y0) * tstep;"
+			                   "  int px0 = ci * pxw; int gi = cy0 * vw + px0; int y = cy0;"
+			                   "  if (pxw == 2) { while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; y = y + 1; } }"
+			                   "  else { while (y < cy1) { pix[gi] = strip[tacc >> 11]; tacc += tstep; gi += vw; y = y + 1; } }"
+			                   "  touched = touched + 1;"
+			                   " }"
+			                   " return touched; };";
+			const std::string cols_listing = listing_of(cols);
+			check_true(cols_listing.find("-- open loop") == std::string::npos, "the column loop closes over its two pixel whiles: " + cols_listing);
+			const std::string cols_call = std::string(cols) + " array<int> pix = []; for (int i = 0; i < 8 * 6; ++i) { pix.push(0); } array<int> strip = []; for (int i = 0; i < 32; ++i) { strip.push(i * 3 % 16); }"
+			                              " int t2 = g(pix, strip, 4, 6, 8, 2); int t1 = g(pix, strip, 4, 6, 8, 1); to_string(t2) + \" \" + to_string(t1) + \" \" + to_string(pix[8 * 2 + 1]) + \" \" + to_string(pix[8 * 3 + 4]);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, cols_call, proofs), in = run_on(false, cols_call, proofs);
+				check_eq(in, vm, std::string("the pixel columns agree") + (proofs ? "" : " (proofs off)"));
+			}
+			// an inner while that never exits under a tiny budget: the same text on both backends, raised from the inner back edge
+			const std::string spin = "var h = function(int n) -> int { int total = 0; for (int i = 0; i < n; ++i) { int k = 0; while (k >= 0) { k = k + 1; total = total + (k & 1); } } return total; };"
+			                         " string out = \"\"; try { out = to_string(h(3)); } catch (e) { out = \"caught \" + e; } out;";
+			for (bool vm : { false, true }) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				e->execution_budget(0.00001);
+				std::string got;
+				try { got = e->execute(spin).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_true(got.find("caught") != std::string::npos || got.find("throw") != std::string::npos, std::string(vm ? "vm" : "interp") + " raises the budget inside the inner while: " + got);
+				check_true(got.find("budget") != std::string::npos || got.find("limit") != std::string::npos || got.find("exceeded") != std::string::npos, std::string(vm ? "vm" : "interp") + " names the budget: " + got);
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

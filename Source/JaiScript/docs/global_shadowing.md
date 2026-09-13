@@ -35,6 +35,12 @@ and vanishes at its end; a function called from inside the block still sees the 
 block's declaration is not the unit's declaration of the name (it neither versions a global nor
 writes one in place). Only a declaration at the unit's own top level binds the name for the unit.
 
+An `include` is textual: the included file runs at the include site, in the current scope and under
+the including unit, so its declarations are the includer's own. A later declaration of the same name
+in the includer writes the included global in place, the included functions see that write, and an
+include inside a block or a function body scopes with it (its names vanish with the block). An
+`import` is a unit of its own.
+
 Function and class definitions replace in place whatever the unit: a reload redefines them for every
 caller and every instance, which is the hot-reload contract. A top-level variable a reloaded file
 declares again is the same unit's declaration, so it also writes in place.

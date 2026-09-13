@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <fstream>
 #include <filesystem>
 #include <thread>
@@ -358,6 +359,25 @@ public:
             cleanup_temp_file(dynamic_file);
         });
         
+        test("include_is_textual_the_file_runs_at_the_include_site", [=, this]() {
+            // Dev (2026-09-12): includes are the includer's scope. The included declarations belong to the including unit (a
+            // later `var x` in the includer writes the included x in place, and the included function sees it), and an include
+            // inside a block or a function body scopes with it (docs/global_shadowing.md)
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto lib = create_temp_file("textual_lib.jai", R"(
+                var x = 3;
+                function readx() { return x; }
+            )");
+            auto blk = create_temp_file("textual_blk.jai", R"(
+                var y = 9;
+            )");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            check_eq(std::string("3 5 5"), eng->execute(R"(var x = 1; include "textual_lib.jai"; var after = x; var x = 5; to_string(after) + " " + to_string(x) + " " + to_string(readx());)").as<std::string>());
+            check_eq(std::string("9 gone 9 gone"), eng->execute(R"(string r = ""; { include "textual_blk.jai"; r = to_string(y); } try { r = r + " " + to_string(y); } catch (e) { r = r + " gone"; } function f() { include "textual_blk.jai"; return y; } r = r + " " + to_string(f()); try { r = r + " " + to_string(y); } catch (e) { r = r + " gone"; } r;)").as<std::string>());
+            cleanup_temp_file(lib);
+            cleanup_temp_file(blk);
+        });
         test("dynamic_import_with_expression", [=, this]() {
             auto eng = make_engine();
             

@@ -2627,10 +2627,14 @@ public:
 				std::ofstream f(file_path);
 				f << "auto vm_included_flag = 77;";
 			}
+			// row 123.3: an include is textual, so an include inside a function body scopes with the function: the included
+			// global is visible inside loader() and gone after it, identically on both backends
 			const char* script = R"(
-				function loader() { include "vm_include_in_fn.jai"; }
-				loader();
-				vm_included_flag
+				function loader() { include "vm_include_in_fn.jai"; return vm_included_flag; }
+				var seen = loader();
+				var after = 0;
+				try { after = vm_included_flag; } catch (e) { after = -1; }
+				seen * 100 + after
 			)";
 			auto interp = jai::engine::make();
 			interp->add_include_path(temp_dir.string());
@@ -2639,6 +2643,7 @@ public:
 			auto lhs = interp->execute(script);
 			auto rhs = vm->execute(script);
 			check_eq(lhs.to_string(), rhs.to_string(), "include-inside-function differential");
+			check_eq((int64_t)7699, rhs.as_int(), "the included global lives in the function and is gone after it");
 			std::filesystem::remove(file_path);
 		});
 

@@ -2739,7 +2739,7 @@ void interpreter::pop_instance_scope() {
     if (instance_env != environment_) { release_environment(instance_env); }
 }
 
-script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
+script_value interpreter::execute(const std::vector<declaration_ptr>& declarations, bool textual) {
     std::optional<detail::call_depth_guard> reentry_depth;
     checked_result<void> entry_result;
     if (is_executing()) {
@@ -2759,6 +2759,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     struct reentry_isolation {
         interpreter* self;
         bool reentrant;
+        bool textual;
         std::shared_ptr<environment> saved_env;
         std::vector<call_frame> saved_call_stack;
         script_valueStack saved_values;
@@ -2766,7 +2767,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         bool saved_has_return = false;
         detail::member_scope_ctx saved_member_scope{};
 
-        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->is_executing()) {
+        reentry_isolation(interpreter* interp, bool textual_run) : self(interp), reentrant(interp->is_executing()), textual(textual_run) {
             if (reentrant) {
                 saved_env = self->environment_;
                 saved_call_stack = std::move(self->call_stack_);
@@ -2775,11 +2776,11 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_.clear();
                 saved_return = std::move(self->returnValue_);
                 saved_has_return = self->hasReturnValue_;
-                if (!self->pending_instance_env_) {
+                if (!self->pending_instance_env_ && !textual) {   // an include runs where it is written
                     self->environment_ = self->get_global_environment();
                 }
                 saved_member_scope = self->member_scope_;
-                self->member_scope_ = {};
+                if (!textual) { self->member_scope_ = {}; }
             }
             // Counted, not a flag (Dev ruling): a nested execute's exit decrements
             // symmetrically and can never clear the outer run's in-flight state
@@ -2797,7 +2798,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             }
             --self->execute_depth_;
         }
-    } isolation(this);
+    } isolation(this, textual);
 
     script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
@@ -12457,7 +12458,7 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
 
     // Execute the included file. Pass the resolved path so every node in the included
     // unit is stamped with its real filename (stack traces / breakpoints name the file).
-    auto result = engine_ptr->execute_source(content, jai::instance_variables{}, resolved_path);
+    auto result = engine_ptr->execute_include_source(resolved_path, content);
 
     // Push the result onto the value stack
     push_value(std::move(result));

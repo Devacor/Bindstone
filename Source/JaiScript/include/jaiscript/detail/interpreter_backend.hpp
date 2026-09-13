@@ -19,6 +19,10 @@ public:
     script_value execute(const std::vector<declaration_ptr>& declarations) override {
         return interpreter_->execute(declarations);
     }
+    script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override {
+        (void)compiled_slot;
+        return interpreter_->execute(declarations, true);
+    }
     
     void prepare_for_execution() override {
         interpreter_->prepare_for_execution();

@@ -250,6 +250,7 @@ namespace jai::vm {
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
         script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
+        script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
         void prepare_for_execution() override;
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
 
@@ -1007,7 +1008,7 @@ namespace jai::vm {
         bool ip_in_call_arg_zone(const frame& f) const;
         void convert_cpp_exception_in_frame(const script_exception& e);
         void pop_records_to(size_t records_base, frame*& fp);
-        script_value run_program(std::shared_ptr<chunk> program);
+        script_value run_program(std::shared_ptr<chunk> program, bool textual = false);   // textual: an include, run in the current environment
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args,
                                                           const call_site* site = nullptr,

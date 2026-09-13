@@ -1,6 +1,7 @@
 #pragma once
 
 #include "value.hpp"
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <memory>
@@ -181,6 +182,11 @@ public:
     // backends' host-level resume detection), so an uncaught script throw converts
     // to a thrown script_exception there instead of staying a latched flag.
     virtual bool is_executing() const { return false; }
+    // The unit of the running code (docs/global_shadowing.md), derived from the executing frame: a function's own
+    // stamp, the run's at top level. The symbolizer's ambient stamp is written only while a name has versions;
+    // sync_unit re-aligns it with the executing frame after a nested run.
+    virtual unit_stamp current_unit() const { return unit_stamp{}; }
+    virtual void sync_unit() {}
 
     // Stack trace captured at the last unwind (empty if the backend doesn't track one)
     virtual std::vector<stack_frame> last_stack_trace() const { return {}; }

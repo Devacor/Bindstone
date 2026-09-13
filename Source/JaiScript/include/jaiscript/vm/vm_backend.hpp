@@ -441,6 +441,7 @@ namespace jai::vm {
             std::shared_ptr<environment> entry_env;
             size_t stack_base = 0;
             bool top_level = false;
+            unit_stamp unit{};                         // the unit of the code this frame runs: its function's stamp, the run's at top level
             // Native-entry / fiber frames: the declared return type and its detail::return_conv
             // class, converted against at the completion door (record frames carry theirs on
             // the call_record). class 0 = no door conversion (top-level / default-arg chunks).
@@ -680,7 +681,7 @@ namespace jai::vm {
             strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
-            unit_stamp prev_unit{};                    // the caller's shadowing unit, restored at pop
+            // the caller's unit is the frame below's (vm_backend::caller_frame_unit); no stamp is saved per call
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             // In-loop ctor-body frames (exec_new shared_ptr arm): stamp the completed
@@ -720,8 +721,28 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         // Shadowing unit of the running code (string_symbolizer::current_unit): set at every frame
         // push from the callee's function or class, restored at pop; a worker never writes it
-        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_) { symbolizer_->set_current_unit(unit); } }
-        unit_stamp current_unit() const noexcept { return symbolizer_->current_unit(); }
+        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_ && symbolizer_->shadow_count() != 0) { symbolizer_->set_current_unit(unit); } }
+        // derived: a scoped override at its depth (a class's field initializers), else the top frame's, else the ambient
+        // (no frame: the run's stamp execute_parsed installed)
+        unit_stamp current_unit() const noexcept override {
+            if (unit_override_ && frames_.size() <= unit_override_depth_) return *unit_override_;
+            if (!frames_.empty()) return frames_.back()->unit;
+            return symbolizer_->current_unit();
+        }
+        // the frame below the top one: the caller of the frame just pushed (a by-reference argument resolves under it)
+        unit_stamp caller_frame_unit() const noexcept { return frames_.size() >= 2 ? frames_[frames_.size() - 2]->unit : symbolizer_->current_unit(); }
+        // the ambient re-aligned with the executing frame: a store only while a name has versions
+        void sync_unit() noexcept override { if (!parallel_worker_ && symbolizer_->shadow_count() != 0) { symbolizer_->set_current_unit(current_unit()); } }
+        const unit_stamp* unit_override_ = nullptr;
+        size_t unit_override_depth_ = 0;
+        struct unit_override_scope {   // the override for a span of code without a frame of its own; the ambient re-aligned after
+            vm_backend* vm; const unit_stamp* prev; size_t prev_depth;
+            unit_override_scope(vm_backend* v, const unit_stamp* unit) : vm(v), prev(v->unit_override_), prev_depth(v->unit_override_depth_) {
+                vm->unit_override_ = unit; vm->unit_override_depth_ = vm->frames_.size(); vm->enter_unit(*unit);
+            }
+            ~unit_override_scope() { vm->unit_override_ = prev; vm->unit_override_depth_ = prev_depth; vm->sync_unit(); }
+        };
+        struct unit_sync_scope { vm_backend* vm; ~unit_sync_scope() { vm->sync_unit(); } };   // the frame below's unit again when this scope ends
         // Epoch sink handed to every environment this vm constructs (== symbolizer_
         // everywhere except a parallel worker; see configure_parallel_worker)
         string_symbolizer* env_symbolizer_ = nullptr;

@@ -119,6 +119,8 @@ public:
     bool is_executing() const override {
         return interpreter_->is_executing();
     }
+    unit_stamp current_unit() const override { return interpreter_->running_unit(); }
+    void sync_unit() override { interpreter_->sync_unit(); }
 
     const script_exception& get_current_exception() const override {
         return interpreter_->get_current_exception();

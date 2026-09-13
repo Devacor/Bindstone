@@ -2767,8 +2767,11 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         std::optional<script_value> saved_return;
         bool saved_has_return = false;
         detail::member_scope_ctx saved_member_scope{};
+        unit_stamp saved_run_unit{};
 
         reentry_isolation(interpreter* interp, bool textual_run) : self(interp), reentrant(interp->is_executing()), textual(textual_run) {
+            saved_run_unit = self->run_unit_;
+            self->run_unit_ = self->string_symbolizer_->current_unit();   // the run's stamp: the derived unit of its top-level code
             if (reentrant) {
                 saved_env = self->environment_;
                 saved_call_stack = std::move(self->call_stack_);
@@ -2789,6 +2792,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             ++self->execute_depth_;
         }
         ~reentry_isolation() {
+            self->run_unit_ = saved_run_unit;
             if (reentrant) {
                 self->environment_ = std::move(saved_env);
                 self->call_stack_ = std::move(saved_call_stack);
@@ -9078,7 +9082,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             needs_capture_env ? final_closure_env : nullptr,  // Only use closure env if we have captures
             expr->local_count   // the frame reserves every slot up front, as a named function's does
         );
-        lambdaFunc->unit = string_symbolizer_->current_unit();
+        lambdaFunc->unit = current_unit();
         if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
     }
 
@@ -11579,7 +11583,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             }
         }
         engine* eng = engine_;
-        func_decl_ptr->unit = string_symbolizer_->current_unit();
+        func_decl_ptr->unit = current_unit();
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(
             [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11608,7 +11612,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             decl->local_count  // Slot count for stack allocation
         );
     }
-    scriptFunc->unit = string_symbolizer_->current_unit();
+    scriptFunc->unit = current_unit();
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -11687,7 +11691,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     }
     
     class_def->nocopy(decl->nocopy);
-    class_def->set_unit(string_symbolizer_->current_unit());
+    class_def->set_unit(current_unit());
 
     // Collect new field defaults and methods (using uint64_t IDs for performance)
     std::unordered_map<uint64_t, script_value> new_field_defaults;
@@ -12361,7 +12365,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             }
 
             // Check for collisions: same name AND same arity in this namespace
-            func_decl->unit = string_symbolizer_->current_unit();
+            func_decl->unit = current_unit();
             auto& overloads = ns_data->functions[func_decl->name_id];
             for (auto it = overloads.begin(); it != overloads.end(); ++it) {
                 if ((*it)->parameters.size() == func_decl->parameters.size()) {
@@ -12619,8 +12623,8 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
-    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
-    enter_unit(class_def->unit());
+    const unit_stamp class_unit = class_def->unit();   // the initializers are the class's code (no frame of their own)
+    unit_override_scope unitScope(this, &class_unit);
     // First, evaluate parent class field initializers (if any)
     // Support multiple inheritance by iterating over all parent classes
     // Skip this if parents were already processed (e.g., by multi-level super() chain handling)
@@ -13365,7 +13369,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                                                            unit_stamp caller_unit) {
     // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
     // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
-    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
     enter_unit(caller_unit);
     call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
 
@@ -13663,7 +13667,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
     const detail::member_scope_ctx previousScope = member_scope_;
-    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    unit_sync_scope unitSync{ this };   // the caller's unit again once this frame is gone
+    const unit_stamp caller_unit = frame_index >= 1 && call_stack_[frame_index - 1].function ? call_stack_[frame_index - 1].function->unit : string_symbolizer_->current_unit();   // a by-reference argument resolves under it
     enter_unit(function.unit);
     member_scope_ = {};
 
@@ -13813,7 +13818,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (param.is_reference) {
             if (call_ctx && i < call_ctx->arg_exprs->size()) {
                 auto bound = bind_reference_parameter(param, frame_index,
-                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, unitRestore.prev);
+                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, caller_unit);
                 if (!bound) {
                     cleanup();
                     return bound.error_value();
@@ -14231,8 +14236,9 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         return detail::raise_call_depth();
     }
     // the body resolves in the unit that declared the coroutine on every resume (continuation replay runs it without call_function)
-    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
-    if (auto declared = handle.get_function()) { enter_unit(declared->unit); }
+    auto declared = handle.get_function();
+    const unit_stamp replay_unit = declared ? declared->unit : current_unit();
+    unit_override_scope unitScope(this, &replay_unit);
 
     auto& state = coroutine_state(handle);
 

@@ -830,7 +830,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			}
 		}
 
-		auto body_chunk = chunk_for_body(function->name, function->parameters, function->body, function->local_count);
+		auto body_chunk = chunk_for_body(function->name, function->parameters, function->body, function->local_count, function->unit);
 		state.body_chunk = body_chunk;
 		state.locals = call_frame{};
 		state.locals.function_name = function->name;
@@ -9723,7 +9723,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	{
 		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 		if (!body_chunk) {
-			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
+			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
 			function.backend_body_cache = compiled;
 			body_chunk = compiled.get();
 		}
@@ -10489,9 +10489,10 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	}
 
 	// Pre-compiled body chunk enters the cache so execute_callable finds it by body identity
-	auto cache_it = chunk_cache_.find(proto.body.get());
+	const node_unit_key body_key{ proto.body.get(), lambdaFunc->unit.id };
+	auto cache_it = chunk_cache_.find(body_key);
 	if (cache_it == chunk_cache_.end()) {
-		chunk_cache_.emplace(proto.body.get(), chunk_cache_entry{proto.body_chunk, proto.body});
+		chunk_cache_.emplace(body_key, chunk_cache_entry{proto.body_chunk, proto.body});
 	}
 
 	script_callable payload;
@@ -10515,12 +10516,13 @@ void vm_backend::raise_script_exception(const std::string& message, const source
 
 checked_result<script_value> vm_backend::eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env) {
 	std::shared_ptr<chunk> compiled;
-	auto it = expr_chunk_cache_.find(expr.get());
+	const node_unit_key key{ expr.get(), current_unit().id };
+	auto it = expr_chunk_cache_.find(key);
 	if (it != expr_chunk_cache_.end()) {
 		compiled = it->second.compiled;
 	} else {
 		compiled = compiler_.compile_standalone_expression(expr);
-		expr_chunk_cache_.emplace(expr.get(), expr_chunk_cache_entry{compiled, expr});
+		expr_chunk_cache_.emplace(key, expr_chunk_cache_entry{compiled, expr});
 	}
 
 	auto saved_env = environment_;
@@ -13243,13 +13245,14 @@ op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 // swap; the initializer sees the members declared before it. KEEP BYTE-PARALLEL with interpreter::visit_namespace_decl.
 op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data) {
 	std::shared_ptr<chunk> compiled;
-	if (auto cached = decl_chunk_cache_.find(member_decl.get()); cached != decl_chunk_cache_.end()) {
+	const node_unit_key key{ member_decl.get(), current_unit().id };
+	if (auto cached = decl_chunk_cache_.find(key); cached != decl_chunk_cache_.end()) {
 		compiled = cached->second.compiled;
 	} else {
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
 		compiled = compiler_.compile_program(std::vector<declaration_ptr>{member_decl});
-		decl_chunk_cache_.emplace(member_decl.get(), decl_chunk_cache_entry{compiled, member_decl});
+		decl_chunk_cache_.emplace(key, decl_chunk_cache_entry{compiled, member_decl});
 	}
 	auto saved_env = environment_;
 	environment_ = detail::namespace_scope(*engine_, ns_data);
@@ -16336,14 +16339,15 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 }
 
 void vm_backend::precompile_parallel_method(const function_decl& decl) {
-	chunk_for_body(decl.name, decl.parameters, decl.body, decl.local_count);
+	chunk_for_body(decl.name, decl.parameters, decl.body, decl.local_count, decl.unit);
 }
 
 std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
                                                   const std::vector<parameter>& params,
                                                   const std::shared_ptr<block_stmt>& body,
-                                                  size_t local_count) {
-	auto it = chunk_cache_.find(body.get());
+                                                  size_t local_count, unit_stamp unit) {
+	const node_unit_key key{ body.get(), unit.id };
+	auto it = chunk_cache_.find(key);
 	if (it != chunk_cache_.end()) {
 		return it->second.compiled;
 	}
@@ -16357,7 +16361,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
-	chunk_cache_.emplace(body.get(), chunk_cache_entry{compiled, body});
+	chunk_cache_.emplace(key, chunk_cache_entry{compiled, body});
 	return compiled;
 }
 
@@ -16417,7 +16421,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	{
 		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 		if (!body_chunk) {
-			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
+			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
 			function.backend_body_cache = compiled;
 			body_chunk = compiled.get();
 		}
@@ -16622,7 +16626,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
-			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count);
+			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
 			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
@@ -16787,7 +16791,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
-			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count);
+			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
 			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
@@ -17884,7 +17888,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	auto body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
 	if (!body_chunk) {
-		body_chunk = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
+		body_chunk = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
 		function.backend_body_cache = body_chunk;
 	}
 	if (parallel_worker_) {

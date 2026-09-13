@@ -38,8 +38,12 @@ writes one in place). Only a declaration at the unit's own top level binds the n
 An `include` is textual: the included file runs at the include site, in the current scope and under
 the including unit, so its declarations are the includer's own. A later declaration of the same name
 in the includer writes the included global in place, the included functions see that write, and an
-include inside a block or a function body scopes with it (its names vanish with the block). An
-`import` is a unit of its own.
+include inside a block or a function body scopes with it (its names vanish with the block; the
+function's parameters and slot locals live in its frame, so the included text does not see them and
+the checker names them undeclared). An included file the VM compiles belongs to the including unit:
+two units including the same file each get their own compiled program, and a function it defines is
+compiled once per unit, so no compiled code ever runs under two units. An `import` is a unit of its
+own.
 
 Function and class definitions replace in place whatever the unit: a reload redefines them for every
 caller and every instance, which is the hot-reload contract. A top-level variable a reloaded file

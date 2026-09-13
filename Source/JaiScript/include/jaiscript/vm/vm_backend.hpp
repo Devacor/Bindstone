@@ -419,7 +419,7 @@ namespace jai::vm {
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on
         // the copy's own backend_body_cache.
         void precompile_parallel_function(const script_defined_function& fn) {
-            fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters(), fn.body, fn.local_count);
+            fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters(), fn.body, fn.local_count, fn.unit);
         }
 
         // Same barrier discipline for an admitted class method: warm THIS worker
@@ -742,11 +742,22 @@ namespace jai::vm {
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
 
         vm_compiler compiler_;
+        // a chunk belongs to one unit (docs/global_shadowing.md): every cache of compiled bodies is keyed by the node AND the
+        // unit that runs it, so a body two units share (a textual include's) compiles once per unit and its lookup caches
+        // never serve another unit's bindings
+        struct node_unit_key {
+            const void* node = nullptr;
+            uint32_t unit = 0;
+            bool operator==(const node_unit_key& o) const noexcept { return node == o.node && unit == o.unit; }
+        };
+        struct node_unit_hash {
+            size_t operator()(const node_unit_key& k) const noexcept { return std::hash<const void*>{}(k.node) ^ (static_cast<size_t>(k.unit) * 0x9E3779B97F4A7C15ull); }
+        };
         struct chunk_cache_entry {
             std::shared_ptr<chunk> compiled;
             std::shared_ptr<block_stmt> pin;
         };
-        std::unordered_map<const block_stmt*, chunk_cache_entry> chunk_cache_;
+        std::unordered_map<node_unit_key, chunk_cache_entry, node_unit_hash> chunk_cache_;
 
         value_stack stack_;
         std::vector<frame*> frames_;
@@ -887,12 +898,12 @@ namespace jai::vm {
             std::shared_ptr<chunk> compiled;
             expression_ptr pin;
         };
-        std::unordered_map<const expression*, expr_chunk_cache_entry> expr_chunk_cache_;
+        std::unordered_map<node_unit_key, expr_chunk_cache_entry, node_unit_hash> expr_chunk_cache_;
         struct decl_chunk_cache_entry {   // a namespace's variable declaration as a one-declaration program
             std::shared_ptr<chunk> compiled;
             declaration_ptr pin;
         };
-        std::unordered_map<const declaration*, decl_chunk_cache_entry> decl_chunk_cache_;
+        std::unordered_map<node_unit_key, decl_chunk_cache_entry, node_unit_hash> decl_chunk_cache_;
 
         void arm_execution_deadline();
         bool execution_budget_exhausted();
@@ -908,10 +919,11 @@ namespace jai::vm {
         // Debug frame stays flat (JAI_MAX_CALL_DEPTH path). Called only when armed.
         void debug_statement_boundary(frame& f);
 
+        // the compiled body of a function object, cached per (body, unit): the unit is the function's own
         std::shared_ptr<chunk> chunk_for_body(std::string_view name,
                                               const std::vector<parameter>& params,
                                               const std::shared_ptr<block_stmt>& body,
-                                              size_t local_count);
+                                              size_t local_count, unit_stamp unit);
 
         checked_result<void> run(frame& entry);
         op_status run_dispatch(frame*& fp, const size_t records_base);

@@ -378,6 +378,42 @@ public:
             cleanup_temp_file(lib);
             cleanup_temp_file(blk);
         });
+        test("a_textual_include_shared_by_two_units_resolves_each_units_cells", [=, this]() {
+            // row 123.5 (Astra, 2026-09-12 19:32): an included file's compiled program and the functions it defines belong to
+            // the including unit; two units including the same file each get their own, so the VM's lookup caches never serve
+            // another unit's binding (docs/global_shadowing.md)
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto reader = create_temp_file("unit_reader.jai", "x;");
+            auto writer = create_temp_file("unit_writer.jai", "x = x + 1; x;");
+            auto fnlib = create_temp_file("unit_fnlib.jai", "function getx() { return x; }");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            const std::string dir = jai::foundry::test_temp_directory().string();
+            const std::string unitA = dir + "/unit_A.jai", unitB = dir + "/unit_B.jai";   // a file unit is its path: the content is a reload
+            eng->execute_file_source(unitA, "var x = 11;");
+            eng->execute_file_source(unitB, "var x = 22;");
+            std::string out;
+            for (int k = 0; k < 2; ++k) {
+                out += eng->execute_file_source(unitA, "return include(\"unit_reader.jai\");").to_string() + " ";
+                out += eng->execute_file_source(unitB, "return include(\"unit_reader.jai\");").to_string() + " ";
+            }
+            check_eq(std::string("11 22 11 22 "), out);
+            out.clear();
+            for (int k = 0; k < 2; ++k) {
+                out += eng->execute_file_source(unitA, "return include(\"unit_writer.jai\");").to_string() + " ";
+                out += eng->execute_file_source(unitB, "return include(\"unit_writer.jai\");").to_string() + " ";
+            }
+            check_eq(std::string("12 23 13 24 "), out);
+            out.clear();
+            for (int k = 0; k < 2; ++k) {
+                out += eng->execute_file_source(unitA, "include \"unit_fnlib.jai\"; return getx();").to_string() + " ";
+                out += eng->execute_file_source(unitB, "include \"unit_fnlib.jai\"; return getx();").to_string() + " ";
+            }
+            check_eq(std::string("13 24 13 24 "), out);
+            cleanup_temp_file(reader);
+            cleanup_temp_file(writer);
+            cleanup_temp_file(fnlib);
+        });
         test("dynamic_import_with_expression", [=, this]() {
             auto eng = make_engine();
             

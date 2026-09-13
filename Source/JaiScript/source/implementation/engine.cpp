@@ -1710,6 +1710,10 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
+script_value engine::execute_include_source(const std::string& resolvedPath, const std::string& content) {
+    return execute_source(content, instance_variables{}, resolvedPath, true);
+}
+
 script_value engine::execute(script_source source) {
     if (source.literal()) {
         auto it = impl->literal_script_cache.find({source.data(), source.size()});
@@ -1736,7 +1740,7 @@ script_value engine::execute(script_source source) {
     return result;
 }
 
-script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath) {
+script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual) {
     impl->has_executed_ = true;
     impl->note_root_source(sourcePath);
     try {
@@ -1776,7 +1780,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
         }
 
-        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent));
+        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent), textual);
 
     } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)
@@ -1787,10 +1791,10 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
 script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarations,
                                     std::shared_ptr<void>& compiled_slot,
-                                    const instance_variables* instanceVars, uint32_t unit) {
+                                    const instance_variables* instanceVars, uint32_t unit, bool textual) {
     ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
     struct unit_scope { string_symbolizer& s; unit_stamp prev; ~unit_scope() { s.set_current_unit(prev); } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit() };
-    impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() });
+    if (!textual) { impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() }); }   // an include runs under the including unit
     try {
         execution_backend* be = backend();
 
@@ -1804,7 +1808,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
             }
         }
 
-        script_value result = be->execute(declarations, compiled_slot);
+        script_value result = textual ? be->execute_textual(declarations, compiled_slot) : be->execute(declarations, compiled_slot);
 
         // Check for unhandled script exception
         if (be->is_unwinding()) {

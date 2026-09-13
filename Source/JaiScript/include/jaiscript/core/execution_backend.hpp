@@ -119,6 +119,12 @@ public:
         return execute(declarations);
     }
 
+    // Textual execution (include): the declarations run in the backend's CURRENT environment under the running
+    // unit, as if written at the include site (docs/global_shadowing.md); the default runs them as a program
+    virtual script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
+        return execute(declarations, compiled_slot);
+    }
+
     virtual void prepare_for_execution() = 0;
 
     // Execute a script-defined callable (see script_callable). For kind::method the

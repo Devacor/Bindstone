@@ -219,6 +219,9 @@ namespace jai {
         // Identical to execute(content) + path attribution when the cache is disabled or
         // the path is a .jaibite itself.
         script_value execute_file_source(const std::string& resolvedPath, const std::string& content);
+        // include: the file runs at the include site, in the current scope and under the running unit, so
+        // its declarations are the includer's (docs/global_shadowing.md)
+        script_value execute_include_source(const std::string& resolvedPath, const std::string& content);
 
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
@@ -1097,7 +1100,7 @@ namespace jai {
         // jaibite does, so the pre-parsed path can never drift semantically.
         script_value execute_parsed(const std::vector<declaration_ptr>& declarations,
                                     std::shared_ptr<void>& compiled_slot,
-                                    const instance_variables* instanceVars, uint32_t unit);
+                                    const instance_variables* instanceVars, uint32_t unit, bool textual = false);
 
         // The one lex+parse+run entry: stamps `sourcePath` onto every AST node and keys
         // the parse cache on (sourcePath, content). Not public — attributing raw content
@@ -1105,7 +1108,8 @@ namespace jai {
         // ("<script>"), execute_file() (the file path), and include/import (resolved path).
         script_value execute_source(const std::string& scriptContent,
                                     const instance_variables& instanceVars,
-                                    const std::string& sourcePath);
+                                    const std::string& sourcePath,
+                                    bool textual = false);   // textual: an include, run where it is written
 
         // Lazily constructs + wires the selected backend on first use, so creating an
         // engine (or switching backend type) costs nothing until a script actually runs.

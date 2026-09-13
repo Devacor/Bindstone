@@ -14430,7 +14430,7 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	// running-coroutine state. An error in the included file surfaces as unwinding.
 	// Pass the resolved path so included nodes carry their real filename.
 	try {
-		script_value result = engine_->execute_source(content, jai::instance_variables{}, resolved_path);
+		script_value result = engine_->execute_include_source(resolved_path, content);
 		stack_.push_back(std::move(result));
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
@@ -16112,7 +16112,18 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 	return run_program(std::move(program));
 }
 
-script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
+script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
+	auto program = std::static_pointer_cast<chunk>(compiled_slot);
+	if (!program) {
+		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+		compiler_.ir_passes(!engine_ || engine_->ir_passes());
+		program = compiler_.compile_program(declarations);
+		compiled_slot = program;
+	}
+	return run_program(std::move(program), true);
+}
+
+script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textual) {
 	std::optional<detail::call_depth_guard> reentry_depth;
 	checked_result<void> entry_result;
 	if (is_executing()) {
@@ -16131,9 +16142,10 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 		vm_backend* self;
 		bool reentrant;
 		std::shared_ptr<environment> saved_env;
-		explicit reentry_isolation(vm_backend* backend) : self(backend), reentrant(backend->is_executing()) {
+		reentry_isolation(vm_backend* backend, bool textual) : self(backend), reentrant(backend->is_executing()) {
 			if (!reentrant) { self->pending_instance_env_.reset(); return; }
 			saved_env = self->environment_;
+			if (textual) { return; }   // an include runs where it is written
 			if (self->pending_instance_env_) { self->pending_instance_env_.reset(); return; }
 			if (self->engine_) {
 				if (auto global = self->engine_->get_global_environment()) {
@@ -16150,7 +16162,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 				self->environment_ = std::move(saved_env);
 			}
 		}
-	} isolation(this);
+	} isolation(this, textual);
 
 	implicit_result_.reset();
 	has_return_value_ = false;

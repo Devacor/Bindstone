@@ -402,7 +402,9 @@ engine stays usable", not by `check_throws`.
   current run, so a re-run reader string reads as of now), so code compiled before a redeclaration keeps its
   binding; the SAME unit (a reload, a re-run hook string) writes in place, and
   functions/classes always replace in place (hot reload). Inside a unit, `{}` blocks scope as in C++ (a block
-  declaration shadows for the block and vanishes after; a callee sees the outer binding). The host reads and
+  declaration shadows for the block and vanishes after; a callee sees the outer binding). An include is TEXTUAL:
+  the file runs at the include site, in the current scope and under the including unit (a later `var x` in the
+  includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit. The host reads and
   assigns the newest cell. Zero cost
   on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`).
 - **Catch variable = block-scoped local** (`docs/EXCEPTION_DESIGN.md` addendum): `catch (e)`

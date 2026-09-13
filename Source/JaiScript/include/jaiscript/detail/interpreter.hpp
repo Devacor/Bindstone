@@ -342,7 +342,7 @@ namespace jai {
         }
 
         // Execute a list of declarations and return the last value
-        script_value execute(const std::vector<declaration_ptr>& declarations);
+        script_value execute(const std::vector<declaration_ptr>& declarations, bool textual = false);   // textual: an include, run where it is written
         
         // Execute with typed return value (throws if no return statement or type doesn't match)
         template<typename T>

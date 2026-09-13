@@ -28,9 +28,11 @@ namespace jai {
         // Check if parsing had errors
         bool has_errors() const { return !errors_.empty(); }
         const std::vector<std::string>& get_errors() const { return errors_; }
+        // the files spliced into function bodies by this parse (resolved paths), for the parse cache's stamps
+        const std::vector<std::string>& spliced_files() const { return spliced_files_; }
         
     private:
-        const std::vector<token>& tokens_;
+        const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
         std::string filename_;
         size_t current_ = 0;
         std::vector<std::string> errors_;
@@ -42,6 +44,13 @@ namespace jai {
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
         mutable token last_advanced_;  // Storage for advance() when consuming pushed_back_token_
+        // A literal include inside a function body is spliced here at parse time (docs/global_shadowing.md): the included
+        // declarations become the function's own, so they see its parameters and locals and it sees theirs; the files read
+        // (the engine stamps them: a change re-parses the includer), the chain being spliced (a cycle guard) and its depth
+        std::vector<std::string> spliced_files_;
+        std::vector<std::string> splice_active_;
+        int splice_depth_ = 0;
+        bool splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out);
 
         // Current namespace context for nested namespace declarations
         std::vector<std::string> current_namespace_path_;

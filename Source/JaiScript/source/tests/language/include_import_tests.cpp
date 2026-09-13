@@ -378,6 +378,49 @@ public:
             cleanup_temp_file(lib);
             cleanup_temp_file(blk);
         });
+        test("a_literal_include_inside_a_function_is_spliced_into_the_function", [=, this]() {
+            // row 126 (Dev, 2026-09-12: an include inside a function sees its parameters and locals, pay for what you use): a
+            // literal include in a function body is parsed into the body (C++), so the checker and both backends see one
+            // function; the included text reads and writes the parameter, declares a local the function then uses, defines a
+            // function; a nested literal include splices too
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto local = create_temp_file("splice_local.jai", "x = x + 1; x;");
+            auto lib = create_temp_file("splice_lib.jai", "var y = x * 2; function twice(int v) { return v * 2; } include \"splice_inner.jai\";");
+            auto inner = create_temp_file("splice_inner.jai", "var z = x + 100;");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            check_eq((int64_t)6, eng->execute("int run(int x) { include(\"splice_local.jai\"); return x; } run(5);").as_int());
+            check_eq((int64_t)6, eng->execute("int run2(int x) { include \"splice_local.jai\"; return x; } run2(5);").as_int());
+            check_eq((int64_t)125, eng->execute("int both(int x) { include \"splice_lib.jai\"; return y + twice(x) + z; } both(5);").as_int());   // 10 + 10 + 105
+            check_eq((int64_t)7, eng->execute("int blk(int x) { { include \"splice_local.jai\"; } { include \"splice_local.jai\"; } return x; } blk(5);").as_int());   // each block's include writes the parameter
+            cleanup_temp_file(local);
+            cleanup_temp_file(lib);
+            cleanup_temp_file(inner);
+        });
+        test("a_computed_include_path_inside_a_function_stays_a_runtime_include", [=, this]() {
+            // pay for what you use: a computed path cannot be spliced, so it runs in the function's environment and does not
+            // see the frame (the checker names the included x undeclared at the include's load)
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto local = create_temp_file("splice_dyn.jai", "x = x + 1; x;");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            check_throws([&]() { eng->execute("int run(int x) { var p = \"splice_dyn.jai\"; include(p); return x; } run(5);"); });
+            cleanup_temp_file(local);
+        });
+        test("a_changed_spliced_file_reparses_its_includer", [=, this]() {
+            // the parse cache stamps the spliced files: the includer's text is unchanged, the included file is not
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto local = create_temp_file("splice_reload.jai", "x = x + 1; x;");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            const std::string dir = jai::foundry::test_temp_directory().string();
+            const std::string includer = dir + "/splice_includer.jai";
+            const char* text = "int run(int x) { include \"splice_reload.jai\"; return x; } return run(5);";
+            check_eq((int64_t)6, eng->execute_file_source(includer, text).as_int());
+            local = create_temp_file("splice_reload.jai", "x = x + 1000; x;");   // a different size: the stamp moves even within one clock tick
+            check_eq((int64_t)1005, eng->execute_file_source(includer, text).as_int());
+            cleanup_temp_file(local);
+        });
         test("a_textual_include_shared_by_two_units_resolves_each_units_cells", [=, this]() {
             // row 123.5 (Astra, 2026-09-12 19:32): an included file's compiled program and the functions it defines belong to
             // the including unit; two units including the same file each get their own, so the VM's lookup caches never serve

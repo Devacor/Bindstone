@@ -407,6 +407,10 @@ engine stays usable", not by `check_throws`.
   executor (the interpreter's `visit_variable_decl`, the VM's `exec_decl_var` as a one-declaration program) with the
   environment swapped to the scope. Host-registered entries (`script_namespace_data::variables`: `string::to_lower`,
   `jai::filesystem`) stay the host's values, read-only from script (`Cannot assign to 'name': it is read-only`).
+- **A literal include inside a function body is spliced at parse time** (Dev ruling 2026-09-12; `docs/global_shadowing.md`):
+  the included text becomes the function's own (its parameters and locals visible, its declarations the function's;
+  the parse cache stamps the spliced files; no jaibite sibling for such a unit); a computed `include(p)` stays a
+  runtime include that sees the environment only. Functions without includes pay nothing.
 - **Program-scope redeclarations shadow by unit** (Dev ruling 2026-09-12; `docs/global_shadowing.md`): each
   executed source is a unit (a file by path, a literal by content), numbered at first execution; a variable
   declared again by ANOTHER unit gets its own cell; code resolves a name to its own unit's cell, else to the

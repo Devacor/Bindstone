@@ -3670,16 +3670,18 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 		emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 		return true;
 	}
-	// Computed index on an ident container: a left-spine arithmetic chain runs
-	// through the fused op (raw int fold / verbatim boxed replay); the innermost
-	// node must be the flat fused-binary shape
-	if (expr->left->get_type() == node_type::identifier_expr) {
+	// Computed index on an ident container, or on a member container `base.member[i op j]` (the member resolves inside the
+	// op as the simple-index shape does, base then member then index): a left-spine arithmetic chain runs through the
+	// fused op (raw int fold / verbatim boxed replay); the innermost node must be the flat fused-binary shape
+	member_expr* computed_mc = fusable_member_container(expr->left.get());
+	if (expr->left->get_type() == node_type::identifier_expr || computed_mc) {
 		if (binary_expr* rb = index_binary_candidate(expr->right.get())) {
 			binary_expr* spine[8];
 			const int depth = index_chain_spine(rb, spine);
 			if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) {
 				fused_index_proto p;
-				p.container = make_fused_operand(expr->left);
+				if (computed_mc) { p.container = make_fused_operand(computed_mc->object); p.container.member_node = add_node(expr->left); }
+				else { p.container = make_fused_operand(expr->left); }
 				binary_expr* inner = spine[depth - 1];
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(inner->op.type);
@@ -3700,7 +3702,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
-			if (depth == 1 && typed_lowering_ && temps_active_ && chunk_->is_function_body && quiet_partner(expr->left.get()) && index_read_partner_shape(rb)) {
+			if (!computed_mc && depth == 1 && typed_lowering_ && temps_active_ && chunk_->is_function_body && quiet_partner(expr->left.get()) && index_read_partner_shape(rb)) {
 				// the element-read operand lands in a temp first (left before right); the index binary then reads
 				// direct operands and the outer read takes the T_LOAD row when the binary's class is proven
 				fused_operand container;
@@ -3733,7 +3735,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
-			if (quiet_partner(expr->left.get()) && binary_lands_fused(rb)) {
+			if (!computed_mc && quiet_partner(expr->left.get()) && binary_lands_fused(rb)) {
 				// an arithmetic tree as the index: compile_binary emits one fused binary last, rewritten to land in a
 				// fresh temp, and the read is the ident-plus-temp shape (the T_LOAD row); a reference-slot container
 				// is dereferenced ahead of the index (the interpreter's container-before-index order)

@@ -13361,7 +13361,12 @@ std::optional<checked_result<script_value>> interpreter::bind_bare_cpp_property_
 checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
                                                            const expression* argExpr,
                                                            const std::shared_ptr<environment>& caller_env,
-                                                           const script_value* evaluated_arg) {
+                                                           const script_value* evaluated_arg,
+                                                           unit_stamp caller_unit) {
+    // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
+    // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
+    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    enter_unit(caller_unit);
     call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
 
     if (argExpr && argExpr->get_type() == node_type::identifier_expr) {
@@ -13808,7 +13813,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (param.is_reference) {
             if (call_ctx && i < call_ctx->arg_exprs->size()) {
                 auto bound = bind_reference_parameter(param, frame_index,
-                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg);
+                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, unitRestore.prev);
                 if (!bound) {
                     cleanup();
                     return bound.error_value();

@@ -9804,7 +9804,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function);
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, rec.prev_unit);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -9844,12 +9844,13 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	tf.window_live = static_cast<uint32_t>(argc);
 	tf.top_level = false;
 	frames_.push_back(&tf);   // ref-param frames_ scan parity with the real push
+	const unit_stamp tail_caller_unit = current_unit();   // the frame the tail call replaces is its caller
 	enter_unit(function.unit);
 	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
 		                        environment_, site, &rec.f, rec.f.code,
-		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc), &function);
+		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc), &function, tail_caller_unit);
 	} catch (...) {
 		frames_.pop_back();
 		throw;
@@ -16515,7 +16516,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function);
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, rec.prev_unit);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -16749,7 +16750,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	try {
 		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc));
+		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, rec.prev_unit);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -16910,7 +16911,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()));
+		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, rec.prev_unit);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -17518,7 +17519,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::shared_ptr<environment>& caller_env,
                                                  const call_site* site, frame* caller_frame,
                                                  chunk* caller_code, const uint8_t* arg_proofs,
-                                                 const script_defined_function* alias_fn) {
+                                                 const script_defined_function* alias_fn,
+                                                 unit_stamp caller_unit) {
 	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
 	// primitive argument is ALREADY its own slot - the bind copy is elided outright
@@ -17578,6 +17580,10 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		const auto& arg = args[args_base + i];
 
 		if (param.is_reference) {
+			// the argument is the caller's code: it resolves under the caller's unit (docs/global_shadowing.md); the callee's
+			// unit, entered by the record push ahead of the binding, resumes once this parameter is bound
+			struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{ this, current_unit() };
+			enter_unit(caller_unit);
 			if (site) {
 				// Stateless ref binding from the compile-time call site: identifier args
 				// share the caller storage's cell handle (boxing on demand when the
@@ -17946,7 +17952,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
 	                                   previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function);
+	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function, unitRestore.prev);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

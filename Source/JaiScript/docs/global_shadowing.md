@@ -45,6 +45,9 @@ two units including the same file each get their own compiled program, and a fun
 compiled once per unit, so no compiled code ever runs under two units. An `import` is a unit of its
 own.
 
+A by-reference argument is the caller's code: it binds the cell the caller's unit resolves, and the
+callee's unit governs only the callee's own code (its default arguments and its body).
+
 Function and class definitions replace in place whatever the unit: a reload redefines them for every
 caller and every instance, which is the hot-reload contract. A top-level variable a reloaded file
 declares again is the same unit's declaration, so it also writes in place.

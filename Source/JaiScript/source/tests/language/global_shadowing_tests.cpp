@@ -154,6 +154,39 @@ public:
 				return std::to_string(lit) + " " + std::to_string(j1) + " " + std::to_string(j2) + " " + std::to_string(lit2);
 			});
 		});
+		test("the_first_shadow_from_a_host_callback_leaves_the_active_frame_on_its_unit", [this]() {
+			// row 123.7: the ambient stamp is written only once a name has versions; a frame active when the first shadow appears
+			// (a host callback declaring another unit's global) keeps resolving as its own unit's code
+			every_backend("first shadow under a frame", "11 11 22", [](engine& e) {
+				engine* raw = &e;
+				e.add_function("host_declare", [raw]() { raw->execute("var g = 22;"); });
+				e.execute("var g = 11; function probe() { var before = g; host_declare(); return to_string(before) + \" \" + to_string(g); }");
+				const std::string inside = e.execute("probe();").as_string();
+				return inside + " " + e.execute("to_string(g)").as_string();
+			});
+		});
+		test("a_lambda_minted_before_the_first_shadow_keeps_its_functions_unit", [this]() {
+			// the unit of a definition is derived from the executing frame, never from an ambient that is not yet maintained
+			every_backend("stamp before shadow", "1 1", [](engine& e) {
+				e.execute("var g = 1; function mk() { return function() { return g; }; }");
+				e.execute("var f = mk();");
+				e.execute("var g = 2;");
+				return e.execute("to_string(f()) + \" \" + to_string(mk()());").as_string();
+			});
+		});
+		test("a_definition_made_by_a_function_called_from_another_unit_is_the_functions_units", [this]() {
+			// a lambda, a nested function and a nested coroutine minted while another unit's top-level code is the caller and no
+			// name has versions yet carry the function's unit (derived from its frame), not the caller's run: the caller declared g
+			// and would read its own 2, the function's unit never declared it and reads the newest
+			every_backend("nested definitions", "3 3 3", [](engine& e) {
+				e.execute("[[warn_mode]] function mk() { return function() { return g; }; }"   // g is declared by no unit yet
+				          " function mkf() { function inner() { return g; } return inner; }"
+				          " function mkc() { coroutine co() { yield g; } return co; }");
+				e.execute("var g = 2; var f = mk(); var h = mkf(); var c = mkc();");
+				e.execute("var g = 3;");
+				return e.execute("to_string(f()) + \" \" + to_string(h()) + \" \" + to_string(c().resume())").as_string();
+			});
+		});
 		test("a_block_is_a_scope_inside_a_unit", [this]() {
 			// Dev (2026-09-12): scope is also identified by {}. A block declaration shadows for the block and vanishes after it, at
 			// program scope and in a function; a callee still sees the outer binding; a block in another unit shadows only inside

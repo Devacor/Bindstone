@@ -1016,9 +1016,9 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		state.started = true;
 	}
 
+	state.f.unit = handle.get_function()->unit;
 	frames_.push_back(&state.f);
-	const unit_stamp prev_unit = current_unit();
-	enter_unit(handle.get_function()->unit);
+	enter_unit(state.f.unit);
 
 	const bool prev_yielding = yielding_;
 	yielding_ = false;
@@ -1046,7 +1046,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		}
 	}
 	frames_.pop_back();
-	enter_unit(prev_unit);
+	sync_unit();
 
 	if (yielding_) {
 		// Suspend is O(1): the fiber frame (ip included) is persistent and the guard
@@ -9795,7 +9795,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.window_live = static_cast<uint32_t>(argc);
 	rec.f.stack_base = args_base;   // no callee slot below the window
 	rec.f.top_level = false;
-	rec.prev_unit = current_unit();
+	rec.f.unit = function.unit;
 	enter_unit(function.unit);
 	frames_.push_back(&rec.f);
 	JAI_CALL_PUSH_SECTION(3);
@@ -9804,7 +9804,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, rec.prev_unit);
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -9843,8 +9843,9 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	tf.window_base = args_base;
 	tf.window_live = static_cast<uint32_t>(argc);
 	tf.top_level = false;
+	tf.unit = rec.f.unit;   // the frame the tail call replaces is its caller
 	frames_.push_back(&tf);   // ref-param frames_ scan parity with the real push
-	const unit_stamp tail_caller_unit = current_unit();   // the frame the tail call replaces is its caller
+	const unit_stamp tail_caller_unit = tf.unit;
 	enter_unit(function.unit);
 	op_status bound{};
 	try {
@@ -9880,6 +9881,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	stack_.truncate(window_base + window_extent);
 	rec.direct_pin = std::move(pin);
 	rec.f.ip = 0;
+	rec.f.unit = function.unit;
 	rec.f.window_live = tf.window_live;
 	switch_to_ = &rec.f;
 	return {};
@@ -10539,6 +10541,7 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	f.entry_env = environment_;
 	f.stack_base = stack_.size();
 	f.top_level = true;
+	f.unit = current_unit();
 
 	struct expression_scope_restore {
 		vm_backend* self;
@@ -13266,6 +13269,7 @@ op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl
 	f.entry_env = environment_;
 	f.stack_base = stack_.size();
 	f.top_level = true;
+	f.unit = current_unit();
 	struct declaration_scope_restore {
 		vm_backend* self;
 		std::shared_ptr<environment> previous_env;
@@ -13381,6 +13385,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			df.entry_env = environment_;
 			df.stack_base = stack_.size();
 			df.top_level = true;
+			df.unit = current_unit();
 			{
 				frame_guard guard(this, &df);
 				auto r = run(df);
@@ -13444,8 +13449,8 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
-	struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{this, current_unit()};
-	enter_unit(class_def->unit());
+	const unit_stamp class_unit = class_def->unit();   // the initializers are the class's code (no frame of their own)
+	unit_override_scope unitScope(this, &class_unit);
 	if (!skip_parent_recursion) {
 		for (const auto& parent : class_def->get_parent_classes()) {
 			auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
@@ -16280,6 +16285,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	f.entry_env = environment_;
 	f.stack_base = stack_.size();
 	f.top_level = true;
+	f.unit = symbolizer_->current_unit();   // the run's stamp (execute_parsed installed it)
 
 	frame_guard guard(this, &f);
 	checked_result<void> result = entry_result;
@@ -16508,7 +16514,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.f.window_live = args_on_stack ? static_cast<uint32_t>(argc) : 0;
 	rec.f.stack_base = args_on_stack ? args_base - 1 : stack_.size();
 	rec.f.top_level = false;
-	rec.prev_unit = current_unit();
+	rec.f.unit = function.unit;
 	enter_unit(function.unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
@@ -16516,7 +16522,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, rec.prev_unit);
+		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -16741,7 +16747,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.f.window_live = static_cast<uint32_t>(argc);
 	rec.f.stack_base = frame_base;
 	rec.f.top_level = false;
-	rec.prev_unit = current_unit();
+	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 	JAI_MPUSH_SECTION(3);
@@ -16750,7 +16756,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	try {
 		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, rec.prev_unit);
+		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -16903,7 +16909,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.f.window_live = 0;
 	rec.f.stack_base = stack_.size();
 	rec.f.top_level = false;
-	rec.prev_unit = current_unit();
+	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
@@ -16911,7 +16917,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, rec.prev_unit);
+		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -16971,7 +16977,6 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
-	enter_unit(rec.prev_unit);
 	JAI_POP_SUB(0);
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
@@ -17028,6 +17033,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	--current_call_depth_;
 	frames_.pop_back();
+	sync_unit();   // the caller's unit again (a store only while a name has versions)
 	--call_records_top_;
 	JAI_POP_SUB(4);
 #undef JAI_POP_SUB
@@ -17582,7 +17588,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		if (param.is_reference) {
 			// the argument is the caller's code: it resolves under the caller's unit (docs/global_shadowing.md); the callee's
 			// unit, entered by the record push ahead of the binding, resumes once this parameter is bound
-			struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{ this, current_unit() };
+			unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
 			enter_unit(caller_unit);
 			if (site) {
 				// Stateless ref binding from the compile-time call site: identifier args
@@ -17929,9 +17935,11 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.return_type = function.return_type;
 	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
 
-	struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{this, current_unit()};
-	enter_unit(function.unit);
+	const unit_stamp caller_unit = current_unit();   // the native caller's frame, or the ambient
+	f.unit = function.unit;
+	unit_sync_scope unitSync{this};   // destroyed after the guard pops the frame: the caller's unit again
 	frame_guard guard(this, &f);
+	enter_unit(function.unit);
 
 	const size_t entry_pending = pending_callees_.size();
 	auto cleanup = [&]() {
@@ -17952,7 +17960,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
 	                                   previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function, unitRestore.prev);
+	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function, caller_unit);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

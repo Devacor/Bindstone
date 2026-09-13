@@ -1782,7 +1782,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         }
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
-        std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[impl->string_symbolizer_.current_unit().id] : cached->compiled;
+        std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[backend()->current_unit().id] : cached->compiled;
         return execute_parsed(cached->declarations, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent), textual);
 
     } catch (const parse_error&) {
@@ -1796,7 +1796,8 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
                                     std::shared_ptr<void>& compiled_slot,
                                     const instance_variables* instanceVars, uint32_t unit, bool textual) {
     ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
-    struct unit_scope { string_symbolizer& s; unit_stamp prev; ~unit_scope() { s.set_current_unit(prev); } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit() };
+    // after a nested run the ambient re-aligns with the frame that resumes (the run may have made the first shadow under it)
+    struct unit_scope { string_symbolizer& s; unit_stamp prev; execution_backend* be; ~unit_scope() { s.set_current_unit(prev); if (be) { be->sync_unit(); } } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit(), backend() };
     if (!textual) { impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() }); }   // an include runs under the including unit
     try {
         execution_backend* be = backend();
@@ -2919,6 +2920,7 @@ void engine::bump_class_definition_epoch() {
 }
 
 unit_stamp engine::current_unit() const {
+    if (auto* be = backend()) { return be->current_unit(); }
     return impl->string_symbolizer_.current_unit();
 }
 

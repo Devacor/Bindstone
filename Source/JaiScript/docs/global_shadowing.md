@@ -113,5 +113,10 @@ name only a later unit declares the same way
 
 A program in which no name is ever declared by two units pays nothing on the VM's armed lookup paths
 and one compare per environment lookup elsewhere. A shadowed name keeps a list of its earlier cells
-with their units; a lookup of such a name walks that list. A call pushes and pops the running unit
-along with the frame it already pushes.
+with their units; a lookup of such a name walks that list.
+
+The unit of running code costs nothing until a program shadows. The engine derives it from the executing
+frame (a function's own stamp; the run's at top level; a class's field initializers and a coroutine's
+replay carry theirs explicitly) whenever a definition needs it, and writes the ambient stamp that lookups
+consult only while some name has versions: a program that never redeclares a global across units pays no
+store at any call or return, and the first shadow turns the writes on for every frame from then on.

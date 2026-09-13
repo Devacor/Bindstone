@@ -344,6 +344,10 @@ namespace jai {
 
         // Execute a list of declarations and return the last value
         script_value execute(const std::vector<declaration_ptr>& declarations, bool textual = false);   // textual: an include, run where it is written
+        // the unit of the running code, derived from the executing call frame (docs/global_shadowing.md), and the
+        // re-alignment of the symbolizer's ambient with it (a store only while a name has versions)
+        unit_stamp running_unit() const noexcept { return current_unit(); }
+        void sync_unit() noexcept { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(current_unit()); } }
         
         // Execute with typed return value (throws if no return statement or type doesn't match)
         template<typename T>
@@ -1334,8 +1338,26 @@ namespace jai {
         // Shadowing unit of the running code (string_symbolizer::current_unit): set around a call from the
         // callee's function or class, restored after; a worker interpreter never writes it (the symbolizer
         // is shared, and a worker's environments consult their private sink, never the versions)
-        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_) { string_symbolizer_->set_current_unit(unit); } }
-        unit_stamp current_unit() const noexcept { return string_symbolizer_->current_unit(); }
+        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(unit); } }
+        // derived: a scoped override at its depth (a class's field initializers, a coroutine's replay), else the top call
+        // frame's function, else the ambient (top-level code: the run's stamp execute_parsed installed)
+        unit_stamp current_unit() const noexcept {
+            if (unit_override_ && call_stack_.size() <= unit_override_depth_) return *unit_override_;
+            if (!call_stack_.empty() && call_stack_.back().function) return call_stack_.back().function->unit;
+            return is_executing() ? run_unit_ : string_symbolizer_->current_unit();   // top-level code: the run's stamp
+        }
+        const unit_stamp* unit_override_ = nullptr;
+        size_t unit_override_depth_ = 0;
+        unit_stamp run_unit_{};   // the stamp execute_parsed installed for the run in flight (execute saves and restores it around a nested run)
+        // the override for a span of code without a frame of its own; the ambient re-aligned when the span ends
+        struct unit_override_scope {
+            interpreter* in; const unit_stamp* prev; size_t prev_depth;
+            unit_override_scope(interpreter* i, const unit_stamp* unit) : in(i), prev(i->unit_override_), prev_depth(i->unit_override_depth_) {
+                in->unit_override_ = unit; in->unit_override_depth_ = in->call_stack_.size(); in->enter_unit(*unit);
+            }
+            ~unit_override_scope() { in->unit_override_ = prev; in->unit_override_depth_ = prev_depth; in->sync_unit(); }
+        };
+        struct unit_sync_scope { interpreter* in; ~unit_sync_scope() { in->sync_unit(); } };   // the frame below's unit again when this scope ends
         size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
         // Barrier-provisioned method pins for the active region (worker instances only;
         // interpreter_backend forwards the execution_backend virtual here)

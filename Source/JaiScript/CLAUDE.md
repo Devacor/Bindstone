@@ -414,7 +414,9 @@ engine stays usable", not by `check_throws`.
   the file runs at the include site, in the current scope and under the including unit (a later `var x` in the
   includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit. The host reads and
   assigns the newest cell. Zero cost
-  on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`).
+  on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`), and zero
+  per-call cost until the first shadow: the running unit is derived from the executing frame and the ambient
+  stamp is written only while a name has versions (row 123.7).
 - **Catch variable = block-scoped local** (`docs/EXCEPTION_DESIGN.md` addendum): `catch (e)`
   binds `e` as a frame-slot local of the catch body (scope env at top level) - C++ `catch`
   semantics: shadows for the block only, invisible to callees and after the block, captured

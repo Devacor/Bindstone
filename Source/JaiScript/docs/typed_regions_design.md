@@ -209,7 +209,8 @@ into canonical operations over admitted values, followed by a legality pass; not
 values: semantic locals (frame slots, identity the slot, kind pinned by a typed use or adopted from the slot
 at entry), compiler values (the temps of an expression, live inside their statement, any kind lands),
 environment values (globals read once at entry), container bindings (arrays resolved once at entry through a
-slot, a plain reference, an environment name or a pinned table entry), snapshots (a guard's container value,
+slot, a plain reference, an environment name, a pinned table entry or a plain field of a frame-slot instance, read once at
+entry and again at every landing after a call), snapshots (a guard's container value,
 live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
 binary operators, pinned kinds as `op_c_arith`, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
 `cmp` with its test (`op_c_cmp` and `op_c_jcmp` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for

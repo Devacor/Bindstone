@@ -2151,6 +2151,42 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
 			}
 		});
+		test("a_member_of_a_frame_slot_instance_is_a_block_container", [this]() {
+			// render_view_impl's shape (GLOOM render.jai 336): a chunk record's columns are read and stored through members of the
+			// reference parameter; the entry resolves each field once (the member IC's plain-field probe), a user accessor on the
+			// field keeps its site on the general form, and a callee that rebinds the field is seen at the landing
+			const char* fn = "class Chunk { array<float> odist = []; array<int> okind = []; array<float> out = []; }"
+			                 " var f = function(var& ch, int cols, float vh) -> float {"
+			                 " float acc = 0.0;"
+			                 " for (int ci = 0; ci < cols; ++ci) {"
+			                 "  float dist = ch.odist[ci]; int kind = ch.okind[ci];"
+			                 "  float lineh = vh / dist; if (kind == 2) { lineh = lineh * 0.5; }"
+			                 "  ch.out[ci] = lineh; acc = acc + lineh;"
+			                 " }"
+			                 " return acc; };";
+			const std::string listing = listing_of(fn);
+			check_true(listing.find("CELLS_") != std::string::npos && listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the member containers close the loop: " + listing);
+			const std::string call = std::string(fn) + " var c = Chunk(); c.odist = [2.0, 4.0, 8.0, 0.5]; c.okind = [1, 2, 1, 2]; c.out = [0.0, 0.0, 0.0, 0.0];"
+			                         " float r = f(c, 4, 16.0); to_string(r) + \" \" + to_string(c.out[1]) + \" \" + to_string(c.out[3]);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+			const std::string acc = "class Chunk { array<float> odist = []; int reads = 0; function _get_odist() { reads = reads + 1; return odist; } }"
+			                        " var g = function(var& ch, int cols) -> float { float acc = 0.0; for (int ci = 0; ci < cols; ++ci) { acc = acc + ch.odist[ci]; } return acc; };"
+			                        " var c = Chunk(); c.odist = [1.0, 2.0, 3.0]; float r = g(c, 3); to_string(r) + \" \" + to_string(c.reads);";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, acc, proofs), run_on(true, acc, proofs), std::string("an accessor-backed member agrees (the general form runs the getter per read)") + (proofs ? "" : " (proofs off)"));
+			}
+			const std::string rebind = "class Chunk { array<float> odist = []; }"
+			                           " function swap(var& ch) { ch.odist = [10.0, 20.0, 30.0, 40.0]; }"
+			                           " var h = function(var& ch, int cols) -> float { float acc = 0.0; for (int ci = 0; ci < cols; ++ci) { acc = acc + ch.odist[ci]; if (ci == 1) { swap(ch); } } return acc; };"
+			                           " var c = Chunk(); c.odist = [1.0, 2.0, 3.0, 4.0]; to_string(h(c, 4));";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, rebind, proofs), run_on(true, rebind, proofs), std::string("a field rebound by a callee agrees (the landing resolves it again)") + (proofs ? "" : " (proofs off)"));
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

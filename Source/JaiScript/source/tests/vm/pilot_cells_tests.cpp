@@ -2250,6 +2250,23 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, oob, proofs), run_on(true, oob, proofs), std::string("the fused member read raises the general text") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("an_element_reference_is_a_member_containers_base", [this]() {
+			// GLOOM's ray step takes its record as `var& t` bound to an element of `array<WallChunk>` (`for (auto& t : WALL_WS)`), a
+			// reference in the container+index mode: the member resolution dereferences it and pins the table; a body that stores into
+			// that table keeps the loop on the general form; a var array of records and a typed array behave alike on both backends
+			const char* src = "class Chunk { array<float> odist = [1.0, 2.0, 4.0, 8.0]; array<float> out = [0.0, 0.0, 0.0, 0.0]; float k = 1.0; }"
+			                  " function f(var& ch, int cols, float vh) -> float { float acc = 0.0; for (int ci = 0; ci < cols; ++ci) { float d = ch.odist[ci]; float v = vh / d * ch.k; ch.out[ci] = v; acc = acc + v; } return acc; }"
+			                  " var loose = [Chunk(), Chunk(), Chunk()]; array<Chunk> typed = [Chunk(), Chunk()]; loose[1].k = 2.0; typed[1].k = 3.0;"
+			                  " float total = 0.0; for (auto& ch : loose) { total = total + f(ch, 4, 16.0); } for (auto& ch : typed) { total = total + f(ch, 4, 16.0); }"
+			                  " function g(var& ch, var& table, int cols) -> float { float acc = 0.0; for (int ci = 0; ci < cols; ++ci) { acc = acc + ch.odist[ci]; if (ci == 1) { table[0] = Chunk(); } } return acc; }"
+			                  " var& first = loose[0]; float swapped = g(first, loose, 4);"
+			                  " to_string(total) + \" \" + to_string(loose[2].out[3]) + \" \" + to_string(typed[1].out[0]) + \" \" + to_string(swapped) + \" \" + to_string(loose[0].k);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, src, proofs), in = run_on(false, src, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the program completes: " + vm);
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

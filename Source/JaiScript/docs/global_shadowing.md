@@ -68,6 +68,10 @@ Code belongs to the unit that executed its declaration:
 - a coroutine: the unit of its function,
 - a namespace function: the unit of its namespace declaration.
 
+A file that two units include declares its functions, lambdas and coroutines once per includer: the
+callable value each includer took from it belongs to that includer's unit, so a factory file included
+under two units hands each one a function that reads that unit's globals.
+
 `::name` skips locals and members and then resolves the same way. Reads, stores, compound stores,
 `++`/`--` and reference declarations all go through the same rule.
 

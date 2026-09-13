@@ -413,7 +413,8 @@ namespace jai {
         // Shared immutable parameter storage, minted once per node (see function_decl):
         // every closure created from this lambda shares it instead of deep-copying.
         // Capture-free lambdas (closure_env = nullptr) additionally reuse the ONE
-        // script_defined_function across creations.
+        // script_defined_function across creations under one unit (a file two units include
+        // mints one per includer: docs/global_shadowing.md).
         mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
         mutable std::shared_ptr<script_defined_function> mint_cache;
 
@@ -832,7 +833,8 @@ namespace jai {
         mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
         mutable std::shared_ptr<function_decl> coroutine_mint_cache;
         // Non-coroutine declarations always mint with closure_env = nullptr, so the ONE
-        // script_defined_function can be reused for every execution of this node
+        // script_defined_function can be reused for every execution of this node under one
+        // unit (the cached mint's unit id is the reuse condition; the coroutine copy's too)
         mutable std::shared_ptr<script_defined_function> mint_cache;
         // The unit whose code ran this declaration (methods, constructors, coroutines and namespace
         // functions run under it: docs/global_shadowing.md)

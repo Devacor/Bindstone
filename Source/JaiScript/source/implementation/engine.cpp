@@ -644,6 +644,7 @@ struct engine::implementation {
         std::vector<declaration_ptr> declarations;
         std::string source_path;   // the spelling the unit was parsed under ("<script>" for raw content)
         std::shared_ptr<void> compiled;
+        std::unordered_map<uint32_t, std::shared_ptr<void>> textual_compiled;   // an include's program per including unit: a chunk belongs to one unit (docs/global_shadowing.md)
         uint64_t epoch = 0;
         uint64_t last_used = 0;
         uint32_t unit = 0;   // shadowing unit (the path for a file, the content for a literal); 0 until first run
@@ -1780,7 +1781,9 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
         }
 
-        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent), textual);
+        // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
+        std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[impl->string_symbolizer_.current_unit().id] : cached->compiled;
+        return execute_parsed(cached->declarations, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent), textual);
 
     } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)

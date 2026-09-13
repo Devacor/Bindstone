@@ -1037,17 +1037,15 @@ void vm_compiler::compile_block(block_stmt* block) {
 	emit(opcode::op_scope_pop);
 }
 
+// A condition in branch position is jumping code all the way down: `&&`, `||` and `!` nest as jumps, no bool is
+// materialized, a leaf comparison is one fused compare-jump in the false sense or a fused comparison and its jump in
+// the true sense, and the operands run in source order with C++ short-circuit (the interpreter's visit_binary is the
+// oracle). false_jumps collect the edges taken when the condition is false; the true sense collects the edges taken
+// when it is true and falls through when it is false.
 void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps) {
 	if (cond->get_type() == node_type::unary_expr) {
 		auto* u = static_cast<unary_expr*>(cond.get());
-		if (u->op.type == token_type::bang) {
-			// `!e` in branch position: branch on e's truthiness directly - the same
-			// is_truthy the unary consulted, minus one op and one bool
-			compile_expression(u->operand);
-			false_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32,
-			                           expression_returns_bool(u->operand.get()) ? 1u : 0u));
-			return;
-		}
+		if (u->op.type == token_type::bang) { compile_branch_condition_true(u->operand, false_jumps); return; }
 	}
 	if (cond->get_type() == node_type::binary_expr) {
 		auto* b = static_cast<binary_expr*>(cond.get());
@@ -1057,16 +1055,39 @@ void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vect
 			return;
 		}
 		if (b->op.type == token_type::pipe_pipe) {
-			compile_expression(b->left);
-			const uint32_t proved = expression_returns_bool(b->left.get()) ? 1u : 0u;
-			size_t jump_true = emit(opcode::op_jump_if_true, k_invalid_u32, proved);
+			std::vector<size_t> true_jumps;
+			compile_branch_condition_true(b->left, true_jumps);
 			compile_branch_condition(b->right, false_jumps);
-			patch_jump(jump_true, chunk_->code.size());
+			for (size_t at : true_jumps) { patch_jump(at, chunk_->code.size()); }
 			return;
 		}
 	}
 	compile_expression(cond);
 	false_jumps.push_back(emit_cond_jump_false(cond.get()));
+}
+
+void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std::vector<size_t>& true_jumps) {
+	if (cond->get_type() == node_type::unary_expr) {
+		auto* u = static_cast<unary_expr*>(cond.get());
+		if (u->op.type == token_type::bang) { compile_branch_condition(u->operand, true_jumps); return; }
+	}
+	if (cond->get_type() == node_type::binary_expr) {
+		auto* b = static_cast<binary_expr*>(cond.get());
+		if (b->op.type == token_type::pipe_pipe) {
+			compile_branch_condition_true(b->left, true_jumps);
+			compile_branch_condition_true(b->right, true_jumps);
+			return;
+		}
+		if (b->op.type == token_type::ampersand_ampersand) {
+			std::vector<size_t> false_jumps;
+			compile_branch_condition(b->left, false_jumps);
+			compile_branch_condition_true(b->right, true_jumps);
+			for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
+			return;
+		}
+	}
+	compile_expression(cond);
+	true_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32, expression_returns_bool(cond.get()) ? 1u : 0u));
 }
 
 void vm_compiler::compile_if(if_stmt* stmt) {
@@ -1671,11 +1692,11 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		return;
 	case node_type::ternary_expr: {
 		auto* t = static_cast<ternary_expr*>(expr.get());
-		compile_expression(t->condition);
-		size_t jump_false = emit_cond_jump_false(t->condition.get());
+		std::vector<size_t> false_jumps;
+		compile_branch_condition(t->condition, false_jumps);
 		compile_expression(t->then_expression);
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
-		patch_jump(jump_false, chunk_->code.size());
+		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
 		compile_expression(t->else_expression);
 		patch_jump(jump_end, chunk_->code.size());
 		return;

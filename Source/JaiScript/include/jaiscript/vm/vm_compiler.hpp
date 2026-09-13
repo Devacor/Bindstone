@@ -160,6 +160,7 @@ namespace jai::vm {
         // materialization; each comparison pairs into fused_cmp_jump). Falsy control lands
         // on the collected jumps — the caller patches them to the else/exit target.
         void compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps);
+        void compile_branch_condition_true(const expression_ptr& cond, std::vector<size_t>& true_jumps);
 
         void compile_identifier_load(const expression_ptr& expr);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);

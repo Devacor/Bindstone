@@ -7553,6 +7553,12 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		const uint8_t declared = loop.cells[dk].kind;
 		if (declared != 0 && declared != kind) {
 			if (declared == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = declared; }
+			else if (declared == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+				// an int declaration takes a float by the declaration's kernel: truncation in range, the general form's text out of range
+				const script_float d = cell_float_of_bits(bits);
+				if (!detail::float_fits_script_int(d)) return false;
+				bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = declared;
+			}
 			else return false;
 		}
 	} else if (have != kind && !loop.cells[dk].temp) {
@@ -7561,8 +7567,13 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 			// a var: the language lands any kind; the flush keeps the any stamp
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;   // a float slot widens an int (decl or store)
+		} else if (have == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && st && st->base_type == script_value_type::jai_int_type) {
+			// a declared int slot takes a float by the assignment table's kernel: truncation in range, the general form's text out of range
+			const script_float d = cell_float_of_bits(bits);
+			if (!detail::float_fits_script_int(d)) return false;
+			bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = have;
 		} else {
-			return false;   // an int slot fed a float: the general form's checked conversion
+			return false;   // an int slot fed a float without a declared int stamp: the general form's conversion
 		}
 	}
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);

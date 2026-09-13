@@ -173,6 +173,8 @@ namespace jai::vm {
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);
         void compile_variable_decl(const std::shared_ptr<variable_decl>& decl);
         void compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init);
+        void compile_ternary_store(identifier_expr* ident, assignment_expr* assign, const std::shared_ptr<ternary_expr>& t);
+        void compile_store_arm(identifier_expr* ident, assignment_expr* assign, const expression_ptr& value);
         void compile_function_decl(const std::shared_ptr<function_decl>& decl);
         void compile_if(if_stmt* stmt);
         void compile_while(while_stmt* stmt);

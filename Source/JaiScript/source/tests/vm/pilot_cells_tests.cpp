@@ -2303,6 +2303,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, kinds, proofs), run_on(true, kinds, proofs), std::string("typed receivers, a declined kind and an index past the end agree") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("ternary_arms_take_every_landing_and_an_int_cell_takes_a_float", [this]() {
+			// the ray step's column loop shapes (GLOOM pure.jai 28..62) without its inner while: `float adx = rdx < 0.0 ? -rdx : rdx;`
+			// (a unary arm), `int mx = posx;` and `int texcol = wallx * 64.0;` (a float into an int, truncated as the declaration
+			// does), `pdist = pdist < 0.02 ? 0.02 : pdist;` (a ternary assignment); the loop closes and agrees with the interpreter,
+			// and a float out of the int range inside the loop raises the general text on both backends
+			const char* fn = "var f = function(int n, float posx, float posy, float dirx, float planex, var& out) -> float {"
+			                 " float acc = 0.0; float xstep = 2.0 / (n - 1.0);"
+			                 " for (int x = 0; x < n; ++x) {"
+			                 "  float camx = x * xstep - 1.0; float rdx = dirx + planex * camx;"
+			                 "  int mx = posx; int my = posy;"
+			                 "  float adx = rdx < 0.0 ? -rdx : rdx; float ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;"
+			                 "  int stepx = rdx < 0.0 ? -1 : 1;"
+			                 "  float sdx = rdx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx;"
+			                 "  float pdist = sdx - ddx; pdist = pdist < 0.02 ? 0.02 : pdist;"
+			                 "  float wallx = posy + pdist * rdx; wallx = wallx - math::floor(wallx);"
+			                 "  int texcol = wallx * 64.0; int shade = 15 - math::itrunc(pdist * 1.55);"
+			                 "  shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);"
+			                 "  out[x] = texcol * 16 + shade + stepx + my; acc = acc + pdist;"
+			                 " }"
+			                 " return acc; };";
+			const std::string listing = listing_of(fn);
+			check_true(listing.find("CELLS_") != std::string::npos, "the column loop closes: " + listing);
+			check_true(listing.find("UNARY op=") == std::string::npos, "the unary arm lands through the move row: " + listing);
+			const std::string call = std::string(fn) + " array<int> out = [0, 0, 0, 0, 0, 0]; float r = f(6, 3.5, 2.25, 1.0, 0.66, out);"
+			                         " to_string(r) + \" \" + to_string(out[0]) + \" \" + to_string(out[2]) + \" \" + to_string(out[5]);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+			const std::string narrow = "var g = function(int n, float big) -> string { string out = \"\"; int keep = 0;"
+			                           " try { for (int i = 0; i < n; ++i) { float f = i * 2.5 + (i == 3 ? big : 0.0); int t = f; keep = keep + t; int s = 7; s = i > 1 ? f : s; keep = keep + s; } }"
+			                           " catch (e) { out = \"caught \" + e; }"
+			                           " return out + \"|\" + to_string(keep); }; g(3, 1.0e30) + \" \" + g(6, 1.0e30) + \" \" + g(4, -0.0);";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, narrow, proofs), run_on(true, narrow, proofs), std::string("a float into an int cell truncates in range and raises the general text out of range") + (proofs ? "" : " (proofs off)"));
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

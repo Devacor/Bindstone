@@ -1573,6 +1573,45 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 	loops_.pop_back();
 }
 
+// The arms of `x = c ? a : b;` onto a slot, each a store of its own: a nested ternary recurses, a value takes the move row when it is
+// an identifier or a literal, the fused-binary store when it is a fused binary, else the general store; the proofs of the whole
+// assignment (a provable typed store, the same-type proof) are not claimed for an arm, so the store enforces the declared type
+void vm_compiler::compile_ternary_store(identifier_expr* ident, assignment_expr* assign, const std::shared_ptr<ternary_expr>& t) {
+	std::vector<size_t> false_jumps;
+	compile_branch_condition(t->condition, false_jumps);
+	compile_store_arm(ident, assign, t->then_expression);
+	const size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
+	for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
+	compile_store_arm(ident, assign, t->else_expression);
+	patch_jump(jump_end, chunk_->code.size());
+}
+
+void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* assign, const expression_ptr& value) {
+	if (value->get_type() == node_type::ternary_expr) { compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(value)); return; }
+	compile_expression(value);
+	uint32_t flags = store_flag_no_result;
+	if (is_lvalue_shaped(value.get())) flags |= store_flag_rhs_lvalue;
+	auto& code = chunk_->code;
+	if (!code.empty() && code.back().op == opcode::op_binary_fused && value->get_type() == node_type::binary_expr) {
+		fused_binary_dst_proto dp;
+		dp.binary_proto = code.back().a;
+		dp.symbol = add_symbol(ident->symbol_id);
+		dp.slot = identifier_slot_operand(ident);
+		dp.flags = flags;
+		chunk_->fused_binary_dst_protos.push_back(dp);
+		vm_instruction& ins = code.back();
+		ins.op = opcode::op_binary_fused_store;
+		ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
+		ins.b = 0;
+		ins.c = 0;
+		note_ident_node(code.size() - 1, assign->target);
+		return;
+	}
+	if (try_lower_store_move(ident, value, flags)) return;
+	const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+	note_ident_node(store_ip, assign->target);
+}
+
 bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
@@ -1601,6 +1640,13 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 					temp_next_ = temp_mark;   // the read's temp dies into the move
 					return true;
 				}
+			}
+			if (assign->op.type == token_type::equal && assign->value->get_type() == node_type::ternary_expr && callable_.active &&
+			    ident->names_value_decl && !ident->global_qualified && identifier_slot_operand(ident) != k_invalid_u32) {
+				// `x = c ? a : b;` onto a slot: the condition's jumps and one store landing per arm (the move row, the fused-binary store, else
+				// the general store), so no value crosses a jump on the operand stack; the interpreter evaluates the same arm and stores once
+				compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(assign->value));
+				return true;
 			}
 			compile_expression(assign->value);
 			if (assign->op.type == token_type::equal) {
@@ -4761,22 +4807,6 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		return;
 	}
 
-	if (decl->initializer && callable_.active && (unary_temp_operand(decl->initializer.get()) || math_temp_operand(decl->initializer.get()) != detail::math_fn::none) &&
-	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
-	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
-		// `T v = -e;` or `T v = math::f(e);`: the value lands in a compiler temp and the move row takes it, no push
-		const size_t temp_mark = temp_next_;
-		fused_operand src;
-		compile_value_into_temp(decl->initializer, 0xFF, src);
-		const size_t ip = chunk_->code.size();
-		chunk::typed_site& site = typed_site_at(ip);
-		site.orig = vm_instruction{opcode::op_load, src.slot, src.symbol, 0};
-		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 0};
-		site.stamp = decl->type.get();
-		emit(opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), src.slot, site.orig2.a);
-		temp_next_ = temp_mark;   // the unary's temp dies into the move
-		return;
-	}
 	if (decl->initializer) { compile_decl_value(decl, decl->initializer); return; }
 	emit(opcode::op_decl_var, add_node(decl), 0, 0);
 }
@@ -4797,6 +4827,23 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
 		compile_decl_value(decl, t->else_expression);
 		patch_jump(jump_end, chunk_->code.size());
+		return;
+	}
+	if (callable_.active && (unary_temp_operand(init.get()) || math_temp_operand(init.get()) != detail::math_fn::none) &&
+	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
+	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
+		// `T v = -e;` or `T v = math::f(e);` (a whole initializer or a ternary's arm): the value lands in a compiler temp and the
+		// move row takes it, no push
+		const size_t temp_mark = temp_next_;
+		fused_operand src;
+		compile_value_into_temp(init, 0xFF, src);
+		const size_t ip = chunk_->code.size();
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = vm_instruction{opcode::op_load, src.slot, src.symbol, 0};
+		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 0};
+		site.stamp = decl->type.get();
+		emit(opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), src.slot, site.orig2.a);
+		temp_next_ = temp_mark;   // the unary's temp dies into the move
 		return;
 	}
 	compile_expression(init);

@@ -125,6 +125,21 @@ public:
 				return out;
 			});
 		});
+		test("a_block_is_a_scope_inside_a_unit", [this]() {
+			// Dev (2026-09-12): scope is also identified by {}. A block declaration shadows for the block and vanishes after it, at
+			// program scope and in a function; a callee still sees the outer binding; a block in another unit shadows only inside
+			// the block and is not that unit's declaration of the name
+			every_backend("blocks", "2 1 2 1 1 5 3 1 20 1", [](engine& e) {
+				e.execute("var G = 1; string out = \"\";"
+				          " { var G = 2; out = out + to_string(G); } out = out + \" \" + to_string(G);"
+				          " function g() { return G; }"
+				          " function f() { var x = 1; { var x = 2; out = out + \" \" + to_string(x); } out = out + \" \" + to_string(x);"
+				          "   { var G = 5; out = out + \" \" + to_string(g()) + \" \" + to_string(G); } }"
+				          " f();"
+				          " if (true) { var G = 3; out = out + \" \" + to_string(G); } out = out + \" \" + to_string(G);");
+				return e.execute("{ var G = 20; out = out + \" \" + to_string(G); } out = out + \" \" + to_string(G); out;").as_string();
+			});
+		});
 		test("a_file_reloaded_at_its_path_is_the_same_unit_and_writes_in_place", [this]() {
 			every_backend("reload", "102 5", [](engine& e) {
 				e.disable(jai::filesystem);

@@ -29,6 +29,12 @@ declaration) binds the name for the declaring unit:
 - A different unit declaring the name gets a new cell. The earlier cell stays the binding of its
   own unit's code and of code compiled before the new declaration.
 
+Inside a unit, a `{ }` block is a scope of its own, as in C++: a declaration inside a block (a bare
+block, an `if`, a loop body, a `try`) shadows an outer declaration of the name for the block's extent
+and vanishes at its end; a function called from inside the block still sees the outer binding; and a
+block's declaration is not the unit's declaration of the name (it neither versions a global nor
+writes one in place). Only a declaration at the unit's own top level binds the name for the unit.
+
 Function and class definitions replace in place whatever the unit: a reload redefines them for every
 caller and every instance, which is the hot-reload contract. A top-level variable a reloaded file
 declares again is the same unit's declaration, so it also writes in place.

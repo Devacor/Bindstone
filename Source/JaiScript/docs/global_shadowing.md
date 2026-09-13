@@ -38,9 +38,15 @@ writes one in place). Only a declaration at the unit's own top level binds the n
 An `include` is textual: the included file runs at the include site, in the current scope and under
 the including unit, so its declarations are the includer's own. A later declaration of the same name
 in the includer writes the included global in place, the included functions see that write, and an
-include inside a block or a function body scopes with it (its names vanish with the block; the
-function's parameters and slot locals live in its frame, so the included text does not see them and
-the checker names them undeclared). An included file the VM compiles belongs to the including unit:
+include inside a block or a function body scopes with it (its names vanish with the block). Inside a
+function body a literal include (`include "file"` or `include("file")`) is spliced at parse time, as
+C++'s is: the included text is parsed into the function, so it reads and writes the function's
+parameters and locals, the locals and functions it declares are the function's own, and the checker
+and both backends see one function; a change to the included file re-parses the includer, and such a
+unit keeps no jaibite sibling. A computed path (`include(p)`) stays a runtime include: it runs in the
+function's environment and does not see the frame (its parameters and slot locals), and the checker
+names them undeclared. A function without an include pays nothing for this. An included file the VM
+compiles at run time belongs to the including unit:
 two units including the same file each get their own compiled program, and a function it defines is
 compiled once per unit, so no compiled code ever runs under two units. An `import` is a unit of its
 own, and a top-level declaration only: inside a function, a block, a class or a namespace it is a parse error, since

@@ -660,6 +660,7 @@ struct engine::implementation {
         bool closure_root = false;   // has literal top-level import/include paths
         bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
+        std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite sibling
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
     };
@@ -756,6 +757,7 @@ struct engine::implementation {
                 throw parse_error(self.format_error(parse_result));
             }
             cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
+            stamp_spliced(*cached, prs.spliced_files());
         }
         return cached;
     }
@@ -979,7 +981,7 @@ struct engine::implementation {
                 std::memcmp(node.source.data(), source.data(), source.size()) != 0) {
                 continue;   // discriminator collision: memcmp is the arbiter, keep scanning
             }
-            if (node.entry->epoch != script_cache_epoch) {
+            if (node.entry->epoch != script_cache_epoch || spliced_changed(*node.entry)) {
                 script_cache[i] = std::move(script_cache.back());
                 script_cache.pop_back();
                 return nullptr;
@@ -990,6 +992,15 @@ struct engine::implementation {
         return nullptr;
     }
 
+    // the files a parse spliced into function bodies, stamped now; a later stamp change makes the entry stale
+    void stamp_spliced(script_cache_entry& entry, const std::vector<std::string>& files) {
+        entry.spliced_stamps.clear();
+        for (const auto& f : files) { closure_stamp s{f, 0, 0}; (void)stat_mtime_size(f, s.mtime, s.size); entry.spliced_stamps.push_back(std::move(s)); }
+    }
+    bool spliced_changed(const script_cache_entry& entry) {
+        for (const auto& s : entry.spliced_stamps) { uint64_t mtime = 0, size = 0; if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) return true; }
+        return false;
+    }
     std::shared_ptr<script_cache_entry> store_cached_script(const std::string& sourcePath, const std::string& source, std::vector<declaration_ptr> decls) {
         if (script_cache.size() >= script_cache_max) {
             size_t victim = 0;
@@ -1778,7 +1789,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Rewrite a missing/stale/rejected sibling AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
-        if (!sibling.empty() && !siblingFresh) {
+        if (!sibling.empty() && !siblingFresh && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no sibling: the sibling's freshness knows only its own file
             impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
         }
 
@@ -2014,6 +2025,7 @@ check_report engine::check(const std::string& scriptContent) {
             throw parse_error(format_error(parse_result));
         }
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
+        impl->stamp_spliced(*cached, parser.spliced_files());
     }
     return impl->program_report(impl->checked_report(*this, *cached, true));
 }

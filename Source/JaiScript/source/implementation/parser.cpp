@@ -4,6 +4,10 @@
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/math_intrinsics.hpp"
+#include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
+#include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 #include <iostream>
 #include <optional>
@@ -776,7 +780,7 @@ void detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarat
 
 // One true constructor with dependency injection
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
-    : tokens_(tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
+    : stream_(&tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
     if (!symbolizer_) {
         throw std::invalid_argument("parser requires a valid string_symbolizer");
     }
@@ -977,9 +981,9 @@ void parser::synchronize_class_member(size_t class_open_index) {
     // class-body level - or stop AT the class's own '}' so the loop closes the class
     // where it really ends.
     int depth = 1;
-    for (size_t i = class_open_index + 1; i < current_ && i < tokens_.size(); ++i) {
-        if (tokens_[i].type == token_type::left_brace) { ++depth; }
-        else if (tokens_[i].type == token_type::right_brace) { --depth; }
+    for (size_t i = class_open_index + 1; i < current_ && i < stream_->size(); ++i) {
+        if ((*stream_)[i].type == token_type::left_brace) { ++depth; }
+        else if ((*stream_)[i].type == token_type::right_brace) { --depth; }
     }
     const size_t entry = current_;
     while (!is_at_end()) {
@@ -1002,11 +1006,11 @@ const token& parser::peek() const {
     if (pushed_back_token_.has_value()) {
         return pushed_back_token_.value();
     }
-    return tokens_[current_];
+    return (*stream_)[current_];
 }
 
 const token& parser::previous() const {
-    return tokens_[current_ - 1];
+    return (*stream_)[current_ - 1];
 }
 
 const token& parser::advance() {
@@ -1086,7 +1090,7 @@ checked_result<expression_ptr> parser::primary() {
     // Anonymous function expression: `function (params) {...}` (a no-capture lambda).
     // `function name...` never reaches here (declaration() routes it first).
     if (check(token_type::function_keyword) &&
-        current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren) {
+        current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
         advance(); // consume 'function'
         return anonymous_function_expression();
     }
@@ -1248,8 +1252,8 @@ checked_result<expression_ptr> parser::primary() {
     // a class member. The identifier resolves GLOBAL-ENV-ONLY; the ordinary postfix loop
     // then applies, so ::f(1), ::hp = 5, and ::arr[i] compose naturally. Only the
     // prefix form is consumed here - infix :: (Class::member, ns::fn) parses postfix.
-    if (check(token_type::colon_colon) && current_ + 1 < tokens_.size() &&
-        tokens_[current_ + 1].type == token_type::identifier) {
+    if (check(token_type::colon_colon) && current_ + 1 < stream_->size() &&
+        (*stream_)[current_ + 1].type == token_type::identifier) {
         advance();   // '::'
         token identToken = advance();
         auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
@@ -1262,7 +1266,7 @@ checked_result<expression_ptr> parser::primary() {
     if (peek().type != token_type::identifier && peek().type != token_type::eof) {
         // Check if this token is followed by ::
         size_t lookAhead = current_ + 1;
-        if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::colon_colon) {
+        if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::colon_colon) {
             // This is a keyword being used as a namespace name
             token nameToken = advance();
             auto id_expr = std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, get_symbol_id(nameToken));
@@ -1379,10 +1383,10 @@ checked_result<expression_ptr> parser::primary() {
         if (check(token_type::this_keyword) || check(token_type::identifier)) {
             // Look ahead to see if this is followed by ] and then (
             size_t lookAhead = current_ + 1;
-            if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::right_bracket) {
+            if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::right_bracket) {
                 // Check if there's a ( after the ]
                 size_t lookAhead2 = lookAhead + 1;
-                if (lookAhead2 < tokens_.size() && tokens_[lookAhead2].type == token_type::left_paren) {
+                if (lookAhead2 < stream_->size() && (*stream_)[lookAhead2].type == token_type::left_paren) {
                     // Pattern is [this]() or [x]() - definitely a lambda
                     current_ = savedPos - 1;
                     return lambda_expression();
@@ -1517,7 +1521,7 @@ checked_result<expression_ptr> parser::primary() {
                     JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
 
                     // Create new_expr with the full type info preserved
-                    return std::make_shared<new_expr>(tokens_[savedPos].location, type, std::move(arguments));
+                    return std::make_shared<new_expr>((*stream_)[savedPos].location, type, std::move(arguments));
                 } else if (type && check(token_type::left_paren)) {
                     // Parentheses constructor for template types
                     advance(); // consume '('
@@ -1531,7 +1535,7 @@ checked_result<expression_ptr> parser::primary() {
                     }
 
                     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
-                    return std::make_shared<new_expr>(tokens_[savedPos].location, type, std::move(arguments));
+                    return std::make_shared<new_expr>((*stream_)[savedPos].location, type, std::move(arguments));
                 }
             }
             // Otherwise backtrack and continue
@@ -2378,14 +2382,14 @@ checked_result<declaration_ptr> parser::declaration_body() {
     // Check specifically for function keyword to handle function declarations
     // (`function (` falls through to expression parsing — anonymous function expression)
     if (check(token_type::function_keyword) &&
-        !(current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren)) {
+        !(current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren)) {
         // `function name = expr;` / `function name;` declares a function-typed VARIABLE
         // (parse_type maps `function` to auto, matching function-typed parameters and the
         // namespace path); `function name(` stays a function declaration.
-        if (current_ + 2 < tokens_.size() &&
-            tokens_[current_ + 1].type == token_type::identifier &&
-            (tokens_[current_ + 2].type == token_type::equal ||
-             tokens_[current_ + 2].type == token_type::semicolon)) {
+        if (current_ + 2 < stream_->size() &&
+            (*stream_)[current_ + 1].type == token_type::identifier &&
+            ((*stream_)[current_ + 2].type == token_type::equal ||
+             (*stream_)[current_ + 2].type == token_type::semicolon)) {
             return variable_declaration();
         }
         JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
@@ -2513,17 +2517,17 @@ checked_result<declaration_ptr> parser::declaration_body() {
             }
             return variable_declaration();
         } else if (check(token_type::ampersand) &&
-                   current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::identifier &&
-                   current_ + 2 < tokens_.size() &&
-                   (tokens_[current_ + 2].type == token_type::left_paren ||
-                    tokens_[current_ + 2].type == token_type::equal ||
-                    tokens_[current_ + 2].type == token_type::semicolon)) {
+                   current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier &&
+                   current_ + 2 < stream_->size() &&
+                   ((*stream_)[current_ + 2].type == token_type::left_paren ||
+                    (*stream_)[current_ + 2].type == token_type::equal ||
+                    (*stream_)[current_ + 2].type == token_type::semicolon)) {
             // Pattern: ClassName& name( - a class-typed reference-return free function
             // (Box& get() { ... }); ClassName& name = / ClassName& name; - a class-typed
             // reference variable (Base& b = derived;). Declaration wins like the
             // identifier-identifier form above (C++: whatever can be a declaration is one);
             // a bitwise-and expression spells it (Box) & get().
-            const bool is_function = tokens_[current_ + 2].type == token_type::left_paren;
+            const bool is_function = (*stream_)[current_ + 2].type == token_type::left_paren;
             current_ = savedPos;
             if (is_function) {
                 return function_declaration();
@@ -2900,12 +2904,60 @@ checked_result<statement_ptr> parser::block_statement() {
 
     while (!check(token_type::right_brace) && !is_at_end()) {
         JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration());
-        declarations.push_back(std::move(decl));
+        if (!splice_include(decl, declarations)) { declarations.push_back(std::move(decl)); }
     }
 
     JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after block"));
 
     return std::make_shared<block_stmt>(leftBrace.location, std::move(declarations));
+}
+
+// A literal include inside a function body is textual at parse time, as C++'s is: the included file's declarations are
+// parsed here, in this scope, so the function's parameters and locals are theirs and theirs are the function's, and the
+// checker and both backends see one function. A computed path stays a runtime include (it runs in the environment and
+// never sees the frame), an unresolved or unreadable path is left to the runtime include's own error, and a function
+// without an include pays nothing (docs/global_shadowing.md).
+bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out) {
+    if (!decl || decl->get_type() != node_type::include_decl || function_scope_stack_.empty() || !engine_) return false;
+    auto* inc = static_cast<include_decl*>(decl.get());
+    std::string path = inc->path;
+    if (inc->path_expr) {
+        if (inc->path_expr->get_type() != node_type::literal_expr) return false;
+        const auto* lit = static_cast<const literal_expr*>(inc->path_expr.get());
+        if (lit->value.raw_storage_index() != script_value::TYPEID_STRING) return false;
+        path = std::string(lit->value.unchecked_as_string());
+    }
+    if (!engine_->is_enabled(privilege::filesystem)) return false;
+    auto resolved = resolve_include_path(path, engine_, decl->location.filename);
+    if (!resolved) return false;
+    if (splice_depth_ >= 32 || std::find(splice_active_.begin(), splice_active_.end(), resolved.value()) != splice_active_.end()) {
+        report_error("include '" + path + "' includes itself or nests too deep", peek());
+        return true;
+    }
+    std::ifstream file(resolved.value(), std::ios::binary);
+    if (!file) return false;
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    lexer lex(content, symbolizer_, registered_template_types_, resolved.value());
+    const std::vector<token> tokens = lex.tokenize();
+    const std::vector<token>* saved_stream = stream_;
+    const size_t saved_current = current_;
+    const std::optional<token> saved_pushed_back = pushed_back_token_;
+    stream_ = &tokens; current_ = 0; pushed_back_token_.reset();
+    ++splice_depth_; splice_active_.push_back(resolved.value());
+    while (!is_at_end()) {
+        const size_t errors_before = errors_.size();
+        auto d = declaration();
+        if (!d) {
+            if (errors_.size() == errors_before && d.error() != std::error_code()) { report_error(format_error(d, *symbolizer_), peek()); }
+            synchronize();
+            continue;
+        }
+        if (d.value() && !splice_include(d.value(), out)) { out.push_back(std::move(d.value())); }
+    }
+    splice_active_.pop_back(); --splice_depth_;
+    stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
+    spliced_files_.push_back(resolved.value());
+    return true;
 }
 
 checked_result<statement_ptr> parser::expression_statement() {
@@ -3329,7 +3381,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
         if (check(token_type::identifier) && peek().lexeme == className.lexeme) {
             // Look ahead to see if this is followed by '(' (constructor) or identifier (field)
             size_t lookAhead = current_ + 1;
-            if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::left_paren) {
+            if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::left_paren) {
                 // This is a constructor - use class name's pre-interned symbol
                 advance(); // consume class name
                 auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
@@ -3518,11 +3570,11 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             // TODO: Mark destructor as virtual if class has any virtual methods
             // Currently no virtual destructor support
         } else if (check(token_type::function_keyword) &&
-                   current_ + 2 < tokens_.size() &&
-                   tokens_[current_ + 1].type == token_type::identifier &&
-                   tokens_[current_ + 1].lexeme != "operator" &&
-                   (tokens_[current_ + 2].type == token_type::equal ||
-                    tokens_[current_ + 2].type == token_type::semicolon)) {
+                   current_ + 2 < stream_->size() &&
+                   (*stream_)[current_ + 1].type == token_type::identifier &&
+                   (*stream_)[current_ + 1].lexeme != "operator" &&
+                   ((*stream_)[current_ + 2].type == token_type::equal ||
+                    (*stream_)[current_ + 2].type == token_type::semicolon)) {
             // `function name = expr;` / `function name;` is a function-typed FIELD
             // (auto semantics, same as top level); fall through to the regular member
             // branch whose parse_type maps `function` to auto. `function operator=` is
@@ -4112,8 +4164,8 @@ checked_result<declaration_ptr> parser::extern_declaration() {
     bool is_function = false;
     if (match(token_type::function_keyword)) {
         is_function = true;
-    } else if (!(check(token_type::identifier) && current_ + 1 < tokens_.size() &&
-                 tokens_[current_ + 1].type == token_type::semicolon)) {
+    } else if (!(check(token_type::identifier) && current_ + 1 < stream_->size() &&
+                 (*stream_)[current_ + 1].type == token_type::semicolon)) {
         JAISCRIPT_TRY_ASSIGN(type, parse_type());
     }
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected name after 'extern'"));
@@ -4125,14 +4177,14 @@ checked_result<declaration_ptr> parser::extern_declaration() {
 // [[warn_mode]] / [[strict_mode]] at a statement position, optional trailing ';'. none when
 // the position holds no attribute (a '[[' there opens a nested array literal as before).
 checked_result<uint8_t> parser::check_mode_attribute() {
-    if (!(current_ + 4 < tokens_.size() && check(token_type::left_bracket) &&
-          tokens_[current_ + 1].type == token_type::left_bracket &&
-          tokens_[current_ + 2].type == token_type::identifier &&
-          tokens_[current_ + 3].type == token_type::right_bracket &&
-          tokens_[current_ + 4].type == token_type::right_bracket)) {
+    if (!(current_ + 4 < stream_->size() && check(token_type::left_bracket) &&
+          (*stream_)[current_ + 1].type == token_type::left_bracket &&
+          (*stream_)[current_ + 2].type == token_type::identifier &&
+          (*stream_)[current_ + 3].type == token_type::right_bracket &&
+          (*stream_)[current_ + 4].type == token_type::right_bracket)) {
         return check_mode_attr_none;
     }
-    const token name = tokens_[current_ + 2];
+    const token name = (*stream_)[current_ + 2];
     const uint8_t mode = name.lexeme == "warn_mode" ? check_mode_attr_warn
                        : name.lexeme == "strict_mode" ? check_mode_attr_strict : check_mode_attr_none;
     if (mode == check_mode_attr_none) {
@@ -4161,13 +4213,13 @@ type_info_ptr parser::wrap_reference_return_type(type_info_ptr return_type) {
 bool parser::bare_coroutine_head() const {
     if (!check(token_type::identifier)) return false;
     return peek().lexeme == "operator" ||
-           (current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren);
+           (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren);
 }
 
 bool parser::coroutine_modifier_run() const {
-    for (size_t i = current_; i < tokens_.size(); ++i) {
-        if (tokens_[i].type == token_type::coroutine_keyword) return true;
-        if (tokens_[i].type != token_type::static_keyword && tokens_[i].type != token_type::override_keyword) return false;
+    for (size_t i = current_; i < stream_->size(); ++i) {
+        if ((*stream_)[i].type == token_type::coroutine_keyword) return true;
+        if ((*stream_)[i].type != token_type::static_keyword && (*stream_)[i].type != token_type::override_keyword) return false;
     }
     return false;
 }

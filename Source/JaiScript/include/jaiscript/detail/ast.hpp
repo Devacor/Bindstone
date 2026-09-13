@@ -301,6 +301,9 @@ namespace jai {
         bool typed_store_provable = false;
         // proof_same_type: the RHS static type IS the target's declared type (identity conversion)
         mutable uint8_t static_store_proof = proof_none;
+        // a compound op on a local: the class of the target's declared kind against the value's (operand_class_*), the
+        // typed row the compiler picks for the fused compound (unknown: the int row speculated; mixed: no typed row)
+        mutable uint8_t static_operand_class = operand_class_unknown;
         // Postfix ++/-- on a non-identifier target desugars to this node with `+= 1`;
         // the expression result is then the OLD value (the parser sets this)
         bool postfix_old_result = false;

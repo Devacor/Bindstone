@@ -10226,7 +10226,18 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	if (proto.is_coroutine) {
 		// Calling a coroutine function mints a handle (same interned identity as the
 		// interpreter) and does NOT run the body; resume drives it.
-		auto func_decl_ptr = proto.decl;
+		// The handle pins a copy of the declaration stamped with its unit (interpreter parity): the node is shared by
+		// every includer of its file, so a copy serves one unit and the next includer mints its own
+		auto& func_decl_ptr = proto.decl->coroutine_mint_cache;
+		const unit_stamp decl_unit = current_unit();
+		if (!func_decl_ptr || func_decl_ptr->unit.id != decl_unit.id) {
+			func_decl_ptr = std::make_shared<function_decl>(proto.decl->location, proto.decl->name, proto.decl->name_id);
+			func_decl_ptr->parameters = proto.decl->parameters;
+			func_decl_ptr->return_type = proto.decl->return_type;
+			func_decl_ptr->body = proto.decl->body;
+			func_decl_ptr->is_coroutine = true;
+			func_decl_ptr->local_count = proto.decl->local_count;
+		}
 		auto closure_env = environment_;
 		// Nested (function-local) coroutine: the resumed body runs on its own frame,
 		// so enclosing-frame slot locals are snapshot by value into a capture env
@@ -10254,7 +10265,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 				closure_env = captureEnv;
 			}
 		}
-		func_decl_ptr->unit = current_unit();
+		func_decl_ptr->unit = decl_unit;
 		uint64_t coroutine_type_id = coroutine_handle_type_id_;
 		script_value functionValue = script_value::make_function(
 			[eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -10479,7 +10490,8 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 
 	// Capture-free closures mint ONCE per node (closure_env = nullptr each time);
 	// capturing ones share the node's parameter storage
-	std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env ? nullptr : proto.lambda->mint_cache;
+	const unit_stamp decl_unit = current_unit();
+	std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env || (proto.lambda->mint_cache && proto.lambda->mint_cache->unit.id != decl_unit.id) ? nullptr : proto.lambda->mint_cache;
 	if (!lambdaFunc) {
 		lambdaFunc = std::make_shared<script_defined_function>(
 			"<lambda>",
@@ -10487,7 +10499,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			proto.lambda->return_type,
 			proto.body,
 			needs_capture_env ? final_closure_env : nullptr);
-		lambdaFunc->unit = current_unit();
+		lambdaFunc->unit = decl_unit;
 		if (!needs_capture_env) { proto.lambda->mint_cache = lambdaFunc; }
 	}
 

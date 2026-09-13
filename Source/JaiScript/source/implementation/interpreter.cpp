@@ -9059,7 +9059,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     // is nullptr, so every creation is identical - body wrap, parameter storage and the
     // function object all reuse); capturing lambdas share the node's parameter storage
     // but carry their per-creation capture environment.
-    std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env ? nullptr : expr->mint_cache;
+    const unit_stamp decl_unit = current_unit();
+    std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env || (expr->mint_cache && expr->mint_cache->unit.id != decl_unit.id) ? nullptr : expr->mint_cache;
     if (!lambdaFunc) {
         // Convert the lambda body to a block_stmt if it's not already
         std::shared_ptr<block_stmt> lambdaBody;
@@ -9082,7 +9083,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             needs_capture_env ? final_closure_env : nullptr,  // Only use closure env if we have captures
             expr->local_count   // the frame reserves every slot up front, as a named function's does
         );
-        lambdaFunc->unit = current_unit();
+        lambdaFunc->unit = decl_unit;
         if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
     }
 
@@ -11513,7 +11514,8 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         // The shared function_decl copy the handle pins is identical on every execution
         // of this declaration - mint it once per node.
         auto& func_decl_ptr = decl->coroutine_mint_cache;
-        if (!func_decl_ptr) {
+        const unit_stamp decl_unit = current_unit();
+        if (!func_decl_ptr || func_decl_ptr->unit.id != decl_unit.id) {
             func_decl_ptr = std::make_shared<function_decl>(decl->location, decl->name, decl->name_id);
             func_decl_ptr->parameters = decl->parameters;
             func_decl_ptr->return_type = decl->return_type;
@@ -11583,7 +11585,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             }
         }
         engine* eng = engine_;
-        func_decl_ptr->unit = current_unit();
+        func_decl_ptr->unit = decl_unit;
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(
             [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11600,9 +11602,11 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     }
 
     // Don't capture any environment in the closure - just use nullptr (which also makes
-    // the mint node-cacheable: every execution of this declaration is identical)
+    // the mint node-cacheable: every execution of this declaration under one unit is identical;
+    // another unit executing the node, an includer of the same file, mints its own)
     auto& scriptFunc = decl->mint_cache;
-    if (!scriptFunc) {
+    const unit_stamp decl_unit = current_unit();
+    if (!scriptFunc || scriptFunc->unit.id != decl_unit.id) {
         scriptFunc = std::make_shared<script_defined_function>(
             decl->name,
             shared_parameters_for(decl),
@@ -11612,7 +11616,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             decl->local_count  // Slot count for stack allocation
         );
     }
-    scriptFunc->unit = current_unit();
+    scriptFunc->unit = decl_unit;
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.

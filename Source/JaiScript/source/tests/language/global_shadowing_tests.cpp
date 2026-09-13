@@ -9,6 +9,9 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <functional>
+#include <filesystem>
+#include <fstream>
+#include <jaiscript/testing/temporary_directory.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -185,6 +188,25 @@ public:
 				e.execute("var g = 2; var f = mk(); var h = mkf(); var c = mkc();");
 				e.execute("var g = 3;");
 				return e.execute("to_string(f()) + \" \" + to_string(h()) + \" \" + to_string(c().resume())").as_string();
+			});
+		});
+		test("a_callable_minted_by_a_shared_include_keeps_its_includers_unit", [this]() {
+			// Astra's saved-function matrix (2026-09-13): one file's declaration node runs under two includers; the callable each
+			// includer saved is that includer's (a cached mint is reused only under the unit it was minted for), for a named
+			// function, a lambda and a coroutine alike
+			every_backend("shared include", "11 22 11 22|11 22|11 22", [](engine& e) {
+				auto write_tmp = [](const std::string& name, const std::string& body) {
+					std::filesystem::path p = jai::foundry::test_temp_directory() / name;
+					std::ofstream(p) << body;
+					return p.generic_string();
+				};
+				const std::string fn = write_tmp("shadow_factory.jai", "function read() { return x; } read;");
+				const std::string lam = write_tmp("shadow_lambda.jai", "var r = function() { return x; }; r;");
+				const std::string gen = write_tmp("shadow_gen.jai", "coroutine gen() { yield x; } gen;");
+				e.execute("var x = 11; var fa = include \"" + fn + "\"; var la = include \"" + lam + "\"; var ga = include \"" + gen + "\";");
+				e.execute("var x = 22; var fb = include \"" + fn + "\"; var lb = include \"" + lam + "\"; var gb = include \"" + gen + "\";");
+				return e.execute("to_string(fa()) + \" \" + to_string(fb()) + \" \" + to_string(fa()) + \" \" + to_string(fb()) + \"|\""
+				                 " + to_string(la()) + \" \" + to_string(lb()) + \"|\" + to_string(ga().resume()) + \" \" + to_string(gb().resume())").as_string();
 			});
 		});
 		test("a_block_is_a_scope_inside_a_unit", [this]() {

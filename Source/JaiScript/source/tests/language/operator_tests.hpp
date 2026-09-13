@@ -347,6 +347,27 @@ public:
             check(message.find("'same_object' expects 2 arguments, got 1") != std::string::npos, message);
         });
 
+        test("branch_conditions_run_in_source_order_with_short_circuit", [this]() {
+            // nested `&&`, `||` and `!` in if, while and ternary conditions: each operand runs once, in source order, and
+            // a short-circuited operand never runs; a logical expression in value position is still a bool
+            auto eng = make_engine();
+            eng->execute("string log = \"\"; function p(string n, bool v) -> bool { log = log + n; return v; }");
+            eng->execute("function run() -> string { log = \"\";"
+                         " if ((p(\"a\", false) || p(\"b\", true)) && p(\"c\", false)) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " if (!(p(\"d\", true) && p(\"e\", false)) || p(\"f\", false)) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " if (p(\"g\", false) || p(\"h\", false) || p(\"i\", true) || p(\"j\", true)) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " int i = 0; while ((p(\"k\", i < 2) || p(\"l\", false)) && p(\"m\", true)) { i = i + 1; }"
+                         " string t = (p(\"n\", false) || p(\"o\", true)) ? \"x\" : \"y\"; log = log + t;"
+                         " if (!(p(\"q\", false) || p(\"r\", true))) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " int a = 1; float b = 2.5; if ((a < 2 && b > 3.0) || a == 1) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " if (!(a < 2) || !(b > 3.0)) { log = log + \"T\"; } else { log = log + \"F\"; }"
+                         " for (int k = 0; !(k >= 2) && (k < 5 || p(\"z\", true)); k = k + 1) { log = log + \"w\"; }"
+                         " bool v = p(\"s\", true) || p(\"t\", false); if (v) { log = log + \"V\"; }"
+                         " return log; }");
+            check_eq(std::string("abcFdeTghiTkmkmklnoxqrFTTwwsV"), eng->execute("run()").as_string());
+            check_eq(std::string("abcFdeTghiTkmkmklnoxqrFTTwwsV"), eng->execute("run()").as_string());
+        });
+
         test("operator_subscript_returns_class", [this]() {
             const char* src = R"(
                 class Cell {

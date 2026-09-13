@@ -1740,26 +1740,33 @@ var G = 1;
 var retag_at = function(int i, int at) -> void { if (i == at) { host_retag(); } };
 var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at); if (i == 2) { G = 1.5; } else { G = G + 1; } i = i + 1; } return to_string(G) + " " + type_of(G); };
 )JAI";
-			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
+			// same_unit: the host redeclares through the program's own unit (a reload of its file writes in place, the retag this row
+			// is about); otherwise through a literal, another unit, which shadows and leaves the loop on its own cell
+			auto run_with = [&](bool vm, const std::string& script, bool proofs, bool same_unit) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
 				stdlib::register_all(*e);
 				if (!proofs) { e->type_proofs(false); }
+				e->disable(jai::filesystem);
 				engine* raw = e.get();
-				e->add_function("host_retag", [raw]() { raw->execute("int G = 5;"); });
-				try { return e->execute(script).as_string(); }
+				const std::string path = "D:/virtual/pilot/retag_unit.jai";
+				e->add_function("host_retag", [raw, same_unit, path]() { if (same_unit) { raw->execute_file_source(path, "int G = 5;"); } else { raw->execute("int G = 5;"); } });
+				try { return (same_unit ? e->execute_file_source(path, script) : e->execute(script)).as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			struct probe { const char* call; };
 			const probe probes[] = { { "probe(4, 2);" }, { "probe(4, 0);" }, { "probe(4, 9);" }, { "probe(6, 3);" } };
 			for (const probe& p : probes) {
-				for (bool proofs : { true, false }) {
-					const std::string script = std::string(defs) + " " + p.call;
-					const std::string interp = run_with(false, script, proofs), vm = run_with(true, script, proofs);
-					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+				for (bool same_unit : { true, false }) {
+					for (bool proofs : { true, false }) {
+						const std::string script = std::string(defs) + " " + p.call;
+						const std::string interp = run_with(false, script, proofs, same_unit), vm = run_with(true, script, proofs, same_unit);
+						check_eq(interp, vm, std::string(p.call) + (same_unit ? " same unit" : " other unit") + (proofs ? "" : " proofs off") + ": both backends");
+					}
 				}
 			}
-			check(run_with(true, std::string(defs) + " probe(4, 2);", true).find("int") != std::string::npos, "the redeclared int boundary holds after the call: " + run_with(true, std::string(defs) + " probe(4, 2);", true));
+			check(run_with(true, std::string(defs) + " probe(4, 2);", true, true).find("int") != std::string::npos, "the redeclared int boundary holds after the call when the same unit redeclares: " + run_with(true, std::string(defs) + " probe(4, 2);", true, true));
+			check(run_with(true, std::string(defs) + " probe(4, 2);", true, false).rfind("2.5", 0) == 0, "another unit's redeclaration shadows and the loop keeps its own cell: " + run_with(true, std::string(defs) + " probe(4, 2);", true, false));
 		});
 		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
 			// Astra's third finding and its callee-getter follow-up: `take(V, G + 1)` where V is a global reference to a native
@@ -1939,8 +1946,10 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 				e->add_global_ref("box", source);
 				e->add_function("arm", [&source]() { source.armed = true; });
 				try {
-					const std::string before = e->execute(std::string(defs) + " " + first).as_string();   // compiled and run while the names are values
-					e->execute("var& P = box.grid; var& X2 = box.number;");   // the host redeclares them as references to properties
+					e->disable(jai::filesystem);
+					const std::string path = "D:/virtual/pilot/reload_unit.jai";
+					const std::string before = e->execute_file_source(path, std::string(defs) + " " + first).as_string();   // compiled and run while the names are values
+					e->execute_file_source(path, "var& P = box.grid; var& X2 = box.number;");   // the same unit (a reload of the file) redeclares them in place as references to properties
 					return before + " / " + e->execute(std::string("arm(); ") + second).as_string();
 				}
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -1981,8 +1990,10 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 					.build();
 				e->add_global_ref("box", source);
 				try {
-					e->execute("var VALUES = [10]; var P = [10]; function probe() { array<int> Q = [0]; return P[Q[0]]; } probe();");
-					e->execute("var& P = box.values;");
+					e->disable(jai::filesystem);
+					const std::string path = "D:/virtual/pilot/null_unit.jai";
+					e->execute_file_source(path, "var VALUES = [10]; var P = [10]; function probe() { array<int> Q = [0]; return P[Q[0]]; } probe();");
+					e->execute_file_source(path, "var& P = box.values;");   // the same unit (a reload) redeclares P in place
 					source.armed = true; source.calls = 0;
 					const std::string r = e->execute("var result = \"\"; try { probe(); result = \"value\"; } catch (err) { result = \"caught\"; } result;").as_string();
 					return r + "|" + std::to_string(source.calls);

@@ -70,6 +70,7 @@ namespace jai {
         check_state check_state_ = check_state::unchecked;
         check_report check_report_;
         uint64_t proof_epoch_ = UINT64_MAX;   // UINT64_MAX = nodes carry no proofs
+        uint32_t unit_ = 0;   // shadowing unit, numbered at the first execute
     };
 
 } // namespace jai

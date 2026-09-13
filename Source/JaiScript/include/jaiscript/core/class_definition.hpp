@@ -363,6 +363,8 @@ public:
     // pinned for the engine's lifetime (methods_ -> dispatcher -> class cycle), so a
     // cached identity can never be a recycled address with a coincidental epoch.
     uint64_t method_epoch() const { return method_epoch_; }
+    unit_stamp unit() const { return unit_; }
+    void set_unit(unit_stamp unit) { unit_ = unit; }
     void bump_method_epoch() {
         ++method_epoch_;
         for (auto& weak_derived : derived_classes_) {
@@ -2133,6 +2135,7 @@ private:
 
     // See method_epoch(): per-call-site inline-cache validity stamp
     uint64_t method_epoch_ = 1;
+    unit_stamp unit_{};   // the unit and execution of the class declaration: field initializers resolve in it
     // See field_shape_epoch(): field-proof validity stamp
     uint64_t field_shape_epoch_ = 1;
 

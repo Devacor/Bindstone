@@ -392,6 +392,14 @@ engine stays usable", not by `check_throws`.
   so the strict checker can hold the slot to callables and null without the runtime changing; `ClassName& name = expr;` and
   `ClassName& name;` at statement level are reference declarations (the same lookahead that reads `ClassName& name(` as a
   reference-return function; C++: whatever can be a declaration is one). `.jaibite` version 15.
+- **Program-scope redeclarations shadow by unit** (Dev ruling 2026-09-12; `docs/global_shadowing.md`): each
+  executed source is a unit (a file by path, a literal by content), numbered at first execution; a variable
+  declared again by ANOTHER unit gets its own cell; code resolves a name to its own unit's cell, else to the
+  newest cell declared no later than its compile time (a function: the run that minted it; top-level code: its
+  current run, so a re-run reader string reads as of now), so code compiled before a redeclaration keeps its
+  binding; the SAME unit (a reload, a re-run hook string) writes in place, and
+  functions/classes always replace in place (hot reload). The host reads and assigns the newest cell. Zero cost
+  on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`).
 - **Catch variable = block-scoped local** (`docs/EXCEPTION_DESIGN.md` addendum): `catch (e)`
   binds `e` as a frame-slot local of the catch body (scope env at top level) - C++ `catch`
   semantics: shadows for the block only, invisible to callees and after the block, captured

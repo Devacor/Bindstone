@@ -908,6 +908,9 @@ namespace jai {
         // every host registration). Cross-function proofs cache against it.
         uint64_t definition_epoch() const;
         void bump_definition_epoch();
+        // The shadowing unit whose code is running (0 = the host: a file by path or a literal by
+        // content, numbered at first execution) and its execution number (docs/global_shadowing.md)
+        unit_stamp current_unit() const;
         // Read-only by-value parameter binds that shared the argument instead of cloning it
         // (main thread; a test observable for the elision)
         uint64_t parameter_alias_binds() const;
@@ -1094,7 +1097,7 @@ namespace jai {
         // jaibite does, so the pre-parsed path can never drift semantically.
         script_value execute_parsed(const std::vector<declaration_ptr>& declarations,
                                     std::shared_ptr<void>& compiled_slot,
-                                    const instance_variables* instanceVars);
+                                    const instance_variables* instanceVars, uint32_t unit);
 
         // The one lex+parse+run entry: stamps `sourcePath` onto every AST node and keys
         // the parse cache on (sourcePath, content). Not public — attributing raw content

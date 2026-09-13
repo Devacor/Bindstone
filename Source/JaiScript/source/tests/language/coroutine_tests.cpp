@@ -51,13 +51,19 @@ public:
         // coroutine's saved env chain, so resuming in a later execute (with global redeclares
         // in between) threw "Undefined variable 'g'"; vm fibers resumed fine.
         test("coroutine_resume_across_executes_with_redeclare", [this]() {
+            // the coroutine body belongs to the unit that declared it (docs/global_shadowing.md): another unit's
+            // `var g` shadows and the body keeps its own g; the same unit (a reload of the file) writes in place
             auto engine = make_engine();
-            engine->execute("var g = 1; coroutine int co() { yield g; yield g; yield g; }");
+            engine->disable(jai::filesystem);
+            const std::string path = "D:/virtual/coroutine/redeclare_unit.jai";
+            engine->execute_file_source(path, "var g = 1; coroutine int co() { yield g; yield g; yield g; yield g; }");
             engine->execute("var c = co();");
             check_eq(static_cast<script_int>(1), engine->execute("c.resume();").as<script_int>());
-            engine->execute("var g = 2; var advnew_a = 10;");   // redeclare + fresh define
+            engine->execute("var g = 2; var advnew_a = 10;");   // another unit: shadows, the body keeps g = 1
+            check_eq(static_cast<script_int>(1), engine->execute("c.resume();").as<script_int>());
+            engine->execute_file_source(path, "var g = 2;");   // the same unit: in place
             check_eq(static_cast<script_int>(2), engine->execute("c.resume();").as<script_int>());
-            engine->execute("g = 3;");
+            engine->execute_file_source(path, "g = 3;");
             check_eq(static_cast<script_int>(3), engine->execute("c.resume();").as<script_int>());
         });
 

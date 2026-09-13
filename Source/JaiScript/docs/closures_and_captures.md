@@ -43,8 +43,10 @@ the global environment directly, so these resolve **live, at call time**:
 
 - `engine::add_global` rebinding is visible to closures created earlier.
 - A **module-scope `var x = ...`** (top level of an executed file) *is* a global: it lives
-  in the shared global environment, persists across `execute()` calls on the same engine,
-  and a later file declaring `var x` again **updates the same storage in place**.
+  in the shared global environment and persists across `execute()` calls on the same engine.
+  The same file (or the same literal string) declaring `var x` again **updates the same
+  storage in place**; a *different* file declaring `var x` gets its own binding, and the
+  first file's functions and closures keep theirs (`docs/global_shadowing.md`).
 - Exception: `execute()` called with `instance_variables` puts top-level `var`s in a
   temporary overlay that evaporates (see `docs/LOCAL_VARIABLES_BEHAVIOR.md`).
 
@@ -71,9 +73,10 @@ current value.
 
 Re-executing script files on a **shared engine** has no C++ analogue, and Tier 2 is where
 it bites: if a host injects `add_global("ctx", A)`, runs file 1, then injects `ctx = B` and
-runs file 2, any *deferred* closure from file 1 that reads `ctx` (or a module-scope
-`var self = ctx;`) now sees **B** — module-scope vars are one shared storage that later
-files clobber.
+runs file 2, any *deferred* closure from file 1 that reads `ctx` now sees **B**: an injected
+global is one shared storage the host rewrites. A module-scope `var self = ctx;` is safe
+against a *different* file's declaration of `self` (that file gets its own binding), but the
+same file executed again for another context rewrites it in place.
 
 **The rule for deferred closures (signal receivers, stored hooks): reference only Tier 1
 names.** Receive the context as a hook *parameter* and let closures capture that; never

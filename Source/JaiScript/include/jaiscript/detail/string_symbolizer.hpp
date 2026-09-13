@@ -10,6 +10,7 @@
 #include <string_view>
 #include <cassert>
 #include <cstdint>
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <limits>
 #include <optional>
 
@@ -111,6 +112,17 @@ namespace jai {
 		// the allocator recycles the address. Starts past 0 (0 = never-cacheable).
 		[[nodiscard]] inline std::uint64_t next_env_serial() noexcept { return ++env_epoch_; }
 
+		// The unit whose code is running (0 = the host): a file by path or a literal by content,
+		// numbered by the engine at first execution. A program-scope variable redeclared by
+		// another unit gets its own cell; shadow_count() nonzero means some name has versions
+		// and lookups pick the version by unit (docs/global_shadowing.md).
+		[[nodiscard]] inline unit_stamp current_unit() const noexcept { return current_unit_; }
+		inline void set_current_unit(unit_stamp unit) noexcept { current_unit_ = unit; }
+		// A fresh execution number: the seq of the stamp execute_parsed installs for a run
+		[[nodiscard]] inline std::uint32_t next_execution() noexcept { return ++execution_count_; }
+		[[nodiscard]] inline std::uint32_t shadow_count() const noexcept { return shadow_count_; }
+		inline void note_shadow() noexcept { ++shadow_count_; }
+
 		// Debug tripwire for parallel regions: while frozen, an intern MISS asserts (the
 		// pre-warm pass at the region barrier must make every worker intern a HIT). Reads
 		// are unaffected; zero cost on the hit path.
@@ -188,6 +200,9 @@ namespace jai {
 		mutable id_type this_id_{ std::numeric_limits<id_type>::max() };
 
 		std::uint64_t env_epoch_ = 1;
+		unit_stamp current_unit_{};
+		std::uint32_t execution_count_ = 0;
+		std::uint32_t shadow_count_ = 0;
 
 		// Parallel-region tripwire (see set_frozen)
 		bool frozen_ = false;

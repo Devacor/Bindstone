@@ -678,6 +678,7 @@ namespace jai::vm {
             strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
+            unit_stamp prev_unit{};                    // the caller's shadowing unit, restored at pop
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             // In-loop ctor-body frames (exec_new shared_ptr arm): stamp the completed
@@ -715,6 +716,10 @@ namespace jai::vm {
         std::vector<pending_call_site> external_site_stack_;
 
         string_symbolizer* symbolizer_;
+        // Shadowing unit of the running code (string_symbolizer::current_unit): set at every frame
+        // push from the callee's function or class, restored at pop; a worker never writes it
+        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_) { symbolizer_->set_current_unit(unit); } }
+        unit_stamp current_unit() const noexcept { return symbolizer_->current_unit(); }
         // Epoch sink handed to every environment this vm constructs (== symbolizer_
         // everywhere except a parallel worker; see configure_parallel_worker)
         string_symbolizer* env_symbolizer_ = nullptr;

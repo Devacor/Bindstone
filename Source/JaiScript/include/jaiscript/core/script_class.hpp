@@ -38,6 +38,7 @@ public:
         auto eng = get_engine();
         if (!eng) return;
         uint64_t name_id = eng->symbolize(name);
+        ast->unit = eng->current_unit();
 
         // Constructors and destructors don't need override validation
         bool is_constructor = (name == get_name());
@@ -109,6 +110,7 @@ public:
     // Add constructor from AST
     void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast) {
         // Store for later reference
+        if (auto eng = get_engine()) { ctor_ast->unit = eng->current_unit(); }
         constructor_asts_.push_back(ctor_ast);
 
         // The constructor is already added to the environment by visit_class_decl
@@ -271,6 +273,7 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     uint64_t name_id = eng->symbolize(name);
 
     // Store the AST in method_overloads_ for type-based resolution
+    if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
     method_overloads_[name_id].push_back(ast);
 
     // Invalidate overload resolution cache for this method name (new overload may change resolution)
@@ -315,6 +318,7 @@ inline void class_definition::add_static_script_method(std::string_view name, st
     if (method_name_id == UINT64_MAX) {
         method_name_id = name_id;
     }
+    if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
     static_method_overloads_[method_name_id].push_back(ast);
 
     static_methods_.insert_or_assign(name_id, script_value::make_function(

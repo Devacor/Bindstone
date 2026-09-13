@@ -26,7 +26,8 @@
 
 namespace jai {
     class script_class_definition;
-    namespace detail { struct caller_frame_view; }
+    namespace detail { struct caller_frame_view; struct namespace_store_target; }
+    struct script_namespace_data;
 }
 
 namespace jai::vm {
@@ -887,6 +888,11 @@ namespace jai::vm {
             expression_ptr pin;
         };
         std::unordered_map<const expression*, expr_chunk_cache_entry> expr_chunk_cache_;
+        struct decl_chunk_cache_entry {   // a namespace's variable declaration as a one-declaration program
+            std::shared_ptr<chunk> compiled;
+            declaration_ptr pin;
+        };
+        std::unordered_map<const declaration*, decl_chunk_cache_entry> decl_chunk_cache_;
 
         void arm_execution_deadline();
         bool execution_budget_exhausted();
@@ -1499,6 +1505,10 @@ namespace jai::vm {
         std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
                                                          const script_value& dereferenced, const script_value& value);
         op_status store_static_target(frame& f, member_expr* member, const script_value& result, script_value* stored_out = nullptr);
+        // ns::x = v / op= / ++ on a namespace variable's cell, and a namespace's variable declaration run in its scope
+        // (detail/namespace_scope.hpp)
+        op_status store_namespace_cell(const detail::namespace_store_target& target, member_expr* member, script_value incoming, script_value* stored_out);
+        op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare
         // sibling calls): call paths recover the payload (kind bound_method) and enter

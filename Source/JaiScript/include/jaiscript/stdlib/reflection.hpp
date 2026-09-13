@@ -185,6 +185,11 @@ inline script_value resolve_free_callable(engine* eng, const std::string& name, 
         auto ns_it = spaces.find(eng->get_symbolizer()->intern(name.substr(0, pos)));
         if (ns_it != spaces.end() && ns_it->second) {
             const uint64_t member_id = eng->get_symbolizer()->intern(name.substr(pos + 2));
+            if (ns_it->second->scope) {   // a function held by a namespace variable
+                if (auto* cell = ns_it->second->scope->get_own_value_ptr(member_id); cell && cell->deref().is_function()) {
+                    return cell->deref();
+                }
+            }
             auto var_it = ns_it->second->variables.find(member_id);
             if (var_it != ns_it->second->variables.end() && var_it->second.is_function()) {
                 return var_it->second;
@@ -765,6 +770,13 @@ inline void register_reflection_functions(engine& eng_ref) {
             for (auto& [vid, value] : data->variables) {
                 if (value.is_function()) {
                     names.insert(ns + "::" + std::string(sym->get_string(vid)));
+                }
+            }
+            if (data->scope) {
+                for (auto& [vname, value] : data->scope->get_all_variables()) {
+                    if (value.deref().is_function()) {
+                        names.insert(ns + "::" + std::string(vname));
+                    }
                 }
             }
         }

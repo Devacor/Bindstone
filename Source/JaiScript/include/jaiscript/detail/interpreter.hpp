@@ -59,6 +59,7 @@ namespace jai {
     class script_class_definition;
     class class_definition;
     class class_instance;
+    namespace detail { struct namespace_store_target; }
     namespace debug { class controller; }
 
     // Forward declare interpreter for scoped_method_environment
@@ -1098,6 +1099,8 @@ namespace jai {
         // - nullptr target = uninitialized (auto x;), locks to source type
         // - any_type target = dynamic (var x), allows anything
         // - locked target = enforce compatibility or convert
+        // ns::x = v / op= / ++ on a namespace variable's cell (detail/namespace_scope.hpp resolves the target)
+        checked_result<script_value> store_namespace_cell(const detail::namespace_store_target& target, const member_expr* member, script_value incoming);
         checked_result<script_value> enforce_type_compatibility(
             script_value value,
             type_info_ptr target_type,

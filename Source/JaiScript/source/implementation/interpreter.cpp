@@ -12,6 +12,7 @@
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
+#include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
@@ -4872,6 +4873,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             auto* memberExpr = static_cast<member_expr*>(expr->target.get());
             // C::s op= v writes back through the shared static-store kernel (vm parity)
             auto store_static_target = [&](const script_value& result) -> checked_result<script_value> {
+                if (auto ns_target = detail::resolve_namespace_store(*engine_, memberExpr, *string_symbolizer_)) {
+                    return store_namespace_cell(*ns_target, memberExpr, clone_for_assignment(result));
+                }
                 auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
                                                               environment_->find_access_context());
                 if (!cls) {
@@ -5984,6 +5988,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Static member assignment: the shared kernel resolves the class and runs the
             // field-store table over the static's declared type (vm parity)
             if (memberExpr->is_static) {
+                if (auto ns_target = detail::resolve_namespace_store(*engine_, memberExpr, *string_symbolizer_)) {
+                    auto stored = store_namespace_cell(*ns_target, memberExpr, clone_for_assignment(value));
+                    if (!stored) {
+                        return stored.error_value();
+                    }
+                    push_value(expression_result_needed_ ? clone_for_assignment(stored.value()) : std::move(stored.value()));
+                    return {};
+                }
                 auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
                                                               environment_->find_access_context());
                 if (!cls) {
@@ -6758,6 +6770,43 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
 // === STRONG TYPES: Type enforcement for assignment ===
 // The one typed-slot table (detail::convert_for_typed_slot); this site owns the assignment
 // texts. KEEP BYTE-PARALLEL with vm_backend::enforce_type_compatibility.
+// A namespace variable's store (ns::x = v, op=, ++): the scope's cell takes the value under the same typed
+// enforcement an environment variable gets, a reference-declared variable stores through, a host-registered
+// entry is read-only. KEEP BYTE-PARALLEL with vm_backend::store_namespace_cell.
+checked_result<script_value> interpreter::store_namespace_cell(const detail::namespace_store_target& target, const member_expr* member, script_value incoming) {
+    if (!target.cell) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
+            "Cannot assign to '{0}': it is read-only", member->member_id);
+    }
+    script_value* storage = target.cell;
+    if (storage->is_reference()) {
+        auto* holder = storage->get_reference_holder();
+        if (holder && holder->has_cell) {
+            storage = holder->cell();
+        } else {
+            JAISCRIPT_TRY(detail::ref_store_through(*storage, incoming, engine_, string_symbolizer_));
+            return incoming;
+        }
+    }
+    type_info_ptr slot_type = storage->get_type_info();
+    if (slot_type && (slot_type->base_type != incoming.type() ||
+                      slot_type->base_type == script_value_type::jai_object_type ||
+                      slot_type->base_type == script_value_type::jai_array_type ||
+                      slot_type->base_type == script_value_type::jai_map_type)) {
+        auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
+        if (!enforced) {
+            return enforced.error_value();
+        }
+        incoming = std::move(enforced.value());
+        if (slot_type->base_type == script_value_type::jai_any_type &&
+            (!incoming.get_type_info() || incoming.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
+            incoming.set_type_info(slot_type);
+        }
+    }
+    *storage = std::move(incoming);
+    return *storage;
+}
+
 checked_result<script_value> interpreter::enforce_type_compatibility(
     script_value value,
     type_info_ptr target_type,
@@ -7694,8 +7743,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                 uint64_t namespace_id = name_id;
                 uint64_t member_id = expr->member_id;
                 engine* eng = engine_;
-                auto mint_env = environment_;
-                script_function namespace_func = [eng, mint_env, overloads, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+                script_function namespace_func = [eng, overloads, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                     execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
                     if (!backend) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
@@ -7715,16 +7763,19 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     {
                         const auto& func_decl = ns_pick;
                         if (func_decl) {
-                            // Create an environment with namespace variables accessible
-                            auto ns_env = std::make_shared<environment>(mint_env, eng->get_symbolizer());
-
-                            // Add all namespace variables to this environment
+                            // The namespace's scope is the body's environment (its cells, then the globals);
+                            // host-registered entries stay visible by their bare names through a layer above it
                             auto& namespaces = eng->script_namespaces();
                             auto ns_it = namespaces.find(namespace_id);
-                            if (ns_it != namespaces.end()) {
+                            std::shared_ptr<environment> ns_env = ns_it != namespaces.end() && ns_it->second
+                                ? detail::namespace_scope(*eng, *ns_it->second)
+                                : std::make_shared<environment>(eng->get_global_environment(), eng->get_symbolizer());
+                            if (ns_it != namespaces.end() && ns_it->second && !ns_it->second->variables.empty()) {
+                                auto host_layer = std::make_shared<environment>(ns_env, eng->get_symbolizer());
                                 for (const auto& [var_id, var_value] : ns_it->second->variables) {
-                                    ns_env->define(var_id, var_value);
+                                    host_layer->define(var_id, var_value);
                                 }
+                                ns_env = std::move(host_layer);
                             }
 
                             // Found matching arity - create script_defined_function with namespace environment
@@ -7765,6 +7816,12 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             }
 
             // Look for variable in namespace
+            if (ns_data->scope) {
+                if (script_value* cell = ns_data->scope->get_own_value_ptr(expr->member_id)) {
+                    push_value(*cell);
+                    return {};
+                }
+            }
             auto var_it = ns_data->variables.find(expr->member_id);
             if (var_it != ns_data->variables.end()) {
                 push_value(var_it->second);
@@ -12354,14 +12411,13 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 var_decl->name_id = string_symbolizer_->intern(var_decl->name);
             }
 
-            // Evaluate variable initializer and store value
-            if (var_decl->initializer) {
-                JAISCRIPT_TRY(dispatch_expr(var_decl->initializer.get()));
-                script_value value = pop_value();
-                ns_data->variables[var_decl->name_id] = value;
-            } else {
-                // No initializer - store null
-                ns_data->variables[var_decl->name_id] = make_value();
+            // The declaration runs in the namespace's scope (visit_variable_decl's every path): its cell lives there
+            // and its initializer sees the members declared before it. KEEP BYTE-PARALLEL with vm_backend::exec_namespace_variable.
+            struct scope_swap { std::shared_ptr<environment>& slot; std::shared_ptr<environment> saved; ~scope_swap() { slot = std::move(saved); } } swap{environment_, environment_};
+            environment_ = detail::namespace_scope(*engine_, *ns_data);
+            JAISCRIPT_TRY(visit_variable_decl(var_decl));
+            if (is_unwinding_) {
+                return {};
             }
 
         } else if (member_decl->get_type() == node_type::class_decl) {

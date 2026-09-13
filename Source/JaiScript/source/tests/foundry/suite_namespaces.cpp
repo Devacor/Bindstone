@@ -1,5 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -293,6 +295,152 @@ public:
             auto r3 = eng->execute("dog::wag()");
             check_eq(r3.as<int>(), 200);
         });
+        // Row 123.4: a namespace is a scope; its variables are cells (C++). Stores through ns::x, writes from the
+        // namespace's own functions, initializers over earlier members, reopening in place, host entries read-only.
+        test("namespace_variable_store_from_outside", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { var x = 3; int y = 4; }
+                ns::x = 10; ns::x += 5; ++ns::x;
+                ns::y = 7; ns::y++;
+                auto r = (ns::x = 20);
+                to_string(ns::x) + " " + to_string(ns::y) + " " + to_string(r)
+            )");
+            check_eq(std::string("20 8 20"), result.as<std::string>());
+        });
+
+        test("namespace_function_writes_and_reads_its_variable", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns {
+                    var x = 3;
+                    function set(v) { x = v; }
+                    function get() { return x; }
+                    function bump() { x += 1; return x; }
+                }
+                ns::set(42);
+                var a = to_string(ns::x) + " " + to_string(ns::get());
+                ns::x = 5;
+                a + " " + to_string(ns::get()) + " " + to_string(ns::bump()) + " " + to_string(ns::x)
+            )");
+            check_eq(std::string("42 42 5 6 6"), result.as<std::string>());
+        });
+
+        test("namespace_initializer_sees_earlier_members", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { var x = 3; var y = x + 1; int z = y * 2; }
+                ns::y * 100 + ns::z
+            )");
+            check_eq((int64_t)408, result.as_int());
+        });
+
+        test("namespace_reopen_redeclares_in_place", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { var x = 3; function get() { return x; } }
+                namespace ns { var x = 30; }
+                to_string(ns::x) + " " + to_string(ns::get())
+            )");
+            check_eq(std::string("30 30"), result.as<std::string>());
+        });
+
+        test("nested_namespace_variable_store", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace outer::inner { var z = 5; function get() { return z; } }
+                outer::inner::z = 6;
+                outer::inner::z += 1;
+                outer::inner::z * 10 + outer::inner::get()
+            )");
+            check_eq((int64_t)77, result.as_int());
+        });
+
+        test("typed_namespace_variable_store_runs_the_assignment_table", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { int y = 4; }
+                int y = 4;
+                function s(var flag) { if (flag) { return "s"; } return 1; }
+                var out = ""; var out2 = "";
+                try { ns::y = s(true); out = "stored"; } catch (e) { out = e; }
+                try { y = s(true); out2 = "stored"; } catch (e) { out2 = e; }
+                var fv = 7.9;
+                ns::y = fv; y = fv;
+                (out == out2 && out != "stored" && to_string(ns::y) == to_string(y))
+                    ? "same"
+                    : (out + " | " + out2 + " | " + to_string(ns::y) + " | " + to_string(y))
+            )");
+            check_eq(std::string("same"), result.as<std::string>());
+        });
+
+        test("host_registered_namespace_entry_is_read_only", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto& ns = eng->script_namespaces()[eng->symbolize("cfg")];
+            if (!ns) { ns = std::make_shared<script_namespace_data>(); }
+            ns->variables[eng->symbolize("host")] = script_value(static_cast<script_int>(5), eng.get());
+            auto result = eng->execute(R"(
+                namespace cfg { var own = 1; function peek() { return cfg::host * 10 + own; } }
+                var out = to_string(cfg::host) + " " + to_string(cfg::peek());
+                try { cfg::host = 1; out = out + " stored"; } catch (e) { out = out + " " + e; }
+                out
+            )");
+            check_eq(std::string("5 51 Cannot assign to 'host': it is read-only"), result.as<std::string>());
+        });
+
+        test("namespace_lambda_variable_is_callable", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { var twice = function(a) { return a * 2; }; }
+                ns::twice(4)
+            )");
+            check_eq((int64_t)8, result.as_int());
+        });
+
+        test("namespace_function_reaches_a_sibling_by_its_qualified_name", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { function b() { return 11; } function a() { return ns::b(); } }
+                ns::a()
+            )");
+            check_eq((int64_t)11, result.as_int());
+        });
+
+        test("namespace_variable_shared_by_every_unit", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->execute("namespace ns { var x = 1; function get() { return x; } }");
+            eng->execute("var x = 100; ns::x = 2;");
+            auto result = eng->execute("to_string(x) + \" \" + to_string(ns::x) + \" \" + to_string(ns::get())");
+            check_eq(std::string("100 2 2"), result.as<std::string>());
+        });
+
+        test("namespace_variable_is_not_ref_bindable_by_its_qualified_name", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace ns { var x = 1; }
+                function take(var& a) { a = 77; }
+                var out = "";
+                try { var& r = ns::x; out = "bound"; } catch (e) { out = e; }
+                var out2 = "";
+                try { take(ns::x); out2 = "passed"; } catch (e) { out2 = e; }
+                out + "|" + out2 + "|" + to_string(ns::x)
+            )");
+            const std::string text = result.as<std::string>();
+            check(text.rfind("Cannot take reference of non-lvalue expression", 0) == 0);
+            check(text.find("|Cannot pass non-lvalue to reference parameter|1") != std::string::npos);
+        });
+
     }
 };
 

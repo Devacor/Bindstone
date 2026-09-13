@@ -18,6 +18,8 @@
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the interpreter)
+#include <jaiscript/vm/disassembler.hpp>  // the listing sink's text
+#include <jaiscript/vm/chunk_manifest.hpp>  // the listing sink's manifest
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
@@ -1115,10 +1117,22 @@ void vm_backend::exec_yield(frame& f, const vm_instruction& ins) {
 	++f.ip;
 }
 
+void vm_backend::arm_listing() {
+	compiler_.ir_listing(engine_ && static_cast<bool>(engine_->disassembly_sink()));
+}
+
+void vm_backend::note_compiled(const chunk& compiled) {
+	if (!engine_) return;
+	if (const auto& sink = engine_->disassembly_sink()) { sink(disassemble(compiled, symbolizer_), chunk_manifest(compiled, symbolizer_)); }
+}
+
 std::shared_ptr<chunk> vm_backend::compile_only(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
-	return compiler_.compile_program(declarations);
+	arm_listing();
+	auto compiled = compiler_.compile_program(declarations);
+	note_compiled(*compiled);
+	return compiled;
 }
 
 void vm_backend::capture_stack_trace() {
@@ -10714,7 +10728,9 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	if (it != expr_chunk_cache_.end()) {
 		compiled = it->second.compiled;
 	} else {
+		arm_listing();
 		compiled = compiler_.compile_standalone_expression(expr);
+		note_compiled(*compiled);
 		expr_chunk_cache_.emplace(key, expr_chunk_cache_entry{compiled, expr});
 	}
 
@@ -13445,7 +13461,9 @@ op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl
 	} else {
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
+		arm_listing();
 		compiled = compiler_.compile_program(std::vector<declaration_ptr>{member_decl});
+		note_compiled(*compiled);
 		decl_chunk_cache_.emplace(key, decl_chunk_cache_entry{compiled, member_decl});
 	}
 	auto saved_env = environment_;
@@ -13566,7 +13584,9 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			}
 
 		} else {
+			arm_listing();
 			auto compiled = compiler_.compile_standalone_declaration(member_decl);
+			note_compiled(*compiled);
 			frame df;
 			df.code = compiled.get();
 			df.pin = compiled;
@@ -16391,7 +16411,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
-	return run_program(compiler_.compile_program(declarations));
+	arm_listing();
+	auto program = compiler_.compile_program(declarations);
+	note_compiled(*program);
+	return run_program(std::move(program));
 }
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
@@ -16399,7 +16422,9 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 	if (!program) {
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
+		arm_listing();
 		program = compiler_.compile_program(declarations);
+		note_compiled(*program);
 		compiled_slot = program;
 	}
 	return run_program(std::move(program));
@@ -16410,7 +16435,9 @@ script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& dec
 	if (!program) {
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
+		arm_listing();
 		program = compiler_.compile_program(declarations);
+		note_compiled(*program);
 		compiled_slot = program;
 	}
 	return run_program(std::move(program), true);
@@ -16557,7 +16584,9 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	}
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
+	arm_listing();
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
+	note_compiled(*compiled);
 	chunk_cache_.emplace(key, chunk_cache_entry{compiled, body});
 	return compiled;
 }

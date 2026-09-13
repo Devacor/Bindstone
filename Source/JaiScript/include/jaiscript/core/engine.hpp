@@ -16,6 +16,7 @@
 #include "privilege.hpp"
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -285,6 +286,14 @@ namespace jai {
         // next compile; a chunk already compiled keeps its form.
         void ir_passes(bool on);
         bool ir_passes() const;
+        // === THE LISTING SINK (`jaiscript --disasm=<file>`; out/fable/plan_row125_ir_module.md) ===
+        // Unset by default. When set, every chunk the VM compiles from here on (a program, a function at its
+        // define, a standalone expression or declaration) is disassembled as it is compiled, with the regions'
+        // canonical operations listed, and handed to the sink in compile order. No bytecode changes either way.
+        // The sink receives the chunk's readable listing (disassembler.hpp) and its semantic manifest (chunk_manifest.hpp).
+        using disassembly_sink_fn = std::function<void(const std::string& listing, const std::string& manifest)>;
+        void disassembly_sink(disassembly_sink_fn sink);
+        const disassembly_sink_fn& disassembly_sink() const;
         // Diagnostic builds only (JAISCRIPT_VM_PROFILE): restart the VM's opcode and
         // per-script-function accounting here, so what the process prints at exit covers
         // the window from this call on. No effect in ordinary builds.

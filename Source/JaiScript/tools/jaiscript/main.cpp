@@ -129,6 +129,8 @@ struct options {
 	int debug_port = 0;                    // 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
+	std::string disasm;                    // --disasm=<file>: every chunk the VM compiles, disassembled with its regions' IR, in compile order
+	std::string manifest;                  // --manifest=<file>: the same chunks' semantic manifests (the identity gate's text)
 	int benchmark_main = 0;               // file execution warms main; then call it N more times
 	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
 };
@@ -193,6 +195,8 @@ void print_usage() {
 		"options:\n"
 		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
 		"  --check=strict|warn|off\n"
+		"  --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>\n"
+		"  --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits) to <file>\n"
 		"                        static checker mode (default strict: typed mistakes and undeclared\n"
 		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
 		"  --budget=N            execution budget in seconds per execute; overruns raise a script\n"
@@ -264,6 +268,8 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a.rfind("--benchmark-main", 0) == 0) { opt.benchmark_main = std::stoi(value_of("--benchmark-main")); }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
 		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
+		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
+		else if (a.rfind("--manifest", 0) == 0) { opt.manifest = value_of("--manifest"); }
 		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
 		else if (a.rfind("--debug-port", 0) == 0) { opt.debug_port = static_cast<int>(std::stol(value_of("--debug-port"))); }
 		else if (a == "--version" || a == "-v") { std::printf("JaiScript %s\n", jai::version().c_str()); std::exit(0); }
@@ -1069,6 +1075,14 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	eng->parameter_alias(opt.param_alias);
+	if (!opt.disasm.empty() || !opt.manifest.empty()) {
+		auto listing = opt.disasm.empty() ? nullptr : std::make_shared<std::ofstream>(opt.disasm, std::ios::binary | std::ios::trunc);
+		auto manifest = opt.manifest.empty() ? nullptr : std::make_shared<std::ofstream>(opt.manifest, std::ios::binary | std::ios::trunc);
+		eng->disassembly_sink([listing, manifest](const std::string& text, const std::string& facts) {
+			if (listing) { (*listing) << text << "\n"; listing->flush(); }
+			if (manifest) { (*manifest) << facts << "\n"; manifest->flush(); }
+		});
+	}
 	if (engine_out) {
 		eng->set_output_stream(std::shared_ptr<std::ostream>(engine_out, [](std::ostream*) {}));
 	}

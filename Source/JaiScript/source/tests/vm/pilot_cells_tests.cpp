@@ -12,6 +12,8 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/vm/disassembler.hpp>
+#include <jaiscript/vm/chunk_manifest.hpp>
+#include <cstring>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <vector>
@@ -83,6 +85,32 @@ public:
 		compiler.ir_listing(true);
 		return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 	}
+	// the compiled program of a snippet and its symbolizer (the manifest controls mutate a copy)
+	struct compiled_snippet { std::shared_ptr<engine> eng; std::shared_ptr<jai::vm::chunk> program; std::shared_ptr<jai::vm::chunk> function; };   // function: the first function's body (its loops close; program-scope loops run over environment values)
+	compiled_snippet compile_snippet(const std::string& source) {
+		compiled_snippet c; c.eng = engine::make();
+		c.eng->set_backend(backend_type::vm);
+		stdlib::register_all(*c.eng);
+		auto* symbolizer = c.eng->get_symbolizer();
+		auto templates = c.eng->get_registered_template_types();
+		jai::lexer lex(source, symbolizer, templates);
+		auto tokens = lex.tokenize();
+		jai::parser p(tokens, symbolizer, c.eng.get(), templates);
+		auto parse_result = p.parse();
+		if (!parse_result.has_value()) { return c; }
+		(void)jai::detail::run_static_check(*c.eng, parse_result.value());
+		jai::vm::vm_compiler compiler(symbolizer);
+		compiler.ir_listing(true);
+		c.program = compiler.compile_program(parse_result.value());
+		for (const auto& d : parse_result.value()) {
+			if (d && d->get_type() == node_type::function_decl) {
+				auto* fd = static_cast<function_decl*>(d.get());
+				c.function = compiler.compile_callable(fd->name, fd->parameters, fd->body, fd->local_count);
+				break;
+			}
+		}
+		return c;
+	}
 	void both(const std::string& script, const std::string& expected, const char* label, bool proofs = true) {
 		const std::string interp = run_on(false, script, proofs);
 		const std::string vm = run_on(true, script, proofs);
@@ -91,6 +119,45 @@ public:
 	}
 
 	void forge_tests() override {
+		test("manifest_is_the_same_across_engines_and_names_no_runtime_state", [this]() {
+			// row 125: two engines intern different ids for the same names; the manifest names symbols by spelling
+			const std::string src = "float f = 1.0000001; function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()) + to_string(f));";
+			auto a = compile_snippet(src); auto b = compile_snippet(src);
+			check_true(a.program && b.program && a.function && b.function, "compiled");
+			const std::string ma = jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer()) + jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
+			const std::string mb = jai::vm::chunk_manifest(*b.program, b.eng->get_symbolizer()) + jai::vm::chunk_manifest(*b.function, b.eng->get_symbolizer());
+			check_eq(ma, mb, "the same program and function manifest the same in two engines");
+			check_true(ma.find("cell_loops 1") != std::string::npos, "the function's loop closed");
+		});
+		test("manifest_changes_with_a_constants_low_bit", [this]() {
+			// Astra (2026-09-12 19:54): 1.0000001 and 1.0000002 list the same; the manifest carries the constant's 64 bits
+			auto a = compile_snippet("float f = 1.0000001; print(to_string(f));");
+			check_true(static_cast<bool>(a.program), "compiled");
+			const std::string before = jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer());
+			bool flipped = false;
+			for (auto& c : a.program->constants) {
+				if (c.raw_storage_index() != script_value::TYPEID_FLOAT) continue;
+				double d = c.unchecked_as_float(); uint64_t bits = 0; std::memcpy(&bits, &d, sizeof bits); bits ^= 1u; std::memcpy(&d, &bits, sizeof d);
+				c = script_value(d, static_cast<engine*>(nullptr)); flipped = true; break;
+			}
+			check_true(flipped, "a float constant was found");
+			check_ne(before, jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer()), "one low bit of a constant changes the manifest");
+		});
+		test("manifest_changes_with_a_live_mask_bit_and_an_origin_entry", [this]() {
+			auto a = compile_snippet("function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()));");
+			check_true(a.function && !a.function->cell_loops.empty(), "a closed loop in the function's body (a compound with a binary right side is a translation refusal; the plain store closes)");
+			const std::string before = jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
+			auto& loop = a.function->cell_loops[0];
+			check_true(!loop.live_temps.empty() && !loop.origin.empty(), "live masks and origins exist");
+			loop.live_temps[0].w[0] ^= 1u;
+			const std::string after_mask = jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
+			check_ne(before, after_mask, "one live mask bit changes the manifest");
+			loop.live_temps[0].w[0] ^= 1u;
+			loop.origin[0] += 1;
+			check_ne(before, jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer()), "one origin entry changes the manifest");
+			loop.origin[0] -= 1;
+			check_eq(before, jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer()), "restored, the manifest is the same again");
+		});
 		test("column_loop_lands_the_same_on_both_backends", [this]() {
 			both(std::string(k_prelude) + "run(0, 4, 2048, 1);", "8004:326", "four iterations");
 		});

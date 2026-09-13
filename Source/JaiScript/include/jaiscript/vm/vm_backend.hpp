@@ -1543,6 +1543,10 @@ namespace jai::vm {
         // ns::x = v / op= / ++ on a namespace variable's cell, and a namespace's variable declaration run in its scope
         // (detail/namespace_scope.hpp)
         op_status store_namespace_cell(const detail::namespace_store_target& target, member_expr* member, script_value incoming, script_value* stored_out);
+        // the engine's listing sink: the compiler lists its regions while a sink is set, and every chunk this backend
+        // compiles is handed to the sink disassembled, in compile order (engine::disassembly_sink)
+        void arm_listing();
+        void note_compiled(const chunk& compiled);
         op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare

@@ -253,6 +253,12 @@ checked_result<script_value> environment::get(uint64_t id) const {
         "Undefined variable '{0}'", id);
 }
 
+void environment::define_shared(uint64_t id, script_value&& value) {
+    if (local_ids_.count(id) != 0) { return; }
+    define(id, std::move(value));   // no unit_of_ entry: the cell belongs to unit 0
+    shared_placeholders_.insert(id);
+}
+
 void environment::define_variable(uint64_t id, const script_value& value) {
     define_variable(id, script_value(value));
 }
@@ -265,6 +271,12 @@ void environment::define_variable(uint64_t id, script_value&& value) {
     const unit_stamp unit = symbolizer_->current_unit();
     if (local_ids_.count(id) == 0) {
         define(id, std::move(value));
+        unit_of_[id] = unit;
+        return;
+    }
+    if (auto shared = shared_placeholders_.find(id); shared != shared_placeholders_.end()) {
+        shared_placeholders_.erase(shared);
+        define(id, std::move(value));   // the declaring unit adopts the extern's shared global in place
         unit_of_[id] = unit;
         return;
     }
@@ -702,6 +714,7 @@ void environment::clear_values() {
     local_ids_.clear();
     versions_.clear();
     unit_of_.clear();
+    shared_placeholders_.clear();
     bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }
 

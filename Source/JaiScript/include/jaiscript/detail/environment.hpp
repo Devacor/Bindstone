@@ -93,6 +93,9 @@ namespace jai {
         // unit, a child environment, a function or a class definition write in place (define)
         void define_variable(uint64_t id, const script_value& value);
         void define_variable(uint64_t id, script_value&& value);
+        // An extern's shared global: defined only when the name is absent, owned by no unit; the first unit that
+        // declares the name adopts the cell in place, so every unit keeps sharing it
+        void define_shared(uint64_t id, script_value&& value);
 
         // Get a variable value (searches parent scopes, then this/static fields based on kind)
         // Returns checked_result to avoid exceptions in regular control flow
@@ -283,6 +286,7 @@ namespace jai {
         struct binding_version { unit_stamp unit; script_value* cell; };
         std::unordered_map<uint64_t, std::vector<binding_version>> versions_;
         std::unordered_map<uint64_t, unit_stamp> unit_of_;
+        std::unordered_set<uint64_t> shared_placeholders_;
         script_value* shadowed_cell(uint64_t id) const;
 
         // Parent pointer kept for: closure semantics, 'this' lookup, debugging

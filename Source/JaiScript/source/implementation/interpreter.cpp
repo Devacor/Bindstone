@@ -14525,7 +14525,17 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
     return {};
 }
 
-checked_result<void> interpreter::visit_extern_decl(extern_decl*) {
+// extern names a shared global: the unit binds to the visible one instead of owning a cell, and the shared
+// global comes into being here when no unit has declared the name (a typed null placeholder; a function
+// extern declares nothing). KEEP BYTE-PARALLEL with vm_backend::exec_extern_decl.
+checked_result<void> interpreter::visit_extern_decl(extern_decl* decl) {
+    if (decl->is_function) { return {}; }
+    auto global = get_global_environment();
+    if (!global->get_value_ptr(decl->name_id)) {
+        script_value placeholder = make_value();
+        if (decl->type) { placeholder.set_type_info(decl->type); }
+        global->define_shared(decl->name_id, std::move(placeholder));
+    }
     return {};
 }
 

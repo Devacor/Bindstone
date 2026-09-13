@@ -1898,12 +1898,14 @@ public:
             std::filesystem::remove_all(dir);
         });
 
-        test("extern_still_missing_raises_the_runtime_undefined_error", [this]() {
+        test("extern_declares_the_shared_global_when_nothing_provides_it", [this]() {
+            // Dev (2026-09-12): an extern that finds nothing brings the shared global into being as a null placeholder of
+            // its declared type, so a read yields null (a typed use reports the null) rather than an undefined name; a
+            // function extern still declares nothing
             auto e = make_engine();
             e->execute("extern ghost;\nfunction touch() -> int { return ghost; }");
-            check_true(outcome(*e, "touch()").rfind("ERROR Undefined variable 'ghost'", 0) == 0, outcome(*e, "touch()"));
-            std::string top = outcome(*e, "extern int ghost;\nghost + 1");
-            check_true(top.rfind("ERROR Undefined variable 'ghost'", 0) == 0, top);
+            check_true(outcome(*e, "touch()").rfind("ERROR Cannot return null from 'touch'", 0) == 0, outcome(*e, "touch()"));
+            check_true(e->execute("extern int ghost;\nghost == null").as_bool(), "the typed placeholder is null");
             auto f = make_engine();
             std::string call = outcome(*f, "extern function host_fn;\nhost_fn(1)");
             check_true(call.rfind("ERROR Undefined variable 'host_fn'", 0) == 0, call);

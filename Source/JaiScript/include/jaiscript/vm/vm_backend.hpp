@@ -1822,6 +1822,7 @@ namespace jai::vm {
         op_status exec_class_decl(frame& f, const vm_instruction& ins);
         op_status exec_namespace_decl(frame& f, const vm_instruction& ins);
         op_status exec_enum_decl(frame& f, const vm_instruction& ins);
+        op_status exec_extern_decl(frame& f, const vm_instruction& ins);
     };
 
 } // namespace jai::vm

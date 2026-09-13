@@ -819,6 +819,7 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 		emit(opcode::op_enum_decl, add_node(decl));
 		return;
 	case node_type::extern_decl:
+		emit(opcode::op_extern_decl, add_node(decl));
 		return;
 	case node_type::include_decl: {
 		auto* inc = static_cast<include_decl*>(decl.get());

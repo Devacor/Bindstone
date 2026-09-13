@@ -71,6 +71,7 @@ namespace jai::vm {
         op_class_decl,      // a=node index (class_decl); defines/redefines the class
         op_namespace_decl,  // a=node index (namespace_decl)
         op_enum_decl,       // a=node index (enum_decl)
+        op_extern_decl,     // a=node index (extern_decl); the shared global is defined when the name resolves to nothing
 
         op_throw,           // a=has value (pops it), b=node index for location; sets unwinding
         op_try_push,        // a=handler instruction index, b=catch var symbol index, c=catch var frame slot (k_invalid_u32 = scope env)
@@ -399,6 +400,7 @@ namespace jai::vm {
             case opcode::op_class_decl: return "CLASS_DECL";
             case opcode::op_namespace_decl: return "NAMESPACE_DECL";
             case opcode::op_enum_decl: return "ENUM_DECL";
+            case opcode::op_extern_decl: return "EXTERN_DECL";
             case opcode::op_throw: return "THROW";
             case opcode::op_try_push: return "TRY_PUSH";
             case opcode::op_try_pop: return "TRY_POP";

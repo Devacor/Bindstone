@@ -12652,6 +12652,21 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		"No constructor found for class '{0}'", expr->type->id);
 }
 
+// extern names a shared global: the unit binds to the visible one instead of owning a cell, and the shared
+// global comes into being here when no unit has declared the name (a typed null placeholder; a function
+// extern declares nothing). KEEP BYTE-PARALLEL with interpreter::visit_extern_decl.
+op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
+	auto* decl = static_cast<extern_decl*>(f.code->nodes[ins.a].get());
+	if (decl->is_function) { return {}; }
+	auto global = engine_->get_global_environment();
+	if (!global->get_value_ptr(decl->name_id)) {
+		script_value placeholder = make_null();
+		if (decl->type) { placeholder.set_type_info(decl->type); }
+		global->define_shared(decl->name_id, std::move(placeholder));
+	}
+	return {};
+}
+
 op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<enum_decl*>(f.code->nodes[ins.a].get());
 	auto enum_map = script_value::make_map(
@@ -14670,6 +14685,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_class_decl: return exec_class_decl(f, ins);
 		case opcode::op_namespace_decl: return exec_namespace_decl(f, ins);
 		case opcode::op_enum_decl: return exec_enum_decl(f, ins);
+		case opcode::op_extern_decl: return exec_extern_decl(f, ins);
 		case opcode::op_throw: return exec_throw(f, ins);
 		case opcode::op_try_push: return exec_try_push(f, ins);
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
@@ -15885,6 +15901,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_class_decl:
 			case opcode::op_namespace_decl:
 			case opcode::op_enum_decl:
+			case opcode::op_extern_decl:
 			case opcode::op_throw:
 			case opcode::op_try_push:
 			case opcode::op_try_pop:

@@ -81,8 +81,14 @@ f();       // 7
 G;         // 5
 ```
 
-A strict-checked unit that reads a name only a later unit declares spells the forward reference with
-`extern var G;` (`docs/static_checking.md`, escape hatches); the runtime resolves it late either way.
+`extern var G;` is how a unit shares a global instead of owning one: the unit binds to the visible
+global (a declaration would shadow it), and when no unit has declared the name yet the extern
+brings the shared global into being as a null placeholder of the declared type, so a program that
+spells `extern int Score;` works alone and shares `Score` with every other unit that declares or
+externs it: the first unit that declares the name adopts the shared cell in place, so the
+externing units, the declaring unit and the host keep one cell. A strict-checked unit reads a
+name only a later unit declares the same way
+(`docs/static_checking.md`, escape hatches).
 
 ## Cost
 

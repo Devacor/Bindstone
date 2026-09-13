@@ -383,7 +383,10 @@ engine stays usable", not by `check_throws`.
   suites `Closed Typed Loops` and `Cell Loops`.
 - **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
   declares a name defined outside the program (checker: a declared global, typed -> checked and
-  proven; both backends: a no-op, the name resolves dynamically); `[[warn_mode]]` / `[[strict_mode]]`
+  proven; both backends: the unit SHARES the visible global instead of declaring its own, and creates
+  the shared global as a typed null placeholder when no unit has declared it, which the first declaring
+  unit then adopts in place, Dev ruling 2026-09-12;
+  a function extern declares nothing); `[[warn_mode]]` / `[[strict_mode]]`
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.

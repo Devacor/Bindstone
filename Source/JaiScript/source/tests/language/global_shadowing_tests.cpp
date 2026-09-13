@@ -109,6 +109,22 @@ public:
 				return e.execute("R = 7; to_string(f()) + \" \" + to_string(R) + \" \" + to_string(G)").as_string();
 			});
 		});
+		test("an_extern_declaration_shares_the_visible_global_or_declares_it_when_absent", [this]() {
+			// Dev (2026-09-12): extern is how a unit shares a global instead of owning one; when no unit has declared the name,
+			// the extern brings the shared global into being (unit 0); the first unit that declares the name adopts that cell in
+			// place, so the externing units, the declaring unit and the host keep sharing it
+			every_backend("extern", "5 5|9 9|7 7 7", [](engine& e) {
+				e.execute("extern var G; G = 5; function f() { return G; }");
+				std::string out = e.execute("extern var G; to_string(G) + \" \" + to_string(f())").as_string();
+				e.execute("var G = 9;");
+				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G)").as_string();
+				e.execute("extern int H; H = 7;");
+				auto host = e.get_global_environment()->get("H");
+				out += "|" + e.execute("extern int H; to_string(H)").as_string() + " " + std::to_string(host ? host.value().as_int() : -1);
+				out += " " + e.execute("function h() { return H; } h();").to_string();
+				return out;
+			});
+		});
 		test("a_file_reloaded_at_its_path_is_the_same_unit_and_writes_in_place", [this]() {
 			every_backend("reload", "102 5", [](engine& e) {
 				e.disable(jai::filesystem);

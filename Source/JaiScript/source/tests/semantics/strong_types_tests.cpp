@@ -342,9 +342,10 @@ public:
             check_eq(caught, true, "var-sourced string into a locked int raises at runtime");
         });
 
-        test("extern_is_a_runtime_no_op_on_both_backends", [this]() {
+        test("extern_declares_shared_placeholders_on_both_backends", [this]() {
             auto eng = make_engine();
-            // typed, untyped and function externs run as nothing; the names resolve dynamically
+            // typed and untyped externs bring shared null placeholders into being (Dev, 2026-09-12); a function extern runs
+            // as nothing; the host's add_global and a later declaration write the shared cell in place
             auto r = eng->execute(R"(
                 extern int hp;
                 extern loose;
@@ -356,7 +357,7 @@ public:
                 try { total(); } catch (e) { caught = e; }
                 caught
             )");
-            check_eq(std::string("Undefined variable 'hp'"), r.as<std::string>());
+            check_eq(std::string("Cannot access 'v' on null ('G' is null)"), r.as<std::string>());
             eng->add_global("hp", script_value((int64_t)4, eng.get()));
             eng->execute("var G = Game();");
             check_eq((int64_t)7, eng->execute("total()").as_int());

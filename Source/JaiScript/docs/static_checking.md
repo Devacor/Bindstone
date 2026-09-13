@@ -296,7 +296,11 @@ extern shared_ptr<Game> G;        // typed: G.hp is checked against Game and pro
 extern config;                    // untyped: var - reads and stores are dynamic
 ```
 
-An extern name counts as declared, and a program's closure carries it to every unit like any
+At run time an extern binds the unit to the shared global instead of declaring its own (a
+declaration would shadow it, `docs/global_shadowing.md`), and when no unit has declared the
+name yet the extern brings the shared global into being as a null placeholder of the declared
+type, and the first unit that declares the name adopts that cell in place; a function extern
+declares nothing. An extern name counts as declared, and a program's closure carries it to every unit like any
 top-level name. It is also the spelling for a shared leaf that calls into a module only some
 programs import (a netplay hook behind a runtime flag): the leaf declares the names it
 reaches for, and in a program that imports the module too the declaration is inert - the

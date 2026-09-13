@@ -81,7 +81,7 @@ namespace jai::vm {
         bool ir_passes_ = true;
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
-        bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl);
+        bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init);
         bool fusable_index_expr(const expression* e);
         bool index_read_partner_shape(const binary_expr* rb);
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
@@ -172,6 +172,7 @@ namespace jai::vm {
         void compile_cast(const std::shared_ptr<cast_expr>& expr);
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);
         void compile_variable_decl(const std::shared_ptr<variable_decl>& decl);
+        void compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init);
         void compile_function_decl(const std::shared_ptr<function_decl>& decl);
         void compile_if(if_stmt* stmt);
         void compile_while(while_stmt* stmt);

@@ -6816,6 +6816,26 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 
 // the load and store sites' containers, resolved at the entry and again after every call inside the block (a callee may
 // replace or grow a container the block reads): false = a site whose container is not a plain array node
+// a container reached through a member of a frame-slot instance (`ch.odist[ci]`): the plain field the member IC's probe
+// names, read once at the entry; a user accessor anywhere in the chain, a non-public chain, a missing field or a base that
+// is not a class instance leaves the site to the general form, which runs the accessor or raises per read
+const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container) {
+	const script_value* base = frame_slot(f, container.slot);
+	if (!base) return nullptr;
+	if (base->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*base)) return nullptr; base = &base->deref(); }
+	if (base->raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
+	auto& holder = const_cast<script_value&>(*base).unchecked_get_object_storage();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) return nullptr;
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) return nullptr;
+	auto* expr = static_cast<member_expr*>(f.code->nodes[container.member_node].get());
+	const uint32_t slot = member_read_slot_probe(cd, expr);
+	if (slot == UINT32_MAX) return nullptr;
+	script_value* v = inst->field_slot_value(slot);
+	return v ? &v->deref() : nullptr;
+}
+
 bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	// the load and store sites' containers: the body has no rebinding and no
@@ -6846,10 +6866,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
 				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
 			}
-			const script_value* cp = site.cont_slot != k_invalid_u32
-				? frame_slot(f, site.cont_slot)
-				: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, cache_slot);
-			if (site.cont_slot != k_invalid_u32) { cs.site_slot[k] = site.cont_slot; } else { cs.site_env[k] = env_binding(cp, cache_slot); }
+			const fused_operand& lc = f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container;
+			const bool member_site = lc.member_node != k_invalid_u32;   // resolved through the field once; the hold check after a call asks for this resolution again
+			const script_value* cp = member_site ? cells_member_container(f, lc)
+				: site.cont_slot != k_invalid_u32 ? frame_slot(f, site.cont_slot)
+				: fused_cmp_operand(f, lc, cache_slot);
+			if (member_site) {} else if (site.cont_slot != k_invalid_u32) { cs.site_slot[k] = site.cont_slot; } else { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {
 				// a guarded site materializes a non-plain reference per read on the general form; the block resolves once
 				// (a plain cell, or an element reference into a hetero array such as a texture table's entry, checked below
@@ -6871,8 +6893,9 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];   // a store through a property or element reference stays general (as the loads above)
 				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
 			}
-			const script_value* cp = fast_operand(f, p.container, cache_slot);
-			if (p.container.const_index == k_invalid_u32 && p.container.direct) { cs.site_slot[k] = p.container.slot; } else if (p.container.const_index == k_invalid_u32) { cs.site_env[k] = env_binding(cp, cache_slot); }
+			const bool member_site = p.container.member_node != k_invalid_u32;
+			const script_value* cp = member_site ? cells_member_container(f, p.container) : fast_operand(f, p.container, cache_slot);
+			if (member_site) {} else if (p.container.const_index == k_invalid_u32 && p.container.direct) { cs.site_slot[k] = p.container.slot; } else if (p.container.const_index == k_invalid_u32) { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
 				const type_info* ti = cp->get_type_info().get();

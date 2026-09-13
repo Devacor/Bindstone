@@ -1673,7 +1673,7 @@ namespace jai::vm {
         bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);   // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
-        const script_value* cells_member_container(frame& f, const fused_operand& container);   // a member of a frame-slot instance: its plain field, read once at the entry; nullptr = the general form
+        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to

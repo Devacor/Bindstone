@@ -466,7 +466,7 @@ size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 // code.back() in place, and a ternary RHS's else-arm also leaves a fusable tail there —
 // but the then-arm's exit jump targets one PAST it, so rewriting that tail would let
 // the then path skip the store entirely.
-void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags, const expression* rhs) {
+void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags, const expression* rhs, uint8_t typed_class) {
 	auto& code = chunk_->code;
 	// ::name targets stay on the plain op (compound_fused's fast path resolves its
 	// target through the frame/env ladder; the global-only door lives in
@@ -505,6 +505,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 			cp.symbol = symbol_index;
 			cp.slot = slot;
 			cp.kind_flags = kind_flags;
+			cp.typed_class = typed_class;
 			chunk_->compound_fused_protos.push_back(cp);
 			vm_instruction& ins = code.back();
 			ins.op = opcode::op_compound_fused;
@@ -1634,7 +1635,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
 				     compound_kind_for(assign->op.type) | compound_flag_no_result |
 				         (ident->global_qualified ? compound_flag_global_only : 0u),
-				     assign->value.get());
+				     assign->value.get(), assign->static_operand_class);
 			}
 			return true;
 		}
@@ -2129,24 +2130,29 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			break;
 		}
 		case opcode::op_compound_fused: {
-			// `x op= y` (bare rhs, statement position) on a direct slot: the compound lane's int
-			// row in place; kind_flags beyond no_result/incdec keep the general op
+			// `x op= y` (bare rhs, statement position) on a direct slot: the compound lane's row of the checker's class
+			// (int/int the int row, float/float the float row, unknown the int row speculated, a mixed class the general
+			// compound, which converts); kind_flags beyond no_result/incdec keep the general op
 			const compound_fused_proto& cp = c.compound_fused_protos[ins.a];
 			if (cp.rhs_proto != k_invalid_u32 || cp.slot == k_invalid_u32 || cp.slot >= k_typed_slot_mask) break;
 			if ((cp.kind_flags & ~(compound_kind_mask | compound_flag_no_result | compound_flag_incdec)) != 0) break;
 			if (!(cp.kind_flags & compound_flag_no_result)) break;
-			opcode t;
+			const uint8_t cls = cp.typed_class == operand_class_float_float ? 2 : (cp.typed_class == operand_class_int_int || cp.typed_class == operand_class_unknown) ? 1 : 0;
+			if (cls == 0) break;
+			token_type tok = token_type::plus;
+			bool known = true;
 			switch (cp.kind_flags & compound_kind_mask) {
-			case compound_plus: t = opcode::op_t_add_ii; break;
-			case compound_minus: t = opcode::op_t_sub_ii; break;
-			case compound_star: t = opcode::op_t_mul_ii; break;
-			case compound_slash: t = opcode::op_t_div_ii; break;
-			default: t = opcode::op_halt; break;
+			case compound_plus: tok = token_type::plus; break;
+			case compound_minus: tok = token_type::minus; break;
+			case compound_star: tok = token_type::star; break;
+			case compound_slash: tok = token_type::slash; break;
+			default: known = false; break;
 			}
+			const opcode t = known ? arith_op(tok, cls) : opcode::op_halt;
 			if (t == opcode::op_halt) break;
 			uint32_t right;
 			if (cp.rhs.const_index != k_invalid_u32) {
-				if (cp.rhs.const_index >= k_typed_slot_mask || c.constants[cp.rhs.const_index].raw_storage_index() != script_value::TYPEID_INT) break;
+				if (cp.rhs.const_index >= k_typed_slot_mask || c.constants[cp.rhs.const_index].raw_storage_index() != (cls == 1 ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT)) break;
 				right = k_typed_const_bit | cp.rhs.const_index;
 			} else if (cp.rhs.slot != k_invalid_u32 && cp.rhs.load_flags == 0 && cp.rhs.slot < k_typed_slot_mask) {
 				right = cp.rhs.slot;
@@ -4226,7 +4232,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			}
 			if (!as_statement) kind |= compound_flag_result_needed;
 			if (ident->global_qualified) kind |= compound_flag_global_only;
-			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get());
+			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get(), expr->static_operand_class);
 		}
 		return;
 	}

@@ -260,6 +260,7 @@ namespace jai::vm {
         uint32_t symbol = 0;            // chunk::symbols index (store target)
         uint32_t slot = k_invalid_u32;  // target frame slot (k_invalid_u32 = env)
         uint32_t kind_flags = 0;        // compound kind | compound_flag_*
+        uint8_t typed_class = 0;        // the checker's class of target and value (assignment_expr::static_operand_class): the typed row
     };
 
     // op_binary_fused_decl / op_binary_fused_store: a fused binary whose result lands in

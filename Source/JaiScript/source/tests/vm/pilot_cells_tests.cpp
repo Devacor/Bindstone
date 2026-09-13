@@ -2187,6 +2187,30 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, rebind, proofs), run_on(true, rebind, proofs), std::string("a field rebound by a callee agrees (the landing resolves it again)") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("a_float_compound_store_takes_the_float_row", [this]() {
+			// `x += y` on floats took the int row (a fallback at every execution; inside a loop a representation refusal): the
+			// class the checker stamps picks the float row, the loop closes, and the mixed and unknown classes keep the general
+			// compound with its conversions
+			const char* fn = "var f = function(int n, float d, float e) -> float {"
+			                 " float x = 1.5; float y = 100.0; float z = 1.0; float w = 81.0; int i = 0;"
+			                 " while (i < n) { x += d; y -= e; z *= 2.0; w /= 3.0; i += 1; }"
+			                 " return x + y + z + w + i; };";
+			const std::string listing = listing_of(fn);
+			check_true(listing.find("T_ADD_FF") != std::string::npos && listing.find("T_SUB_FF") != std::string::npos && listing.find("T_MUL_FF") != std::string::npos && listing.find("T_DIV_FF") != std::string::npos,
+			           "the float compounds take the float rows: " + listing);
+			check_true(listing.find("CELLS_") != std::string::npos, "the loop closes: " + listing);
+			const std::string call = std::string(fn) + " to_string(f(4, 0.25, 2.5)) + \" \" + to_string(f(0, 0.25, 2.5));";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+			const std::string mixed = "var g = function(int n) -> string { float x = 1.5; var v = 2; int i = 3; for (int k = 0; k < n; ++k) { x += 1; v += 2.5; i += 2; x *= 2.0; x /= 4.0; }"
+			                          " return to_string(x) + \" \" + to_string(v) + \" \" + to_string(i); }; g(3);";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, mixed, proofs), run_on(true, mixed, proofs), std::string("mixed and unknown classes agree") + (proofs ? "" : " (proofs off)"));
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

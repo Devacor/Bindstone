@@ -2195,6 +2195,7 @@ private:
 				check_store(rhs, compound, base_op, local->type, local->display,
 							"'" + std::string(id->name) + "'", a->location, local->line, local->column);
 				if (!compound && same_type(local->type, rhs)) { store_proof = proof_same_type; }
+				if (compound) { stamp(a->static_operand_class, operand_class_of(local->type, rhs), operand_class_unknown); }   // the fused compound's typed row
 				return done(local->type);
 			}
 			if (class_ctx_) {

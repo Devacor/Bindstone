@@ -125,6 +125,35 @@ public:
 				return out;
 			});
 		});
+		test("a_reference_argument_resolves_in_the_callers_unit", [this]() {
+			// row 123.6: a by-reference argument is the caller's code, so it binds the caller's unit's cell; the call enters the
+			// callee's unit ahead of the binding and the binding resolves under the caller's (the sol2 precompiled BST benchmark's
+			// abort: a literal and a jaibite of the same text both declaring ref_root)
+			every_backend("ref args", "2 1 11 1", [](engine& e) {
+				e.execute("class T { int v = 0; T left = null; T right = null; T(int x) { v = x; } }"
+				          " function ins(T& n, int v) { if (n == null) { n = T(v); return; } if (v < n.v) { ins(n.left, v); } else { ins(n.right, v); } }"
+				          " function cnt(T& n) -> int { if (n == null) { return 0; } return 1 + cnt(n.left) + cnt(n.right); }"
+				          " function bump(int& x) { x += 1; }"
+				          " var root = null; ins(root, 8); ins(root, 4); var g = 1;"
+				          " function a_cnt() { return cnt(root); } function a_g() { return g; }");
+				std::string b = e.execute("var root = null; ins(root, 1); var g = 10; bump(g); to_string(cnt(root)) + \" \" + to_string(g);").as_string();
+				return e.execute("to_string(a_cnt()) + \" " + b + " \" + to_string(a_g());").as_string();
+			});
+		});
+		test("a_jaibite_of_the_same_text_is_another_unit_for_reference_arguments", [this]() {
+			every_backend("jaibite refs", "2 2 2 2", [](engine& e) {
+				e.execute("class T { int v = 0; T left = null; T right = null; T(int x) { v = x; } }"
+				          " function ins(T& n, int v) { if (n == null) { n = T(v); return; } if (v < n.v) { ins(n.left, v); } else { ins(n.right, v); } }"
+				          " function cnt(T& n) -> int { if (n == null) { return 0; } return 1 + cnt(n.left) + cnt(n.right); }");
+				const char* text = "var root = null; ins(root, 8); ins(root, 4); cnt(root);";
+				const auto lit = e.execute(text).as_int();
+				auto bite = e.jaibite(text);
+				const auto j1 = e.execute(bite).as_int();
+				const auto j2 = e.execute(bite).as_int();
+				const auto lit2 = e.execute(text).as_int();
+				return std::to_string(lit) + " " + std::to_string(j1) + " " + std::to_string(j2) + " " + std::to_string(lit2);
+			});
+		});
 		test("a_block_is_a_scope_inside_a_unit", [this]() {
 			// Dev (2026-09-12): scope is also identified by {}. A block declaration shadows for the block and vanishes after it, at
 			// program scope and in a function; a callee still sees the outer binding; a block in another unit shadows only inside

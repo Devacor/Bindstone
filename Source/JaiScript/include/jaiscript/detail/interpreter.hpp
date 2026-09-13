@@ -1237,10 +1237,12 @@ namespace jai {
         // Stateless reference-parameter binding from the call-site arg expression,
         // factored out of call_function so its locals don't sit in the
         // per-recursion-level frame (Debug stack ceiling)
+        // a by-reference argument is the caller's code: it resolves under caller_unit (the call has entered the callee's unit)
         checked_result<void> bind_reference_parameter(const parameter& param, size_t frame_index,
                                                       const expression* argExpr,
                                                       const std::shared_ptr<environment>& caller_env,
-                                                      const script_value* evaluated_arg = nullptr);
+                                                      const script_value* evaluated_arg,
+                                                      unit_stamp caller_unit);
         // Share-or-box against the caller's variable storage (cell model)
         checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
 

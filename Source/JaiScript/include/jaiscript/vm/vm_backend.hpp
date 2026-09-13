@@ -1043,8 +1043,9 @@ namespace jai::vm {
                                              const std::shared_ptr<environment>& caller_env,
                                              const call_site* site, frame* caller_frame,
                                              chunk* caller_code,
-                                             const uint8_t* arg_proofs = nullptr,
-                                             const script_defined_function* alias_fn = nullptr);
+                                             const uint8_t* arg_proofs,
+                                             const script_defined_function* alias_fn,
+                                             unit_stamp caller_unit);   // a by-reference argument resolves under the caller's unit
         // V-C1: the call site's per-argument same_type proofs, valid only when the site's
         // call_expr was proven against THIS callee body with THIS arity (null otherwise)
         const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,

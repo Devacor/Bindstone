@@ -2123,6 +2123,34 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string listing = listing_of("var TEXT = \"a\"; function flip(int i) -> void { if (i == 2) { TEXT = \"b\"; } } var f = function() { var s = \"\"; int i = 0; while (i < 5) { flip(i); s += TEXT; i = i + 1; } return s; };");
 			check(listing.find("-- cell loop") != std::string::npos && listing.find("C_APPEND") != std::string::npos, "the loop with the int-only call closes and appends in place: " + listing);
 		});
+		test("a_nested_or_chain_and_a_ternary_declaration_close_inside_a_block", [this]() {
+			// trace_block_dz's shape (JaiDOOM things.jai 324): `t < 0.0 || t > 1.0 || t >= best` is jumps with no bool materialized,
+			// `float ob = f0 > f1 ? f0 : f1` lands each arm in the declaration (the block widens the int arm), and the loop closes
+			const char* fn = "var f = function(var& VX, var& L1, var& L2, int n, float rdx, float rdy, float x1) -> float {"
+			                 " float best = 1000.0; int hits = 0;"
+			                 " for (int i = 0; i < n; ++i) {"
+			                 "  float ax = VX[L1[i]]; float bx = VX[L2[i]];"
+			                 "  float d = (bx - ax) * rdy - (bx + ax) * rdx;"
+			                 "  if (d > -0.0001 && d < 0.0001) { continue; }"
+			                 "  float t = (x1 - ax) / d;"
+			                 "  if (t < 0.0 || t > 1.0 || t >= best) { continue; }"
+			                 "  int f0 = L1[i]; int f1 = L2[i];"
+			                 "  float ob = f0 > f1 ? f0 : f1;"
+			                 "  float ot = f0 < f1 ? f0 : f1;"
+			                 "  if (t * 10.0 <= ob || ot < 0.5) { best = t; hits = hits + 1; }"
+			                 " }"
+			                 " return best + hits; };";
+			const std::string listing = listing_of(fn);
+			check_true(listing.find("CELLS_") != std::string::npos, "the loop closes: " + listing);
+			check_true(listing.find("TO_BOOL") == std::string::npos, "no bool is materialized for the condition chain: " + listing);
+			const std::string call = std::string(fn) + " array<float> VX = [0.0, 1.0, 2.5, 4.0, 8.0, 0.5]; array<int> L1 = [0, 1, 2, 3, 4, 5, 1]; array<int> L2 = [1, 2, 3, 4, 5, 0, 1];"
+			                         " to_string(f(VX, L1, L2, 7, 0.25, 0.75, 3.0));";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

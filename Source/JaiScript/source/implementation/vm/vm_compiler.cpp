@@ -1899,7 +1899,7 @@ chunk::typed_site& vm_compiler::typed_site_at(size_t ip) {
 // initialized from a plain slot identifier or a scalar literal: the LOAD or CONST just
 // emitted becomes one typed move and no DECL_VAR follows. The op's guard is the decl fast
 // path's admission; its fallback is the pair it replaced.
-bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl) {
+bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init) {
 	if (!callable_.active) return false;
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
 	    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) return false;
@@ -1907,7 +1907,7 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 	if (code.empty()) return false;
 	vm_instruction& last = code.back();
 	const size_t ip = code.size() - 1;
-	if (decl->initializer->get_type() == node_type::identifier_expr && last.op == opcode::op_load &&
+	if (init->get_type() == node_type::identifier_expr && last.op == opcode::op_load &&
 	    last.a != k_invalid_u32 && last.c == 0) {
 		const vm_instruction orig = last;
 		chunk::typed_site& site = typed_site_at(ip);
@@ -1917,7 +1917,7 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 		last = vm_instruction{opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), orig.a, site.orig2.a};
 		return true;
 	}
-	if (decl->initializer->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
+	if (init->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
 		const size_t ci = chunk_->constants[last.a].raw_storage_index();
 		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL &&
 		    ci != script_value::TYPEID_CHAR && ci != script_value::TYPEID_STRING) return false;
@@ -4717,63 +4717,80 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		temp_next_ = temp_mark;   // the unary's temp dies into the move
 		return;
 	}
-	uint32_t has_init = 0;
-	uint32_t lvalue_init = 0;
-	if (decl->initializer) {
-		compile_expression(decl->initializer);
-		has_init = 1;
-		lvalue_init = is_lvalue_shaped(decl->initializer.get()) ? 1u : 0u;
-		if (try_lower_decl_move(decl)) return;
-		// Dest-addressed peephole (flatstack stage 6, same in-place rewrite shape as
-		// emit_compound_store): a fused-binary init lands straight in the decl - one
-		// dispatch, no push. The exec falls back to op_decl_var verbatim for every
-		// non-scalar decl shape, so this fuses unconditionally.
-		auto& code = chunk_->code;
-		if (!code.empty() && code.back().op == opcode::op_binary_fused &&
-		    decl->initializer->get_type() == node_type::binary_expr) {
-			fused_binary_dst_proto dp;
-			dp.binary_proto = code.back().a;
-			dp.node_index = add_node(decl);
-			chunk_->fused_binary_dst_protos.push_back(dp);
-			vm_instruction& ins = code.back();
-			ins.op = opcode::op_binary_fused_decl;
-			ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
-			ins.b = 0;
-			ins.c = 0;
-			return;
-		}
-		// Subscript-init twin (the INDEX_FUSED→DECL_VAR pair): the read lands straight
-		// in the decl — a/b (proto, flags) stay, c carries the decl node. Lane facts
-		// hoist the exec-time landing checks to HERE (decl_fast slot decls land the
-		// scalar read directly; everything else replays op_decl_var).
-		if (!code.empty() && code.back().op == opcode::op_index_fused &&
-		    decl->initializer->get_type() == node_type::binary_expr) {
-			vm_instruction& ins = code.back();
-			ins.op = opcode::op_index_fused_decl;
-			ins.c = add_node(decl);
-			if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-			    !decl->ref_escaping && decl->slot_index != SIZE_MAX) {
-				auto& proto = chunk_->fused_index_protos[ins.a];
-				proto.decl_slot = static_cast<uint32_t>(decl->slot_index);
-				proto.decl_type = decl->type.get();
-				const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
-				switch (bt) {
-				case script_value_type::jai_int_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
-				case script_value_type::jai_float_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
-				case script_value_type::jai_bool_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_BOOL); break;
-				case script_value_type::jai_char_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_CHAR); break;
-				case script_value_type::jai_string_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
-				case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
-				default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // container/object decls: general landing
-				}
-				if (proto.decl_slot != k_invalid_u32 && index_proto_typed_lane_shape(*chunk_, proto)) {
-					proto.typed_lane = true;
-				}
-			}
-			return;
-		}
+	if (decl->initializer) { compile_decl_value(decl, decl->initializer); return; }
+	emit(opcode::op_decl_var, add_node(decl), 0, 0);
+}
+
+// The declaration's value lands by the declaration's own rule: the move row for an identifier or a literal, the fused
+// binary or subscript read landing straight in the slot, else the general declaration over the pushed value. A ternary
+// initializer of a slot declaration lands each arm this way under the condition's jumps, so no value crosses a jump on
+// the operand stack (the block form admits the arms as moves); the interpreter evaluates the same arm and converts once.
+void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init) {
+	if (init->get_type() == node_type::ternary_expr && callable_.active &&
+	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
+	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
+		auto* t = static_cast<ternary_expr*>(init.get());
+		std::vector<size_t> false_jumps;
+		compile_branch_condition(t->condition, false_jumps);
+		compile_decl_value(decl, t->then_expression);
+		const size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
+		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
+		compile_decl_value(decl, t->else_expression);
+		patch_jump(jump_end, chunk_->code.size());
+		return;
 	}
-	emit(opcode::op_decl_var, add_node(decl), has_init, lvalue_init);
+	compile_expression(init);
+	const uint32_t lvalue_init = is_lvalue_shaped(init.get()) ? 1u : 0u;
+	if (try_lower_decl_move(decl, init.get())) return;
+	// Dest-addressed peephole (flatstack stage 6, same in-place rewrite shape as
+	// emit_compound_store): a fused-binary init lands straight in the decl - one
+	// dispatch, no push. The exec falls back to op_decl_var verbatim for every
+	// non-scalar decl shape, so this fuses unconditionally.
+	auto& code = chunk_->code;
+	if (!code.empty() && code.back().op == opcode::op_binary_fused &&
+	    init->get_type() == node_type::binary_expr) {
+		fused_binary_dst_proto dp;
+		dp.binary_proto = code.back().a;
+		dp.node_index = add_node(decl);
+		chunk_->fused_binary_dst_protos.push_back(dp);
+		vm_instruction& ins = code.back();
+		ins.op = opcode::op_binary_fused_decl;
+		ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
+		ins.b = 0;
+		ins.c = 0;
+		return;
+	}
+	// Subscript-init twin (the INDEX_FUSED→DECL_VAR pair): the read lands straight
+	// in the decl — a/b (proto, flags) stay, c carries the decl node. Lane facts
+	// hoist the exec-time landing checks to HERE (decl_fast slot decls land the
+	// scalar read directly; everything else replays op_decl_var).
+	if (!code.empty() && code.back().op == opcode::op_index_fused &&
+	    init->get_type() == node_type::binary_expr) {
+		vm_instruction& ins = code.back();
+		ins.op = opcode::op_index_fused_decl;
+		ins.c = add_node(decl);
+		if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+		    !decl->ref_escaping && decl->slot_index != SIZE_MAX) {
+			auto& proto = chunk_->fused_index_protos[ins.a];
+			proto.decl_slot = static_cast<uint32_t>(decl->slot_index);
+			proto.decl_type = decl->type.get();
+			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+			switch (bt) {
+			case script_value_type::jai_int_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
+			case script_value_type::jai_float_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
+			case script_value_type::jai_bool_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_BOOL); break;
+			case script_value_type::jai_char_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_CHAR); break;
+			case script_value_type::jai_string_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
+			case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
+			default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // container/object decls: general landing
+			}
+			if (proto.decl_slot != k_invalid_u32 && index_proto_typed_lane_shape(*chunk_, proto)) {
+				proto.typed_lane = true;
+			}
+		}
+		return;
+	}
+	emit(opcode::op_decl_var, add_node(decl), 1, lvalue_init);
 }
 
 void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& decl) {

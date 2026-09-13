@@ -368,6 +368,20 @@ public:
             check_eq(std::string("abcFdeTghiTkmkmklnoxqrFTTwwsV"), eng->execute("run()").as_string());
         });
 
+        test("a_ternary_initializer_lands_each_arm_in_the_declaration", [this]() {
+            // `T v = c ? a : b;` declares once with the chosen arm, converted by the declaration's rule (a float takes an int
+            // arm), nested ternaries and a ternary condition with short-circuit included
+            auto eng = make_engine();
+            eng->execute("string log = \"\"; function p(string n, bool v) -> bool { log = log + n; return v; }");
+            eng->execute("function run(bool c) -> string { log = \"\";"
+                         " int a = 3; int b = 7; float w = c ? a : b; string s = c ? \"x\" : \"y\";"
+                         " float u = (p(\"m\", c) || p(\"n\", true)) ? (c ? a : b) : (a + b);"
+                         " int q = c ? (a > b ? a : b) : (a < b ? a : b);"
+                         " return log + s + (w > 5.0 ? \"W\" : \"w\") + (u > 5.0 ? \"U\" : \"u\") + (q == 7 ? \"Q\" : \"q\"); }");
+            check_eq(std::string("mxwuQ"), eng->execute("run(true)").as_string());
+            check_eq(std::string("mnyWUq"), eng->execute("run(false)").as_string());
+        });
+
         test("operator_subscript_returns_class", [this]() {
             const char* src = R"(
                 class Cell {

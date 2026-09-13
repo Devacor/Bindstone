@@ -169,6 +169,7 @@ namespace {
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
 			case opcode::op_c_append:
+			case opcode::op_c_push:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -333,6 +334,7 @@ namespace {
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
 			case opcode::op_c_append:
+			case opcode::op_c_push:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
@@ -2255,7 +2257,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe };   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // append: the compound plus with run-time kinds (strings in place)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push };   // push: recv.push(v) onto a frame-slot array   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // append: the compound plus with run-time kinds (strings in place)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
 	struct ir_op {
 		ir kind = ir::placeholder;
 		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
@@ -2758,6 +2760,39 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				ops.push_back(op);
 				op = ir_op{}; op.kind = ir::skip;   // the store's place: no copy instruction
 				++ip;
+			} else if (((st.op == opcode::op_push_fused && st.a < c.push_protos.size()) || (st.op == opcode::op_t_push && ip < c.typed_sites.size() && c.typed_sites[ip].orig.a < c.push_protos.size()))
+			           && ip + 1 < back && code[ip + 1].op == opcode::op_pop) {
+				// `recv.push(v);` onto a frame-slot array (the fused push or its typed row, and the statement's POP): the receiver is a
+				// container site, the value a cell, a constant of a pushable kind or an element of a second container at an int index (read
+				// as a handle at the push, so no string is borrowed); the append is the push kernel's rows, anything they decline a miss
+				const uint32_t pidx = st.op == opcode::op_push_fused ? st.a : c.typed_sites[ip].orig.a;
+				const push_proto& pp = c.push_protos[pidx];
+				if (!c.builtin_indexed || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!pp.receiver.direct || pp.receiver.slot == k_invalid_u32 || pp.receiver.slot >= k_typed_slot_mask || pp.receiver.const_index != k_invalid_u32 || pp.receiver.member_node != k_invalid_u32 || pp.receiver.is_subscript()) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (pp.value.const_index != k_invalid_u32) {
+					const size_t ck = pp.value.const_index < c.constants.size() && pp.value.const_index < k_typed_slot_mask ? c.constants[pp.value.const_index].raw_storage_index() : SIZE_MAX;
+					if (ck != script_value::TYPEID_INT && ck != script_value::TYPEID_FLOAT && ck != script_value::TYPEID_BOOL && ck != script_value::TYPEID_STRING) { refuse(chunk::cell_refusal_representation, ip); break; }
+					op.b = k_typed_const_bit | pp.value.const_index;
+				} else if (pp.value_is_subscript) {
+					if (pp.value.subscript_chain.size() != 1 || pp.value.member_node != k_invalid_u32 || pp.value.load_flags != 0 || (pp.value.slot == k_invalid_u32 && pp.value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_representation, ip); break; }
+					const fused_subscript_index& si = pp.value.subscript_chain[0];
+					if (si.kind == fused_subscript_index::index_literal) {
+						c.constants.push_back(script_value(static_cast<script_int>(si.literal), static_cast<engine*>(nullptr)));
+						op.c = k_typed_const_bit | static_cast<uint32_t>(c.constants.size() - 1);
+					} else {
+						fused_operand io; io.slot = si.slot; io.symbol = si.symbol; io.direct = si.slot != k_invalid_u32;
+						if (!value(op, io, kint, static_cast<uint32_t>(ip * 3 + 2), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+					}
+					op.tok = 1;   // an element push: the source container is the copy's second site
+				} else {
+					if (!pp.value.direct || pp.value.slot == k_invalid_u32 || pp.value.slot >= k_typed_slot_mask || !value(op, pp.value, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+					const int vk = find_cell(pp.value.slot);
+					if (vk >= 0 && cells[vk].kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) { refuse(chunk::cell_refusal_representation, ip); break; }   // a string cell is a borrow, never pushed
+				}
+				op.kind = ir::push; op.proto = pidx; op.container = pp.receiver.slot; op.a = pp.receiver.slot;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the POP's place: no copy instruction
+				++ip;
 			} else if (st.op == opcode::op_incdec && st.b != k_invalid_u32 && st.b < k_typed_slot_mask) {
 				// ++x / x-- as a statement on a slot the typed lowering left general: arith by one with the compound landing
 				if (st.c & incdec_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }
@@ -2987,7 +3022,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.cells = cells;
 		loop.env_operands = env_ops;
 		if (ir_listing_) {
-			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe" };
+			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push" };
 			std::string text;
 			for (size_t k = 0; k < ops.size(); ++k) {
 				const ir_op& op = ops[k];
@@ -3173,6 +3208,21 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::skip: break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
 			case ir::append: append(vm_instruction{opcode::op_c_append, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
+			case ir::push: {
+				// the copy's proto: a clone whose value, or the index of its element, names a cell; the receiver and the source container
+				// stay the general operands, resolved from the frame or the environment at entry; the original proto stays the general form's
+				push_proto cp = c.push_protos[op.proto];
+				if (op.tok == 1) {
+					fused_subscript_index& si = cp.value.subscript_chain[0];
+					if (op.c & k_typed_const_bit) { si.kind = fused_subscript_index::index_literal; si.literal = static_cast<int64_t>(c.constants[op.c & ~k_typed_const_bit].unchecked_as_int()); si.slot = k_invalid_u32; si.symbol = k_invalid_u32; }
+					else { si.kind = fused_subscript_index::index_ident; si.slot = cell_of(op.c); si.symbol = k_invalid_u32; }
+				} else if (!(op.b & k_typed_const_bit)) {
+					fused_operand d; d.slot = cell_of(op.b); d.direct = true; cp.value = d;
+				}
+				c.push_protos.push_back(cp);
+				append(vm_instruction{opcode::op_c_push, static_cast<uint32_t>(c.push_protos.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
+				break;
+			}
 			case ir::lnot: append(vm_instruction{opcode::op_c_lnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
 			case ir::cmpval: append(vm_instruction{opcode::op_c_cmpval, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
 			}
@@ -3191,7 +3241,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push) { loop.sites.push_back(ip2); } }
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {
 			for (const auto& x : exits) { if (x.first == target) return x.second; }

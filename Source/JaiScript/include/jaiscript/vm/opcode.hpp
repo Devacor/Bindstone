@@ -237,6 +237,7 @@ namespace jai::vm {
         op_c_cmp_p,         // C_CMP over pinned operand cells
         op_c_jcmp_p,        // C_JCMP over pinned operand cells
         op_c_append,        // a = plus << 24 | dst cell, b = dst cell, c = src cell or const: the compound plus with run-time kinds (strings append in place, numbers add)
+        op_c_push,          // a = push proto (the copy's, its value or index naming a cell), b = cell loop index, c = the original ip: recv.push(v) onto a frame-slot array by the push kernel's rows
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -378,6 +379,7 @@ namespace jai::vm {
             case opcode::op_c_cmp_p: return "C_CMP_P";
             case opcode::op_c_jcmp_p: return "C_JCMP_P";
             case opcode::op_c_append: return "C_APPEND";
+            case opcode::op_c_push: return "C_PUSH";
             case opcode::op_call: return "CALL";
             case opcode::op_return: return "RETURN";
             case opcode::op_implicit_return: return "IMPLICIT_RETURN";

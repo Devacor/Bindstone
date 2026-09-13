@@ -210,7 +210,9 @@ values: semantic locals (frame slots, identity the slot, kind pinned by a typed 
 at entry), compiler values (the temps of an expression, live inside their statement, any kind lands),
 environment values (globals read once at entry), container bindings (arrays resolved once at entry through a
 slot, a plain reference, an environment name, a pinned table entry or a plain field of a frame-slot instance, read once at
-entry and again at every landing after a call), snapshots (a guard's container value,
+entry and again at every landing after a call), pushes (`recv.push(v)` onto a frame-slot array: the receiver a container
+site, the value a cell, a constant or an element of a second container read as a handle at the push, the append the push
+kernel's rows; a declined kind, a refused charge or a typed hetero receiver misses onto the general push), snapshots (a guard's container value,
 live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
 binary operators, pinned kinds as `op_c_arith`, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
 `cmp` with its test (`op_c_cmp` and `op_c_jcmp` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for

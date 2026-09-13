@@ -6863,6 +6863,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	const size_t span = loop.copy_back - loop.copy_head;
 	const script_array* pinned[4] = {}; uint32_t pinned_count = 0;   // element references' tables: no store site may write them
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
+	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
 	// the binding an environment lookup answered from its cache, valid while the environment and its epoch hold (the cache's own rule)
 	auto env_binding = [&](const script_value* v, size_t cache_slot) -> const script_value* {
@@ -6906,6 +6907,28 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 			bool borrowed = false;
 			node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+		} else if (ci.op == opcode::op_c_push) {
+			// a push site: the receiver a frame-slot array (a typed hetero array converts on the general form), the source of an element
+			// push a second container (a slot or an environment array); a landing after a call asks for this resolution again
+			const push_proto& p = f.code->push_protos[ci.a];
+			const script_value* cp = frame_slot(f, p.receiver.slot);
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
+			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+			node = cp->unchecked_array_node();
+			if (node && node->kind() == script_array::kind_t::hetero) {
+				const type_info* ti = cp->get_type_info().get();
+				if (ti && ti->element_type() && ti->element_type()->base_type != script_value_type::jai_any_type) return false;
+			}
+			cs.site_node2[ip - loop.copy_head] = nullptr;
+			if (p.value_is_subscript) {
+				fused_operand base = p.value; base.subscript_chain.clear();
+				const script_value* sp = base.slot != k_invalid_u32 ? frame_slot(f, base.slot) : fused_cmp_operand(f, base, static_cast<size_t>(ci.c) * 3 + 1);
+				if (sp && sp->raw_storage_index() == script_value::TYPEID_REFERENCE) { sp = lane_deref_silent(*sp) ? &sp->deref() : nullptr; }
+				bool borrowed = false;
+				const script_array* sn = sp ? lane_element_source(*sp, borrowed) : nullptr;
+				if (!sn || borrowed) return false;
+				cs.site_node2[ip - loop.copy_head] = sn;
+			}
 		} else if (ci.op == opcode::op_c_index_store) {
 			const fused_index_proto& p = f.code->fused_index_protos[ci.a];
 			const size_t cache_slot = p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3;
@@ -6930,7 +6953,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (const uint32_t ip : loop.sites) {
-			if (f.code->code[ip].op == opcode::op_c_index_store && cs.site_node[ip - loop.copy_head] == pinned[i]) { return false; }
+			if ((f.code->code[ip].op == opcode::op_c_index_store || f.code->code[ip].op == opcode::op_c_push) && cs.site_node[ip - loop.copy_head] == pinned[i]) { return false; }
 		}
 	}
 	return true;
@@ -7073,6 +7096,7 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_lnot: st = exec_c_lnot(f, ci); break;
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci); break;
 		case opcode::op_c_append: st = exec_c_append(f, ci); break;
+		case opcode::op_c_push: st = exec_c_push(f, ci); break;
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 		if (st == op_status::failed) return st;
@@ -7543,6 +7567,86 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 	}
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);
 	return true;
+}
+
+// recv.push(v) inside a block: the receiver's node was resolved at entry (its identity checked against the slot), the value is a
+// cell boxed with its landing's stamp, a constant, or an element of the source container read as a handle; the append is
+// typed_push_append's rows with the kernel's charge, and anything the kernel would decline or raise is a miss onto the general
+// push, whose texts stand
+JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const uint32_t original_ip = ins.c;
+	const push_proto& p = f.code->push_protos[ins.a];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	script_array* node = const_cast<script_array*>(cs.site_node[f.ip - loop.copy_head]);
+	const script_value* recv = frame_slot(f, p.receiver.slot);
+	if (!node || !recv) return miss();
+	if (recv->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*recv)) return miss(); recv = &recv->deref(); }
+	if (recv->raw_storage_index() != script_value::TYPEID_ARRAY || recv->unchecked_array_node() != node) return miss();
+	std::optional<script_value> boxed;
+	const script_value* pv = nullptr;
+	if (p.value.const_index != k_invalid_u32) {
+		pv = &f.code->constants[p.value.const_index];
+	} else if (p.value_is_subscript) {
+		const script_array* src = cs.site_node2[f.ip - loop.copy_head];
+		const fused_subscript_index& si = p.value.subscript_chain[0];
+		script_int index;
+		if (si.kind == fused_subscript_index::index_literal) { index = si.literal; }
+		else { if (si.slot == k_invalid_u32 || cs.kind[si.slot] != kint) return miss(); index = static_cast<script_int>(cs.payload[si.slot]); }
+		if (!src || index < 0 || static_cast<size_t>(index) >= src->size()) return miss();
+		const size_t at = static_cast<size_t>(index);
+		switch (src->kind()) {
+		case script_array::kind_t::i64: boxed.emplace(static_cast<script_int>(src->ints()[at]), engine_); pv = &*boxed; break;
+		case script_array::kind_t::f64: boxed.emplace(src->floats()[at], engine_); pv = &*boxed; break;
+		case script_array::kind_t::str: boxed.emplace(src->strs()[at], engine_); pv = &*boxed; break;
+		case script_array::kind_t::hetero: pv = &src->values()[at]; break;
+		default: return miss();
+		}
+	} else {
+		const uint32_t k = p.value.slot;
+		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
+		const uint8_t vk = cs.kind[k];
+		if (vk == kint) { boxed.emplace(static_cast<script_int>(cs.payload[k]), engine_); }
+		else if (vk == kflt) { boxed.emplace(cell_float_of_bits(cs.payload[k]), engine_); }
+		else if (vk == kbool) { boxed.emplace(cs.payload[k] != 0, engine_); }
+		else return miss();   // a string cell is a borrow, never pushed
+		const chunk::cell_loop::cell& vc = loop.cells[k];
+		if (vc.landing == k_typed_dst_decl && vc.stamp) { boxed->set_type_info(type_info_ptr{vc.stamp}); }   // the general form pushes the slot's value with its declared stamp
+		pv = &*boxed;
+	}
+	const script_value& v = pv->deref();
+	const size_t vi = v.raw_storage_index();
+	switch (node->kind()) {
+	case script_array::kind_t::hetero: {
+		const type_info* ti = recv->get_type_info().get();
+		const type_info* et = ti ? ti->element_type().get() : nullptr;
+		if ((et && et->base_type != script_value_type::jai_any_type) ||
+		    !(vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+		      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) return miss();
+		if (!limits_->memory_charge(sizeof(script_value) + (vi == script_value::TYPEID_STRING ? v.unchecked_as_string().size() : 0))) return miss();
+		node->values().push_back(v);
+		break;
+	}
+	case script_array::kind_t::i64:
+		if (vi != script_value::TYPEID_INT || !limits_->memory_charge(sizeof(script_value))) return miss();
+		node->ints().push_back(v.unchecked_as_int());
+		break;
+	case script_array::kind_t::f64:
+		if ((vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_INT) || !limits_->memory_charge(sizeof(script_value))) return miss();
+		node->floats().push_back(vi == script_value::TYPEID_FLOAT ? v.unchecked_as_float() : static_cast<script_float>(v.unchecked_as_int()));
+		break;
+	case script_array::kind_t::str:
+		if (vi != script_value::TYPEID_STRING || !limits_->memory_charge(sizeof(script_value) + v.unchecked_as_string().size())) return miss();
+		node->strs().push_back(v.unchecked_string_handle());
+		break;
+	default:
+		return miss();
+	}
+	++f.ip;
+	return {};
 }
 
 // the compound plus with run-time kinds: two strings append in place (the destination's slot must still hold the borrowed

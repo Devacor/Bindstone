@@ -1326,6 +1326,11 @@ namespace jai {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // Shadowing unit of the running code (string_symbolizer::current_unit): set around a call from the
+        // callee's function or class, restored after; a worker interpreter never writes it (the symbolizer
+        // is shared, and a worker's environments consult their private sink, never the versions)
+        void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_) { string_symbolizer_->set_current_unit(unit); } }
+        unit_stamp current_unit() const noexcept { return string_symbolizer_->current_unit(); }
         size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
         // Barrier-provisioned method pins for the active region (worker instances only;
         // interpreter_backend forwards the execution_backend virtual here)

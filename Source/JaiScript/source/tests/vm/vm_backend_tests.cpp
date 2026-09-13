@@ -566,12 +566,17 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->disable(jai::filesystem);
+				const std::string path = "D:/virtual/sticky/unit.jai";
 				// first = (12+3)*2 = 30, second = 20+5 = 25
-				check_eq((int64_t)3025, e->execute(src).as_int(),
+				check_eq((int64_t)3025, e->execute_file_source(path, src).as_int(),
 					use_vm ? "[vm] global read-through" : "[interp] global read-through");
-				// Redefinition of a warm global (in-place into stable storage)
-				check_eq((int64_t)35, e->execute("var gmul = 7; q.u(4);").as_int(),
+				// Redefinition of a warm global by the same unit (a reload): in place into stable storage
+				check_eq((int64_t)35, e->execute_file_source(path, "var gmul = 7; q.u(4);").as_int(),
 					use_vm ? "[vm] global redefinition read-through" : "[interp] global redefinition read-through");
+				// Redefinition by another unit shadows: the method keeps its class's unit binding (docs/global_shadowing.md)
+				check_eq((int64_t)35, e->execute("var gmul = 9; q.u(4);").as_int(),
+					use_vm ? "[vm] another unit's redefinition shadows" : "[interp] another unit's redefinition shadows");
 			}
 		});
 

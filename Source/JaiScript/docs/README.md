@@ -23,6 +23,7 @@ disagree, the file wins.
 | [integer_semantics.md](integer_semantics.md) | int64, checked overflow, shifts that wrap by contract |
 | [closures_and_captures.md](closures_and_captures.md) | What a lambda captures, and when globals resolve |
 | [reference_model.md](reference_model.md) | What a reference is, and the four owner-pinned modes |
+| [global_shadowing.md](global_shadowing.md) | Program-scope declarations across executions: units, shadowing by unit, in-place reloads |
 | [typed_array_design.md](typed_array_design.md) | Typed arrays and maps: the declared type *is* the representation, and what that means for conversions and the C++ view |
 | [reflection.md](reflection.md) | The `reflect::` API |
 | [SERIALIZATION.md](SERIALIZATION.md) | The C++ archive framework (JSON and binary) and script `to_json` / `from_json` |

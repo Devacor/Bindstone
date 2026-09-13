@@ -1888,6 +1888,7 @@ namespace {
 			auto copy = std::make_shared<script_defined_function>(
 				source_fn->name, std::move(params), source_fn->return_type,
 				source_fn->body, ctx->root_env, source_fn->local_count);
+			copy->unit = source_fn->unit;
 			copy->alias_candidate = source_fn->alias_candidate;
 			if (copy->alias_candidate) { ctx->alias_stamps.emplace_back(source_fn, copy); }
 			if (ctx->vm) { ctx->vm->precompile_parallel_function(*copy); }
@@ -3633,6 +3634,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		stmt->body_fn_cache = std::make_shared<script_defined_function>(
 			std::string_view("<parallel_for>"), std::move(loop_params),
 			type_info_ptr(nullptr), std::move(body_block), nullptr, stmt->local_count);
+		stmt->body_fn_cache->unit = eng.current_unit();
 	}
 	const std::shared_ptr<script_defined_function>& body_fn = stmt->body_fn_cache;
 

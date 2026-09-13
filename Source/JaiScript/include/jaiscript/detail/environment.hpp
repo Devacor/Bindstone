@@ -88,6 +88,11 @@ namespace jai {
         void define(const std::string& name, script_value&& value);
         void define(uint64_t id, const script_value& value);
         void define(uint64_t id, script_value&& value);
+        // A variable declaration at program scope: another unit redeclaring the name gets its own
+        // cell and the old one stays the binding of the units that declared or saw it; the same
+        // unit, a child environment, a function or a class definition write in place (define)
+        void define_variable(uint64_t id, const script_value& value);
+        void define_variable(uint64_t id, script_value&& value);
 
         // Get a variable value (searches parent scopes, then this/static fields based on kind)
         // Returns checked_result to avoid exceptions in regular control flow
@@ -185,6 +190,9 @@ namespace jai {
         // entries (their provenance spans the whole chain), never kind fallbacks.
         script_value* get_own_value_ptr(uint64_t id) {
             if (local_ids_.count(id) == 0) return nullptr;
+            if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+                if (script_value* cell = shadowed_cell(id)) return cell;
+            }
             auto it = flat_lookup_.find(id);
             return it != flat_lookup_.end() ? it->second : nullptr;
         }
@@ -270,6 +278,12 @@ namespace jai {
 
         // Track which IDs we defined locally (for O(1) "is local" checks)
         std::unordered_set<uint64_t> local_ids_;
+        // Root only: the earlier cells of a name redeclared across units, each with the unit that
+        // declared it, and the unit of the cell in flat_lookup_ (absent = 0: host, function, class)
+        struct binding_version { unit_stamp unit; script_value* cell; };
+        std::unordered_map<uint64_t, std::vector<binding_version>> versions_;
+        std::unordered_map<uint64_t, unit_stamp> unit_of_;
+        script_value* shadowed_cell(uint64_t id) const;
 
         // Parent pointer kept for: closure semantics, 'this' lookup, debugging
         std::shared_ptr<environment> parent_;
@@ -523,6 +537,7 @@ namespace jai {
         bool alias_candidate = false;
         mutable uint64_t alias_proof_epoch = 0;
         mutable uint32_t alias_proof_mask = 0;
+        unit_stamp unit{};   // the unit and the execution that declared it (docs/global_shadowing.md)
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
 

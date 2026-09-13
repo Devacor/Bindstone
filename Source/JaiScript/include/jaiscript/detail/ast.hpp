@@ -834,6 +834,9 @@ namespace jai {
         // Non-coroutine declarations always mint with closure_env = nullptr, so the ONE
         // script_defined_function can be reused for every execution of this node
         mutable std::shared_ptr<script_defined_function> mint_cache;
+        // The unit whose code ran this declaration (methods, constructors, coroutines and namespace
+        // functions run under it: docs/global_shadowing.md)
+        mutable unit_stamp unit{};
         // Return-epilogue classification memo (vm method frames; classify_return_conv
         // derives it from return_type alone, engine-independent). 0 = uncomputed. Same
         // benign-idempotent write pattern as script_defined_function::backend_return_conv.

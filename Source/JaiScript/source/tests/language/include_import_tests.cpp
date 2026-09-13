@@ -386,7 +386,8 @@ public:
             eng->execute("auto letterB = \"B\";");
             eng->execute("import(\"module\" + letterB + \".jai\");");
             
-            // Since we're using 'once' behavior, importing again should not change anything
+            // Since we're using 'once' behavior, importing again should not change anything. The same reader text
+            // executed again resolves as of this run, so it sees module B's declaration (docs/global_shadowing.md)
             check_eq(eng->execute("module_letter").as<std::string>(), "B");
 
             cleanup_temp_file(moduleA);

@@ -6294,7 +6294,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             call_stack_.back().set_local(decl->slot_index, std::move(value));
         } else {
             // Global variable or no slot assigned - use environment
-            environment_->define(decl->name_id, std::move(value));
+            environment_->define_variable(decl->name_id, std::move(value));
         }
     };
 
@@ -7390,6 +7390,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         direct_ast->body,
                         nullptr,
                         direct_ast->local_count);
+                    script_func.unit = direct_ast->unit;
                     method_call_override mctx{&def_env, &objectValue, cls_pin.get()};
                     detail::call_site_context ctx{&expr->arguments, expr};
                     const detail::call_site_context* saved_ctx = pending_call_ctx_;
@@ -7736,6 +7737,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                                 ns_env,  // Environment with namespace variables
                                 func_decl->local_count
                             );
+                            payload.fn->unit = func_decl->unit;
                             return backend->execute_callable(payload, args);
                         }
                     }
@@ -9018,6 +9020,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             needs_capture_env ? final_closure_env : nullptr,  // Only use closure env if we have captures
             expr->local_count   // the frame reserves every slot up front, as a named function's does
         );
+        lambdaFunc->unit = string_symbolizer_->current_unit();
         if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
     }
 
@@ -11518,6 +11521,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             }
         }
         engine* eng = engine_;
+        func_decl_ptr->unit = string_symbolizer_->current_unit();
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(
             [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -11546,6 +11550,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             decl->local_count  // Slot count for stack allocation
         );
     }
+    scriptFunc->unit = string_symbolizer_->current_unit();
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -11624,6 +11629,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     }
     
     class_def->nocopy(decl->nocopy);
+    class_def->set_unit(string_symbolizer_->current_unit());
 
     // Collect new field defaults and methods (using uint64_t IDs for performance)
     std::unordered_map<uint64_t, script_value> new_field_defaults;
@@ -12297,6 +12303,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             }
 
             // Check for collisions: same name AND same arity in this namespace
+            func_decl->unit = string_symbolizer_->current_unit();
             auto& overloads = ns_data->functions[func_decl->name_id];
             for (auto it = overloads.begin(); it != overloads.end(); ++it) {
                 if ((*it)->parameters.size() == func_decl->parameters.size()) {
@@ -12543,6 +12550,7 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
         method_env,  // Method environment with 'this'
         ast->local_count
     );
+    script_func.unit = ast->unit;
 
     // Execute method with the arguments - propagate errors to caller
     return call_function(script_func, args);
@@ -12554,6 +12562,8 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
+    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    enter_unit(class_def->unit());
     // First, evaluate parent class field initializers (if any)
     // Support multiple inheritance by iterating over all parent classes
     // Skip this if parents were already processed (e.g., by multi-level super() chain handling)
@@ -13591,6 +13601,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
     const detail::member_scope_ctx previousScope = member_scope_;
+    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    enter_unit(function.unit);
     member_scope_ = {};
 
     // Determine closure environment and method context; each branch stamps the
@@ -14156,6 +14168,9 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
         return detail::raise_call_depth();
     }
+    // the body resolves in the unit that declared the coroutine on every resume (continuation replay runs it without call_function)
+    struct unit_restore { interpreter* in; unit_stamp prev; ~unit_restore() { in->enter_unit(prev); } } unitRestore{ this, current_unit() };
+    if (auto declared = handle.get_function()) { enter_unit(declared->unit); }
 
     auto& state = coroutine_state(handle);
 
@@ -14232,6 +14247,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             handle.get_closure_env(),
             function->local_count
         );
+        state.function->unit = function->unit;
 
         // A first resume nested inside another call's argument list must not see that
         // call's in-flight arg metadata (a zero-arg .resume() never saves/clears it)
@@ -14533,7 +14549,7 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
         if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));
         } else {
-            environment_->define(decl->names[i].second, std::move(val));
+            environment_->define_variable(decl->names[i].second, std::move(val));
         }
     }
 

@@ -124,6 +124,9 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return &this_object_;
     }
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { cacheable = true; return cell; }
+    }
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
         cacheable = local_ids_.count(id) > 0;
@@ -156,6 +159,9 @@ checked_result<script_value> environment::get(uint64_t id) const {
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return this_object_;
+    }
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { return *cell; }
     }
 
     // Check cache first (O(1))
@@ -247,6 +253,81 @@ checked_result<script_value> environment::get(uint64_t id) const {
         "Undefined variable '{0}'", id);
 }
 
+void environment::define_variable(uint64_t id, const script_value& value) {
+    define_variable(id, script_value(value));
+}
+
+void environment::define_variable(uint64_t id, script_value&& value) {
+    if (parent_) {
+        define(id, std::move(value));
+        return;
+    }
+    const unit_stamp unit = symbolizer_->current_unit();
+    if (local_ids_.count(id) == 0) {
+        define(id, std::move(value));
+        unit_of_[id] = unit;
+        return;
+    }
+    auto owner = unit_of_.find(id);
+    const unit_stamp flat_unit = owner == unit_of_.end() ? unit_stamp{} : owner->second;
+    if (flat_unit.id == unit.id) {
+        define(id, std::move(value));   // the same unit writes in place; the cell keeps the seq of its first declaration
+        return;
+    }
+    auto versions = versions_.find(id);
+    if (versions != versions_.end()) {
+        for (auto& v : versions->second) {
+            if (v.unit.id == unit.id) {
+                *v.cell = std::move(value);
+                return;
+            }
+        }
+    }
+    auto flat = flat_lookup_.find(id);
+    if (flat == flat_lookup_.end()) {
+        define(id, std::move(value));
+        unit_of_[id] = unit;
+        return;
+    }
+    versions_[id].push_back({flat_unit, flat->second});
+    if (engine* eng = value.get_engine()) {
+        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    }
+    local_storage_.push_back(std::move(value));
+    flat->second = &local_storage_.back();
+    unit_of_[id] = unit;
+    symbolizer_->note_shadow();
+    bump_env_epoch();
+}
+
+// The binding of a versioned name for the running code: its own unit's cell when that unit declared the
+// name, else the cell declared most recently among those declared no later than the code's execution
+// (top-level code: its current run; a function: the run that minted it), else the flat cell (a forward
+// reference keeps today's late binding); the host outside any execution (unit 0) reads the newest
+script_value* environment::shadowed_cell(uint64_t id) const {
+    const environment* root = this;
+    while (root->parent_) { root = root->parent_.get(); }
+    if (root->versions_.empty()) { return nullptr; }
+    auto versions = root->versions_.find(id);
+    if (versions == root->versions_.end()) { return nullptr; }
+    auto flat = root->flat_lookup_.find(id);
+    if (flat == root->flat_lookup_.end()) { return nullptr; }
+    const unit_stamp me = symbolizer_->current_unit();
+    if (me.id == 0) { return flat->second; }
+    auto owner = root->unit_of_.find(id);
+    const unit_stamp flat_unit = owner == root->unit_of_.end() ? unit_stamp{} : owner->second;
+    if (flat_unit.id == me.id) { return flat->second; }
+    for (const auto& v : versions->second) {
+        if (v.unit.id == me.id) { return v.cell; }
+    }
+    script_value* pick = flat_unit.seq <= me.seq ? flat->second : nullptr;
+    unsigned int pick_seq = flat_unit.seq;
+    for (const auto& v : versions->second) {
+        if (v.unit.seq <= me.seq && (!pick || v.unit.seq > pick_seq)) { pick = v.cell; pick_seq = v.unit.seq; }
+    }
+    return pick ? pick : flat->second;
+}
+
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
     return assign(id, value);
@@ -261,6 +342,9 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return std::cref(this_object_);
+    }
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { return std::cref(*cell); }
     }
 
     // Check cache first (O(1))
@@ -410,6 +494,9 @@ checked_result<void> environment::assign(const std::string& name, script_value&&
 }
 
 checked_result<void> environment::assign(uint64_t id, const script_value& value) {
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { *cell = value; return {}; }
+    }
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -482,6 +569,9 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 }
 
 checked_result<void> environment::assign(uint64_t id, script_value&& value) {
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { *cell = std::move(value); return {}; }
+    }
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -610,6 +700,8 @@ void environment::clear_values() {
         local_storage_.pop_back();
     }
     local_ids_.clear();
+    versions_.clear();
+    unit_of_.clear();
     bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }
 
@@ -724,6 +816,9 @@ script_value* environment::get_value_ptr(uint64_t id) {
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return &this_object_;
     }
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { return cell; }
+    }
 
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
@@ -796,6 +891,9 @@ script_value* environment::get_value_ptr(uint64_t id) {
 }
 
 script_value* environment::get_env_var_ptr(uint64_t id) {
+    if (symbolizer_->shadow_count() != 0) [[unlikely]] {
+        if (script_value* cell = shadowed_cell(id)) { return cell; }
+    }
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
         return it->second;

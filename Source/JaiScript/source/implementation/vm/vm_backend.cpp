@@ -1016,6 +1016,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	frames_.push_back(&state.f);
+	const unit_stamp prev_unit = current_unit();
+	enter_unit(handle.get_function()->unit);
 
 	const bool prev_yielding = yielding_;
 	yielding_ = false;
@@ -1043,6 +1045,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		}
 	}
 	frames_.pop_back();
+	enter_unit(prev_unit);
 
 	if (yielding_) {
 		// Suspend is O(1): the fiber frame (ip included) is persistent and the guard
@@ -1796,7 +1799,7 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
 		frame_slot_set(f, slot_index, std::move(value));
 	} else {
-		environment_->define(name_id, std::move(value));
+		environment_->define_variable(name_id, std::move(value));
 	}
 	return {};
 }
@@ -9791,6 +9794,8 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.window_live = static_cast<uint32_t>(argc);
 	rec.f.stack_base = args_base;   // no callee slot below the window
 	rec.f.top_level = false;
+	rec.prev_unit = current_unit();
+	enter_unit(function.unit);
 	frames_.push_back(&rec.f);
 	JAI_CALL_PUSH_SECTION(3);
 
@@ -9838,6 +9843,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	tf.window_live = static_cast<uint32_t>(argc);
 	tf.top_level = false;
 	frames_.push_back(&tf);   // ref-param frames_ scan parity with the real push
+	enter_unit(function.unit);
 	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
@@ -10244,6 +10250,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 				closure_env = captureEnv;
 			}
 		}
+		func_decl_ptr->unit = current_unit();
 		uint64_t coroutine_type_id = coroutine_handle_type_id_;
 		script_value functionValue = script_value::make_function(
 			[eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -10257,6 +10264,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 
 	script_callable payload;
 	payload.kind = script_callable::kind_type::function;
+	proto.fn->unit = current_unit();
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
@@ -10475,6 +10483,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			proto.lambda->return_type,
 			proto.body,
 			needs_capture_env ? final_closure_env : nullptr);
+		lambdaFunc->unit = current_unit();
 		if (!needs_capture_env) { proto.lambda->mint_cache = lambdaFunc; }
 	}
 
@@ -11055,6 +11064,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 							func_decl->body,
 							ns_env
 						);
+						payload.fn->unit = func_decl->unit;
 						return backend->execute_callable(payload, args);
 					}
 				}
@@ -12721,6 +12731,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 	}
 
 	class_def->nocopy(decl->nocopy);
+	class_def->set_unit(current_unit());
 
 	std::unordered_map<uint64_t, script_value> new_field_defaults;
 	std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)
@@ -13179,6 +13190,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 				func_decl->name_id = symbolizer_->intern(func_decl->name);
 			}
 
+			func_decl->unit = current_unit();
 			auto& overloads = ns_data->functions[func_decl->name_id];
 			for (auto it = overloads.begin(); it != overloads.end(); ++it) {
 				if ((*it)->parameters.size() == func_decl->parameters.size()) {
@@ -13311,6 +13323,7 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 		ast->body,
 		std::move(method_env),
 		ast->local_count);
+	script_func.unit = ast->unit;
 	return call_script_function(script_func, args);
 }
 
@@ -13318,6 +13331,8 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion) {
+	struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{this, current_unit()};
+	enter_unit(class_def->unit());
 	if (!skip_parent_recursion) {
 		for (const auto& parent : class_def->get_parent_classes()) {
 			auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
@@ -13858,6 +13873,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	                                  matching_ctor->return_type, matching_ctor->body,
 	                                  acquire_method_scope_env(definition_env, this_value, class_def.get()),
 	                                  matching_ctor->local_count);
+	ctor_func.unit = matching_ctor->unit;
 	struct carrier_release {
 		vm_backend* vm;
 		std::shared_ptr<environment>& env;
@@ -16364,6 +16380,8 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.f.window_live = args_on_stack ? static_cast<uint32_t>(argc) : 0;
 	rec.f.stack_base = args_on_stack ? args_base - 1 : stack_.size();
 	rec.f.top_level = false;
+	rec.prev_unit = current_unit();
+	enter_unit(function.unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	op_status bound{};
@@ -16595,6 +16613,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.f.window_live = static_cast<uint32_t>(argc);
 	rec.f.stack_base = frame_base;
 	rec.f.top_level = false;
+	rec.prev_unit = current_unit();
+	enter_unit(ast->unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 	JAI_MPUSH_SECTION(3);
 
@@ -16755,6 +16775,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.f.window_live = 0;
 	rec.f.stack_base = stack_.size();
 	rec.f.top_level = false;
+	rec.prev_unit = current_unit();
+	enter_unit(ast->unit);
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	op_status bound{};
@@ -16821,6 +16843,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
+	enter_unit(rec.prev_unit);
 	JAI_POP_SUB(0);
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
@@ -17773,6 +17796,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.return_type = function.return_type;
 	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
 
+	struct unit_restore { vm_backend* vm; unit_stamp prev; ~unit_restore() { vm->enter_unit(prev); } } unitRestore{this, current_unit()};
+	enter_unit(function.unit);
 	frame_guard guard(this, &f);
 
 	const size_t entry_pending = pending_callees_.size();

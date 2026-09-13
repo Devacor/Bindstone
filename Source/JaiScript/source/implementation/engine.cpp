@@ -646,6 +646,7 @@ struct engine::implementation {
         std::shared_ptr<void> compiled;
         uint64_t epoch = 0;
         uint64_t last_used = 0;
+        uint32_t unit = 0;   // shadowing unit (the path for a file, the content for a literal); 0 until first run
         // Static-check result, cached beside the parse (amortized once per unique
         // source); re-run when the registration surface epoch moves.
         bool checked = false;
@@ -930,7 +931,7 @@ struct engine::implementation {
                 gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
             }
         }
-        return self.execute_parsed(entry.declarations, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars);
+        return self.execute_parsed(entry.declarations, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, unit_of(entry, source));
     }
 
     // Keyed on (sourcePath, content) so identical text under different paths does not
@@ -1074,6 +1075,23 @@ struct engine::implementation {
     // cache initialized to epoch 0 always misses its first query.
     uint64_t class_definition_epoch_ = 1;
     uint64_t definition_epoch_ = 1;
+    // Shadowing units (environment::define_variable): a file by its lexically normal path, a
+    // literal by its content, numbered at first execution; 0 is the host
+    std::unordered_map<std::string, uint32_t> unit_index_;
+    uint32_t unit_count_ = 0;
+    uint32_t unit_for(const std::string& key) {
+        auto it = unit_index_.find(key);
+        if (it != unit_index_.end()) { return it->second; }
+        return unit_index_.emplace(key, ++unit_count_).first->second;
+    }
+    uint32_t unit_of(script_cache_entry& entry, std::string_view content) {
+        if (entry.unit == 0) {
+            entry.unit = entry.source_path == "<script>"
+                ? unit_for(std::string("\n").append(content))
+                : unit_for(std::filesystem::path(entry.source_path).lexically_normal().string());
+        }
+        return entry.unit;
+    }
     uint64_t parameter_alias_binds_ = 0;
     bool parameter_alias_ = true;
 
@@ -1758,7 +1776,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
         }
 
-        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars);
+        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent));
 
     } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)
@@ -1769,8 +1787,10 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
 script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarations,
                                     std::shared_ptr<void>& compiled_slot,
-                                    const instance_variables* instanceVars) {
+                                    const instance_variables* instanceVars, uint32_t unit) {
     ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
+    struct unit_scope { string_symbolizer& s; unit_stamp prev; ~unit_scope() { s.set_current_unit(prev); } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit() };
+    impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() });
     try {
         execution_backend* be = backend();
 
@@ -1863,7 +1883,8 @@ script_value engine::execute(jai::jaibite& bite) {
     impl->has_executed_ = true;
     check_bite(bite, nullptr);   // diagnostics once (warn/strict); proofs re-stamp on surface moves
     backend()->prepare_for_execution();
-    return execute_parsed(bite.declarations_, bite.compiled_, nullptr);
+    if (bite.unit_ == 0) { bite.unit_ = ++impl->unit_count_; }
+    return execute_parsed(bite.declarations_, bite.compiled_, nullptr, bite.unit_);
 }
 
 script_value jaibite::execute() {
@@ -2888,6 +2909,10 @@ uint64_t engine::class_definition_epoch() const {
 void engine::bump_class_definition_epoch() {
     ++impl->class_definition_epoch_;
     ++impl->definition_epoch_;
+}
+
+unit_stamp engine::current_unit() const {
+    return impl->string_symbolizer_.current_unit();
 }
 
 uint64_t engine::definition_epoch() const {

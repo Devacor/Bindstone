@@ -314,13 +314,18 @@ public:
             check_eq(std::string("second"), holder->fn());
         });
 
-        test("module_scope_var_is_shared_across_executes", [this, makeHolderEngine]() {
+        test("module_scope_var_is_shared_across_executes_of_the_same_unit", [this, makeHolderEngine]() {
+            // docs/global_shadowing.md: another text declaring `alias` shadows (the closure keeps its unit's cell);
+            // the same text executed again is the same unit and writes the cell in place
             std::shared_ptr<hook_holder> holder;
             auto eng = makeHolderEngine(holder);
+            const std::string first = "var alias = who; holder.fn = []() { return alias; };";
             eng->add_global("who", script_value(std::string("first"), eng.get()));
-            eng->execute("var alias = who; holder.fn = []() { return alias; };");
+            eng->execute(first);
             eng->add_global("who", script_value(std::string("second"), eng.get()));
             eng->execute("var alias = who;");
+            check_eq(std::string("first"), holder->fn());
+            eng->execute(first);
             check_eq(std::string("second"), holder->fn());
         });
 

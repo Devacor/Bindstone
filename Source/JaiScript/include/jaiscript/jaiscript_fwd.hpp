@@ -50,6 +50,13 @@ namespace jai {
         jai_invalid_type         // Invalid/non-existent value (used as sentinel)
     };
     
+    // The unit whose code is running and the execution that compiled it (docs/global_shadowing.md):
+    // id numbers units by first execution (0 = the host), seq numbers executions engine-wide
+    struct unit_stamp {
+        unsigned int id = 0;
+        unsigned int seq = 0;
+    };
+
 } // namespace jai
 
 #endif // __JAISCRIPT_JAISCRIPT_FWD_HPP__

@@ -12,6 +12,7 @@ namespace jai {
 
 class function_decl;
 class class_definition;
+class environment;
 
 // Flat script namespace registry entry ("a::b::c" is one namespace name, no nesting).
 // Engine-owned (see engine::script_namespaces()) so namespaces survive across backends.
@@ -19,6 +20,7 @@ struct script_namespace_data {
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> functions;  // function_name_id -> overloads
     std::unordered_map<uint64_t, script_value> variables;                                 // variable_name_id -> value
     std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classes;              // class_name_id -> definition
+    std::shared_ptr<environment> scope;   // the cells of the script-declared variables, parented on the global environment (detail/namespace_scope.hpp)
 };
 
 // Engine-owned namespaces: reflect:: answers and jai:: capabilities cannot be

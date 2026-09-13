@@ -4751,6 +4751,16 @@ static const script_array* ref_pinned_element_container(const script_value& v) n
 	return h->container.get();
 }
 
+// an element reference into any array, hetero or typed (a record of `array<WallChunk>`, `for (auto& t : WALL_WS)`): the base of
+// a member container dereferences it (a typed element materializes; an object slot reboxes to its instance handle) and pins
+// the table; the table, or null for every other shape
+static const script_array* ref_element_table(const script_value& v) noexcept {
+	const auto* h = v.get_reference_holder();
+	if (!h || !h->container || h->has_cell || h->property || h->owner_instance || h->container_map) return nullptr;
+	if (h->container_index >= h->container->size()) return nullptr;
+	return h->container.get();
+}
+
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
 		// the container guard's plain-cell form, a slot form: a plain cell (or no reference at all) needs no snapshot, the readers
@@ -6824,11 +6834,11 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	const script_value* base = frame_slot(f, container.slot);
 	if (!base) return nullptr;
 	if (base->raw_storage_index() == script_value::TYPEID_REFERENCE) {
-		// the base dereferences as a load site's container does: a plain cell, a map entry (no store site writes a map), or an
-		// element reference (a record of a table, `for (auto& t : WALL_WS)`) whose table the block pins; a getter-backed reference
-		// stays general (its getter belongs to every read)
+		// the base dereferences as a load site's container does, and further: a plain cell, a map entry (no store site writes a
+		// map), or an element reference into a hetero or a typed table (a record of `array<WallChunk>`, `for (auto& t : WALL_WS)`)
+		// whose table the block pins; a getter-backed reference stays general (its getter belongs to every read)
 		if (ref_plain_cell(*base) || ref_map_entry(*base)) { base = &base->deref(); }
-		else if (const script_array* table = ref_pinned_element_container(*base)) { pin = table; base = &base->deref(); }
+		else if (const script_array* table = ref_element_table(*base)) { pin = table; base = &base->deref(); }   // a typed buffer's element materializes: an object slot is its instance
 		else return nullptr;
 	}
 	if (base->raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;

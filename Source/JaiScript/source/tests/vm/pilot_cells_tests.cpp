@@ -2211,6 +2211,45 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, mixed, proofs), run_on(true, mixed, proofs), std::string("mixed and unknown classes agree") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("a_computed_index_on_a_member_container_fuses_and_the_dda_loop_closes", [this]() {
+			// gloom_ray_chunk_step's DDA while (GLOOM pure.jai 46): `t.pack[cell / 15]` reads a member container at a computed
+			// index; fused, the loop closes over the member container (row 129) with its float compounds (row 130)
+			const char* fn = "class Ws { int mw = 8; array<int> pack = []; }"
+			                 " var f = function(var& t, float posx, float posy, float rdx, float rdy) -> float {"
+			                 " int mw = t.mw; int mx = posx; int my = posy;"
+			                 " float adx = rdx < 0.0 ? -rdx : rdx; float ady = rdy < 0.0 ? -rdy : rdy;"
+			                 " float ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx; float ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;"
+			                 " int stepx = rdx < 0.0 ? -1 : 1; int stepy = rdy < 0.0 ? -1 : 1;"
+			                 " float sdx = rdx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx;"
+			                 " float sdy = rdy < 0.0 ? (posy - my) * ddy : (my + 1.0 - posy) * ddy;"
+			                 " int side = 0; int kind = 1; int guard = 0; bool hit = false;"
+			                 " while (!hit && guard < 128) {"
+			                 "  if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; } else { sdy += ddy; my += stepy; side = 1; }"
+			                 "  int cell = my * mw + mx; int word = t.pack[cell / 15]; int c = (word >> ((cell % 15) * 4)) & 15;"
+			                 "  if (c != 0) { hit = true; kind = c; }"
+			                 "  guard = guard + 1;"
+			                 " }"
+			                 " return (side == 0 ? sdx - ddx : sdy - ddy) + kind * 1000.0 + guard; };";
+			const std::string listing = listing_of(fn);
+			check_true(listing.find("INDEX_FUSED_DECL") != std::string::npos, "the member container read is one fused instruction: " + listing);
+			check_true(listing.find("CELLS_") != std::string::npos, "the DDA loop closes: " + listing);
+			const std::string call = std::string(fn) + " var w = Ws(); array<int> pack = []; int word = 0; int fill = 0;"
+			                         " for (int cell = 0; cell < 64; ++cell) { int cx = cell % 8; int cy = cell / 8; int k = (cx == 0 || cy == 0 || cx == 7 || cy == 7) ? 1 : 0;"
+			                         "  word = word | (k << ((cell % 15) * 4)); fill = fill + 1; if (fill == 15) { pack.push(word); word = 0; fill = 0; } }"
+			                         " if (fill > 0) { pack.push(word); } w.pack = pack;"
+			                         " to_string(f(w, 3.5, 3.5, 1.0, 0.66)) + \" \" + to_string(f(w, 3.5, 3.5, -0.7, -0.3)) + \" \" + to_string(f(w, 1.2, 6.1, 0.1, 1.0));";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+			}
+			// the member read raises like the unfused shape: an index past the end and a missing member, the same text on both backends
+			const std::string oob = "class Ws { array<int> pack = [1, 2, 3]; } var r = function(var& t, int i) -> int { return t.pack[i * 2]; };"
+			                        " var w = Ws(); string out = \"\"; try { out = to_string(r(w, 1)); } catch (e) { out = \"caught \" + e; } try { out = out + \"|\" + to_string(r(w, 5)); } catch (e) { out = out + \"|caught \" + e; } out;";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, oob, proofs), run_on(true, oob, proofs), std::string("the fused member read raises the general text") + (proofs ? "" : " (proofs off)"));
+			}
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

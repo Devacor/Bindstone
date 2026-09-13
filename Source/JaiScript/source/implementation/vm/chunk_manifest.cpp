@@ -1,0 +1,233 @@
+#include <jaiscript/vm/chunk_manifest.hpp>
+#include <cstdio>
+#include <cstring>
+#include <sstream>
+
+namespace jai::vm {
+
+namespace {
+
+	struct manifest_writer {
+		std::ostringstream out;
+		const string_symbolizer* sym = nullptr;
+
+		std::string id(uint64_t symbol_id) const {
+			if (symbol_id == UINT64_MAX) return "-";
+			if (!sym) return "#" + std::to_string(symbol_id);
+			return esc(std::string(sym->get_string(symbol_id)));
+		}
+		std::string symidx(const chunk& ch, uint32_t index) const {
+			if (index == k_invalid_u32) return "-";
+			if (index >= ch.symbols.size()) return "?" + std::to_string(index);
+			return id(ch.symbols[index]);
+		}
+		static std::string u(uint32_t v) { return v == k_invalid_u32 ? std::string("-") : std::to_string(v); }
+		static std::string z(size_t v) { return v == SIZE_MAX ? std::string("-") : std::to_string(v); }
+		static const char* b(bool v) { return v ? "1" : "0"; }
+		static std::string tn(const type_info* t) { return t ? esc(t->type_name) : std::string("-"); }
+		static std::string esc(const std::string& s) {
+			std::string r;
+			for (unsigned char c : s) {
+				if (c >= 0x20 && c < 0x7F && c != '\\' && c != '|' && c != ' ') { r += static_cast<char>(c); }
+				else { char h[8]; std::snprintf(h, sizeof h, "\\x%02X", c); r += h; }
+			}
+			return r;
+		}
+		static std::string hex64(uint64_t v) { char h[24]; std::snprintf(h, sizeof h, "%016llx", static_cast<unsigned long long>(v)); return h; }
+		static std::string node(const ast_node* n) {
+			if (!n) return "-";
+			return std::to_string(static_cast<int>(n->get_type())) + "@" + std::to_string(n->location.line) + ":" + std::to_string(n->location.column);
+		}
+		std::string ins(const vm_instruction& i) const {
+			return std::string(opcode_name(i.op)) + " " + std::to_string(i.a) + " " + std::to_string(i.b) + " " + std::to_string(i.c);
+		}
+		std::string constant(const script_value& v) const {
+			std::string r;
+			switch (v.raw_storage_index()) {
+			case script_value::TYPEID_NULL: r = "null"; break;
+			case script_value::TYPEID_INT: r = "i:" + std::to_string(v.unchecked_as_int()); break;
+			case script_value::TYPEID_FLOAT: { const double d = v.unchecked_as_float(); uint64_t bits = 0; std::memcpy(&bits, &d, sizeof bits); r = "f:" + hex64(bits); break; }
+			case script_value::TYPEID_STRING: r = "s:" + esc(std::string(v.unchecked_as_string())); break;
+			case script_value::TYPEID_BOOL: r = std::string("b:") + (v.unchecked_as_bool() ? "1" : "0"); break;
+			default: r = "k" + std::to_string(v.raw_storage_index()) + ":" + esc(v.to_string()); break;
+			}
+			return r + " tag=" + tn(v.get_type_info().get());
+		}
+		std::string operand(const chunk& ch, const fused_operand& o) const {
+			std::string r = "{slot=" + u(o.slot) + " sym=" + symidx(ch, o.symbol) + " const=" + u(o.const_index) + " flags=" + std::to_string(o.load_flags) +
+			                " ident=" + u(o.ident_node) + " member=" + u(o.member_node) + " direct=" + b(o.direct);
+			if (o.is_subscript()) {
+				r += " chain=[";
+				for (const auto& s : o.subscript_chain) {
+					r += "(" + std::to_string(s.kind) + " " + u(s.slot) + " " + symidx(ch, s.symbol) + " " + std::to_string(s.literal) + ")";
+				}
+				r += "]";
+			}
+			return r + "}";
+		}
+		std::string mask(const chunk::cell_mask& m) const { return hex64(m.w[0]) + ":" + hex64(m.w[1]); }
+
+		void write(const chunk& ch, const std::string& label, int depth) {
+			const std::string pre(static_cast<size_t>(depth) * 2, ' ');
+			out << pre << "chunk " << label << " name=" << esc(ch.function_name) << " locals=" << ch.local_count << " body=" << b(ch.is_function_body)
+			    << " frame_env=" << b(ch.needs_frame_env) << " builtin_indexed=" << b(ch.builtin_indexed) << " method_env_reusable=" << b(ch.method_env_reusable)
+			    << " pinned_decls=" << ch.pinned_decls.size() << "\n";
+			out << pre << "code " << ch.code.size() << "\n";
+			for (size_t i = 0; i < ch.code.size(); ++i) {
+				out << pre << " " << i << " " << ins(ch.code[i]);
+				if (i < ch.stmt_nodes.size()) { out << " stmt=" << node(ch.stmt_nodes[i]); }
+				if (i < ch.ident_nodes.size()) { out << " ident=" << u(ch.ident_nodes[i]); }
+				out << "\n";
+			}
+			out << pre << "constants " << ch.constants.size() << "\n";
+			for (size_t i = 0; i < ch.constants.size(); ++i) { out << pre << " " << i << " " << constant(ch.constants[i]) << "\n"; }
+			out << pre << "symbols " << ch.symbols.size() << "\n";
+			for (size_t i = 0; i < ch.symbols.size(); ++i) { out << pre << " " << i << " " << id(ch.symbols[i]) << "\n"; }
+			out << pre << "messages " << ch.messages.size() << "\n";
+			for (size_t i = 0; i < ch.messages.size(); ++i) { out << pre << " " << i << " " << esc(ch.messages[i]) << "\n"; }
+			out << pre << "nodes " << ch.nodes.size() << "\n";
+			for (size_t i = 0; i < ch.nodes.size(); ++i) { out << pre << " " << i << " " << node(ch.nodes[i].get()) << "\n"; }
+			out << pre << "call_arg_zones";
+			for (const auto& z : ch.call_arg_zones) { out << " " << z.first << "-" << z.second; }
+			out << "\n" << pre << "reference_slots";
+			for (uint32_t s : ch.reference_slots) { out << " " << s; }
+			out << "\n" << pre << "call_sites " << ch.call_sites.size() << "\n";
+			for (size_t i = 0; i < ch.call_sites.size(); ++i) {
+				const call_site& s = ch.call_sites[i];
+				out << pre << " " << i << " args=[";
+				for (size_t k = 0; k < s.arg_symbols.size(); ++k) {
+					out << (k ? " " : "") << id(s.arg_symbols[k]) << "/" << (k < s.arg_slots.size() ? u(s.arg_slots[k]) : std::string("?"))
+					    << "/" << (k < s.arg_global.size() ? std::to_string(s.arg_global[k]) : std::string("?"))
+					    << "/" << (k < s.arg_lvalue_nodes.size() ? u(s.arg_lvalue_nodes[k]) : std::string("-"));
+				}
+				out << "] member=" << u(s.member_node) << " call=" << u(s.call_node) << " recv=" << id(s.receiver_symbol) << "/" << u(s.receiver_slot)
+				    << " root=" << id(s.chain_root_symbol) << "/" << u(s.chain_root_slot) << " bi=" << s.bi_array << "," << s.bi_map << "," << s.bi_string
+				    << " callee=" << operand(ch, s.callee) << "\n";
+			}
+			out << pre << "function_protos " << ch.function_protos.size() << "\n";
+			for (size_t i = 0; i < ch.function_protos.size(); ++i) {
+				const function_proto& p = ch.function_protos[i];
+				out << pre << " " << i << " decl=" << (p.decl ? esc(std::string(p.decl->name)) : std::string("-")) << " coroutine=" << b(p.is_coroutine) << " outer=[";
+				for (const auto& o : p.outer_slot_plan) { out << "(" << id(o.first) << " " << o.second << ")"; }
+				out << "]\n";
+			}
+			out << pre << "closure_protos " << ch.closure_protos.size() << "\n";
+			for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
+				const closure_proto& p = ch.closure_protos[i];
+				out << pre << " " << i << " lambda=" << node(p.lambda.get()) << " default_capture=" << static_cast<int>(p.default_capture) << " this=" << b(p.captures_this) << " outer=[";
+				for (const auto& o : p.outer_slot_plan) { out << "(" << id(o.first) << " " << o.second << ")"; }
+				out << "] used=[";
+				for (uint64_t v : p.used_variables) { out << id(v) << " "; }
+				out << "] captures=[";
+				for (const auto& c : p.captures) { out << "(" << id(c.symbol_id) << " " << b(c.by_reference) << " " << z(c.outer_slot) << ")"; }
+				out << "]\n";
+			}
+			out << pre << "destructure_protos " << ch.destructure_protos.size() << "\n";
+			for (size_t i = 0; i < ch.destructure_protos.size(); ++i) {
+				out << pre << " " << i;
+				for (const auto& n : ch.destructure_protos[i].names) { out << " (" << id(n.first) << " " << n.second << ")"; }
+				out << "\n";
+			}
+			out << pre << "iter_protos " << ch.iter_protos.size() << "\n";
+			for (size_t i = 0; i < ch.iter_protos.size(); ++i) {
+				const iter_proto& p = ch.iter_protos[i];
+				out << pre << " " << i << " var=" << id(p.var_symbol) << " slot=" << z(p.slot) << " ref=" << b(p.is_reference) << "\n";
+			}
+			out << pre << "fused_binary_protos " << ch.fused_binary_protos.size() << "\n";
+			for (size_t i = 0; i < ch.fused_binary_protos.size(); ++i) {
+				const fused_binary_proto& p = ch.fused_binary_protos[i];
+				out << pre << " " << i << " op=" << static_cast<int>(p.op) << " class=" << static_cast<int>(p.typed_class) << " elem=" << b(p.elem_read_operand)
+				    << " left=" << operand(ch, p.left) << " right=" << operand(ch, p.right) << "\n";
+			}
+			out << pre << "compound_fused_protos " << ch.compound_fused_protos.size() << "\n";
+			for (size_t i = 0; i < ch.compound_fused_protos.size(); ++i) {
+				const compound_fused_proto& p = ch.compound_fused_protos[i];
+				out << pre << " " << i << " rhs_proto=" << u(p.rhs_proto) << " rhs=" << operand(ch, p.rhs) << " sym=" << symidx(ch, p.symbol) << " slot=" << u(p.slot) << " kind=" << p.kind_flags << "\n";
+			}
+			out << pre << "fused_binary_dst_protos " << ch.fused_binary_dst_protos.size() << "\n";
+			for (size_t i = 0; i < ch.fused_binary_dst_protos.size(); ++i) {
+				const fused_binary_dst_proto& p = ch.fused_binary_dst_protos[i];
+				out << pre << " " << i << " binary=" << p.binary_proto << " node=" << u(p.node_index) << " sym=" << symidx(ch, p.symbol) << " slot=" << u(p.slot) << " flags=" << p.flags << "\n";
+			}
+			out << pre << "fused_index_protos " << ch.fused_index_protos.size() << "\n";
+			for (size_t i = 0; i < ch.fused_index_protos.size(); ++i) {
+				const fused_index_proto& p = ch.fused_index_protos[i];
+				out << pre << " " << i << " container=" << operand(ch, p.container) << " index=" << operand(ch, p.index) << " index_binary=" << u(p.index_binary) << " chain=[";
+				for (uint32_t s : p.index_chain_ext) { out << s << " "; }
+				out << "] value=" << operand(ch, p.store_value) << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
+				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always) << "\n";
+			}
+			out << pre << "push_protos " << ch.push_protos.size() << "\n";
+			for (size_t i = 0; i < ch.push_protos.size(); ++i) {
+				const push_proto& p = ch.push_protos[i];
+				out << pre << " " << i << " recv=" << operand(ch, p.receiver) << " value=" << operand(ch, p.value) << " site=" << u(p.site) << " subscript=" << b(p.value_is_subscript) << " flags=" << p.value_index_flags << "\n";
+			}
+			out << pre << "counted_for_protos " << ch.counted_for_protos.size() << "\n";
+			for (size_t i = 0; i < ch.counted_for_protos.size(); ++i) {
+				const counted_for_proto& p = ch.counted_for_protos[i];
+				out << pre << " " << i << " var=" << operand(ch, p.var) << " end=" << operand(ch, p.end) << " step=" << operand(ch, p.step) << " cmp=" << static_cast<int>(p.cmp)
+				    << " sub=" << b(p.step_subtract) << " incdec=" << b(p.step_incdec) << " body=" << u(p.body_ip) << " exit=" << u(p.exit_ip) << " cond=" << u(p.generic_cond_ip) << " update=" << u(p.generic_update_ip) << "\n";
+			}
+			out << pre << "typed_sites " << ch.typed_sites.size() << "\n";
+			for (size_t i = 0; i < ch.typed_sites.size(); ++i) {
+				const chunk::typed_site& s = ch.typed_sites[i];
+				if (s.orig.op == opcode::op_halt && s.orig2.op == opcode::op_halt && !s.stamp && s.cont_slot == k_invalid_u32 && s.fold_count == 0 && s.index_proto == k_invalid_u32) continue;   // an empty row
+				out << pre << " " << i << " orig=" << ins(s.orig) << " orig2=" << ins(s.orig2) << " stamp=" << tn(s.stamp) << " cont=" << u(s.cont_slot) << " ops=";
+				for (uint32_t o : s.operands) { out << o << ","; }
+				out << " fold=";
+				for (uint8_t f : s.fold_ops) { out << static_cast<int>(f) << ","; }
+				out << static_cast<int>(s.fold_count) << " expect=" << static_cast<int>(s.decl_expect) << " proto=" << u(s.index_proto) << " temp=" << b(s.temp) << " spec=" << b(s.speculative)
+				    << " guard=" << u(s.guard_temp) << " always=" << b(s.guard_always) << "\n";
+			}
+			out << pre << "cell_loops " << ch.cell_loops.size() << "\n";
+			for (size_t i = 0; i < ch.cell_loops.size(); ++i) {
+				const chunk::cell_loop& l = ch.cell_loops[i];
+				out << pre << " " << i << " head=" << l.head << " back=" << l.back << " copy=" << l.copy_head << ".." << l.copy_back << " exit=" << l.exit_ip << " counted=" << u(l.counted)
+				    << " temp_mask=" << mask(l.temp_mask) << " env_mask=" << mask(l.env_mask) << "\n";
+				out << pre << "  cells";
+				for (const auto& c : l.cells) {
+					out << " (" << c.slot << " k" << static_cast<int>(c.kind) << " l" << static_cast<int>(c.landing) << " in" << b(c.live_in) << " def" << b(c.defined) << " " << tn(c.stamp)
+					    << " env" << u(c.env_operand) << " t" << b(c.temp) << " fd" << b(c.first_decl) << " " << tn(c.decl_stamp) << " sb" << b(c.string_borrow) << ")";
+				}
+				out << "\n" << pre << "  slot_to_cell";
+				for (uint32_t c : l.slot_to_cell) { out << " " << u(c); }
+				out << "\n" << pre << "  origin";
+				for (uint32_t o : l.origin) { out << " " << o; }
+				out << "\n" << pre << "  live";
+				for (const auto& m : l.live_temps) { out << " " << mask(m); }
+				out << "\n" << pre << "  sites";
+				for (uint32_t s : l.sites) { out << " " << s; }
+				out << "\n" << pre << "  env_operands";
+				for (const auto& e : l.env_operands) { out << " " << operand(ch, e.operand) << "@" << e.cache_slot; }
+				out << "\n" << pre << "  calls";
+				for (const auto& c : l.calls) {
+					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " args=[";
+					for (const auto& a : c.args) { out << "(" << static_cast<int>(a.kind) << " " << a.v << " " << a.ip << ")"; }
+					out << "])";
+				}
+				out << "\n" << pre << "  ir " << esc(l.ir_text) << "\n";
+			}
+			out << pre << "cell_refusals " << ch.cell_refusals.size() << "\n";
+			for (const auto& r : ch.cell_refusals) {
+				out << pre << " " << r.head << " " << r.back << " " << r.ip << " " << chunk::cell_refusal_name(r.reason) << " " << opcode_name(static_cast<opcode>(r.op)) << "\n";
+			}
+			for (size_t i = 0; i < ch.param_default_chunks.size(); ++i) {
+				if (ch.param_default_chunks[i]) { write(*ch.param_default_chunks[i], label + ".default" + std::to_string(i), depth + 1); }
+			}
+			for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
+				if (ch.closure_protos[i].body_chunk) { write(*ch.closure_protos[i].body_chunk, label + ".closure" + std::to_string(i), depth + 1); }
+			}
+			out << pre << "end " << label << "\n";
+		}
+	};
+
+} // namespace
+
+std::string chunk_manifest(const chunk& ch, const string_symbolizer* symbolizer) {
+	manifest_writer w;
+	w.sym = symbolizer;
+	w.write(ch, "root", 0);
+	return w.out.str();
+}
+
+} // namespace jai::vm

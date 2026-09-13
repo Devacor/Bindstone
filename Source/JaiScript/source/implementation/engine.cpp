@@ -695,6 +695,7 @@ struct engine::implementation {
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
     bool type_proofs_ = true;
     bool ir_passes_ = true;
+    engine::disassembly_sink_fn disassembly_sink_;   // the listing tool's sink; unset = no listing
     proof_stats last_proof_stats_;
 
     // Program closure (docs/static_checking.md "Programs"): a unit with literal top-level
@@ -1980,6 +1981,14 @@ void engine::ir_passes(bool on) {
 
 bool engine::ir_passes() const {
     return impl->ir_passes_;
+}
+
+void engine::disassembly_sink(disassembly_sink_fn sink) {
+    impl->disassembly_sink_ = std::move(sink);
+}
+
+const engine::disassembly_sink_fn& engine::disassembly_sink() const {
+    return impl->disassembly_sink_;
 }
 
 void engine::vm_profile_reset() {

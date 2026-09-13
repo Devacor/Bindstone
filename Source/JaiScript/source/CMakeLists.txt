@@ -20,6 +20,7 @@ set(JAISCRIPT_SOURCES
     implementation/type_info.cpp
     implementation/types.cpp
     implementation/value.cpp
+    implementation/vm/chunk_manifest.cpp
     implementation/vm/disassembler.cpp
     implementation/vm/vm_backend.cpp
     implementation/vm/vm_compiler.cpp

@@ -10,6 +10,7 @@
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/vm/vm_compiler.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/vm/disassembler.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
@@ -77,7 +78,8 @@ public:
 		auto parse_result = p.parse();
 		if (!parse_result.has_value()) { return "<parse failed>"; }
 		(void)jai::detail::run_static_check(*e, parse_result.value());
-		jai::vm::vm_compiler compiler(symbolizer);
+		jai::builtin_method_registries builtins; jai::init_builtin_method_registries(symbolizer, builtins);   // the call sites' builtin indexes, as the engine's compiler has them (a push site needs its array index)
+		jai::vm::vm_compiler compiler(symbolizer, &builtins);
 		compiler.ir_listing(true);
 		return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 	}
@@ -2265,6 +2267,40 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				const std::string vm = run_on(true, src, proofs), in = run_on(false, src, proofs);
 				check_eq(in, vm, std::string("both backends agree") + (proofs ? "" : " (proofs off)"));
 				check_true(vm.find("throw") == std::string::npos, "the program completes: " + vm);
+			}
+		});
+		test("pushes_onto_a_frame_slot_array_run_inside_the_block", [this]() {
+			// gloom_row_quad's shape (GLOOM render.jai 526): string elements of environment tables and string constants pushed onto a
+			// local var array inside the cells loop; the loop closes and the joined row agrees with the interpreter; a typed
+			// array<string> receiver, an int buffer fed a float (the general text), the memory cap and an index past the end agree too
+			const char* src = "array<int> PIX = [3, 3, 3, 3, 5, 3, 5, 3, 1, 2, 3, 4, 7, 7, 7, 7]; array<int> PAL_LUM = [0, 40, 80, 120, 160, 200, 240, 255];"
+			                  " array<string> PAL_FG = [\"f0\", \"f1\", \"f2\", \"f3\", \"f4\", \"f5\", \"f6\", \"f7\"]; array<string> PAL_BG = [\"b0\", \"b1\", \"b2\", \"b3\", \"b4\", \"b5\", \"b6\", \"b7\"];"
+			                  " array<string> QUADG = [\"q0\", \"q1\", \"q2\", \"q3\", \"q4\", \"q5\", \"q6\", \"q7\", \"q8\", \"q9\", \"qa\", \"qb\", \"qc\", \"qd\", \"qe\", \"qf\"];"
+			                  " var row = function(int vw) -> string { var parts = []; int cells = vw / 2; int pfg = -1; int pbg = -1; int itop = 0; int ibot = vw;"
+			                  "  for (int cx = 0; cx < cells; ++cx) { int xx = cx * 2; int p0 = PIX[itop + xx]; int p1 = PIX[itop + xx + 1]; int p2 = PIX[ibot + xx]; int p3 = PIX[ibot + xx + 1];"
+			                  "   if (p0 == p1 && p0 == p2 && p0 == p3) { if (p0 != pbg) { parts.push(PAL_BG[p0]); pbg = p0; } parts.push(\" \"); continue; }"
+			                  "   if (p0 == p2 && p1 == p3) { if (p0 != pfg) { parts.push(PAL_FG[p0]); pfg = p0; } if (p1 != pbg) { parts.push(PAL_BG[p1]); pbg = p1; } parts.push(QUADG[5]); continue; }"
+			                  "   int l0 = PAL_LUM[p0]; int l1 = PAL_LUM[p1]; int l2 = PAL_LUM[p2]; int l3 = PAL_LUM[p3]; int lmin = l0; int lmax = l0; int fgp = p0; int bgp = p0;"
+			                  "   if (l1 < lmin) { lmin = l1; bgp = p1; } if (l1 > lmax) { lmax = l1; fgp = p1; } if (l2 < lmin) { lmin = l2; bgp = p2; } if (l2 > lmax) { lmax = l2; fgp = p2; }"
+			                  "   int thr = (lmin + lmax + 1) / 2; int bits = 0; if (l0 >= thr) { bits = 1; } if (l1 >= thr) { bits += 2; } if (l2 >= thr) { bits += 4; } if (l3 >= thr) { bits += 8; }"
+			                  "   if (fgp != pfg) { parts.push(PAL_FG[fgp]); pfg = fgp; } if (bits != 15 && bgp != pbg) { parts.push(PAL_BG[bgp]); pbg = bgp; } parts.push(QUADG[bits]); }"
+			                  "  return parts.join(\",\"); };";
+			const std::string listing = listing_of(src);
+			check_true(listing.find("C_PUSH") != std::string::npos && listing.find("CELLS_") != std::string::npos, "the pushes run inside the block: " + listing);
+			const std::string call = std::string(src) + " row(8) + \"|\" + row(8);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, call, proofs), in = run_on(false, call, proofs);
+				check_eq(in, vm, std::string("the joined rows agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos && vm.find("q") != std::string::npos, "the row is built: " + vm);
+			}
+			const std::string kinds = "var f = function(int n) -> string { array<string> names = []; array<int> ints = []; array<float> floats = []; var mixed = []; string out = \"\";"
+			                          " for (int i = 0; i < n; ++i) { names.push(\"n\"); ints.push(i); floats.push(i); floats.push(0.5); mixed.push(i); mixed.push(true); mixed.push(\"s\"); }"
+			                          " out = out + names.join(\"\") + to_string(ints.size()) + to_string(floats[3]) + to_string(mixed.size());"
+			                          " try { for (int i = 0; i < n; ++i) { ints.push(1.5); } } catch (e) { out = out + \"|\" + e; }"
+			                          " array<string> tbl = [\"a\", \"b\"]; try { for (int i = 0; i < n; ++i) { names.push(tbl[i]); } } catch (e) { out = out + \"|\" + e; }"
+			                          " return out; }; f(3);";
+			for (bool proofs : { true, false }) {
+				check_eq(run_on(false, kinds, proofs), run_on(true, kinds, proofs), std::string("typed receivers, a declined kind and an index past the end agree") + (proofs ? "" : " (proofs off)"));
 			}
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {

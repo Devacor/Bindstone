@@ -1,6 +1,6 @@
 # Latest compiler review, 2026-09-14
 
-Two reproducible correctness issues remain: the new cell push can observe a getter without refreshing cached cells, and the held literal-include change can consume an older parsed cache that skips splicing. The saved-callable unit fix is verified. The include return rule remains a policy question.
+Two reproducible correctness issues remain: the new cell push can observe a getter without refreshing cached cells, and the held literal-include change can consume an older parsed cache that skips splicing. The saved-callable unit fix is verified. Dev has since ruled that an include's return exits the surrounding function for both literal and computed paths.
 
 ## Sources and scope
 
@@ -62,7 +62,11 @@ Fable's proposed immediately invoked reference-capture body is a workable direct
 - Check the runtime-parsed body against captured types and preserve ordinary reference, read-only and observable-getter behavior.
 - Keep diagnostics attached to the included file.
 
-The proposed assertion that literal and computed returns already agree is disproved by the frozen-source runs. With an included `return 3;`, a literal include returns 3 from the surrounding function; a computed include finishes its file and the surrounding function returns 7. This is a policy question. Declarations flowing out of a computed include are a separate question. Neither changes Dev's existing authorization for parameter/local reads and writes.
+The proposed assertion that literal and computed returns already agree is disproved by the frozen-source runs. With an included `return 3;`, a literal include returns 3 from the surrounding function; a computed include finishes its file and the surrounding function returns 7. **Decision, 2026-09-14:** Dev chose return from the surrounding function, matching textual inclusion, for both spellings. The computed-path result of 7 is therefore a contract mismatch; both forms must produce 3 and skip statements after the include.
+
+Acceptance also covers ordinary fallthrough continuing the caller, a single evaluation of the return expression, the surrounding function's existing return conversion, normal scope cleanup, nested includes, cold/warm caches and both backends with proofs and IR passes on/off. A helper lambda used for capture plumbing must propagate the included body's return to the surrounding function; its ordinary local return is insufficient. An explicit nested function or lambda retains its own return scope.
+
+Declarations flowing out of a computed include remain a separate question. Parameter/local reads and writes were already authorized. This records the ruling and acceptance criteria; it does not claim that computed-path return propagation is implemented.
 
 Evidence and acceptance controls: `raw/COMPUTED_INCLUDE_PLAN_REVIEW.md`, `raw/return-host/run.log` and the include-return results.
 

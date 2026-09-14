@@ -482,3 +482,24 @@ backends, so the store-value hoist is already in that order. A reference declara
 (`var& pix = PIX;`) keeps its function on the lazy-environment path: the reference lands in the alias's slot and the
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
+
+### The region IR module
+
+The canonical operations of a closed loop and the analyses over them live in `include/jaiscript/vm/region_ir.hpp`
+and `source/implementation/vm/region_ir.cpp`: the operation set (`ir`, `ir_op`), `region_ir` (one loop's operations
+with the span of the general form they stand for; an operation's index is its id, `first + k` its original ip),
+`control_flow` (successors and predecessors over the operations, the back node and the exit node), `verify` (the
+must-define dataflow over that graph for every slot the block enters with undefined, the snapshot spans, a container
+binding never written; the first offence in operation order is the verdict), `listing` (the text the listing tool
+prints per region) and `live_temps` (the liveness of compiler values per copy instruction, the flush's map).
+`vm_compiler::lower_typed_ops` translates a loop into a `region_ir`, asks the module for the verdict, the listing and
+the liveness, and emits the cell copy; every pass over regions consults the module and nothing else.
+
+The listing tool: `engine::disassembly_sink` hands every chunk the VM compiles (a program, a function at its define, a
+closure body, a standalone expression or declaration) to a sink as it is compiled, off by default; the runner's
+`--disasm=<file>` writes the readable listings (`vm/disassembler.hpp`, the regions' operations included) and
+`--manifest=<file>` the semantic manifests (`vm/chunk_manifest.hpp`: every instruction's fields, every constant's
+exact bits, the symbols by spelling, every proto table, the typed sites, each cell loop's cells, origins, live masks,
+sites, calls and refusals, every nested chunk; no runtime cache or counter). A compiler change that claims unchanged
+output proves it by identical manifests over a corpus; a listing alone cannot tell two constants or two live masks
+apart.

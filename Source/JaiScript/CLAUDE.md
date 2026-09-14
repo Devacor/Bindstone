@@ -380,7 +380,11 @@ engine stays usable", not by `check_throws`.
   typed-lane index stores gets a cell-form copy; `op_cells_back` guards every slot, resolves the
   containers once, unboxes into the call record's raw area and runs the copy as one block; a miss flushes
   and re-runs the original instruction on the general form, so the interpreter stays the oracle. Controls:
-  suites `Closed Typed Loops` and `Cell Loops`.
+  suites `Closed Typed Loops` and `Cell Loops`. The operation set, the region's graph, the verifier, the listing
+  and the liveness are the module `vm/region_ir.hpp` (the compiler builds a `region_ir` and consults it). The
+  listing tool: `engine::disassembly_sink` (every chunk the VM compiles, as compiled; off by default), the runner's
+  `--disasm=<file>` (readable listings) and `--manifest=<file>` (`vm/chunk_manifest.hpp`, the identity gate of a
+  compiler change: every field, exact constant bits).
 - **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
   declares a name defined outside the program (checker: a declared global, typed -> checked and
   proven; both backends: the unit SHARES the visible global instead of declaring its own, and creates

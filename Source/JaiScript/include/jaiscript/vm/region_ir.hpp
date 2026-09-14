@@ -1,0 +1,89 @@
+#pragma once
+
+#ifndef __JAISCRIPT_VM_REGION_IR_HPP__
+#define __JAISCRIPT_VM_REGION_IR_HPP__
+
+// The region IR (docs/typed_regions_design.md "The contract", out/fable/plan_middle_end.md): a closed loop's
+// canonical operations, one per instruction of the general form, over cells. vm_compiler::lower_typed_ops
+// translates a loop into a region_ir and emits the cell copy from it; this module holds what every pass
+// consults: the operation set, the region's control flow graph, the verifier (must-define over the graph,
+// the snapshot spans, the container bindings never written), the listing and the liveness of compiler
+// values per copy instruction. Cells are the registers and the fallback contract (a miss flushes dirty
+// cells by liveness and re-runs the general form from the origin), so the IR keeps cells rather than
+// renaming into SSA.
+
+#include "chunk.hpp"
+#include <array>
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace jai::vm {
+
+	// probe: the callee resolved at its own place, ahead of the argument values; push: recv.push(v) onto a frame-slot array
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push };
+
+	inline const char* ir_name(ir k) {
+		static const char* const names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push" };
+		return names[static_cast<size_t>(k)];
+	}
+
+	constexpr uint32_t k_ir_env_bit = 0x40000000u;   // an operand that is an environment value: the bit | its position among the region's environment operands
+
+	struct ir_op {
+		ir kind = ir::placeholder;
+		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
+		opcode fast = opcode::op_halt;           // the pinned-kind form (op_t_*) when the typed lowering produced it, else the any-kind form
+		uint8_t tok = 0;                         // the token for arith and cmp, the math_fn for math; a jump's 1 marks an inner loop's back edge (the budget poll)
+		uint32_t target = 0;                     // cmp and jump: the original target ip (the exit for a head)
+		uint32_t proto = k_invalid_u32;          // load: a general read's fused_index_protos index (k_invalid_u32 = a T_LOAD's site); store: the proto
+		uint32_t guarded = 0xFFFFFFu;            // guard: the guarded read's offset from the head
+		uint32_t reads[8] = {}; uint8_t nreads = 0;   // the slots the operation reads (the verifier's use list)
+		uint32_t writes = k_invalid_u32;         // the slot the operation writes (a local or a compiler value)
+		uint32_t container = k_invalid_u32;      // load and store: the container slot when the binding is a frame slot
+		bool head = false;
+		bool sense = false;                      // cmp: jump when true (a comparison value followed by JUMP_IF_TRUE)
+		uint32_t origin = k_invalid_u32;         // the original ip a miss at this operation re-runs (k_invalid_u32 = its own): an argument's value re-runs from the probe
+	};
+
+	// one loop's operations with the span of the general form they stand for: ops[k] stands for the instruction
+	// at first + k (a counted loop's head is the back edge's placeholder ahead of first); the index is the
+	// operation's id, back the back edge's ip
+	struct region_ir {
+		std::vector<ir_op> ops;
+		uint32_t head = 0, first = 0, back = 0;
+	};
+
+	// the region's control flow graph: an operation's successors are the next operation, a compare's target (the
+	// exit when the target is past the back edge; a head compare's false edge is the exit), a jump's target and
+	// nothing after an exit; the last operation continues to the back node, which re-enters at the first
+	struct region_cfg {
+		std::vector<std::array<size_t, 2>> succ;   // per operation and the back node (ops.size()); an entry of exit_node is no edge
+		std::vector<std::vector<size_t>> preds;    // per operation and the back node; the entry (0) records none
+		size_t back_node = 0, exit_node = 0;
+	};
+	region_cfg control_flow(const region_ir& r);
+
+	struct region_verdict { uint8_t refusal = chunk::cell_refusal_none; uint32_t at = 0; };
+	// the verifier: a slot the block enters with undefined (a compiler value, a local the body declares) is defined
+	// on every path to each of its reads; a snapshot's slot is written only by its own guard between the guard and
+	// its read; a container binding's slot is never written. The first offence in operation order is the verdict
+	// (malformed at its ip; a rewritten container binding is an effect at the head)
+	region_verdict verify(const region_ir& r, const std::vector<chunk::cell_loop::cell>& cells);
+
+	// the listing tool's text: index:kind, ->target, w slot, r slots, one operation per ';'
+	std::string listing(const region_ir& r);
+
+	// liveness of compiler values per copy instruction: a definition is live from the instruction after it through
+	// its last read (a miss there re-runs the read on the general form, which needs the slot to hold this value); a
+	// dead definition is never flushed, so it cannot overwrite the live one of the same slot. copy_at maps an original
+	// ip's offset from the head to its first copy instruction, defs lists (ip, cell) in program order, copy_count is
+	// the copy's length
+	std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<chunk::cell_loop::cell>& cells,
+	                                         const std::vector<uint32_t>& slot_to_cell, const std::vector<std::pair<uint32_t, uint32_t>>& defs,
+	                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count);
+
+} // namespace jai::vm
+
+#endif // __JAISCRIPT_VM_REGION_IR_HPP__

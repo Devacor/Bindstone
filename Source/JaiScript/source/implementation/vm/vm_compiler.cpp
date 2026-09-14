@@ -1,4 +1,5 @@
 #include <jaiscript/vm/vm_compiler.hpp>
+#include <jaiscript/vm/region_ir.hpp>   // the region IR: the operation set, the verifier, the listing, the liveness
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
@@ -2303,23 +2304,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push };   // push: recv.push(v) onto a frame-slot array   // probe: the callee resolved at its own place, ahead of the argument values (design_row118_canonical_lowering.md section 9)   // append: the compound plus with run-time kinds (strings in place)   // exit: the block ends, the general form continues at target   // skip: an instruction with no copy (a boxed argument, a carried jump)
-	struct ir_op {
-		ir kind = ir::placeholder;
-		uint32_t a = 0, b = 0, c = 0;            // operands: a slot, k_typed_const_bit | constant, or k_ir_env_bit | env value position
-		opcode fast = opcode::op_halt;           // the pinned-kind form (op_t_*) when the typed lowering produced it, else the any-kind form
-		uint8_t tok = 0;                         // the token for arith and cmp, the math_fn for math
-		uint32_t target = 0;                     // cmp and jump: the original target ip (the exit for a head)
-		uint32_t proto = k_invalid_u32;          // load: a general read's fused_index_protos index (k_invalid_u32 = a T_LOAD's site); store: the proto
-		uint32_t guarded = 0xFFFFFFu;            // guard: the guarded read's offset from the head
-		uint32_t reads[8] = {}; uint8_t nreads = 0;   // the slots the operation reads (the verifier's use list)
-		uint32_t writes = k_invalid_u32;         // the slot the operation writes (a local or a compiler value)
-		uint32_t container = k_invalid_u32;      // load and store: the container slot when the binding is a frame slot
-		bool head = false;
-		bool sense = false;                      // cmp: jump when true (a comparison value followed by JUMP_IF_TRUE)
-		uint32_t origin = k_invalid_u32;         // the original ip a miss at this operation re-runs (k_invalid_u32 = its own): an argument's value re-runs from the probe
-	};
-	constexpr uint32_t k_ir_env_bit = 0x40000000u;
+	// the operation set (ir, ir_op, k_ir_env_bit), the region and its analyses: jaiscript/vm/region_ir.hpp
 	auto stamp_kind = [](const type_info* t) -> uint8_t {
 		if (!t) return 0;
 		if (t->base_type == script_value_type::jai_int_type) return static_cast<uint8_t>(script_value::TYPEID_INT);
@@ -2485,9 +2470,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		};
 		// one operation per instruction of the loop span: a compare-headed loop from its head (the head span, then the
 		// compare, then the body), a counted loop from its body behind a placeholder
-		std::vector<ir_op> ops;
+		region_ir region;   // the loop's canonical operations (region_ir.hpp): built here, verified, listed and emitted below
+		std::vector<ir_op>& ops = region.ops;
 		ir_op head_op;
 		const size_t first = counted != k_invalid_u32 ? head + 1 : head;
+		region.head = static_cast<uint32_t>(head); region.first = static_cast<uint32_t>(first); region.back = static_cast<uint32_t>(back);
 		if (refusal == chunk::cell_refusal_none && counted != k_invalid_u32) {
 			const counted_for_proto& p = c.counted_for_protos[counted];
 			use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, head);   // stepped in place by the back edge
@@ -3000,69 +2987,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
-		// legality and lifetimes: a container binding's slot is never written; a slot the block enters with undefined (a compiler
-		// value, a local the body declares) is defined on every path to each of its reads; a snapshot's slot is written only by
-		// its own guard between the guard and its read (temps are reused across statements, so the slot may carry other values
-		// outside that span)
-		if (refusal == chunk::cell_refusal_none) {
-			// the region's control flow graph: an operation's successors are the next operation, a compare's target (the exit when
-			// the target is past the back edge; a head compare's false edge is the exit), a jump's target and nothing after an
-			// exit; the last operation continues to the back edge, which re-enters at the first. The must-define dataflow over that
-			// graph is the rule (a definition in an untaken branch does not reach a read after the join), and it is the rule every
-			// pass over the region must keep
-			const size_t n_ops = ops.size(), back_node = n_ops, exit_node = n_ops + 1;
-			auto node_of = [&](uint32_t target) -> size_t { return target > back || target < first ? exit_node : static_cast<size_t>(target - first); };
-			std::vector<std::array<size_t, 2>> succ(n_ops + 1, std::array<size_t, 2>{ exit_node, exit_node });
-			for (size_t k = 0; k < n_ops; ++k) {
-				const ir_op& op = ops[k];
-				switch (op.kind) {
-				case ir::exit: break;
-				case ir::jump: succ[k][0] = node_of(op.target); break;
-				case ir::cmp: succ[k][0] = k + 1; succ[k][1] = op.head ? exit_node : node_of(op.target); break;
-				default: succ[k][0] = k + 1; break;
-				}
-			}
-			succ[back_node][0] = 0;
-			std::vector<uint32_t> tracked;   // the slots undefined at entry
-			for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && (cl.temp || cl.first_decl) && std::find(tracked.begin(), tracked.end(), cl.slot) == tracked.end()) { tracked.push_back(cl.slot); } }
-			auto tracked_at = [&](uint32_t slot) -> int { for (size_t t = 0; t < tracked.size(); ++t) { if (tracked[t] == slot) return static_cast<int>(t); } return -1; };
-			std::vector<std::vector<bool>> in(n_ops + 1, std::vector<bool>(tracked.size(), true));   // the meet's identity; the entry defines nothing tracked
-			std::fill(in[0].begin(), in[0].end(), false);
-			std::vector<std::vector<size_t>> preds(n_ops + 1);
-			for (size_t k = 0; k <= n_ops; ++k) { for (size_t s : succ[k]) { if (s <= n_ops && s != 0) { preds[s].push_back(k); } } }
-			for (bool changed = true; changed;) {
-				changed = false;
-				for (size_t k = 1; k <= n_ops; ++k) {
-					if (preds[k].empty()) continue;
-					for (size_t t = 0; t < tracked.size(); ++t) {
-						bool all = true;
-						for (size_t p : preds[k]) { if (!(in[p][t] || (p < n_ops && ops[p].writes == tracked[t]))) { all = false; break; } }
-						if (in[k][t] != all) { in[k][t] = all; changed = true; }
-					}
-				}
-			}
-			std::vector<std::pair<uint32_t, uint32_t>> snapshots;   // slot, the read's ip (the guard is open until it)
-			for (size_t k = 0; k < n_ops && refusal == chunk::cell_refusal_none; ++k) {
-				const size_t ip = first + k;
-				const ir_op& op = ops[k];
-				for (uint8_t r = 0; r < op.nreads; ++r) {
-					const int t = tracked_at(op.reads[r]);
-					if (t >= 0 && !in[k][static_cast<size_t>(t)]) { refuse(chunk::cell_refusal_malformed, ip); }
-				}
-				if (op.writes != k_invalid_u32) {
-					for (const auto& s : snapshots) { if (s.first == op.writes && ip < s.second) { refuse(chunk::cell_refusal_malformed, ip); } }
-				}
-				if (op.kind == ir::guard) {
-					for (const auto& s : snapshots) { if (s.first == op.a && ip < s.second) { refuse(chunk::cell_refusal_malformed, ip); } }
-					if (op.guarded == 0xFFFFFFu) { refuse(chunk::cell_refusal_malformed, ip); }
-					snapshots.emplace_back(op.a, static_cast<uint32_t>(head + op.guarded));
-				}
-			}
-			for (const auto& op : ops) {
-				if (op.container == k_invalid_u32) continue;
-				for (const auto& w : ops) { if (w.writes == op.container) { refuse(chunk::cell_refusal_effect, head); } }   // a container binding rewritten inside the body
-			}
-		}
+		// legality and lifetimes (region_ir.hpp verify): a container binding's slot is never written; a slot the block enters with
+		// undefined is defined on every path to each of its reads; a snapshot's slot is written only by its own guard between the
+		// guard and its read. The must-define dataflow over the region's control flow graph is the rule every pass must keep
+		if (refusal == chunk::cell_refusal_none) { const region_verdict v = verify(region, cells); if (v.refusal != chunk::cell_refusal_none) { refuse(v.refusal, v.at); } }
 		if (refusal != chunk::cell_refusal_none) {
 			c.cell_refusals.push_back(chunk::cell_refusal{ static_cast<uint32_t>(head), static_cast<uint32_t>(back), refusal_ip, refusal, static_cast<uint8_t>(code[refusal_ip].op) });
 			continue;
@@ -3074,21 +3002,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
 		loop.env_operands = env_ops;
-		if (ir_listing_) {
-			static const char* const ir_names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push" };
-			std::string text;
-			for (size_t k = 0; k < ops.size(); ++k) {
-				const ir_op& op = ops[k];
-				text += std::to_string(k) + ":" + ir_names[static_cast<size_t>(op.kind)];
-				if (op.kind == ir::cmp || op.kind == ir::jump || op.kind == ir::exit) {
-					text += op.kind == ir::exit || op.head || op.target > back || op.target < first ? "->exit" : op.target == back ? "->back" : "->" + std::to_string(op.target - first);
-				}
-				if (op.writes != k_invalid_u32) { text += " w" + std::to_string(op.writes); }
-				for (uint8_t r = 0; r < op.nreads; ++r) { text += (r ? "," : " r") + std::to_string(op.reads[r]); }
-				text += ";";
-			}
-			loop.ir_text = std::move(text);
-		}
+		if (ir_listing_) { loop.ir_text = listing(region); }   // the listing tool's text (region_ir.hpp)
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (cells[k].temp) { loop.temp_mask.set(k); } }
@@ -3309,26 +3223,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			else if (fx.field == 1) { code[fx.at].c = to | fx.bits; }
 			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 8); }
 		}
-		// liveness of compiler values per copy instruction: a definition is live from the instruction after it through its
-		// last read (a miss there re-runs the read on the general form, which needs the slot to hold this value); a dead
-		// definition is never flushed, so it cannot overwrite the live one of the same slot
-		loop.live_temps.assign(loop.origin.size(), chunk::cell_mask{});
-		{
-			std::vector<uint32_t> cur = loop.slot_to_cell;
-			std::vector<size_t> def_end(cells.size(), 0);   // per compiler value: the copy offset after its defining instruction(s)
-			size_t nd = 0;
-			for (size_t k = 0; k < ops.size(); ++k) {
-				const ir_op& op = ops[k];
-				const size_t ip = first + k;
-				const size_t here_end = copy_at[ip + 1 - head] - loop.copy_head;   // the copy offset after this operation's instructions
-				for (uint8_t r = 0; r < op.nreads; ++r) {
-					const uint32_t cl = op.reads[r] < cur.size() ? cur[op.reads[r]] : k_invalid_u32;
-					if (cl == k_invalid_u32 || !cells[cl].temp) continue;
-					for (size_t m = def_end[cl]; m < here_end && m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(cl); }
-				}
-				while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_end[defs[nd].second] = here_end; ++nd; }
-			}
-		}
+		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size());   // liveness of compiler values per copy instruction (region_ir.hpp)
 		c.cell_loops.push_back(std::move(loop));
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }

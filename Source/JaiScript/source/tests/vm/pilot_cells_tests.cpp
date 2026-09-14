@@ -2411,6 +2411,28 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_true(got.find("budget") != std::string::npos || got.find("limit") != std::string::npos || got.find("exceeded") != std::string::npos, std::string(vm ? "vm" : "interp") + " names the budget: " + got);
 			}
 		});
+		test("a_table_reached_by_several_member_sites_is_pinned_once", [this]() {
+			// the ray step's shape: one member load and four member stores through one element reference into a typed record
+			// buffer (five sites, one table); a body that also stores into that table keeps the general form; the same on both
+			// backends, proofs on and off
+			const std::string script = R"(
+				class Rec { int x0 = 0; int x1 = 0; array<int> pack = []; array<float> odist = []; array<int> oside = []; array<int> okind = []; array<int> otex = [];
+					Rec(int a, int b) { x0 = a; x1 = b; for (int i = 0; i < 64; ++i) { pack.push(i * 7 + 3); odist.push(0.0); oside.push(0); okind.push(0); otex.push(0); } } }
+				array<Rec> WS = []; for (int k = 0; k < 4; ++k) { WS.push(new Rec(k * 16, k * 16 + 16)); }
+				function step(var& t) -> void { int x0 = t.x0; int x1 = t.x1; int oi = 0; for (int x = x0; x < x1; ++x) { int cell = x * 3; int word = t.pack[cell / 15]; int c = (word >> ((cell % 15) * 4)) & 15; float pdist = c * 0.5 + 0.25; t.odist[oi] = pdist; t.oside[oi] = c & 1; t.okind[oi] = c; t.otex[oi] = word & 63; oi = oi + 1; } }
+				function step_writes_table(var& t, var& ws, int k) -> int { int x0 = t.x0; int x1 = t.x1; int oi = 0; int acc = 0; for (int x = x0; x < x1; ++x) { int word = t.pack[x % 64]; t.okind[oi] = word & 15; acc = acc + t.okind[oi]; if (x == x0 + 2) { ws[k] = t; } oi = oi + 1; } return acc; }
+				for (int r = 0; r < 3; ++r) { for (auto& t : WS) { step(t); } }
+				int sum = 0; for (auto& t : WS) { for (int i = 0; i < 16; ++i) { sum = sum + t.oside[i] + t.okind[i] + t.otex[i] + math::itrunc(t.odist[i] * 4.0); } }
+				int w = step_writes_table(WS[1], WS, 1) + step_writes_table(WS[2], WS, 3);
+				to_string(sum) + "," + to_string(w) + "," + to_string(WS[3].x0) + "," + to_string(WS[3].okind[2]);
+			)";
+			both(script, "", "five member sites on one pinned table");
+			both(script, "", "five member sites on one pinned table, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find(",32,") != std::string::npos, "the record loops ran and the table store copied the record: " + vm);
+			const std::string l = listing_of("class Rec { int x0 = 0; int x1 = 0; array<int> pack = []; array<float> odist = []; array<int> oside = []; array<int> okind = []; array<int> otex = []; } var f = function(var& t) { int x0 = t.x0; int x1 = t.x1; int oi = 0; for (int x = x0; x < x1; ++x) { int word = t.pack[x / 15]; int c = (word >> ((x % 15) * 4)) & 15; t.odist[oi] = c * 0.5 + 0.25; t.oside[oi] = c & 1; t.okind[oi] = c; t.otex[oi] = word & 63; oi = oi + 1; } return oi; };");
+			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("C_INDEX_STORE") != std::string::npos && l.find("-- open loop") == std::string::npos, "the five-site record loop closes: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

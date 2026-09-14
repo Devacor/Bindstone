@@ -6861,7 +6861,20 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	// this resolution); a site whose container is not a plain array node (a getter-backed reference, a typed var
 	// array) keeps the loop on the general form, which runs the site's own resolution every time
 	const size_t span = loop.copy_back - loop.copy_head;
-	const script_array* pinned[4] = {}; uint32_t pinned_count = 0;   // element references' tables: no store site may write them
+	const script_array* pinned[8] = {}; uint32_t pinned_count = 0;   // element references' tables, each once: no store site may write them
+	auto pin = [&](const script_array* table) -> bool {
+		for (uint32_t i = 0; i < pinned_count; ++i) { if (pinned[i] == table) return true; }
+		if (pinned_count == 8) return false;
+		pinned[pinned_count++] = table; return true;
+	};
+	auto refuse_site = [&](uint32_t ip, const char* why) -> bool {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_entry_refusals_[std::string(f.code->function_name) + " container site ip " + std::to_string(ip) + ": " + why];
+#else
+		(void)ip; (void)why;
+#endif
+		return false;
+	};
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
 	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
@@ -6883,7 +6896,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				// an environment binding that is a reference to a property or an element is not a plain node: its getter or its error
 				// belongs to every read, so the loop stays on the general form (the cache holds the binding the general form resolved)
 				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
-				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return refuse_site(ip, "an environment binding that is a property or element reference");
 			}
 			const fused_operand& lc = f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container;
 			const bool member_site = lc.member_node != k_invalid_u32;   // resolved through the field once; the hold check after a call asks for this resolution again
@@ -6891,7 +6904,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			const script_value* cp = member_site ? cells_member_container(f, lc, member_pin)
 				: site.cont_slot != k_invalid_u32 ? frame_slot(f, site.cont_slot)
 				: fused_cmp_operand(f, lc, cache_slot);
-			if (member_pin) { if (pinned_count == 4) return false; pinned[pinned_count++] = member_pin; }
+			if (member_pin && !pin(member_pin)) return refuse_site(ip, "more than eight pinned tables");
 			if (member_site) {} else if (site.cont_slot != k_invalid_u32) { cs.site_slot[k] = site.cont_slot; } else { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {
 				// a guarded site materializes a non-plain reference per read on the general form; the block resolves once
@@ -6901,7 +6914,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 					if (ref_map_entry(*cp)) { cp = &cp->deref(); }   // a map entry (a sprite table keyed by lump): no store site writes a map, so it holds for the block
 					else {
 						const script_array* table = ref_pinned_element_container(*cp);
-						if (!table || pinned_count == 4) { cp = nullptr; } else { pinned[pinned_count++] = table; cp = &cp->deref(); }
+						if (!table || !pin(table)) { cp = nullptr; } else { cp = &cp->deref(); }
 					}
 				} else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			}
@@ -6912,12 +6925,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			// push a second container (a slot or an environment array); a landing after a call asks for this resolution again
 			const push_proto& p = f.code->push_protos[ci.a];
 			const script_value* cp = frame_slot(f, p.receiver.slot);
-			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
-			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return refuse_site(ip, "a push receiver behind a non-plain reference"); cp = &cp->deref(); }
+			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY) return refuse_site(ip, "a push receiver that is not an array");
 			node = cp->unchecked_array_node();
 			if (node && node->kind() == script_array::kind_t::hetero) {
 				const type_info* ti = cp->get_type_info().get();
-				if (ti && ti->element_type() && ti->element_type()->base_type != script_value_type::jai_any_type) return false;
+				if (ti && ti->element_type() && ti->element_type()->base_type != script_value_type::jai_any_type) return refuse_site(ip, "a typed hetero push receiver");
 			}
 			cs.site_node2[ip - loop.copy_head] = nullptr;
 			if (p.value_is_subscript) {
@@ -6926,7 +6939,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				if (sp && sp->raw_storage_index() == script_value::TYPEID_REFERENCE) { sp = lane_deref_silent(*sp) ? &sp->deref() : nullptr; }
 				bool borrowed = false;
 				const script_array* sn = sp ? lane_element_source(*sp, borrowed) : nullptr;
-				if (!sn || borrowed) return false;
+				if (!sn || borrowed) return refuse_site(ip, "a push source that is not a plain node");
 				cs.site_node2[ip - loop.copy_head] = sn;
 			}
 		} else if (ci.op == opcode::op_c_index_store) {
@@ -6934,12 +6947,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			const size_t cache_slot = p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3;
 			if (!(p.container.const_index == k_invalid_u32 && p.container.direct) && cache_slot < f.code->env_lookup_cache.size()) {
 				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];   // a store through a property or element reference stays general (as the loads above)
-				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
+				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return refuse_site(ip, "an environment binding that is a property or element reference");
 			}
 			const bool member_site = p.container.member_node != k_invalid_u32;
 			const script_array* member_pin = nullptr;
 			const script_value* cp = member_site ? cells_member_container(f, p.container, member_pin) : fast_operand(f, p.container, cache_slot);
-			if (member_pin) { if (pinned_count == 4) return false; pinned[pinned_count++] = member_pin; }
+			if (member_pin && !pin(member_pin)) return refuse_site(ip, "more than eight pinned tables");
 			if (member_site) {} else if (p.container.const_index == k_invalid_u32 && p.container.direct) { cs.site_slot[k] = p.container.slot; } else if (p.container.const_index == k_invalid_u32) { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_ARRAY) {
@@ -6948,12 +6961,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
 			}
 		}
-		if (!node) { return false; }
+		if (!node) { return refuse_site(ip, "a container that is not a plain node"); }
 		cs.site_node[ip - loop.copy_head] = node;
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		for (const uint32_t ip : loop.sites) {
-			if ((f.code->code[ip].op == opcode::op_c_index_store || f.code->code[ip].op == opcode::op_c_push) && cs.site_node[ip - loop.copy_head] == pinned[i]) { return false; }
+			if ((f.code->code[ip].op == opcode::op_c_index_store || f.code->code[ip].op == opcode::op_c_push) && cs.site_node[ip - loop.copy_head] == pinned[i]) { return refuse_site(ip, "a store into a pinned table"); }
 		}
 	}
 	return true;
@@ -15774,7 +15787,7 @@ void vm_backend::dump_opcode_profile() const {
 	if (!profile_cells_entry_refusals_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> refusals(profile_cells_entry_refusals_.begin(), profile_cells_entry_refusals_.end());
 		std::sort(refusals.begin(), refusals.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] cell entries refused by cell (function, slot or environment name, the kind the cell wants, the kind and stamp found; kinds: 1 int 2 float 5 bool):\n");
+		fprintf(stderr, "[vm-profile] cell entries refused by cell or by a container site (function, then the slot or environment name with the kind the cell wants and the kind and stamp found, or the site's instruction and its reason; kinds: 1 int 2 float 5 bool):\n");
 		size_t shown = 0;
 		for (const auto& [name, count] : refusals) {
 			fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count);

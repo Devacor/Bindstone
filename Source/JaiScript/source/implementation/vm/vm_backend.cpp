@@ -6778,6 +6778,10 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
+	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "step 5", "step 6", "other" };
+	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
+	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "step 5", "step 6", "other" };
+	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
 #else
 	(void)step;
 #endif
@@ -7594,7 +7598,8 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 			else return false;
 		}
 	} else if (have != kind && !loop.cells[dk].temp) {
-		const type_info* st = cs.stamp[dk];
+		// a local the body declares has no slot stamp: its declaration's type is the cell's contract on every iteration
+		const type_info* st = cs.stamp[dk] ? cs.stamp[dk] : loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
 		if (st && st->base_type == script_value_type::jai_any_type) {
 			// a var: the language lands any kind; the flush keeps the any stamp
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -15419,6 +15424,8 @@ void vm_backend::profile_reset() {
 	profile_nested_cycles_ = 0;
 	profile_native_callees_.clear();
 	profile_cells_entry_refusals_.clear();
+	profile_cells_miss_sites_.clear();
+	profile_cells_miss_sites_.clear();
 	profile_store_name_cycles_.clear();
 	profile_cfs_inloop_names_.clear();
 	profile_cfs_opaque_cycles_.clear();
@@ -15803,6 +15810,20 @@ void vm_backend::dump_opcode_profile() const {
 		for (const auto& [name, cyc] : callees) {
 			fprintf(stderr, "  %-32s %12.1f Mcyc\n", name.c_str(), cyc / 1e6);
 		}
+	}
+	if (!profile_cells_miss_sites_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> sites(profile_cells_miss_sites_.begin(), profile_cells_miss_sites_.end());
+		std::sort(sites.begin(), sites.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] cell misses by site (function, the original instruction's ip and opcode, the step):\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : sites) { fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count); if (++shown >= 12) break; }
+	}
+	if (!profile_cells_miss_sites_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> sites(profile_cells_miss_sites_.begin(), profile_cells_miss_sites_.end());
+		std::sort(sites.begin(), sites.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] cell misses by site (function, the original instruction's ip and opcode, the step):\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : sites) { fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count); if (++shown >= 12) break; }
 	}
 	if (!profile_cells_entry_refusals_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> refusals(profile_cells_entry_refusals_.begin(), profile_cells_entry_refusals_.end());

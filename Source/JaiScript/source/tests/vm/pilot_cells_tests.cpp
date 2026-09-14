@@ -2500,6 +2500,48 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_of("class Rec { int x0 = 0; int x1 = 0; array<int> pack = []; array<float> odist = []; array<int> oside = []; array<int> okind = []; array<int> otex = []; } var f = function(var& t) { int x0 = t.x0; int x1 = t.x1; int oi = 0; for (int x = x0; x < x1; ++x) { int word = t.pack[x / 15]; int c = (word >> ((x % 15) * 4)) & 15; t.odist[oi] = c * 0.5 + 0.25; t.oside[oi] = c & 1; t.okind[oi] = c; t.otex[oi] = word & 63; oi = oi + 1; } return oi; };");
 			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("C_INDEX_STORE") != std::string::npos && l.find("-- open loop") == std::string::npos, "the five-site record loop closes: " + l);
 		});
+		test("a_local_the_body_declares_lands_by_its_declaration_on_every_iteration", [this]() {
+			// the ray step's `int mx = posx;`: a narrowing declaration inside the body lands the float by the declaration's kernel on
+			// every iteration of a block run (not only the first, when the cell is empty), a float assigned to a body-declared int
+			// local truncates as the assignment table does, a var re-kinds freely, an out-of-range float raises the general text with
+			// the stores before it kept; the same on both backends, proofs on and off
+			const std::string script = R"(
+				function narrow(var& xs, int n) -> int { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; }
+				function assign(var& xs, int n) -> int { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = 0; m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; }
+				function rekind(int n) -> string { string s = ""; float f = 0.5; int i = 0; while (i < n) { var v = i; if ((i % 2) == 1) { v = f; } s = s + to_string(v) + ","; f = f + 1.0; i = i + 1; } return s; }
+				function far(var& xs, int n) -> string { float f = 1.0; int i = 0; try { while (i < n) { f = f * 10000000000.0; int m = f; xs[i] = m; i = i + 1; } } catch (err) { return "caught:" + err + "|" + to_string(i) + "|" + to_string(xs[0]); } return "ok"; }
+				var XS = [0, 0, 0, 0, 0, 0, 0, 0];
+				string a = to_string(narrow(XS, 6)) + "|" + to_string(assign(XS, 6)) + "|" + rekind(5) + "|" + to_string(XS[3]);
+				a + "|" + far(XS, 6);
+			)";
+			both(script, "", "body-declared landings");
+			both(script, "", "body-declared landings, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("27|27|0,1.500000,2,3.500000,4,|5|caught:", 0) == 0 && vm.find("|1|10000000000") != std::string::npos, "the declaration's kernel on every iteration, the var re-kinded, the out-of-range text after one kept store: " + vm);
+			const std::string l = listing_of("var f = function(var& xs, int n) { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; };");
+			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the narrowing loop closes: " + l);
+		});
+		test("a_local_the_body_declares_lands_by_its_declaration_on_every_iteration", [this]() {
+			// the ray step's `int mx = posx;`: a narrowing declaration inside the body lands the float by the declaration's kernel on
+			// every iteration of a block run (not only the first, when the cell is empty), a float assigned to a body-declared int
+			// local truncates as the assignment table does, a var re-kinds freely, an out-of-range float raises the general text with
+			// the stores before it kept; the same on both backends, proofs on and off
+			const std::string script = R"(
+				function narrow(var& xs, int n) -> int { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; }
+				function assign(var& xs, int n) -> int { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = 0; m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; }
+				function rekind(int n) -> string { string s = ""; float f = 0.5; int i = 0; while (i < n) { var v = i; if ((i % 2) == 1) { v = f; } s = s + to_string(v) + ","; f = f + 1.0; i = i + 1; } return s; }
+				function far(var& xs, int n) -> string { float f = 1.0; int i = 0; try { while (i < n) { f = f * 10000000000.0; int m = f; xs[i] = m; i = i + 1; } } catch (err) { return "caught:" + err + "|" + to_string(i) + "|" + to_string(xs[0]); } return "ok"; }
+				var XS = [0, 0, 0, 0, 0, 0, 0, 0];
+				string a = to_string(narrow(XS, 6)) + "|" + to_string(assign(XS, 6)) + "|" + rekind(5) + "|" + to_string(XS[3]);
+				a + "|" + far(XS, 6);
+			)";
+			both(script, "", "body-declared landings");
+			both(script, "", "body-declared landings, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("27|27|0,1.500000,2,3.500000,4,|5|caught:", 0) == 0 && vm.find("|1|10000000000") != std::string::npos, "the declaration's kernel on every iteration, the var re-kinded, the out-of-range text after one kept store: " + vm);
+			const std::string l = listing_of("var f = function(var& xs, int n) { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; };");
+			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the narrowing loop closes: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

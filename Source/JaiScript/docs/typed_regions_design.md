@@ -344,8 +344,10 @@ are two-word masks (`cell_mask`), and a loop with more cells stays on the genera
 
 A local the body declares enters empty: its cell needs no entry kind and no unbox (its slot may hold a placeholder
 until the declaration runs, in a branch the general form has not taken), its declaration is the first write and
-lands by the declared kind (an int declaration takes ints, a float declaration widens an int, a var or auto
-declaration takes any kind), and a read of an empty cell misses like any other kind mismatch.
+lands by the declared kind (an int declaration takes ints and truncates a float in range as the declaration's kernel does,
+a float declaration widens an int, a var or auto declaration takes any kind), the declaration's type stays the cell's
+contract on every later iteration of the block (a landing on the defined cell judges by it where the slot has no stamp),
+and a read of an empty cell misses like any other kind mismatch.
 
 An exit ends a block: a `return` statement or a `break` that leaves the loop ends it at the statement's first
 instruction, the cells flush and the general form runs the statement whole (its pushes, region exits, scope pops

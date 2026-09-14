@@ -1,6 +1,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/environment.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <functional>
 #include <memory>
 #include <cstdint>
@@ -320,6 +322,43 @@ public:
 		});
 
 		// Text-receiver shape fired from inside a script (Clickable::onAccept via press()).
+		test("a_native_getters_exception_in_a_fused_push_argument_is_the_scripts_in_that_frame", [this]() {
+			// a property reference stored in an array<var> element through the native array view; its getter throws on its
+			// third (or first) call: dst.push(SRC[0]) is a call whose argument the fused push reads itself, so the exception
+			// converts in the calling frame and the function's own try catches it, on both backends, proofs on and off
+			// (Astra's acceptance case, 2026-09-14; the unfused call's argument zone already did this)
+			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
+			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				if (!proofs) { e->type_proofs(false); }
+				stdlib::register_all(*e);
+				source_t source{ e.get(), throw_at };
+				dynamic_binder<source_t>(*e, "Source").property("number", [](source_t& s) -> script_int {
+					if (s.armed && ++s.calls == s.throw_at) { throw std::runtime_error("boom"); }
+					return 1;
+				}, nullptr).build();
+				e->add_global_ref("box", source);
+				(void)e->execute("var& r = box.number; var SRC = [0];");
+				auto reference = e->get_global_environment()->get_ref("r");
+				if (!reference) { return "no reference"; }
+				auto src = e->get_variable("SRC");
+				src.as_array()[0] = reference.value().get();
+				source.armed = true; source.calls = 0;
+				std::string out;
+				try { out = e->execute("string probe() { array<int> dst = []; int i = 0; try { while (i < 4) { dst.push(SRC[0]); i++; } } catch (err) { return \"caught:\" + err + \"|\" + to_string(i) + \"|\" + to_string(dst.size()); } return \"ok:\" + to_string(dst.size()); } probe();").to_string(); }
+				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				return out + "|calls=" + std::to_string(source.calls);
+			};
+			for (bool proofs : { true, false }) {
+				for (int at : { 3, 1 }) {
+					const std::string i = run(false, proofs, at), v = run(true, proofs, at);
+					check_eq(i, v, "the fused push's argument: both backends");
+					const std::string want = at == 3 ? "caught:boom|2|2|calls=3" : "caught:boom|0|0|calls=1";
+					check_eq(want, v, "caught by the pushing function's own try");
+				}
+			}
+		});
 		test("nested_execute_with_instance_vars_in_converted_callback", [this]() {
 			auto eng = make_engine();
 			engine* raw = eng.get();

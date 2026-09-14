@@ -6,6 +6,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/type_checker.hpp>
@@ -2520,6 +2521,49 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("27|27|0,1.500000,2,3.500000,4,|5|caught:", 0) == 0 && vm.find("|1|10000000000") != std::string::npos, "the declaration's kernel on every iteration, the var re-kinded, the out-of-range text after one kept store: " + vm);
 			const std::string l = listing_of("var f = function(var& xs, int n) { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; };");
 			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the narrowing loop closes: " + l);
+		});
+		test("a_push_of_a_getter_backed_element_misses_before_the_getter_runs", [this]() {
+			// Astra's host (2026-09-14): a property reference stored in an array<var> element through the native array view; its
+			// getter adds 10 to a global (or rewrites the element); the block's push must not observe it ahead of the general
+			// form, so the sums and the rewrite agree with the interpreter, proofs on and off (a getter that throws is a separate,
+			// older boundary gap on both backends: the native exception is not the script's to catch through an element read)
+			struct source_t { engine* eng = nullptr; int mode = 0; bool armed = false; int calls = 0; };
+			auto run = [&](bool vm, bool proofs, int mode, const char* body) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				if (!proofs) { e->type_proofs(false); }
+				stdlib::register_all(*e);
+				source_t source{ e.get(), mode };
+				dynamic_binder<source_t>(*e, "Source").property("number", [](source_t& s) -> script_int {
+					if (!s.armed) { return 1; }
+					++s.calls;
+					if (s.mode == 0) { (void)s.eng->execute("G = G + 10;"); }
+					else if (s.mode == 2 && s.calls == 2) { (void)s.eng->execute("SRC[0] = 7;"); }
+					return 1;
+				}, nullptr).build();
+				e->add_global_ref("box", source);
+				e->add_global("G", script_value(script_int(0), e.get()));
+				(void)e->execute("var& r = box.number; var SRC = [0];");
+				auto reference = e->get_global_environment()->get_ref("r");
+				if (!reference) { return "no reference"; }
+				auto src = e->get_variable("SRC");
+				src.as_array()[0] = reference.value().get();
+				source.armed = true; source.calls = 0;
+				std::string out;
+				try { out = e->execute(body).to_string(); }
+				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				return out + "|calls=" + std::to_string(source.calls) + "|G=" + e->get_variable("G").to_string();
+			};
+			const char* sum_body = "int probe() { array<int> dst = []; int sum = 0; int i = 0; while (i < 4) { dst.push(SRC[0]); sum = sum + G; i++; } return sum; } probe();";
+			const char* rewrite_body = "string probe() { array<int> dst = []; int i = 0; while (i < 4) { dst.push(SRC[0]); i++; } return to_string(dst[0]) + \",\" + to_string(dst[1]) + \",\" + to_string(dst[2]) + \",\" + to_string(dst[3]); } probe();";
+			for (bool proofs : { true, false }) {
+				const std::string i0 = run(false, proofs, 0, sum_body), v0 = run(true, proofs, 0, sum_body);
+				check_eq(i0, v0, "the getter's effect seen by the sum: both backends");
+				check_eq(std::string("100|calls=4|G=40"), v0, "sum 100, four getter calls");
+				const std::string i2 = run(false, proofs, 2, rewrite_body), v2 = run(true, proofs, 2, rewrite_body);
+				check_eq(i2, v2, "the getter rewriting the element: both backends");
+				check_true(v2.rfind("1,1,7,7|", 0) == 0, "the rewritten element from the third push: " + v2);
+			}
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

@@ -19,4 +19,6 @@
 #include "implementation/vm/vm_compiler.cpp"
 #include "implementation/vm/vm_backend.cpp"
 #include "implementation/vm/disassembler.cpp"
+#include "implementation/vm/region_ir.cpp"
+#include "implementation/vm/chunk_manifest.cpp"
 #include "implementation/coroutine.cpp"

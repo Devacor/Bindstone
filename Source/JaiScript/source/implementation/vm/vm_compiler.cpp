@@ -4375,6 +4375,7 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	chunk_->call_sites.push_back(std::move(site));
 	proto.site = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 	chunk_->push_protos.push_back(std::move(proto));
+	chunk_->call_arg_zones.emplace_back(static_cast<uint32_t>(chunk_->code.size()), static_cast<uint32_t>(chunk_->code.size() + 1));   // the fused push reads its argument itself: a native exception there converts in this frame, as the unfused call's argument zone does
 	emit(opcode::op_push_fused, static_cast<uint32_t>(chunk_->push_protos.size() - 1));
 	return true;
 }

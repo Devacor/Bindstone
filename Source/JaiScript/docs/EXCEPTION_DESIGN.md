@@ -36,6 +36,13 @@
 >   throw, whose exception pair stays live for the resumer's handler. So a resumer's own
 >   `try/catch` between resumes never touches the fiber's `e`, and a resumer's `catch (e)`
 >   driving a coroutine from a range-for keeps reading its own exception throughout.
+> - **A native exception converts at a call boundary, on both backends.** A C++ exception a bound function,
+>   getter or setter raises becomes the script's exception where the call it belongs to stands: during a call's
+>   argument evaluation, in the calling frame (the unfused call's argument zone; the fused push's own instruction,
+>   which reads its argument itself, row 138a); at a native call; and, raised by any other instruction of a script
+>   function (an element load through a property reference), at that function's caller, the throwing frame popped
+>   first, so the function's own `try` does not see it. The VM's `run` converts (`ip_in_call_arg_zone`,
+>   `convert_cpp_exception_in_frame`, `convert_cpp_exception_at_frame`); the interpreter's `visit_call` does.
 > - `finally` remains unimplemented (still-future, as designed).
 
 ## Overview

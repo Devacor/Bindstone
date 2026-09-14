@@ -6780,8 +6780,6 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	++profile_cells_miss_step_[step < 8 ? step : 7];
 	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "step 5", "step 6", "other" };
 	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
-	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "step 5", "step 6", "other" };
-	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
 #else
 	(void)step;
 #endif
@@ -15425,7 +15423,6 @@ void vm_backend::profile_reset() {
 	profile_native_callees_.clear();
 	profile_cells_entry_refusals_.clear();
 	profile_cells_miss_sites_.clear();
-	profile_cells_miss_sites_.clear();
 	profile_store_name_cycles_.clear();
 	profile_cfs_inloop_names_.clear();
 	profile_cfs_opaque_cycles_.clear();
@@ -15810,13 +15807,6 @@ void vm_backend::dump_opcode_profile() const {
 		for (const auto& [name, cyc] : callees) {
 			fprintf(stderr, "  %-32s %12.1f Mcyc\n", name.c_str(), cyc / 1e6);
 		}
-	}
-	if (!profile_cells_miss_sites_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> sites(profile_cells_miss_sites_.begin(), profile_cells_miss_sites_.end());
-		std::sort(sites.begin(), sites.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] cell misses by site (function, the original instruction's ip and opcode, the step):\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : sites) { fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count); if (++shown >= 12) break; }
 	}
 	if (!profile_cells_miss_sites_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> sites(profile_cells_miss_sites_.begin(), profile_cells_miss_sites_.end());

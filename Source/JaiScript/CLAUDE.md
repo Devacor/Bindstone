@@ -416,7 +416,9 @@ engine stays usable", not by `check_throws`.
   functions/classes always replace in place (hot reload). Inside a unit, `{}` blocks scope as in C++ (a block
   declaration shadows for the block and vanishes after; a callee sees the outer binding). An include is TEXTUAL:
   the file runs at the include site, in the current scope and under the including unit (a later `var x` in the
-  includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit. The host reads and
+  includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit and a top-level
+  declaration only (inside a function, a block, a class or a namespace it is a parse error: an import runs once and takes
+  no scope; Dev ruling 2026-09-14). The host reads and
   assigns the newest cell. Zero cost
   on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`), and zero
   per-call cost until the first shadow: the running unit is derived from the executing frame and the ambient

@@ -199,11 +199,14 @@ namespace jai {
             lambda_expr* owner = nullptr;  // the lambda this scope belongs to (chain-capture target)
         };
         std::vector<function_scope> function_scope_stack_;  // Stack for nested functions/lambdas
+        int nesting_depth_ = 0;   // function bodies, blocks, class and namespace bodies: an import is a top-level declaration only
+        struct nesting_guard { int& depth; explicit nesting_guard(int& d) : depth(d) { ++depth; } ~nesting_guard() { --depth; } };
 
         // Enter a new function scope (call at start of function/lambda parsing)
         void enter_function_scope(lambda_expr* owner = nullptr) {
             function_scope_stack_.emplace_back();
             function_scope_stack_.back().owner = owner;
+            ++nesting_depth_;
         }
 
         // Exit current function scope, returns the total slot count
@@ -211,6 +214,7 @@ namespace jai {
             if (function_scope_stack_.empty()) return 0;
             size_t count = function_scope_stack_.back().next_slot;
             function_scope_stack_.pop_back();
+            --nesting_depth_;
             return count;
         }
 

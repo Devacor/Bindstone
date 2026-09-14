@@ -2326,6 +2326,10 @@ checked_result<declaration_ptr> parser::declaration_body() {
         return result;
     }
     if (match(token_type::import_keyword)) {
+        if (nesting_depth_ > 0) {   // an import runs once and takes no scope: a top-level declaration only (Dev, 2026-09-14)
+            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", previous());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(auto result, import_declaration());
         match(token_type::semicolon);  // Consume optional trailing semicolon
         return result;
@@ -2892,6 +2896,7 @@ checked_result<statement_ptr> parser::block_statement() {
 
     // Locals declared in this block stop resolving by name once it closes
     block_scope_guard block_scope(*this);
+    nesting_guard nesting(nesting_depth_);
 
     while (!check(token_type::right_brace) && !is_at_end()) {
         JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration());
@@ -3256,8 +3261,13 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     // Parse class members
     class_decl::member_visibility visibility = class_decl::Public;
     const bool class_entry_in_coroutine = in_coroutine_;
+    nesting_guard nesting(nesting_depth_);
 
     while (!check(token_type::right_brace) && !is_at_end()) {
+        if (check(token_type::import_keyword)) {   // an import is a top-level declaration only (Dev, 2026-09-14)
+            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         // Error-recovery `continue`s below can leave in_coroutine_ armed; every member
         // starts from the class-entry state
         in_coroutine_ = class_entry_in_coroutine;
@@ -3844,7 +3854,12 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     }
 
     // Parse namespace members (functions, classes, variables)
+    nesting_guard nesting(nesting_depth_);
     while (!check(token_type::right_brace) && !is_at_end()) {
+        if (check(token_type::import_keyword)) {   // an import is a top-level declaration only (Dev, 2026-09-14)
+            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         // Parse any declaration (class, function, variable)
         declaration_ptr member_decl = nullptr;
 

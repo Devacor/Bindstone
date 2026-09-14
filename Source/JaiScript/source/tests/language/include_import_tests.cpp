@@ -782,6 +782,32 @@ public:
             }
         });
 
+        test("import_is_a_top_level_declaration_only", [=, this]() {
+            // Dev's ruling (2026-09-14): an import runs once and takes no scope, so it is written at the top level of a file
+            // only; inside a function, a block, a class or a namespace it is a parse error naming the rule, on both backends
+            const char* nested[] = {
+                "int f() { import \"lib.jai\"; return 1; } f();",
+                "if (true) { import \"lib.jai\"; } 3;",
+                "class C { import \"lib.jai\"; int v = 0; } 4;",
+                "namespace ns { import \"lib.jai\"; int g() { return 2; } } ns::g();",
+                "var h = function() { import(\"lib.jai\"); return 5; }; h();",
+            };
+            for (bool use_vm : {false, true}) {
+                for (const char* src : nested) {
+                    auto eng = engine::make();
+                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    std::string text;
+                    try { (void)eng->execute(src); } catch (const std::exception& ex) { text = ex.what(); }
+                    check_true(text.find("import is allowed only at the top level") != std::string::npos, std::string("rejected with the rule: ") + src + " -> " + text);
+                }
+                auto src = create_temp_file("top_imp.jai", "var TOP_IMP = 11;");
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
+                check_eq((int64_t)11, eng->execute("import \"top_imp.jai\"; TOP_IMP;").as_int(), "a top-level import still runs");
+                cleanup_temp_file(src);
+            }
+        });
         test("import_mtime_gate_sits_above_disk_cache", [=, this]() {
             // import's once-per-change gate decides IF the file runs at all; the disk
             // cache only decides parse-vs-load when it does (pin: hot-reload semantics).

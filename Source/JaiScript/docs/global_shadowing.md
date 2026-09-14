@@ -43,7 +43,8 @@ function's parameters and slot locals live in its frame, so the included text do
 the checker names them undeclared). An included file the VM compiles belongs to the including unit:
 two units including the same file each get their own compiled program, and a function it defines is
 compiled once per unit, so no compiled code ever runs under two units. An `import` is a unit of its
-own.
+own, and a top-level declaration only: inside a function, a block, a class or a namespace it is a parse error, since
+an import runs once and takes no scope.
 
 A by-reference argument is the caller's code: it binds the cell the caller's unit resolves, and the
 callee's unit governs only the callee's own code (its default arguments and its body).

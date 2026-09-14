@@ -54,6 +54,7 @@ include runs EVERY time: load_count = 3</code></pre></div>
 <p>Includes nest (an included file can include another), and the <code>#</code> prefix is accepted and ignored for C++ muscle memory: <code>#include &quot;x.jai&quot;;</code>.</p>
 <p><strong>include in expression position returns the file&#x27;s value</strong>: <code>var cfg = include &quot;config.jai&quot;;</code> evaluates to the included file&#x27;s result (its last top-level expression), which makes data-file configs a one-liner. Statement-position include still discards the value.</p>
 <h2 id="dynamic-paths">Dynamic paths<a class="hlink" href="#dynamic-paths" aria-label="link">&#8203;</a></h2>
+<p>An <code>import</code> is a top-level declaration: inside a function, a block, a class or a namespace it is a parse error, since an import runs once and takes no scope. An <code>include</code> may appear wherever a statement may.</p>
 <p>The call form takes any string expression, both for include and import:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto libname = &quot;mod_&quot; + &quot;math&quot; + &quot;.jai&quot;;
 include(libname);

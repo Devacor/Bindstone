@@ -210,7 +210,6 @@ namespace jai::vm {
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
         std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
         std::map<std::string, uint64_t> profile_cells_miss_sites_;       // misses by function, the original instruction and the step
-        std::map<std::string, uint64_t> profile_cells_miss_sites_;       // misses by function, the original instruction and the step
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
         uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident

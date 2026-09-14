@@ -212,7 +212,7 @@ environment values (globals read once at entry), container bindings (arrays reso
 slot, a plain reference, an environment name, a pinned table entry or a plain field of a frame-slot instance, read once at
 entry and again at every landing after a call), pushes (`recv.push(v)` onto a frame-slot array: the receiver a container
 site, the value a cell, a constant or an element of a second container read as a handle at the push, the append the push
-kernel's rows; a declined kind, a refused charge or a typed hetero receiver misses onto the general push), and inner while
+kernel's rows; a declined kind, a refused charge or a typed hetero receiver, or a source element that is a property or element reference (its getter belongs to the general push, which runs after the flush) misses onto the general push), and inner while
 loops (an inner loop's back edge is a backward jump inside the outer block that polls the execution budget; its head compare
 is a body compare, its exit a forward edge; the inner loop's own block stays for the general form; an inner counted loop
 stays a refusal), snapshots (a guard's container value,

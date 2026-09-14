@@ -7648,7 +7648,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		case script_array::kind_t::i64: boxed.emplace(static_cast<script_int>(src->ints()[at]), engine_); pv = &*boxed; break;
 		case script_array::kind_t::f64: boxed.emplace(src->floats()[at], engine_); pv = &*boxed; break;
 		case script_array::kind_t::str: boxed.emplace(src->strs()[at], engine_); pv = &*boxed; break;
-		case script_array::kind_t::hetero: pv = &src->values()[at]; break;
+		case script_array::kind_t::hetero:
+			pv = &src->values()[at];
+			if (pv->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*pv)) return miss();   // a property or element reference observes on dereference: the general push runs its getter once, after the flush
+			break;
 		default: return miss();
 		}
 	} else {

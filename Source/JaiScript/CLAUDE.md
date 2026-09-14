@@ -409,7 +409,8 @@ engine stays usable", not by `check_throws`.
   `jai::filesystem`) stay the host's values, read-only from script (`Cannot assign to 'name': it is read-only`).
 - **A literal include inside a function body is spliced at parse time** (Dev ruling 2026-09-12; `docs/global_shadowing.md`):
   the included text becomes the function's own (its parameters and locals visible, its declarations the function's;
-  the parse cache stamps the spliced files; no jaibite sibling for such a unit); a computed `include(p)` stays a
+  the parse cache stamps the spliced files; no jaibite sibling for such a unit; `.jaibite` version 18, so a sibling
+  written before the splice re-parses); a computed `include(p)` stays a
   runtime include that sees the environment only. Functions without includes pay nothing.
 - **Program-scope redeclarations shadow by unit** (Dev ruling 2026-09-12; `docs/global_shadowing.md`): each
   executed source is a unit (a file by path, a literal by content), numbered at first execution; a variable

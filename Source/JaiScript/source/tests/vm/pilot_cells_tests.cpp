@@ -2596,6 +2596,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_of("var f = function(var& tp, var& pal, var& pix, int w, int h) { int acc = 0; for (int sx = 0; sx < w; ++sx) { for (int sy = 0; sy < h; ++sy) { int t = tp[sx * h + sy]; if (t >= 0) { pix[sy * 8 + sx] = pal[t]; acc = acc + t; } } } return acc; };");
 			check_true(l.find("CELLS_CFOR_BACK") != std::string::npos && l.find("C_JCMP") != std::string::npos && l.find("-- open loop") == std::string::npos, "the counted column loop closes over its counted row loop: " + l);
 		});
+		test("an_untranslatable_instruction_inside_a_branch_arm_is_a_bail", [this]() {
+			// GLOOM's column loop (a cache-fill arm storing a call result into a global table the first time a key is seen, the pixel
+			// loop after it), JaiDOOM's fuzz loop (a call result stored into the pixel table under a parity test), a bail whose arm is
+			// taken on every iteration, a bail inside an inner while, and a bail with a body-defined value live across it; the same on
+			// both backends, proofs on and off; the listing shows the bail and no open loop
+			const std::string script = R"(
+				var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; var PIX = [0, 0, 0, 0, 0, 0, 0, 0];
+				function build_strip(int k) -> var { return [k * 10, k * 10 + 1, k * 10 + 2, k * 10 + 3]; }
+				function columns(var& pix, int cols, int vh) -> int {
+					int acc = 0; int x = 0;
+					while (x < cols) {
+						int sidx = x % 4; int have = STRIP_SET[sidx];
+						if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; }
+						var& strip = STRIPS[sidx]; int y = 0; int gi = x;
+						while (y < vh) { int c = strip[y]; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; }
+						x = x + 1; }
+					return acc; }
+				function dark(int v) -> int { return v - 1; }
+				function fuzz(var& pix, int n) -> int { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; if ((i & 1) != 0) { pix[fpi] = dark(pix[fpi]); } acc = acc + pix[fpi]; i = i + 1; } return acc; }
+				function always(var& pix, int n) -> int { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; if (i >= 0) { pix[fpi] = dark(pix[fpi]); } acc = acc + pix[fpi]; i = i + 1; } return acc; }
+				function inner(var& pix, int n) -> int { int acc = 0; int i = 0; while (i < n) { int j = 0; while (j < 4) { if (j == 3) { pix[j] = dark(pix[j]); } acc = acc + pix[j] + j; j = j + 1; } i = i + 1; } return acc; }
+				function live(var& pix, int n) -> int { int acc = 0; int i = 0; while (i < n) { int t = i * 3 + 1; if (i == 2) { pix[i] = dark(pix[i]); } acc = acc + t * 2; i = i + 1; } return acc; }
+				to_string(columns(PIX, 6, 4)) + "|" + to_string(fuzz(PIX, 10)) + "|" + to_string(always(PIX, 5)) + "|" + to_string(inner(PIX, 3)) + "|" + to_string(live(PIX, 5)) + "|" + to_string(PIX[0]) + "," + to_string(PIX[3]) + "," + to_string(STRIP_SET[2]);
+			)";
+			both(script, "", "bails");
+			both(script, "", "bails, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } int y = 0; int gi = x; while (y < vh) { int c = STRIP_SET[sidx] + y; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
+			check_true(l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with a bail in its cache-fill arm (without the reference alias, a main-path gap of its own): " + l);
+			const std::string m = listing_of("var f = function(var& pix, int n) { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; pix[fpi] = to_string(fpi).size(); acc = acc + pix[fpi]; i = i + 1; } return acc; };");
+			check_true(m.find("-- open loop") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a gap on the main path stays a refusal: " + m);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

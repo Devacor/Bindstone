@@ -66,7 +66,11 @@ region_verdict verify(const region_ir& r, const std::vector<chunk::cell_loop::ce
 	}
 	for (const auto& op : ops) {
 		if (op.container == k_invalid_u32) continue;
-		for (const auto& w : ops) { if (w.writes == op.container) { return region_verdict{ chunk::cell_refusal_effect, r.head }; } }   // a container binding rewritten inside the body
+		for (const auto& w : ops) {
+			if (w.writes != op.container) continue;
+			if (w.kind == ir::rebind && &w < &op) continue;   // an alias slot: its sites follow its declaration, and the must-define dataflow above holds every read to a defined alias
+			return region_verdict{ chunk::cell_refusal_effect, r.head };
+		}   // a container binding rewritten inside the body
 	}
 	return region_verdict{};
 }

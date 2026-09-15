@@ -479,6 +479,7 @@ namespace jai::vm {
             // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
             std::vector<uint32_t> site_slot;
             std::vector<const script_value*> site_env;
+            std::vector<const script_value*> site_value;   // per site: the container value the entry resolved (a flush builds an alias's element reference from its source's)
             std::vector<const script_value*> env_ptr;
             const environment* env_of = nullptr;
             uint64_t env_serial = 0;
@@ -1681,7 +1682,10 @@ namespace jai::vm {
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
         const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
-        bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);   // after a call: every site's container is the node resolved at entry, reached the same way
+        bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
+        bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
+        bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index);   // the alias's sites take the table's element at index, a plain array node, else false
+        op_status exec_c_rebind(frame& f, const vm_instruction& ins);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take

@@ -2672,6 +2672,53 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			check_true(!adopted_slot, "no slot cell of an adopted kind remains from the bailed arm: " + cells_line);
 		});
+		test("an_element_alias_declared_in_the_body_is_a_rebind", [this]() {
+			// GLOOM's column loop as written (the cache-fill arm, then `var& strip = STRIPS[sidx]` and the pixel loop through it): the alias's
+			// declaration rebinds its sites' container once per iteration and the loop closes; a store through the alias; a callee between the
+			// alias and its reads replacing the element; a store into the source table (the pinned table refuses the entry); an element that is
+			// not an array; a read through the alias missing mid-iteration (the general form resumes with the alias bound); both backends, proofs on and off
+			const std::string script = R"(
+				var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; var PIX = [0, 0, 0, 0, 0, 0, 0, 0];
+				function build_strip(int k) -> var { return [k * 10, k * 10 + 1, k * 10 + 2, k * 10 + 3]; }
+				function columns(var& pix, int cols, int vh) -> int {
+					int acc = 0; int x = 0;
+					while (x < cols) {
+						int sidx = x % 4; int have = STRIP_SET[sidx];
+						if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; }
+						var& strip = STRIPS[sidx]; int y = 0; int gi = x;
+						while (y < vh) { int c = strip[y]; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; }
+						x = x + 1; }
+					return acc; }
+				function writes(int n) -> int {
+					int acc = 0; int i = 0;
+					while (i < n) { var& row = STRIPS[i % 4]; row[i % 4] = row[i % 4] + 1; acc = acc + row[(i + 1) % 4]; i = i + 1; }
+					return acc; }
+				function swap_strip(int k) -> int { STRIPS[k] = [k + 100, 1, 2, 3]; return 1; }
+				function replaced(int n) -> int {
+					int acc = 0; int i = 0;
+					while (i < n) { var& s = STRIPS[i % 4]; int k = swap_strip(i % 4); acc = acc + s[0] + k; i = i + 1; }
+					return acc; }
+				function stale(int n) -> string {
+					int acc = 0; int i = 0;
+					try { while (i < n) { var& s = STRIPS[i % 4]; STRIPS[(i + 1) % 4] = 7; acc = acc + s[1]; i = i + 1; } } catch (err) { return "caught:" + to_string(acc); }
+					return "ok:" + to_string(acc); }
+				function scalar_element(int n) -> string {
+					var T = [1, [2, 3], 4]; int acc = 0; int i = 0;
+					try { while (i < n) { var& e = T[i]; acc = acc + e[0]; i = i + 1; } } catch (err) { return "caught:" + to_string(acc); }
+					return "ok:" + to_string(acc); }
+				function mid_loop_miss(int n) -> string {
+					var T = [[1, 2], [3, "x"], [5, 6]]; int acc = 0; int i = 0;
+					try { while (i < n) { var& r = T[i]; int a = r[0]; int b = r[1]; acc = acc + a + b; i = i + 1; } } catch (err) { return "caught:" + to_string(acc); }
+					return "ok:" + to_string(acc); }
+				to_string(columns(PIX, 6, 4)) + "|" + to_string(writes(6)) + "|" + to_string(replaced(5)) + "|" + stale(5) + "|" + scalar_element(3) + "|" + mid_loop_miss(3) + "|" + to_string(PIX[0]) + "," + to_string(PIX[3]) + "," + to_string(STRIPS[3][1]);
+			)";
+			both(script, "", "element alias rebinds");
+			both(script, "", "element alias rebinds, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } var& strip = STRIPS[sidx]; int y = 0; int gi = x; while (y < vh) { int c = strip[y]; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
+			check_true(l.find("C_REBIND") != std::string::npos && l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with its alias as a rebind and its cache-fill arm as a bail: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

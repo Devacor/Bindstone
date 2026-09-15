@@ -232,6 +232,7 @@ namespace jai::vm {
         op_c_land,          // a = call index, b = cell loop index, c = the consumer's ip: the bindings re-read, the result landed by the declared-type rule or dropped
         op_c_lnot,          // a = dst cell, b = src cell or const: logical not of a truthiness (an int, a float or a bool), a bool
         op_c_cmpval,        // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: a comparison as a value, a bool
+        op_c_rebind,        // a = the loop's rebind index, b = the loop, c = the general ip: an element alias's declaration inside a block (the source table's element becomes the container of the alias's sites; the alias slot is written only by a flush where the alias is live)
         op_c_bail,          // a = the general ip: a planned miss at an instruction the translation does not take inside a conditional span (nothing observed first)
         op_c_exit,          // a = the general ip: the block ends here (a return, a break out of the loop, a compare's edge out): flush, then the general form
         op_c_arith_p,       // C_ARITH whose operand cells are pinned to the operation's kind: no per-read kind check (the emission proved it)
@@ -376,6 +377,7 @@ namespace jai::vm {
             case opcode::op_c_land: return "C_LAND";
             case opcode::op_c_lnot: return "C_LNOT";
             case opcode::op_c_cmpval: return "C_CMPVAL";
+            case opcode::op_c_rebind: return "C_REBIND";
             case opcode::op_c_bail: return "C_BAIL";
             case opcode::op_c_exit: return "C_EXIT";
             case opcode::op_c_arith_p: return "C_ARITH_P";

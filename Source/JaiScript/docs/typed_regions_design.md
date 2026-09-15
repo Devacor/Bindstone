@@ -248,6 +248,16 @@ does not normalize yet: a coverage gap), `malformed` (a lifetime rule failed), `
 does not take). The profile prints the closed and refused loops per function (`cell translation`), and the
 disassembly lists them under each chunk (`-- cell loop`, `-- open loop`).
 
+An element alias declared in the body (`var& strip = STRIPS[sidx]`, an element reference bound by `DECL_REF_VALUE`) is a
+`rebind`: the alias's sites (the loads and stores whose container is the alias slot, after it) take the source table's
+element as their container each time the declaration runs, and the entry resolves and pins the source table instead of
+the alias (a store site into the table refuses the entry, as any pinned table does). The alias slot is a compiler value of
+kind reference whose payload is the element index; the block never writes the slot, and a flush where the alias is live
+binds the element reference the declaration would have bound, so the general form resumes with it. A landing after a call
+names the element again for every alias live there. The element must be an array node that is plain, as the entry has it;
+anything else misses at the declaration, whose general form raises or binds as it does. One alias per slot in a body, its
+source never an alias, and a push receiver never an alias.
+
 A comparison used as a value and the `JUMP_IF_TRUE` or `JUMP_IF_FALSE` that consumes it (the `||` and `&&`
 chains, `!e`) translate to one `cmp` whose target word carries the jump's sense (never an inverted operator,
 since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a

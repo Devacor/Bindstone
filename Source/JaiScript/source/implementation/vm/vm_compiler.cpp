@@ -165,6 +165,7 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
 			case opcode::op_c_arith_p:
@@ -331,6 +332,7 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
 			case opcode::op_c_arith_p:
@@ -2394,6 +2396,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
+		std::vector<uint32_t> alias_slots;   // the slots of the body's element aliases (rebinds), in order
+		auto is_alias = [&](uint32_t slot) -> bool { for (const uint32_t s : alias_slots) { if (s == slot) return true; } return false; };
 		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp, size_t at) {
 			if (operand & k_typed_const_bit) return;
 			const uint32_t slot = operand & k_typed_slot_mask;
@@ -2449,6 +2453,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			return false;
 		};
 		auto slot_read = [&](ir_op& op, uint32_t operand) { if (!(operand & k_typed_const_bit) && op.nreads < 8) { op.reads[op.nreads++] = operand & k_typed_slot_mask; } };
+		// a site whose container is an alias reads the alias (the must-define dataflow holds it to a defined alias, the liveness keeps the
+		// alias until its last site); a push receiver is resolved at entry, never rebound
+		auto alias_site = [&](ir_op& op, size_t at) -> bool {
+			if (op.container == k_invalid_u32 || !is_alias(op.container)) return true;
+			if (op.kind == ir::push) { refuse(chunk::cell_refusal_translation, at); return false; }
+			slot_read(op, op.container);
+			return true;
+		};
 		// a truth test's operand (`if (x)`, `while (RUNNING)`): a frame slot's cell of adopted kind, or an environment value; the test is
 		// the language's truthiness of an int, a float or a bool (a NaN is true, a negative zero is false, as the general test has them)
 		auto truth_operand = [&](ir_op& op, const vm_instruction& ld, size_t at, uint32_t& out) -> bool {
@@ -2516,12 +2528,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			return end;
 		};
-		std::vector<chunk::cell_loop::cell> snap_cells; size_t snap_env = 0, snap_defs = 0, snap_calls = 0, snap_ip = first, last_ip = first; uint32_t snap_arg = 0; const ast_node* snap_stmt = nullptr;
+		std::vector<chunk::cell_loop::cell> snap_cells; size_t snap_env = 0, snap_defs = 0, snap_calls = 0, snap_ip = first, last_ip = first; uint32_t snap_arg = 0; size_t snap_alias = 0; const ast_node* snap_stmt = nullptr;
 		size_t resume_from = first;
 		for (;;) {
 		for (size_t ip = resume_from; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
 			last_ip = ip;
-			if (ip == resume_from || stmt_of(ip) != stmt_of(ip - 1)) { snap_cells = cells; snap_env = env_ops.size(); snap_defs = defs.size(); snap_calls = calls.size(); snap_arg = arg_temp_next; snap_ip = ip; snap_stmt = stmt_of(ip); }
+			if (ip == resume_from || stmt_of(ip) != stmt_of(ip - 1)) { snap_cells = cells; snap_env = env_ops.size(); snap_defs = defs.size(); snap_calls = calls.size(); snap_arg = arg_temp_next; snap_alias = alias_slots.size(); snap_ip = ip; snap_stmt = stmt_of(ip); }
 			const vm_instruction st = code[ip];
 			ir_op op;
 			if (ip < inner_skip_until) { op.kind = ir::skip; ops.push_back(op); continue; }   // an inner counted loop's generic cond or update code, its loop back or its pop: dead in the block
@@ -2640,6 +2652,26 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
 				use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, site.temp ? k_typed_dst_temp : k_typed_dst_decl, site.temp ? nullptr : site.stamp, ip);
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
+			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
+			           && code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a] && c.nodes[code[ip + 1].a]->get_type() == node_type::variable_decl) {
+				// `var& strip = STRIPS[sidx]`: an element alias declared in the body is a rebind, the source table's element becoming the container of
+				// the alias's sites (the loads and stores through the slot after it), once per iteration; the alias slot is a compiler value of kind
+				// reference (its payload the index) that only a flush where it is live materializes, as the element reference the declaration binds
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				const auto* decl = static_cast<const variable_decl*>(c.nodes[code[ip + 1].a].get());
+				if (fp.index_chain_ext.size() > 2 || !container_operand(fp.container) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask || decl->ref_escaping) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const uint32_t aslot = static_cast<uint32_t>(decl->slot_index);
+				bool taken = find_cell(aslot) >= 0 || is_alias(aslot);
+				for (const ir_op& prior : ops) { if (prior.container == aslot) { taken = true; } }
+				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				if (taken || (op.container != k_invalid_u32 && is_alias(op.container))) { refuse(chunk::cell_refusal_translation, ip); break; }   // one alias per slot, declared before its sites, its source never an alias
+				use_slot(aslot, static_cast<uint8_t>(script_value::TYPEID_REFERENCE), true, k_typed_dst_temp, nullptr, ip);
+				alias_slots.push_back(aslot);
+				op.kind = ir::rebind; op.a = aslot; op.proto = st.a; op.writes = aslot;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the declaration is the pair's second instruction
+				++ip;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && ip + 1 < back && code[ip + 1].op == opcode::op_compound_store
 			           && (code[ip + 1].c & compound_kind_mask) == compound_plus && (code[ip + 1].c & compound_flag_no_result) && !(code[ip + 1].c & (compound_flag_global_only | compound_flag_old_result))
 			           && code[ip + 1].b != k_invalid_u32 && code[ip + 1].b < k_typed_slot_mask) {
@@ -2653,6 +2685,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				{ const int tk = find_cell(t); if (tk >= 0) { cells[tk].string_borrow = true; } }   // the append replays from this read on a miss, so a borrowed string may land here
 				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				if (!alias_site(op, ip)) break;
 				ops.push_back(op);
 				const uint32_t dslot = code[ip + 1].b;
 				op = ir_op{};
@@ -3046,13 +3079,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				refuse(chunk::cell_refusal_of(code[at].op), at);
 				break;
 			}
+			if (!alias_site(op, ip)) break;
 			ops.push_back(op);
 		}
 		if (refusal == chunk::cell_refusal_translation && snap_stmt && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
 		    && snap_ip >= first && (counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first) {
 			const uint32_t arm_end = arm_end_of(snap_ip);
 			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {
-				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg;
+				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg; alias_slots.resize(snap_alias);
 				ops.resize(snap_ip - first);
 				ir_op bail; bail.kind = ir::bail; bail.target = static_cast<uint32_t>(snap_ip);
 				ops.push_back(bail);
@@ -3254,6 +3288,32 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
 			case ir::skip: break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
+			case ir::rebind: {
+				// the alias's declaration: its source read's site row for the copy (the container the general operand, resolved and pinned at entry;
+				// the index operands name cells) and the rebind record, whose source site and dependents are filled in with the site list
+				const fused_index_proto& fp = c.fused_index_protos[op.proto];
+				chunk::typed_site site;
+				site.cont_slot = fp.container.direct && fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				if (fp.index_binary == k_invalid_u32) { site_operand(fp.index, site.operands[0]); }
+				else {
+					const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
+					site_operand(bp.left, site.operands[0]); site_operand(bp.right, site.operands[1]);
+					site.fold_ops[0] = bp.op; site.fold_count = 1;
+					for (size_t k = 0; k < fp.index_chain_ext.size(); ++k) {
+						const fused_binary_proto& sp = c.fused_binary_protos[fp.index_chain_ext[k]];
+						site_operand(sp.right, site.operands[k + 2]); site.fold_ops[k + 1] = sp.op; site.fold_count = static_cast<uint8_t>(k + 2);
+					}
+				}
+				site.orig = code[ip];
+				site.index_proto = op.proto;
+				site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
+				chunk_ = &c;
+				typed_site_at(code.size()) = site;
+				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a);
+				loop.rebinds.push_back(rb);
+				append(vm_instruction{opcode::op_c_rebind, static_cast<uint32_t>(loop.rebinds.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
+				break;
+			}
 			case ir::bail: append(vm_instruction{opcode::op_c_bail, op.target, 0, 0}, ip); break;   // a planned miss at its own origin
 			case ir::append: append(vm_instruction{opcode::op_c_append, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
 			case ir::push: {
@@ -3289,7 +3349,28 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind) { loop.sites.push_back(ip2); } }
+		if (!loop.rebinds.empty()) {
+			// the alias's sites: every load or store whose container slot is the alias, resolved by the rebind and never by the entry
+			loop.site_alias.assign(loop.sites.size(), 0);
+			auto container_slot_of = [&](uint32_t cip) -> uint32_t {
+				const opcode o = code[cip].op;
+				if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_rebind) {
+					const chunk::typed_site& s = c.typed_sites[cip];
+					if (s.index_proto != k_invalid_u32) { const fused_operand& co = c.fused_index_protos[s.index_proto].container; return co.const_index == k_invalid_u32 && co.slot != k_invalid_u32 && co.slot < k_typed_slot_mask ? co.slot : k_invalid_u32; }
+					return s.cont_slot;
+				}
+				if (o == opcode::op_c_index_store) { const fused_operand& co = c.fused_index_protos[code[cip].a].container; return co.const_index == k_invalid_u32 && co.slot != k_invalid_u32 && co.slot < k_typed_slot_mask ? co.slot : k_invalid_u32; }
+				return k_invalid_u32;
+			};
+			for (chunk::cell_loop::rebind& rb : loop.rebinds) {
+				const uint32_t aslot = loop.cells[rb.cell].slot;
+				for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+					if (loop.sites[k] == rb.copy_ip) { rb.source_site = k; continue; }
+					if (container_slot_of(loop.sites[k]) == aslot) { rb.dependents.push_back(k); loop.site_alias[k] = 1; }
+				}
+			}
+		}
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {
 			for (const auto& x : exits) { if (x.first == target) return x.second; }

@@ -6731,6 +6731,18 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
 	cell_state& cs = *f.cells;
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_STRING)) return;   // a borrowed string: the owner already holds the appended node; nothing to write
+	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_REFERENCE)) {
+		// an element alias live at the miss: the reference its declaration binds on the general form, to its source table's element
+		for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
+			if (rb.cell != k) continue;
+			const script_value* src = rb.source_site < cs.site_value.size() ? cs.site_value[rb.source_site] : nullptr;
+			if (!src || src->raw_storage_index() != script_value::TYPEID_ARRAY) break;
+			type_info_ptr ti = src->get_type_info();
+			frame_slot_set(f, loop.cells[k].slot, script_value::make_element_reference(const_cast<script_value*>(src)->unchecked_get_array_storage(), static_cast<size_t>(cs.payload[k]), engine_, ti ? ti->element_type() : type_info_ptr{}));
+			break;
+		}
+		return;
+	}
 	const chunk::cell_loop::cell& cl = loop.cells[k];
 	script_value* s = frame_slot(f, cl.slot);
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -6802,7 +6814,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
-	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "step 6", "other" };
+	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "rebind", "other" };
 	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
 #else
 	(void)step;
@@ -6922,6 +6934,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
 	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
+	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
 	// the binding an environment lookup answered from its cache, valid while the environment and its epoch hold (the cache's own rule)
 	auto env_binding = [&](const script_value* v, size_t cache_slot) -> const script_value* {
 		if (!v || cache_slot >= f.code->env_lookup_cache.size()) return nullptr;
@@ -6932,8 +6945,9 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const uint32_t ip = loop.sites[k];
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
-		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr;
-		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any) {
+		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
+		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
+		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			const size_t cache_slot = site.fold_count ? ci.c * 3 + 2 : ci.c * 3;
 			if (site.cont_slot == k_invalid_u32 && cache_slot < f.code->env_lookup_cache.size()) {
@@ -6964,6 +6978,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 			bool borrowed = false;
 			node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+			cs.site_value[k] = cp;
 		} else if (ci.op == opcode::op_c_push) {
 			// a push site: the receiver a frame-slot array (a typed hetero array converts on the general form), the source of an element
 			// push a second container (a slot or an environment array); a landing after a call asks for this resolution again
@@ -7006,6 +7021,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 		}
 		if (!node) { return refuse_site(ip, "a container that is not a plain node"); }
+		if (ci.op == opcode::op_c_rebind && !pin(node)) { return refuse_site(ip, "more than eight pinned tables"); }   // an alias's source table: no store site may write it (a store would replace the element the alias names)
 		cs.site_node[ip - loop.copy_head] = node;
 	}
 	for (uint32_t i = 0; i < pinned_count; ++i) {
@@ -7015,12 +7031,69 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	}
 	return true;
 }
+// an element alias's declaration inside the block (`var& strip = STRIPS[sidx]`): the source table, resolved and pinned at entry, at the index
+// the cells hold; the alias's sites take the element as their container; a miss re-runs the general declaration from its read (its own
+// origin) with the stack it expects
+op_status vm_backend::exec_c_rebind(frame& f, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop::rebind& rb = loop.rebinds[ins.a];
+	const chunk::typed_site& site = f.code->typed_sites[f.ip];   // the copy's own row: its operands name cells
+	auto read_int = [&](uint32_t o, script_int& out) -> bool {
+		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (cs.kind[o] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cs.payload[o]);
+		return true;
+	};
+	script_int index = 0, r = 0;
+	bool ok = read_int(site.operands[0], index);
+	if (ok && site.fold_count) {
+		ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
+		for (uint8_t k = 1; ok && k < site.fold_count; ++k) { ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index); }
+	}
+	if (!ok || !cells_rebind_apply(f, loop, rb, index)) { cells_miss(f, loop, ins.c, 6); return {}; }
+	++f.ip;
+	return {};
+}
+// the alias's sites take the source table's element at index: an array node that is plain, as the entry has it (a hetero node with a
+// declared element type is the general form's); the alias cell holds the index, and its flush builds the element reference the general
+// form's declaration binds
+bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index) {
+	cell_state& cs = *f.cells;
+	const script_array* table = cs.site_node[rb.copy_ip - loop.copy_head];
+	if (!table || index < 0 || static_cast<size_t>(index) >= table->size()) return false;
+	const script_array* node = nullptr;
+	if (table->kind() == script_array::kind_t::hetero) {
+		const script_value& el = table->values()[static_cast<size_t>(index)];
+		if (el.raw_storage_index() == script_value::TYPEID_ARRAY) {
+			const script_array* n = el.unchecked_array_node();
+			const type_info* ti = el.get_type_info().get();
+			if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
+		}
+	}
+	if (!node) return false;
+	for (const uint32_t d : rb.dependents) { cs.site_node[loop.sites[d] - loop.copy_head] = node; }
+	cs.kind[rb.cell] = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.payload[rb.cell] = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
+	return true;
+}
+// after a call: every alias live at the landing names its source table's element again (a callee may have replaced the element; the
+// general form's reference reads the table on every use)
+bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {
+	cell_state& cs = *f.cells;
+	const size_t at = f.ip - loop.copy_head;
+	for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
+		if (at < loop.live_temps.size() && !loop.live_temps[at].test(rb.cell)) continue;
+		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]))) return false;
+	}
+	return true;
+}
 // after a call: each site's container, reached the way the entry reached it (its frame slot, or its environment binding while
 // the environment and epoch hold), still names the node resolved at entry; a site reached any other way (an element of a
 // table, a map entry, a member scope) or any difference asks for the full resolution again
 bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok) {
 	cell_state& cs = *f.cells;
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+		if (k < loop.site_alias.size() && loop.site_alias[k]) continue;   // a site through an alias: cells_rebinds_hold names its element again
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
 		if (!cp) return false;
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
@@ -7172,6 +7245,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_args: return exec_c_args(f, ci);
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
+	case opcode::op_c_rebind: return exec_c_rebind(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
 	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
@@ -7291,6 +7365,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		cs.payload[k] = reinterpret_cast<int64_t>(s->unchecked_string_handle().get());
 	}
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
+	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any

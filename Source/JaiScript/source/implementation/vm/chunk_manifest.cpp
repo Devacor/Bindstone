@@ -184,6 +184,11 @@ namespace {
 				const chunk::cell_loop& l = ch.cell_loops[i];
 				out << pre << " " << i << " head=" << l.head << " back=" << l.back << " copy=" << l.copy_head << ".." << l.copy_back << " exit=" << l.exit_ip << " counted=" << u(l.counted)
 				    << " temp_mask=" << mask(l.temp_mask) << " env_mask=" << mask(l.env_mask) << "\n";
+				if (!l.rebinds.empty()) {
+					out << pre << "  rebinds";
+					for (const auto& rb : l.rebinds) { out << " (" << rb.copy_ip << " c" << rb.cell << " s" << u(rb.source_site) << " d"; for (const uint32_t d : rb.dependents) { out << ":" << d; } out << ")"; }
+					out << "\n";
+				}
 				out << pre << "  cells";
 				for (const auto& c : l.cells) {
 					out << " (" << c.slot << " k" << static_cast<int>(c.kind) << " l" << static_cast<int>(c.landing) << " in" << b(c.live_in) << " def" << b(c.defined) << " " << tn(c.stamp)

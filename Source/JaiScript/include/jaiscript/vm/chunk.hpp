@@ -388,6 +388,12 @@ namespace jai::vm {
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
             uint32_t counted = k_invalid_u32;
+            // an element alias declared in the body (`var& strip = STRIPS[sidx]`): the copy instruction that rebinds it, its cell (a compiler value of
+            // kind reference: the element index is its payload, the source table its own site), the site index of its source table and the site
+            // indices of the loads and stores through the alias, whose containers the rebind sets and the entry never resolves
+            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; };
+            std::vector<rebind> rebinds;
+            std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
             std::vector<uint32_t> inner_counted;   // the counted_for_protos indices of the inner counted loops the block took, outermost first: a miss inside one pushes the general form's state (cells_miss)
             std::vector<cell> cells;
             // indexed by frame slot (and the env cells' synthetic slots): the slot's FIRST cell, k_invalid_u32 = not a cell. A

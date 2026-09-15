@@ -22,10 +22,10 @@
 namespace jai::vm {
 
 	// probe: the callee resolved at its own place, ahead of the argument values; push: recv.push(v) onto a frame-slot array
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push };
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push, bail };   // bail: a planned miss at its own origin inside a conditional span
 
 	inline const char* ir_name(ir k) {
-		static const char* const names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push" };
+		static const char* const names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push", "bail" };
 		return names[static_cast<size_t>(k)];
 	}
 

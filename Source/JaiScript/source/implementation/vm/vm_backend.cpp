@@ -6802,7 +6802,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
-	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "step 5", "step 6", "other" };
+	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "step 6", "other" };
 	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
 #else
 	(void)step;
@@ -7172,6 +7172,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_args: return exec_c_args(f, ci);
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
+	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
 	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 	}

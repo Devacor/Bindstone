@@ -214,8 +214,10 @@ entry and again at every landing after a call), pushes (`recv.push(v)` onto a fr
 site, the value a cell, a constant or an element of a second container read as a handle at the push, the append the push
 kernel's rows; a declined kind, a refused charge or a typed hetero receiver, or a source element that is a property or element reference (its getter belongs to the general push, which runs after the flush) misses onto the general push), and inner while
 loops (an inner loop's back edge is a backward jump inside the outer block that polls the execution budget; its head compare
-is a body compare, its exit a forward edge; the inner loop's own block stays for the general form; an inner counted loop
-stays a refusal), snapshots (a guard's container value,
+is a body compare, its exit a forward edge; the inner loop's own block stays for the general form; an inner counted loop's
+`CFOR_PREP` is its head compare with the exit as the false edge, its `CFOR_BACK` the step on the var and, in the place of the
+first generic update instruction, the compare back to the body, the generic cond and update code, the loop back and the pop
+dead in the block, and a miss inside it pushes the general form's counted state first, `cells_miss`), snapshots (a guard's container value,
 live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
 binary operators, pinned kinds as `op_c_arith`, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
 `cmp` with its test (`op_c_cmp` and `op_c_jcmp` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for

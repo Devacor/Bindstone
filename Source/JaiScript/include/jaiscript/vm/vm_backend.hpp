@@ -1699,6 +1699,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
+        void cfor_state_push(frame& f, const counted_for_proto& p);   // the state a counted loop's general back edge expects, built as exec_cfor_prep builds it minus the initial test
         void refuse_container_site(frame& f, const chunk::cell_loop& loop);   // the refusal valve: mark the loop for the rest of the call
         void cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);

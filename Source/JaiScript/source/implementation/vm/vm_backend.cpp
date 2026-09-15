@@ -6684,6 +6684,30 @@ namespace {
 // landing that defined it and hands the general dispatch the ORIGINAL instruction's ip. Flushing
 // reproduces the general form's slot state: payload in place when the slot already carries the
 // stamp the landing would give it, the full landing otherwise.
+// a miss inside an inner counted loop of a block hands the general form an iteration whose CFOR_PREP the block skipped: the
+// state its CFOR_BACK expects, built the way exec_cfor_prep builds it (the var's slot after the flush, the end and the step
+// pointers or values, the fast flag) minus the initial test
+void vm_backend::cfor_state_push(frame& f, const counted_for_proto& p) {
+	counted_for_state st;
+	st.cmp = p.cmp;
+	st.subtract = p.step_subtract;
+	st.incdec = p.step_incdec;
+	bool fast = !has_custom_numeric_ops_;
+	if (fast) {
+		script_value* varPtr = resolve_local_or_env(f, p.var.slot, f.code->symbols[p.var.symbol]);
+		if (varPtr) {
+			script_value& target = varPtr->deref();
+			if (target.raw_storage_index() == script_value::TYPEID_INT && !target.is_cpp_bound()) { st.var = &target; } else { fast = false; }
+		} else {
+			fast = false;
+		}
+	}
+	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val);
+	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val);
+	st.fast = fast;
+	cfor_states_.push_back(st);
+}
+
 // a container site refused the entry: the binding will not change within this call, so the loop is not tried again
 void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
 	const size_t index = static_cast<size_t>(&loop - f.code->cell_loops.data());
@@ -6784,6 +6808,10 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	(void)step;
 #endif
 	cells_flush(f, loop);
+	for (const uint32_t pi : loop.inner_counted) {   // outermost first: the general form resumes inside these loops with their states in place
+		const counted_for_proto& p = f.code->counted_for_protos[pi];
+		if (original_ip >= p.body_ip && original_ip < p.exit_ip) { cfor_state_push(f, p); }
+	}
 	f.ip = original_ip;
 }
 

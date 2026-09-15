@@ -2565,6 +2565,37 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_true(v2.rfind("1,1,7,7|", 0) == 0, "the rewritten element from the third push: " + v2);
 			}
 		});
+		test("a_block_closes_over_an_inner_counted_loop", [this]() {
+			// part 2 of nested loops: draw_patch's shape (a counted column loop over a counted row loop with continues in both, a texel
+			// table and a palette, the view width an environment scalar), += 2 and -- steps, a break out of the inner loop, an overflow
+			// of the inner step (the general text, the count before it kept), an environment-scalar end, a three-deep nest, and a miss
+			// inside the inner body (a bool element landing on an int declaration at the third column) that hands the general form the
+			// rest of the iteration with the counted state in place; the same on both backends, proofs on and off
+			const std::string script = R"(
+				var VW = 8; var VH = 4;
+				function patch(var& pix, var& tp, var& pal, int x0, int y0, int w, int h) -> int {
+					int acc = 0;
+					for (int sx = 0; sx < w; ++sx) { int px = x0 + sx; if (px < 0 || px >= VW) { continue; } int base = sx * h;
+						for (int sy = 0; sy < h; ++sy) { int py = y0 + sy; if (py < 0 || py >= VH) { continue; } int texel = tp[base + sy]; if (texel >= 0) { pix[py * VW + px] = pal[texel]; acc = acc + pal[texel]; } } }
+					return acc; }
+				function steps(int n) -> int { int acc = 0; int i = 0; while (i < n) { for (int j = 0; j < 10; j += 2) { acc = acc + j; } for (int k = 5; k > 0; --k) { acc = acc + k; } i = i + 1; } return acc; }
+				function brk(int n) -> int { int acc = 0; int i = 0; while (i < n) { for (int j = 0; j < 100; ++j) { if (j == 3) { break; } acc = acc + 1; } i = i + 1; } return acc; }
+				function ovf() -> string { int acc = 0; try { int i = 0; while (i < 2) { for (int j = 9223372036854775800; j <= 9223372036854775807; j += 4) { acc = acc + 1; } i = i + 1; } } catch (err) { return "caught:" + err + "|" + to_string(acc); } return "ok:" + to_string(acc); }
+				function envend(int n) -> int { int acc = 0; int i = 0; while (i < n) { for (int j = 0; j < VW; ++j) { acc = acc + j; } i = i + 1; } return acc; }
+				function deep(int n) -> int { int acc = 0; int i = 0; while (i < n) { for (int a = 0; a < 3; ++a) { for (int b = 0; b < 2; ++b) { acc = acc + a * b + 1; } } i = i + 1; } return acc; }
+				function missy(var& xs, int n) -> int { int acc = 0; int i = 0; while (i < n) { for (int j = 0; j < 4; ++j) { int v = xs[j]; acc = acc + v; } i = i + 1; } return acc; }
+				var PIX = [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0];
+				var TP = [1, -1, 2, 3, 0, 1, 2, -1, 3, 3, 1, 0]; var PAL = [10, 20, 30, 40];
+				var XS = [1, 2, true, 4];
+				to_string(patch(PIX, TP, PAL, -1, 1, 4, 3)) + "|" + to_string(steps(3)) + "|" + to_string(brk(3)) + "|" + ovf() + "|" + to_string(envend(2)) + "|" + to_string(deep(2)) + "|" + to_string(missy(XS, 3)) + "|" + to_string(PIX[9]) + "," + to_string(PIX[17]);
+			)";
+			both(script, "", "inner counted loops");
+			both(script, "", "inner counted loops, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|caught:") != std::string::npos && vm.find("|2|") != std::string::npos && vm.find("|24|") != std::string::npos, "the shapes ran, the overflow caught after two steps, the bool element summed as one: " + vm);
+			const std::string l = listing_of("var f = function(var& tp, var& pal, var& pix, int w, int h) { int acc = 0; for (int sx = 0; sx < w; ++sx) { for (int sy = 0; sy < h; ++sy) { int t = tp[sx * h + sy]; if (t >= 0) { pix[sy * 8 + sx] = pal[t]; acc = acc + t; } } } return acc; };");
+			check_true(l.find("CELLS_CFOR_BACK") != std::string::npos && l.find("C_JCMP") != std::string::npos && l.find("-- open loop") == std::string::npos, "the counted column loop closes over its counted row loop: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

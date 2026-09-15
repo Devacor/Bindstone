@@ -388,6 +388,7 @@ namespace jai::vm {
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
             uint32_t counted = k_invalid_u32;
+            std::vector<uint32_t> inner_counted;   // the counted_for_protos indices of the inner counted loops the block took, outermost first: a miss inside one pushes the general form's state (cells_miss)
             std::vector<cell> cells;
             // indexed by frame slot (and the env cells' synthetic slots): the slot's FIRST cell, k_invalid_u32 = not a cell. A
             // compiler temp slot may carry several cells, one per definition of another kind; the emission advances the

@@ -2492,9 +2492,23 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			c.constants.push_back(script_value(static_cast<script_int>(1), static_cast<engine*>(nullptr)));
 			return static_cast<uint32_t>(c.constants.size() - 1);
 		};
+		// an inner counted loop (part 2 of nested loops): its CFOR_PREP is the head compare, its CFOR_BACK the step, the compare back to the
+		// body takes the place of the first generic update instruction, and the generic cond and update code, the loop back and the pop
+		// have no copy; a miss inside the loop pushes the general form's counted state first (cells_miss over inner_counted)
+		uint32_t inner_skip_until = 0, inner_cmp_at = k_invalid_u32, inner_cmp_proto = k_invalid_u32;
+		std::vector<uint32_t> inner_counted;
 		for (size_t ip = first; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
 			const vm_instruction st = code[ip];
 			ir_op op;
+			if (ip < inner_skip_until) { op.kind = ir::skip; ops.push_back(op); continue; }   // an inner counted loop's generic cond or update code, its loop back or its pop: dead in the block
+			if (ip == inner_cmp_at) {
+				// the inner counted loop's compare back to its body, in the place of the first generic update instruction
+				const counted_for_proto& p = c.counted_for_protos[inner_cmp_proto];
+				op.kind = ir::cmp; op.tok = p.cmp; op.target = p.body_ip; op.sense = true; op.fast = cmp_op(static_cast<token_type>(p.cmp), 1);
+				if (!value(op, p.var, kint, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, p.end, kint, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				inner_cmp_at = k_invalid_u32; inner_skip_until = p.exit_ip;
+				ops.push_back(op); continue;
+			}
 			{
 				// an exit statement (a return, or a break that leaves the loop): the block ends at its first instruction and the general
 				// form runs the statement whole (its pushes, region exits, scope pops and the return or jump), so any expression may
@@ -2724,6 +2738,31 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::cmp; op.tok = bp.op; op.target = st.a;
+			} else if (st.op == opcode::op_cfor_prep) {
+				// an inner counted loop's head: `var cmp end`, the exit its false edge (the general form's CFOR_PREP tests once the same way); the var,
+				// the end and the step are cells, constants or environment scalars as the outer counted head requires
+				if (st.a >= c.counted_for_protos.size()) { refuse(chunk::cell_refusal_translation, ip); break; }
+				const counted_for_proto& p = c.counted_for_protos[st.a];
+				if (!(p.body_ip > ip && p.exit_ip > p.body_ip && p.exit_ip <= back && p.generic_update_ip > p.body_ip && p.generic_update_ip < p.exit_ip)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (!direct_slot(p.var)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				op.kind = ir::cmp; op.tok = p.cmp; op.target = p.exit_ip; op.fast = cmp_op(static_cast<token_type>(p.cmp), 1);
+				uint32_t step_sink;
+				if (!value(op, p.var, kint, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, p.end, kint, static_cast<uint32_t>(ip * 3 + 1), ip, op.b) || !value(op, p.step, kint, static_cast<uint32_t>(ip * 3 + 2), ip, step_sink)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				inner_counted.push_back(st.a);
+				inner_skip_until = p.body_ip;   // the generic cond code
+			} else if ((st.op == opcode::op_cfor_back || st.op == opcode::op_cells_cfor_back) && ip != back) {
+				// an inner counted loop's back edge: the step on the var (an overflow misses onto the general back edge, whose text stands), then
+				// the compare back to the body in the place of the first generic update instruction
+				const uint32_t pi = st.op == opcode::op_cfor_back ? st.a : (st.a < c.cell_loops.size() ? c.cell_loops[st.a].counted : k_invalid_u32);
+				if (pi == k_invalid_u32 || pi >= c.counted_for_protos.size() || std::find(inner_counted.begin(), inner_counted.end(), pi) == inner_counted.end()) { refuse(chunk::cell_refusal_translation, ip); break; }
+				const counted_for_proto& p = c.counted_for_protos[pi];
+				if (p.generic_update_ip != ip + 1) { refuse(chunk::cell_refusal_translation, ip); break; }
+				op.kind = ir::arith; op.tok = static_cast<uint8_t>(p.step_subtract ? token_type::minus : token_type::plus); op.fast = p.step_subtract ? opcode::op_t_sub_ii : opcode::op_t_add_ii;
+				uint32_t var_operand = k_invalid_u32;
+				if (!value(op, p.var, kint, static_cast<uint32_t>(ip * 3), ip, var_operand) || !value(op, p.step, kint, static_cast<uint32_t>(ip * 3 + 2), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				op.a = var_operand; op.b = var_operand; op.writes = var_operand;
+				use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, ip);
+				inner_cmp_at = static_cast<uint32_t>(ip + 1); inner_cmp_proto = pi;
 			} else if ((st.op == opcode::op_loop_back || st.op == opcode::op_cells_back) && ip != back) {
 				// an inner while loop's back edge (LOOP_BACK, or the CELLS_BACK of its own block): a backward jump to its head inside the
 				// outer block, ticking the execution budget as the general back edge does (a miss on exhaustion: the general form raises on
@@ -3002,6 +3041,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
 		loop.env_operands = env_ops;
+		loop.inner_counted = inner_counted;
 		if (ir_listing_) { loop.ir_text = listing(region); }   // the listing tool's text (region_ir.hpp)
 		loop.slot_to_cell.assign(max_slot + 1, k_invalid_u32);
 		for (uint32_t k = 0; k < cells.size(); ++k) { if (loop.slot_to_cell[cells[k].slot] == k_invalid_u32) { loop.slot_to_cell[cells[k].slot] = k; } }   // the first cell per slot; definitions advance the binding

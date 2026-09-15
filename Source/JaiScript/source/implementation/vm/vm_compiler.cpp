@@ -2502,17 +2502,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a bail (row 139): a statement the translation does not take (a translation-class refusal), standing inside a conditional span of
 		// the body (reached only through a forward branch before it whose target lies after it), is a planned miss at its first instruction
 		// instead of a refusal of the loop: the general form runs the statement whole from there with the stack it expects, so the
-		// translation state is snapshotted at every statement start and restored, and the loop resumes after the statement's last instruction
+		// translation state is snapshotted at every statement start and restored, and the copy resumes at the end of the innermost arm
+		// holding the bail (nothing between a bail and the arm's end is reachable inside the block, so none of it leaves a cell)
 		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
-		auto conditional_span = [&](size_t at) -> bool {
-			if (counted == k_invalid_u32 && at <= cmp_ip) return false;   // the head span and the head compare are the loop's own
+		auto arm_end_of = [&](size_t at) -> uint32_t {   // the nearest target after `at` of a forward branch before it: the end of the innermost arm holding `at`, invalid on the main path
+			if (counted == k_invalid_u32 && at <= cmp_ip) return k_invalid_u32;   // the head span and the head compare are the loop's own
+			uint32_t end = k_invalid_u32;
 			for (size_t j = first; j < at; ++j) {
 				const vm_instruction& n = code[j];
 				const uint32_t tgt = (n.op == opcode::op_jump || n.op == opcode::op_jump_if_true || n.op == opcode::op_jump_if_false || n.op == opcode::op_fused_cmp_jump) ? n.a
 				                   : (n.op >= opcode::op_t_jlt_ii && n.op <= opcode::op_t_jne_ff) ? n.c : k_invalid_u32;
-				if (tgt != k_invalid_u32 && tgt > at && tgt <= back) return true;
+				if (tgt != k_invalid_u32 && tgt > at && tgt <= back && tgt < end) end = tgt;
 			}
-			return false;
+			return end;
 		};
 		std::vector<chunk::cell_loop::cell> snap_cells; size_t snap_env = 0, snap_defs = 0, snap_calls = 0, snap_ip = first, last_ip = first; uint32_t snap_arg = 0; const ast_node* snap_stmt = nullptr;
 		size_t resume_from = first;
@@ -3047,17 +3049,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			ops.push_back(op);
 		}
 		if (refusal == chunk::cell_refusal_translation && snap_stmt && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
-		    && snap_ip >= first && (counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first && conditional_span(snap_ip)) {
-			size_t stmt_end = snap_ip;
-			while (stmt_end + 1 < back && stmt_of(stmt_end + 1) == snap_stmt) { ++stmt_end; }
-			if (refusal_ip <= stmt_end && last_ip <= stmt_end) {
+		    && snap_ip >= first && (counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first) {
+			const uint32_t arm_end = arm_end_of(snap_ip);
+			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {
 				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg;
 				ops.resize(snap_ip - first);
 				ir_op bail; bail.kind = ir::bail; bail.target = static_cast<uint32_t>(snap_ip);
 				ops.push_back(bail);
-				for (size_t k = snap_ip + 1; k <= stmt_end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
+				for (size_t k = snap_ip + 1; k < arm_end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
 				refusal = chunk::cell_refusal_none; refusal_ip = static_cast<uint32_t>(back);
-				resume_from = stmt_end + 1;
+				resume_from = arm_end;
 				continue;
 			}
 		}

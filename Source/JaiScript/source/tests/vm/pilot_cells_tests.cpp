@@ -2626,8 +2626,51 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } int y = 0; int gi = x; while (y < vh) { int c = STRIP_SET[sidx] + y; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
 			check_true(l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with a bail in its cache-fill arm (without the reference alias, a main-path gap of its own): " + l);
-			const std::string m = listing_of("var f = function(var& pix, int n) { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; pix[fpi] = to_string(fpi).size(); acc = acc + pix[fpi]; i = i + 1; } return acc; };");
-			check_true(m.find("-- open loop") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a gap on the main path stays a refusal: " + m);
+			const std::string m = listing_of("function dark(int v) -> int { return v - 1; } var f = function(var& pix, int n) { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; pix[fpi] = dark(pix[fpi]); acc = acc + pix[fpi]; i = i + 1; } return acc; };");
+			check_true(m.find("-- open loop") != std::string::npos && m.find("translation at") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a translation gap on the main path stays a refusal: " + m);
+			// lights_tic's shape (JaiDOOM spec.jai): a declaration the translation does not take inside an arm, read by the arm's later
+			// statements, under a continue-guarded body; a bail stands for the rest of its arm, so the arm's local leaves no cell to guard
+			// at entry (the census at the first row 139 tip: lights_tic slot 5 want=1 have=0, refused at every entry)
+			const std::string lights = R"(
+				var LT_MAX = [200, 180, 160, 140]; var LT_MIN = [100, 90, 80, 70]; var SE_LIGHT = [0, 0, 0, 0]; var LT_CNT = [1, 2, 1, 3]; var LT_SEC = [0, 1, 2, 3]; var LT_KIND = [0, 1, 2, 0];
+				function jitter(int k) -> int { return k % 3 + 1; }
+				var tic = function() {
+					int n = LT_SEC.size();
+					for (int i = 0; i < n; ++i) {
+						int s = LT_SEC[i]; int kind = LT_KIND[i];
+						LT_CNT[i] = LT_CNT[i] - 1;
+						if (LT_CNT[i] > 0) { continue; }
+						if (kind == 1) {
+							if (SE_LIGHT[s] == LT_MAX[i]) { SE_LIGHT[s] = LT_MIN[i]; LT_CNT[i] = jitter(i); }
+							else { SE_LIGHT[s] = LT_MAX[i]; LT_CNT[i] = jitter(i + 1); }
+						} else {
+							int l2 = LT_MAX[i] - jitter(i) * 16;
+							if (l2 < LT_MIN[i]) { l2 = LT_MIN[i]; }
+							SE_LIGHT[s] = l2; LT_CNT[i] = 4;
+						}
+					}
+				};
+				tic(); tic(); tic();
+				to_string(SE_LIGHT[0]) + "," + to_string(SE_LIGHT[1]) + "," + to_string(SE_LIGHT[2]) + "," + to_string(SE_LIGHT[3]) + "|" + to_string(LT_CNT[0]) + "," + to_string(LT_CNT[1]) + "," + to_string(LT_CNT[2]) + "," + to_string(LT_CNT[3]);
+			)";
+			both(lights, "", "a declaration bailed inside an arm");
+			both(lights, "", "a declaration bailed inside an arm, proofs off", false);
+			check_eq(std::string("184,180,112,124|2,2,2,4"), run_on(true, lights));
+			const std::string k = listing_of(lights);
+			size_t bails = 0, last_bail = std::string::npos;
+			for (size_t at = k.find("C_BAIL"); at != std::string::npos; at = k.find("C_BAIL", at + 1)) { ++bails; last_bail = at; }
+			const size_t after_last = last_bail == std::string::npos ? std::string::npos : k.find('\n', last_bail);
+			const std::string next_line = after_last == std::string::npos ? std::string() : k.substr(after_last + 1, k.find('\n', after_last + 1) - after_last - 1);
+			check_true(bails == 3 && k.find("-- open loop") == std::string::npos && next_line.find("C_CFOR_BACK") != std::string::npos, "the light loop closes with three bails, the last standing for the rest of its arm up to the back edge: " + k);
+			const size_t cells_at = k.find("-- cell loop");
+			const std::string cells_line = cells_at == std::string::npos ? std::string() : k.substr(cells_at, k.find('\n', cells_at) - cells_at);
+			bool adopted_slot = false;
+			for (size_t at = cells_line.find(" s"); at != std::string::npos; at = cells_line.find(" s", at + 1)) {
+				size_t d = at + 2;
+				while (d < cells_line.size() && cells_line[d] >= '0' && cells_line[d] <= '9') { ++d; }
+				if (d > at + 2 && cells_line.compare(d, 2, ":0") == 0) { adopted_slot = true; }
+			}
+			check_true(!adopted_slot, "no slot cell of an adopted kind remains from the bailed arm: " + cells_line);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

@@ -237,7 +237,9 @@ and its read (the guard restores the snapshot when the slot holds another table,
 statement); a pinned table entry is admitted only when no store site of the loop writes that table (checked
 at entry); a table several sites reach is pinned once, and a block pins up to eight distinct tables. An instruction of the `translation` class inside a conditional span of the body (reached only through a forward
 branch before it whose target lies after it) is a `bail` rather than a refusal of the loop: a copy instruction whose
-execution is a miss at its own origin with nothing observed first, so the loop closes and the arm's frequency decides
+execution is a miss at its own origin with nothing observed first, standing for the rest of its arm (the copy resumes at
+the nearest target after the bail of a forward branch before it, since nothing between the two is reachable inside the block,
+so none of the arm's later locals leaves a cell for the entry guard), so the loop closes and the arm's frequency decides
 the cost (the miss-site table names the site); the head span, the back edge, the main path and the representation and
 effect classes refuse as before. A refusal names its class and its first offending instruction: `representation` (a value the model
 does not take: strings, maps, members, getters, nested typed arrays, a local of two kinds), `effect` (a call,

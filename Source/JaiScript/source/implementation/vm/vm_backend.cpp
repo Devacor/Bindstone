@@ -6731,6 +6731,7 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
 	cell_state& cs = *f.cells;
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_STRING)) return;   // a borrowed string: the owner already holds the appended node; nothing to write
+	if (loop.cells[k].iter_index) return;   // a range-for's index lives in the iteration state (synced by the miss and the exit)
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_REFERENCE)) {
 		// an element alias live at the miss: the reference its declaration binds on the general form, to its source table's element
 		for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
@@ -6738,7 +6739,9 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 			const script_value* src = rb.source_site < cs.site_value.size() ? cs.site_value[rb.source_site] : nullptr;
 			if (!src || src->raw_storage_index() != script_value::TYPEID_ARRAY) break;
 			type_info_ptr ti = src->get_type_info();
-			frame_slot_set(f, loop.cells[k].slot, script_value::make_element_reference(const_cast<script_value*>(src)->unchecked_get_array_storage(), static_cast<size_t>(cs.payload[k]), engine_, ti ? ti->element_type() : type_info_ptr{}));
+			type_info_ptr constraint = ti ? ti->element_type() : type_info_ptr{};
+			if (rb.iter && constraint && (ti->base_type != script_value_type::jai_array_type || constraint->base_type == script_value_type::jai_any_type || constraint->base_type == script_value_type::jai_null_type)) { constraint = nullptr; }   // the range-for's rule (KEEP BYTE-PARALLEL with exec_iter_next)
+			frame_slot_set(f, loop.cells[k].slot, script_value::make_element_reference(const_cast<script_value*>(src)->unchecked_get_array_storage(), static_cast<size_t>(cs.payload[k]), engine_, constraint));
 			break;
 		}
 		return;
@@ -6819,6 +6822,14 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 #else
 	(void)step;
 #endif
+	if (loop.iter_proto != k_invalid_u32 && loop.iter_index_cell != k_invalid_u32 && !iter_states_.empty()) {
+		// the iteration state's next index: the element the block bound this iteration is done with (a miss inside the body), or is the
+		// general ITER_NEXT's to bind again (a miss at the head or its landing: an element the cells do not take, which refuses the
+		// block for the rest of this call, so a range over such elements pays one miss)
+		const int64_t idx = f.cells->payload[loop.iter_index_cell];
+		iter_states_.back().index = static_cast<size_t>(idx < 0 ? 0 : idx) + (original_ip > loop.head ? 1 : 0);
+		if (original_ip == loop.head && f.cells->loop < 64) { f.cells->refused_loops |= uint64_t(1) << f.cells->loop; }
+	}
 	cells_flush(f, loop);
 	for (const uint32_t pi : loop.inner_counted) {   // outermost first: the general form resumes inside these loops with their states in place
 		const counted_for_proto& p = f.code->counted_for_protos[pi];
@@ -6947,8 +6958,19 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
 		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
-		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind) {
+		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
+			if (site.cont_slot == chunk::k_iter_container) {
+				// a range-for head's container: the iteration state's array (ITER_INIT dereferenced and holds it; no callee rebinds it)
+				const script_value* rc = !iter_states_.empty() && iter_states_.back().container ? &*iter_states_.back().container : nullptr;
+				bool rborrowed = false;
+				node = rc && rc->raw_storage_index() == script_value::TYPEID_ARRAY ? lane_element_source(*rc, rborrowed) : nullptr;
+				cs.site_value[k] = rc;
+				if (!node) { return refuse_site(ip, "a range over a container that is not a plain node"); }
+				if (ci.op == opcode::op_c_rebind && !pin(node)) { return refuse_site(ip, "more than eight pinned tables"); }
+				cs.site_node[ip - loop.copy_head] = node;
+				continue;
+			}
 			const size_t cache_slot = site.fold_count ? ci.c * 3 + 2 : ci.c * 3;
 			if (site.cont_slot == k_invalid_u32 && cache_slot < f.code->env_lookup_cache.size()) {
 				// an environment binding that is a reference to a property or an element is not a plain node: its getter or its error
@@ -7087,6 +7109,27 @@ bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {
 	}
 	return true;
 }
+// a range-for block's head: the index cell against the container's live size (the body may grow or shrink the array, as the general
+// ITER_NEXT reads it every iteration); exhaustion syncs the iteration state, flushes and leaves for the exit (the ITER_POP)
+op_status vm_backend::exec_c_range(frame& f, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	const script_array* node = cs.site_node[f.ip - loop.copy_head];
+	if (!node || cs.kind[ins.b] != static_cast<uint8_t>(script_value::TYPEID_INT)) { cells_miss(f, loop, loop.head, 0); return {}; }
+	const script_int index = static_cast<script_int>(cs.payload[ins.b]);
+	if (index < 0 || static_cast<size_t>(index) >= node->size()) {
+		if (!iter_states_.empty()) { iter_states_.back().index = static_cast<size_t>(index < 0 ? 0 : index); }
+		JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ins.c; return {};
+	}
+	++f.ip;
+	return {};
+}
+// the copy's back edge of a range-for block: the index steps, then the budget poll and the copy's head
+op_status vm_backend::exec_c_back_step(frame& f, const vm_instruction& ins) {
+	cell_state& cs = *f.cells;
+	cs.payload[ins.b] = static_cast<int64_t>(static_cast<script_int>(cs.payload[ins.b]) + 1);
+	return exec_c_back(f, ins);
+}
 // after a call: each site's container, reached the way the entry reached it (its frame slot, or its environment binding while
 // the environment and epoch hold), still names the node resolved at entry; a site reached any other way (an element of a
 // table, a map entry, a member scope) or any difference asks for the full resolution again
@@ -7094,6 +7137,7 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 	cell_state& cs = *f.cells;
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
 		if (k < loop.site_alias.size() && loop.site_alias[k]) continue;   // a site through an alias: cells_rebinds_hold names its element again
+		if (loop.sites[k] < f.code->typed_sites.size() && f.code->typed_sites[loop.sites[k]].cont_slot == chunk::k_iter_container) continue;   // a range head's container: the iteration state's, which no callee rebinds
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
 		if (!cp) return false;
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
@@ -7105,6 +7149,13 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
 bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
+	if (loop.iter_proto != k_invalid_u32) {
+		// a range-for block: the general form's iteration state (ITER_INIT pushed it) is an array iteration, the loop variable a frame slot
+		const iter_proto& ipr = f.code->iter_protos[loop.iter_proto];
+		if (iter_states_.empty() || ipr.slot == SIZE_MAX || !f.locals || f.top_level) { JAI_CELLS_COUNT(1); return false; }
+		const iter_state& st = iter_states_.back();
+		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
+	}
 	// every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's
 	// canonical stamp and engine: the general form's first iteration established it, and a landing whose
 	// slot holds another kind (a declared-type conversion on a store) stays on the general form
@@ -7130,6 +7181,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			}
 			continue;
 		}
+		if (cl.iter_index) continue;   // a range-for's index: the iteration state's, read below
 		if (cl.temp) continue;   // a compiler temp: written before read inside its statement, no declared type
 		if (cl.first_decl) continue;   // a local the body declares: empty until its declaration, the first write
 		const script_value* s = frame_slot(f, cl.slot);
@@ -7172,6 +7224,8 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
 			cs.payload[k] = vk == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(v->unchecked_as_int()) : vk == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(v->unchecked_as_float()) : vk == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : (v->unchecked_as_bool() ? 1 : 0);   // a string: the node, borrowed
 			cs.kind[k] = vk; cs.stamp[k] = const_cast<type_info*>(v->type_info_raw());   // the landing rule for a write judges against the stamp read here
+		} else if (cl.iter_index) {
+			cs.kind[k] = static_cast<uint8_t>(script_value::TYPEID_INT); cs.payload[k] = static_cast<int64_t>(iter_states_.back().index); cs.stamp[k] = nullptr;   // the next element's index, as the general ITER_NEXT would read it
 		} else if (cl.temp || cl.first_decl) {
 			cs.kind[k] = 0; cs.stamp[k] = nullptr;   // a temp or a body-declared local: empty until the body writes it (its slot may hold another statement's value, or a placeholder)
 		} else {
@@ -7212,6 +7266,8 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_load_any: st = exec_c_load(f, ci, true); break;
 		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
 		case opcode::op_c_back: st = exec_c_back(f, ci); break;
+		case opcode::op_c_back_step: st = exec_c_back_step(f, ci); break;
+		case opcode::op_c_range: st = exec_c_range(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the

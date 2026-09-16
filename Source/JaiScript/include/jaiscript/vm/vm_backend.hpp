@@ -1685,7 +1685,9 @@ namespace jai::vm {
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
         bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index);   // the alias's sites take the table's element at index, a plain array node, else false
-        op_status exec_c_rebind(frame& f, const vm_instruction& ins);   // after a call: every site's container is the node resolved at entry, reached the same way
+        op_status exec_c_rebind(frame& f, const vm_instruction& ins);
+        op_status exec_c_range(frame& f, const vm_instruction& ins);
+        op_status exec_c_back_step(frame& f, const vm_instruction& ins);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take

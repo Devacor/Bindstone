@@ -2719,6 +2719,38 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } var& strip = STRIPS[sidx]; int y = 0; int gi = x; while (y < vh) { int c = strip[y]; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
 			check_true(l.find("C_REBIND") != std::string::npos && l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with its alias as a rebind and its cache-fill arm as a bail: " + l);
 		});
+		test("a_range_for_over_an_array_is_a_block", [this]() {
+			// a range-for over an array as a block head: by value (a typed buffer, a var array, an int-declared variable over floats, which binds
+			// the element as the general form does), by reference over arrays of arrays (a rebind), a continue and a break, the body growing the
+			// array (the live size), an element the cells do not take (a string: one miss, then the call's iterations run general), a call inside,
+			// an instance element by reference (a miss at the landing until member cells), a scalar element by reference, a mid-body miss that
+			// resumes at the right element, and a nested range-for; both backends, proofs on and off
+			const std::string script = R"(
+				class P { float x = 0.0; float vx = 1.0; }
+				function twice(int v) -> int { return v * 2; }
+				function sum_typed(int n) -> int { array<int> a = [1, 2, 3, 4]; int s = 0; int k = 0; while (k < n) { for (int v : a) { s = s + v; } k = k + 1; } return s; }
+				function sum_var() -> int { var a = [5, 6, 7]; int s = 0; for (auto v : a) { s = s + v; } return s; }
+				function int_over_floats() -> string { var a = [1.5, 2.5]; string t = ""; for (int v : a) { t = t + type_of(v); } return t; }
+				function rows() -> int { var g = [[1, 2], [3, 4], [5, 6]]; int s = 0; for (auto& r : g) { r[0] = r[0] + 10; s = s + r[0] + r[1]; } return s + g[2][0]; }
+				function skip_break() -> int { var a = [1, 2, 3, 4, 5, 6]; int s = 0; for (auto v : a) { if (v == 2) { continue; } if (v == 5) { break; } s = s + v; } return s; }
+				function grows() -> int { var a = [1, 2]; int s = 0; for (auto v : a) { if (v == 2) { a.push(9); } s = s + v; } return s; }
+				function strings() -> string { var a = ["a", "bb", "ccc"]; int n = 0; for (auto v : a) { n = n + 1; } return to_string(n); }
+				function calls() -> int { var a = [1, 2, 3]; int s = 0; for (auto v : a) { s = s + twice(v); } return s; }
+				function objs() -> float { array<P> pool = [P(), P(), P()]; for (auto& p : pool) { p.x = p.x + p.vx; } float s = 0.0; for (auto& p : pool) { s = s + p.x; } return s; }
+				function scalar_ref() -> int { var a = [1, 2, 3]; for (auto& v : a) { v = v * 2; } return a[0] + a[1] + a[2]; }
+				function mid_miss() -> string { var a = [1, 2, 2.5, 4]; int s = 0; try { for (auto v : a) { int w = v; s = s + w; } } catch (err) { return "caught:" + to_string(s); } return "ok:" + to_string(s); }
+				function nested() -> int { var g = [[1, 2], [3]]; int s = 0; for (auto& r : g) { for (auto v : r) { s = s + v; } } return s; }
+				to_string(sum_typed(3)) + "|" + to_string(sum_var()) + "|" + int_over_floats() + "|" + to_string(rows()) + "|" + to_string(skip_break()) + "|" + to_string(grows()) + "|" + strings() + "|" + to_string(calls()) + "|" + to_string(objs()) + "|" + to_string(scalar_ref()) + "|" + mid_miss() + "|" + to_string(nested());
+			)";
+			both(script, "", "range-for blocks");
+			both(script, "", "range-for blocks, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("30|18|floatfloat|66|8|12|3|12|3.000000|12|", 0) == 0 && vm.size() > 2 && vm.substr(vm.size() - 2) == "|6", "the shapes: " + vm);
+			const std::string l = listing_of("var f = function(var& a) { int s = 0; for (int v : a) { s = s + v; } return s; };");
+			check_true(l.find("C_RANGE") != std::string::npos && l.find("C_BACK_STEP") != std::string::npos && l.find("C_LOAD") != std::string::npos && l.find("-- open loop") == std::string::npos, "a by-value range closes with the range head and the stepping back edge: " + l);
+			const std::string m = listing_of("var f = function(var& g) { int s = 0; for (auto& r : g) { r[0] = r[0] + 1; s = s + r[1]; } return s; };");
+			check_true(m.find("C_RANGE") != std::string::npos && m.find("C_REBIND") != std::string::npos && m.find("-- open loop") == std::string::npos, "a by-reference range closes with a rebind at the head: " + m);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

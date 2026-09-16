@@ -213,6 +213,8 @@ namespace jai::vm {
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
         op_c_load_any,      // the same for a destination whose kind is adopted at run time: it lands through the declared-type rule
         op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
+        op_c_range,         // a = cell loop index, b = the range index cell, c = the exit ip: a range-for block's head, the index against the container's live size; exhaustion syncs the iteration state, flushes and leaves for the exit
+        op_c_back_step,     // a = cell loop index, b = the range index cell: the copy's back edge of a range-for block; the index steps, then the budget poll and the copy's head
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
         op_c_jcmp,          // (c bit 31 = jump when true: a comparison value followed by JUMP_IF_TRUE) // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
         op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
@@ -378,6 +380,8 @@ namespace jai::vm {
             case opcode::op_c_lnot: return "C_LNOT";
             case opcode::op_c_cmpval: return "C_CMPVAL";
             case opcode::op_c_rebind: return "C_REBIND";
+            case opcode::op_c_range: return "C_RANGE";
+            case opcode::op_c_back_step: return "C_BACK_STEP";
             case opcode::op_c_bail: return "C_BAIL";
             case opcode::op_c_exit: return "C_EXIT";
             case opcode::op_c_arith_p: return "C_ARITH_P";

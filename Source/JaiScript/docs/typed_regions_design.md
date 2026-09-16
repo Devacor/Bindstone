@@ -258,6 +258,15 @@ names the element again for every alias live there. The element must be an array
 anything else misses at the declaration, whose general form raises or binds as it does. One alias per slot in a body, its
 source never an alias, and a push receiver never an alias.
 
+A range-for over an array (`for (auto& p : pool)`, `for (int v : a)`) is a block head: its back edge is the jump to `ITER_NEXT`,
+the head (`range`) compares an index cell against the container's live size and leaves for the `ITER_POP` on exhaustion, and the
+head's landing binds the element into the loop variable, by value as a load of the element's own kind (a use that pins the
+variable's cell makes another kind miss), by reference as a rebind of the element. The index cell is the iteration state's
+index at entry, stepped by the block's back edge (`C_BACK_STEP`) and written back to the state by a miss (the next element's
+index) and at the exit; the state's container is the head's site, resolved at entry and holding through calls (no callee
+rebinds it; the body may grow the array, as the general form reads its size every iteration). An element the cells do not
+take (a string by value, an instance by reference) misses at the landing once and refuses the block for the rest of the call.
+
 A comparison used as a value and the `JUMP_IF_TRUE` or `JUMP_IF_FALSE` that consumes it (the `||` and `&&`
 chains, `!e`) translate to one `cmp` whose target word carries the jump's sense (never an inverted operator,
 since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a

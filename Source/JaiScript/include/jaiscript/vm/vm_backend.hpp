@@ -1605,6 +1605,8 @@ namespace jai::vm {
         op_status exec_binary(frame& f, const vm_instruction& ins);
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
+        op_status exec_member_temp(frame& f, const vm_instruction& ins);
+        op_status exec_set_member_fused(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
         op_status exec_unary_temp(frame& f, const vm_instruction& ins);
         // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-

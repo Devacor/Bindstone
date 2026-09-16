@@ -11680,6 +11680,26 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// a member read of a frame-slot base landing in a compiler temp: the base pushed as its LOAD would have, op_get_member's kernel
+// (its cache, its proofs, its texts; a user getter runs inside it, as it does for the general read) and the value popped into the
+// temp, so the read keeps its place among the statement's operands and its consumers take a direct operand
+op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
+	const script_value* base = frame_slot(f, ins.c);
+	stack_.push_back(base ? *base : make_null());
+	VM_TRY(exec_get_member(f, ins));
+	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member temp across a frame switch"); }
+	script_value out = std::move(stack_.back());
+	stack_.pop_back();
+	frame_slot_set(f, ins.b, std::move(out));
+	return {};
+}
+// a member store on a frame-slot base: the base pushed as its LOAD would have, then op_set_member whole (the value below it on the
+// stack, the proof in b, the result landed as it lands it)
+op_status vm_backend::exec_set_member_fused(frame& f, const vm_instruction& ins) {
+	const script_value* base = frame_slot(f, ins.c);
+	stack_.push_back(base ? *base : make_null());
+	return exec_set_member(f, ins);
+}
 op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value out = make_null();
@@ -15154,6 +15174,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_super: return exec_super(f, ins);
 		case opcode::op_from_this: return exec_from_this(f, ins);
 		case opcode::op_get_member: return exec_get_member(f, ins);
+		case opcode::op_member_temp: return exec_member_temp(f, ins);
+		case opcode::op_set_member_fused: return exec_set_member_fused(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
 		case opcode::op_set_member: return exec_set_member(f, ins);
 		case opcode::op_set_static: return exec_set_static(f, ins);
@@ -16351,6 +16373,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// dead result together with the pop that follows
 			case opcode::op_get_member:
 				VM_TRY_OP_SHARED(exec_get_member(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_member_temp:
+				VM_TRY_OP_SHARED(exec_member_temp(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_set_member_fused:
+				VM_TRY_OP_SHARED(exec_set_member_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_set_member:

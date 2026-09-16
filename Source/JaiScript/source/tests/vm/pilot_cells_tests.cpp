@@ -2784,6 +2784,41 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_of("class P { float x = 1.5; float vx = 0.25; } var f = function(P p, float y) { float w = p.x; p.x = w + y; return p.x + p.vx; };");
 			check_true(l.find("MEMBER_TEMP") != std::string::npos && l.find("SET_MEMBER_FUSED") != std::string::npos && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
 		});
+		test("an_alias_lives_to_the_end_of_the_body_and_an_inner_counted_step_polls_the_budget", [this]() {
+			// Astra's reproductions on the landed 016175eb (2026-09-16): a return inside the body reading the alias after its last read
+			// inside the block (the flush left the first iteration's reference), and an inner counted loop whose step never polled the budget
+			// (a zero step, a huge bound); and the coverage limit beside them: a while holding a counted for was skipped as the counted
+			// loop's own generic duplicate. Both backends, proofs on and off
+			const std::string alias = "int probe() { var strips = [[1], [2, 20], [3, 30, 300]]; int sum = 0; int i = 0; while (i < 3) { var& strip = strips[i]; sum += strip[0]; if (i == 2) { return sum + strip.size(); } i++; } return sum; } to_string(probe());";
+			both(alias, "", "an alias live at a return");
+			both(alias, "", "an alias live at a return, proofs off", false);
+			check_eq(std::string("9"), run_on(true, alias));
+			const std::string alias_break = "int probe() { var g = [[1], [2, 20], [3, 30, 300]]; int sum = 0; int i = 0; int last = 0; while (i < 3) { var& row = g[i]; sum += row[0]; if (sum > 2) { last = row.size(); break; } i++; } return sum * 10 + last; } to_string(probe());";
+			both(alias_break, "", "an alias live at a break");
+			check_eq(std::string("32"), run_on(true, alias_break));
+			auto budget_run = [&](bool vm, bool proofs, const std::string& src) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (!proofs) { e->type_proofs(false); }
+				e->execution_budget(0.05);
+				try { return "ok:" + e->execute(src).as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string late = "int probe() { int sum = 0; for (int i = 0; i < 3; i++) { int step = 1; if (i == 1) { step = 0; } for (int j = 0; j < 3; j += step) { sum += 0; } } return sum; } to_string(probe());";
+			const std::string bound = "int probe() { int sum = 0; for (int i = 0; i < 3; i++) { int bound = 3; if (i == 1) { bound = 1000000000; } for (int j = 0; j < bound; j++) { sum += 0; } } return sum; } to_string(probe());";
+			for (const std::string* src : { &late, &bound }) {
+				const std::string interp = budget_run(false, true, *src);
+				check_true(interp.rfind("throw:", 0) == 0, "the interpreter raises the budget: " + interp);
+				check_eq(interp, budget_run(true, true, *src));
+				check_eq(interp, budget_run(true, false, *src));
+			}
+			const std::string l = listing_of("var f = function(int n) { int s = 0; int i = 0; while (i < n) { for (int j = 0; j < 3; j++) { s = s + j; } i = i + 1; } return s; };");
+			size_t closed = 0;
+			for (size_t at = l.find("-- cell loop"); at != std::string::npos; at = l.find("-- cell loop", at + 1)) { ++closed; }
+			check_true(closed >= 2 && l.find("-- open loop") == std::string::npos, "a while holding a counted for closes over it (the duplicate test names the counted loop's own fallback): " + l);
+			check_true(l.find("C_JUMP") != std::string::npos, "the inner step is preceded by the budget poll: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

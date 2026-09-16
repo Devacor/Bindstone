@@ -2381,7 +2381,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (head >= back) continue;
 			// a counted loop's generic fallback (its op_loop_back spans the counted back edge) is the same loop, not a second one
 			bool generic_of_counted = false;
-			for (size_t ip = head + 1; ip < back; ++ip) { if (code[ip].op == opcode::op_cfor_back || code[ip].op == opcode::op_cells_cfor_back) { generic_of_counted = true; break; } }
+			for (size_t ip = head + 1; ip < back; ++ip) {
+				if (code[ip].op != opcode::op_cfor_back && code[ip].op != opcode::op_cells_cfor_back) continue;
+				const uint32_t pi = code[ip].op == opcode::op_cfor_back ? code[ip].a : (code[ip].a < c.cell_loops.size() ? c.cell_loops[code[ip].a].counted : k_invalid_u32);
+				if (pi < c.counted_for_protos.size() && c.counted_for_protos[pi].exit_ip > back) { generic_of_counted = true; break; }   // the counted loop's own fallback spans this back edge; an inner counted loop ends before it
+			}
 			if (generic_of_counted) continue;
 			// the head compare: a typed compare-jump or a general one whose false edge is the exit; the instructions before it
 			// (the condition's temps and reads) are the head span, translated like the body and run every iteration
@@ -2875,6 +2879,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				uint32_t var_operand = k_invalid_u32;
 				if (!value(op, p.var, kint, static_cast<uint32_t>(ip * 3), ip, var_operand) || !value(op, p.step, kint, static_cast<uint32_t>(ip * 3 + 2), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.a = var_operand; op.b = var_operand; op.writes = var_operand;
+				op.poll = true;   // the budget ticks ahead of the step, as the general back edge polls ahead of its own
 				use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, ip);
 				inner_cmp_at = static_cast<uint32_t>(ip + 1); inner_cmp_proto = pi;
 			} else if ((st.op == opcode::op_loop_back || st.op == opcode::op_cells_back) && ip != back) {
@@ -3237,6 +3242,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			copy_at[ip - head] = static_cast<uint32_t>(code.size());
 			origin_override = op.origin != k_invalid_u32 ? op.origin : SIZE_MAX;
 			pending_def = next_def < defs.size() && defs[next_def].first == ip ? defs[next_def].second : k_invalid_u32;
+			if (op.poll) { append(vm_instruction{opcode::op_c_jump, static_cast<uint32_t>(code.size() + 1), 0, 1}, ip); }   // the poll ahead of an inner counted step: a continue lands here too (copy_at names it)
 			switch (op.kind) {
 			case ir::arith:
 				if (op.fast != opcode::op_halt) {
@@ -3470,6 +3476,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 8); }
 		}
 		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size());   // liveness of compiler values per copy instruction (region_ir.hpp)
+		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a
+		// miss), never a statement's value: live from its rebind to the end of the copy, so every flush after the rebind materializes it
+		for (const chunk::cell_loop::rebind& rb : loop.rebinds) { for (size_t m = rb.copy_ip - loop.copy_head; m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(rb.cell); } }
 		c.cell_loops.push_back(std::move(loop));
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }

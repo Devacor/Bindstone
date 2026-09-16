@@ -45,6 +45,7 @@ namespace jai::vm {
 		bool head = false;
 		bool sense = false;                      // cmp: jump when true (a comparison value followed by JUMP_IF_TRUE)
 		uint32_t origin = k_invalid_u32;         // the original ip a miss at this operation re-runs (k_invalid_u32 = its own): an argument's value re-runs from the probe
+		bool poll = false;                       // arith: an inner counted loop's step, preceded in the copy by the budget poll (C_JUMP c = 1: a miss on exhaustion onto the step's own origin)
 	};
 
 	// one loop's operations with the span of the general form they stand for: ops[k] stands for the instruction

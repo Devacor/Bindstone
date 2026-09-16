@@ -256,7 +256,11 @@ kind reference whose payload is the element index; the block never writes the sl
 binds the element reference the declaration would have bound, so the general form resumes with it. A landing after a call
 names the element again for every alias live there. The element must be an array node that is plain, as the entry has it;
 anything else misses at the declaration, whose general form raises or binds as it does. One alias per slot in a body, its
-source never an alias, and a push receiver never an alias.
+source never an alias, and a push receiver never an alias. An alias is a local the general continuation may read anywhere
+after its declaration (a return inside the body, a break, a bail, a miss), never a statement's value: it is live from its
+rebind to the end of the body, so every flush after the rebind materializes it. An inner counted loop's step is preceded
+by the budget poll, as an inner while's back edge is: on exhaustion the block misses onto the step's own origin, the general
+back edge, which raises the budget text ahead of its own step.
 
 A range-for over an array (`for (auto& p : pool)`, `for (int v : a)`) is a block head: its back edge is the jump to `ITER_NEXT`,
 the head (`range`) compares an index cell against the container's live size and leaves for the `ITER_POP` on exhaustion, and the

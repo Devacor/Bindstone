@@ -383,7 +383,7 @@ namespace jai::vm {
             // flush stamps with decl_stamp, the declaration's type, whatever later stores land)
             // string_borrow: a temp that may hold a borrowed string node, because its only consumer replays from the producer on a miss
             // (the append pair); any other temp refuses a string element, since a miss at its consumer reads the temp's slot
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; };
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; bool iter_index = false; };   // iter_index: a range-for block's index, the iteration state's (never a slot's)
             uint32_t head, back, copy_head, copy_back, exit_ip;
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
@@ -391,9 +391,12 @@ namespace jai::vm {
             // an element alias declared in the body (`var& strip = STRIPS[sidx]`): the copy instruction that rebinds it, its cell (a compiler value of
             // kind reference: the element index is its payload, the source table its own site), the site index of its source table and the site
             // indices of the loads and stores through the alias, whose containers the rebind sets and the entry never resolves
-            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; };
+            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint)
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
+            // a range-for head (`for (auto& p : pool)`): the iter_protos index (the loop variable's slot and binding), the index cell (the
+            // iteration state's index at entry, stepped by the back edge, synced on a miss and at the exit) and the head's site (the state's container)
+            uint32_t iter_proto = k_invalid_u32, iter_index_cell = k_invalid_u32, iter_site = k_invalid_u32;
             std::vector<uint32_t> inner_counted;   // the counted_for_protos indices of the inner counted loops the block took, outermost first: a miss inside one pushes the general form's state (cells_miss)
             std::vector<cell> cells;
             // indexed by frame slot (and the env cells' synthetic slots): the slot's FIRST cell, k_invalid_u32 = not a cell. A
@@ -469,6 +472,7 @@ namespace jai::vm {
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.
+        static constexpr uint32_t k_iter_container = 0xFFFFFFFEu;   // a site row's cont_slot: the container is the iteration state's (a range-for block's head and its landing)
         struct typed_site {
             vm_instruction orig{opcode::op_halt, 0, 0, 0};
             vm_instruction orig2{opcode::op_halt, 0, 0, 0};

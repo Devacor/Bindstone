@@ -165,6 +165,8 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_range:
+			case opcode::op_c_back_step:
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
@@ -332,6 +334,8 @@ namespace {
 			case opcode::op_c_land:
 			case opcode::op_c_lnot:
 			case opcode::op_c_cmpval:
+			case opcode::op_c_range:
+			case opcode::op_c_back_step:
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
@@ -2354,11 +2358,21 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	for (size_t back = 0; back < original_size; ++back) {
 		const vm_instruction be = code[back];
-		if (be.op != opcode::op_loop_back && be.op != opcode::op_cfor_back) continue;
+		// a range-for's back edge: the jump to its ITER_NEXT, the exit jump after that, the pop after the back edge (a continue jumps
+		// there too, but not from the instruction before the pop)
+		uint32_t range_proto = k_invalid_u32;
+		if (be.op == opcode::op_jump && be.a < back && code[be.a].op == opcode::op_iter_next && be.a + 1 < back && code[be.a + 1].op == opcode::op_jump_if_false && code[be.a + 1].a == back + 1
+		    && back + 1 < original_size && code[back + 1].op == opcode::op_iter_pop && code[be.a].a < c.iter_protos.size()) { range_proto = code[be.a].a; }
+		if (be.op != opcode::op_loop_back && be.op != opcode::op_cfor_back && range_proto == k_invalid_u32) continue;
 		size_t head; vm_instruction hd{}; uint32_t counted = k_invalid_u32; size_t cmp_ip = 0;
 		uint8_t refusal = chunk::cell_refusal_none; uint32_t refusal_ip = static_cast<uint32_t>(back);
 		auto refuse = [&](uint8_t why, size_t at) { if (refusal == chunk::cell_refusal_none) { refusal = why; refusal_ip = static_cast<uint32_t>(at); } };
-		if (be.op == opcode::op_loop_back) {
+		if (range_proto != k_invalid_u32) {
+			// the head is ITER_NEXT, the exit the jump's target (read below as hd.a); the loop variable must be a frame slot
+			head = be.a; cmp_ip = head; hd = code[head + 1];
+			const iter_proto& ipr = c.iter_protos[range_proto];
+			if (ipr.slot == SIZE_MAX || ipr.slot >= k_typed_slot_mask) { refuse(chunk::cell_refusal_head, head); }
+		} else if (be.op == opcode::op_loop_back) {
 			head = be.a;
 			if (head >= back) continue;
 			// a counted loop's generic fallback (its op_loop_back spans the counted back edge) is the same loop, not a second one
@@ -2496,6 +2510,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (p.step.const_index == k_invalid_u32) { if (env_scalar(p.step)) { env_cell(p.step, kint, static_cast<uint32_t>(head * 3 + 2), head); } else { use_slot(p.step.slot, kint, false, 0, nullptr, head); } }
 			head_op.kind = ir::placeholder;
 		}
+		// a range-for head: the index a cell of its own (the iteration state's index at entry, stepped by the back edge, synced on a miss
+		// and at the exit), the loop variable a body-declared cell bound by the head's landing (by value: the element's own kind; by
+		// reference: a rebind of the element)
+		uint32_t range_index_slot = k_invalid_u32, range_var_slot = k_invalid_u32; bool range_byref = false;
+		if (refusal == chunk::cell_refusal_none && range_proto != k_invalid_u32) {
+			const iter_proto& ipr = c.iter_protos[range_proto];
+			range_index_slot = arg_temp_next++;
+			use_slot(range_index_slot, kint, true, k_typed_dst_compound, nullptr, head);
+			{ const int k = find_cell(range_index_slot); if (k >= 0) { cells[k].iter_index = true; cells[k].live_in = true; } }
+			range_var_slot = static_cast<uint32_t>(ipr.slot); range_byref = ipr.is_reference;
+		}
 		auto int_zero = [&]() -> uint32_t {   // the literal 0 a truth test compares against, minted once per chunk
 			for (size_t k = 0; k < c.constants.size() && k < k_typed_slot_mask; ++k) { if (c.constants[k].raw_storage_index() == script_value::TYPEID_INT && c.constants[k].unchecked_as_int() == 0) return static_cast<uint32_t>(k); }
 			c.constants.push_back(script_value(static_cast<script_int>(0), static_cast<engine*>(nullptr)));
@@ -2536,6 +2561,34 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (ip == resume_from || stmt_of(ip) != stmt_of(ip - 1)) { snap_cells = cells; snap_env = env_ops.size(); snap_defs = defs.size(); snap_calls = calls.size(); snap_arg = arg_temp_next; snap_alias = alias_slots.size(); snap_ip = ip; snap_stmt = stmt_of(ip); }
 			const vm_instruction st = code[ip];
 			ir_op op;
+			if (range_proto != k_invalid_u32 && ip == head) {
+				// the range head: the index against the container's live size, the exit on exhaustion
+				op.kind = ir::range; op.head = true; op.a = range_index_slot; op.target = code[head + 1].a; slot_read(op, range_index_slot);
+				ops.push_back(op);
+				continue;
+			}
+			if (range_proto != k_invalid_u32 && ip == head + 1) {
+				// the head's landing (the exit jump's place): the element into the loop variable, by value as a load of the element's own
+				// kind, by reference as a rebind; a miss here re-runs the general ITER_NEXT
+				if (range_byref) {
+					if (find_cell(range_var_slot) >= 0 || is_alias(range_var_slot)) { refuse(chunk::cell_refusal_translation, ip); break; }
+					use_slot(range_var_slot, static_cast<uint8_t>(script_value::TYPEID_REFERENCE), true, k_typed_dst_temp, nullptr, ip);
+					alias_slots.push_back(range_var_slot);
+					op.kind = ir::rebind;
+				} else {
+					use_slot(range_var_slot, 0, true, k_typed_dst_decl, nullptr, ip);
+					op.kind = ir::load;
+				}
+				op.a = range_var_slot; op.writes = range_var_slot; op.b = range_index_slot; op.container = chunk::k_iter_container; op.origin = static_cast<uint32_t>(head);
+				slot_read(op, range_index_slot);
+				ops.push_back(op);
+				continue;
+			}
+			if (range_proto != k_invalid_u32 && st.op == opcode::op_jump && st.a == head) {
+				op.kind = ir::jump; op.target = static_cast<uint32_t>(back);   // a continue: the jump to ITER_NEXT lands on the block's back edge (the step and the poll)
+				ops.push_back(op);
+				continue;
+			}
 			if (ip < inner_skip_until) { op.kind = ir::skip; ops.push_back(op); continue; }   // an inner counted loop's generic cond or update code, its loop back or its pop: dead in the block
 			if (ip == inner_cmp_at) {
 				// the inner counted loop's compare back to its body, in the place of the first generic update instruction
@@ -3114,6 +3167,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		uint32_t max_slot = 0; for (const auto& cl : cells) { if (cl.env_operand == k_invalid_u32 && cl.slot > max_slot) max_slot = cl.slot; }
 		for (auto& cl : cells) { if (cl.env_operand != k_invalid_u32) { cl.slot = ++max_slot; } }   // the environment values' synthetic slots
 		loop.cells = cells;
+		loop.iter_proto = range_proto; loop.iter_index_cell = range_index_slot != k_invalid_u32 && find_cell(range_index_slot) >= 0 ? static_cast<uint32_t>(find_cell(range_index_slot)) : k_invalid_u32;
 		loop.env_operands = env_ops;
 		loop.inner_counted = inner_counted;
 		if (ir_listing_) { loop.ir_text = listing(region); }   // the listing tool's text (region_ir.hpp)
@@ -3205,7 +3259,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::load: {
 				// the copy's own site row at the copy instruction's index: the general row keeps slots, this one names cells
 				chunk::typed_site site;
-				if (op.proto != k_invalid_u32) {
+				if (op.container == chunk::k_iter_container) {
+					// a range-for's landing: the iteration state's container at the index cell, the element's own kind unless the loop variable's
+					// cell is pinned by its uses (then another kind misses, and the general ITER_NEXT binds it)
+					site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.b]; site.orig = code[ip];
+					const uint32_t d = dst_of(op.a);
+					site.decl_expect = loop.cells[d].kind == 0 ? 0xFF : loop.cells[d].kind;
+				} else if (op.proto != k_invalid_u32) {
 					// a general read's site row, built for the copy only (the general instruction keeps its proto)
 					const fused_index_proto& fp = c.fused_index_protos[op.proto];
 					site.cont_slot = fp.container.direct && fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
@@ -3233,7 +3293,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
 				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
-				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, static_cast<uint32_t>(ip)}, ip);
+				const uint32_t miss_ip = op.container == chunk::k_iter_container && op.origin != k_invalid_u32 ? op.origin : static_cast<uint32_t>(ip);   // a range landing misses onto the general ITER_NEXT
+				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, miss_ip}, ip);
 				break;
 			}
 			case ir::store: {
@@ -3291,8 +3352,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::rebind: {
 				// the alias's declaration: its source read's site row for the copy (the container the general operand, resolved and pinned at entry;
 				// the index operands name cells) and the rebind record, whose source site and dependents are filled in with the site list
-				const fused_index_proto& fp = c.fused_index_protos[op.proto];
 				chunk::typed_site site;
+				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a);
+				if (op.container == chunk::k_iter_container) {
+					// a range-for's by-reference loop variable: the iteration state's container at the index cell
+					site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.b]; site.orig = code[ip]; rb.iter = true;
+					chunk_ = &c;
+					typed_site_at(code.size()) = site;
+					loop.rebinds.push_back(rb);
+					append(vm_instruction{opcode::op_c_rebind, static_cast<uint32_t>(loop.rebinds.size() - 1), loop_index, static_cast<uint32_t>(op.origin)}, ip);   // a miss re-runs the general ITER_NEXT
+					break;
+				}
+				const fused_index_proto& fp = c.fused_index_protos[op.proto];
 				site.cont_slot = fp.container.direct && fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 				if (fp.index_binary == k_invalid_u32) { site_operand(fp.index, site.operands[0]); }
 				else {
@@ -3309,9 +3380,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
-				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a);
 				loop.rebinds.push_back(rb);
 				append(vm_instruction{opcode::op_c_rebind, static_cast<uint32_t>(loop.rebinds.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
+				break;
+			}
+			case ir::range: {
+				// the head: its site row names the iteration state's container; the exit target is the general ITER_POP
+				chunk::typed_site site; site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.a]; site.orig = code[ip];
+				chunk_ = &c;
+				typed_site_at(code.size()) = site;
+				append(vm_instruction{opcode::op_c_range, loop_index, cell_of(op.a), op.target}, ip);
 				break;
 			}
 			case ir::bail: append(vm_instruction{opcode::op_c_bail, op.target, 0, 0}, ip); break;   // a planned miss at its own origin
@@ -3340,7 +3418,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (size_t k = 0; k < ops.size(); ++k) { emit(ops[k], first + k); }
 		loop.copy_back = static_cast<uint32_t>(code.size());
 		if (counted == k_invalid_u32) {
-			append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back);
+			if (range_proto != k_invalid_u32) { append(vm_instruction{opcode::op_c_back_step, loop_index, current[range_index_slot], 0}, back); }   // the index steps at the back edge
+			else { append(vm_instruction{opcode::op_c_back, loop_index, 0, 0}, back); }
 			code[back] = vm_instruction{opcode::op_cells_back, loop_index, static_cast<uint32_t>(head), 0};
 		} else {
 			const counted_for_proto& p = c.counted_for_protos[counted];
@@ -3349,7 +3428,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range) { loop.sites.push_back(ip2); } }
+		for (uint32_t k = 0; k < loop.sites.size(); ++k) { if (code[loop.sites[k]].op == opcode::op_c_range) { loop.iter_site = k; } }
 		if (!loop.rebinds.empty()) {
 			// the alias's sites: every load or store whose container slot is the alias, resolved by the rebind and never by the entry
 			loop.site_alias.assign(loop.sites.size(), 0);

@@ -148,6 +148,8 @@ namespace jai::vm {
         op_math_temp,          // a=fused_binary_protos index (left = the argument operand; k_invalid_u32 =
                                // the argument rides the stack), b=frame slot (a compiler temp), c=math_fn:
                                // a one-argument math:: intrinsic's result lands in the temp
+        op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
+        op_set_member_fused,   // a=nodes index (a member_expr), b=the store proof, c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
         op_operand_temp,       // a=fused_binary_protos index (left = a subscript operand), b=frame
                                // slot: the operand resolves RAW into a compiler temp BEFORE a
                                // lifted right subtree computes (left-to-right sequencing of the
@@ -445,6 +447,8 @@ namespace jai::vm {
             case opcode::op_index_fused_decl: return "INDEX_FUSED_DECL";
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
+            case opcode::op_member_temp: return "MEMBER_TEMP";
+            case opcode::op_set_member_fused: return "SET_MEMBER_FUSED";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";
             case opcode::op_unary_temp: return "UNARY_TEMP";

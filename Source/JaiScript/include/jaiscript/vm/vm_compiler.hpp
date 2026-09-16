@@ -86,6 +86,9 @@ namespace jai::vm {
         bool index_read_partner_shape(const binary_expr* rb);
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
+        uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
+        bool member_temp_operand(const expression* e) const;
+        void compile_member_into_temp(const expression_ptr& e, fused_operand& out);
         bool quiet_partner(const expression* e);
         bool private_local(const expression* e);       // a frame slot no user code can rebind: a value declaration, not escaping
         bool primitive_local(const expression* e);     // a private local declared int, float or bool

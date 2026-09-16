@@ -267,6 +267,14 @@ index) and at the exit; the state's container is the head's site, resolved at en
 rebinds it; the body may grow the array, as the general form reads its size every iteration). An element the cells do not
 take (a string by value, an instance by reference) misses at the landing once and refuses the block for the rest of the call.
 
+A member read whose base is a frame-slot identifier (`p.x`) lands in a compiler temp in the general form (`MEMBER_TEMP`:
+the base pushed as its `LOAD` would have, `GET_MEMBER`'s kernel with its cache, proofs and texts, the value popped into the
+temp), emitted where the operand is evaluated, so it is a direct operand of the fused binaries, the compare-jumps, the call
+arguments and the assignment values, and the typed lowering takes it when the checker proved the pair; a member store on such
+a base reads the base from the slot (`SET_MEMBER_FUSED`, `SET_MEMBER` whole otherwise). Static members, null-safe accesses,
+environment bases and `this` keep the general shape. Inside a loop these instructions are a translation gap until the block
+takes member sites.
+
 A comparison used as a value and the `JUMP_IF_TRUE` or `JUMP_IF_FALSE` that consumes it (the `||` and `&&`
 chains, `!e`) translate to one `cmp` whose target word carries the jump's sense (never an inverted operator,
 since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a

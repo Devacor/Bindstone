@@ -1239,7 +1239,7 @@ public:
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect (a break was one until row 119f, a string append
-			// a representation until row 122: both close now), a member access is a representation, a tree deeper than
+			// a representation until row 122: both close now), a member read is a temp the block does not take yet (a translation gap since row 142), a tree deeper than
 			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
@@ -1251,7 +1251,7 @@ public:
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
-			check_true(listing.find(": representation at") != std::string::npos && listing.find("(GET_MEMBER)") != std::string::npos, "the member access is a representation: " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(MEMBER_TEMP)") != std::string::npos, "the member read is a temp the block does not take yet, a translation gap: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
@@ -2750,6 +2750,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("C_RANGE") != std::string::npos && l.find("C_BACK_STEP") != std::string::npos && l.find("C_LOAD") != std::string::npos && l.find("-- open loop") == std::string::npos, "a by-value range closes with the range head and the stepping back edge: " + l);
 			const std::string m = listing_of("var f = function(var& g) { int s = 0; for (auto& r : g) { r[0] = r[0] + 1; s = s + r[1]; } return s; };");
 			check_true(m.find("C_RANGE") != std::string::npos && m.find("C_REBIND") != std::string::npos && m.find("-- open loop") == std::string::npos, "a by-reference range closes with a rebind at the head: " + m);
+		});
+		test("member_reads_land_in_temps_and_member_stores_read_their_base_from_the_slot", [this]() {
+			// the general form: a member read of a frame-slot base is a compiler temp (op_get_member's kernel, its place among the operands
+			// kept), so it feeds the fused binaries and the typed lowering; a member store on a frame-slot base reads the base from the slot.
+			// Both members of a binary, a member with a local, a member with a global read first, a user getter in a binary, a getter
+			// that changes the partner global (the order), a null base (the text), a store through a reference parameter, a store into
+			// an int field (the conversion), a store whose value is used, a user setter; both backends, proofs on and off
+			const std::string script = R"(
+				class P { float x = 1.5; float vx = 0.25; int n = 3; string s = "a"; }
+				class G { int hits = 0; int _get_v() { hits = hits + 1; TOTAL = TOTAL + 100; return 7; } void _set_w(int v) { hits = hits + 10; } }
+				var TOTAL = 1;
+				function both_members(P p) -> float { return p.x + p.vx; }
+				function member_local(P p, float y) -> float { float a = p.x * y; float b = y - p.vx; return a + b; }
+				function global_first(G g) -> int { return TOTAL + g.v; }
+				function getter_binary(G g) -> int { int r = g.v * 2 + g.v; return r + g.hits; }
+				function null_base(int k) -> string { P q = P(); var z = null; try { if (k == 1) { return to_string(z.x + 1.0); } } catch (err) { return "caught:" + err; } return to_string(q.n + 1); }
+				function store_ref(P& p, float d) -> float { p.x = p.x + d; p.vx = d; return p.x + p.vx; }
+				function store_int(P p) -> string { try { p.n = p.n + 1; p.n = 2.5; } catch (err) { return "caught:" + to_string(p.n); } return "ok:" + to_string(p.n); }
+				function store_used(P p) -> float { float r = (p.x = 4.5) + 1.0; return r + p.x; }
+				function setter(G g) -> int { g.w = 5; g.w = g.hits + 1; return g.hits; }
+				function decls(P p) -> string { float x = p.x; int k = p.n; var s = p.s; auto v = p.vx; p.x = 2.5; try { var q = p.x; int bad = q; return "ok:" + to_string(x + k + v) + s + to_string(bad); } catch (err) { return "caught:" + to_string(x + k + v) + s; } }
+				function cond(P p, int t) -> int { int c = 0; if (p.n > t) { c = c + 1; } if (p.x < 2.0 && p.vx > 0.0) { c = c + 10; } return c; }
+				class Leaf { int v = 0; string tag = "leaf"; } class Node { Leaf a = Leaf(); }
+				function copies(Node n) -> string { auto l = n.a; l.tag = l.tag + "!"; var m = n.a; m.v = 5; string t = n.a.tag; t = t + "?"; return n.a.tag + to_string(n.a.v) + l.tag + to_string(m.v) + t; }
+				P p = P(); G g = G(); Node nd = Node();
+				to_string(both_members(p)) + "|" + to_string(member_local(p, 2.0)) + "|" + to_string(global_first(g)) + "|" + to_string(getter_binary(g)) + "|" + null_base(1) + "|" + null_base(0) + "|" + to_string(store_ref(p, 0.5)) + "|" + store_int(p) + "|" + to_string(store_used(p)) + "|" + to_string(setter(g)) + "|" + decls(p) + "|" + to_string(cond(p, 2)) + "|" + copies(nd) + "|" + to_string(TOTAL) + "|" + to_string(p.x);
+			)";
+			both(script, "", "member temps");
+			both(script, "", "member temps, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of("class P { float x = 1.5; float vx = 0.25; } var f = function(P p, float y) { float w = p.x; p.x = w + y; return p.x + p.vx; };");
+			check_true(l.find("MEMBER_TEMP") != std::string::npos && l.find("SET_MEMBER_FUSED") != std::string::npos && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();

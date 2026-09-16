@@ -123,6 +123,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_member_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
@@ -201,6 +202,7 @@ namespace {
 			// lexical truth); exec_new never touches environment_
 			case opcode::op_get_member:
 			case opcode::op_set_member:
+			case opcode::op_set_member_fused:
 			case opcode::op_member_compound:
 			case opcode::op_get_static:
 			case opcode::op_set_static:
@@ -292,6 +294,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_member_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
@@ -367,6 +370,7 @@ namespace {
 			case opcode::op_get_member:
 			case opcode::op_get_static:
 			case opcode::op_set_member:
+			case opcode::op_set_member_fused:
 			case opcode::op_set_static:
 			case opcode::op_member_compound:
 			case opcode::op_new:
@@ -3557,7 +3561,7 @@ bool vm_compiler::quiet_partner(const expression* e) {
 		auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
 		return !id->global_qualified && identifier_slot_operand(id) != k_invalid_u32;
 	}
-	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none;
+	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || member_temp_operand(e);   // a member read is hoisted in order like a subscript
 }
 
 // an identifier that is not a frame slot resolves in the environment inside a fused op, as a lifted binary's environment
@@ -3617,7 +3621,7 @@ bool vm_compiler::quiet_index(const expression* e) {
 // a subtree with a hoisted read that may run user code: the operands the language reads before it must not stay in place
 bool vm_compiler::observing_hoist_in(const expression* e) {
 	if (!e) return false;
-	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e)) return !quiet_read(e);
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e)) return !quiet_read(e);
 	if (e->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(e);
 	return observing_hoist_in(b->left.get()) || observing_hoist_in(b->right.get());
@@ -3634,7 +3638,7 @@ bool vm_compiler::env_reference_candidate(const expression* e) {
 // a subtree with a hoisted read, intrinsic or unary of any quietness: it runs ahead of the operation's own operands
 bool vm_compiler::hoist_in(const expression* e) {
 	if (!e) return false;
-	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e)) return true;
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e)) return true;
 	if (e->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(e);
 	return hoist_in(b->left.get()) || hoist_in(b->right.get());
@@ -3642,10 +3646,11 @@ bool vm_compiler::hoist_in(const expression* e) {
 
 // a value that lands in a compiler temp wherever a consumer wants an operand: an element read, a pure math call, a unary
 bool vm_compiler::value_temp_operand(const expression* e) {
-	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e);
+	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);
 }
 
 bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
+	if (member_temp_operand(e.get())) { compile_member_into_temp(e, out); return true; }
 	if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, out); return true; }
 	if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, out); return true; }
 	return fusable_index_expr(e.get()) && compile_subscript_into_temp(e, expect, out);
@@ -3696,6 +3701,8 @@ void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand
 		compile_math_into_temp(arg, p.left);
 	} else if (unary_temp_operand(arg.get())) {
 		compile_unary_into_temp(arg, p.left);
+	} else if (member_temp_operand(arg.get())) {
+		compile_member_into_temp(arg, p.left);
 	} else if (!(fusable_index_expr(arg.get()) && compile_subscript_into_temp(arg, 0xFF, p.left))) {
 		const bool lands = arg->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(arg.get()));
 		compile_expression(arg);
@@ -3741,6 +3748,8 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 		compile_math_into_temp(arg, p.left);
 	} else if (unary_temp_operand(arg.get())) {
 		compile_unary_into_temp(arg, p.left);
+	} else if (member_temp_operand(arg.get())) {
+		compile_member_into_temp(arg, p.left);
 	} else if (!(fusable_index_expr(arg.get()) && compile_subscript_into_temp(arg, 0xFF, p.left))) {
 		// a binary argument that lands as one fused binary computes into a temp instead of the stack
 		const bool lands = arg->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(arg.get()));
@@ -3827,6 +3836,34 @@ uint8_t vm_compiler::operand_expect(const binary_expr* node) {
 	if (node->static_operand_class == operand_class_int_int) return static_cast<uint8_t>(script_value::TYPEID_INT);
 	if (node->static_operand_class == operand_class_float_float) return static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	return 0xFF;
+}
+
+// A member read or store whose base is a frame-slot identifier (`p.x`, `p` a local or a parameter; never `::name`, a static, a
+// null-safe access or an environment name): the base's slot, so the read lands in a compiler temp and the store reads the
+// base from the slot. Function bodies with the typed lowering only, like the other temps.
+uint32_t vm_compiler::member_base_slot(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return k_invalid_u32;
+	if (!e || e->get_type() != node_type::member_expr) return k_invalid_u32;
+	const auto* m = static_cast<const member_expr*>(e);
+	if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::identifier_expr) return k_invalid_u32;
+	auto* id = static_cast<identifier_expr*>(m->object.get());
+	if (id->global_qualified) return k_invalid_u32;
+	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
+	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
+}
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32; }
+// The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
+// becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
+void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
+	const uint32_t base = member_base_slot(e.get());
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	emit(opcode::op_member_temp, add_node(e), t, base);
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
 }
 
 // The fused index read of `e` lands in a fresh compiler temp: op_index_fused_decl with decl_temp (its general
@@ -4116,7 +4153,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
-		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e); };
+		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e); };
 		const bool lsub = hoists(expr->left.get()) && quiet_partner(expr->right.get());
 		const bool rsub = hoists(expr->right.get()) && quiet_partner(expr->left.get());
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
@@ -4129,6 +4166,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			auto hoist_into_temp = [&](const expression_ptr& side, fused_operand& out) {
 				if (math_temp_operand(side.get()) != detail::math_fn::none) { compile_math_into_temp(side, out); }
 				else if (unary_temp_operand(side.get())) { compile_unary_into_temp(side, out); }
+				else if (member_temp_operand(side.get())) { compile_member_into_temp(side, out); }
 				else { compile_subscript_into_temp(side, expect_of(side), out); }
 			};
 			fused_binary_proto proto;
@@ -4519,8 +4557,9 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			if (member->is_static) {
 				emit(opcode::op_set_static, add_node(member));
 			} else {
-				compile_expression(member->object);
-				emit(opcode::op_set_member, add_node(member), expr->static_store_proof);
+				const uint32_t base_slot = member_base_slot(member.get());
+				if (base_slot != k_invalid_u32) { emit(opcode::op_set_member_fused, add_node(member), expr->static_store_proof, base_slot); }   // the base from its slot: no LOAD dispatch
+				else { compile_expression(member->object); emit(opcode::op_set_member, add_node(member), expr->static_store_proof); }
 			}
 		} else {
 			if (member->is_static) {
@@ -4974,10 +5013,10 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 		patch_jump(jump_end, chunk_->code.size());
 		return;
 	}
-	if (callable_.active && (unary_temp_operand(init.get()) || math_temp_operand(init.get()) != detail::math_fn::none) &&
+	if (callable_.active && (unary_temp_operand(init.get()) || math_temp_operand(init.get()) != detail::math_fn::none || (member_temp_operand(init.get()) && primitive_declared_type(decl->type.get()))) &&
 	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
 	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
-		// `T v = -e;` or `T v = math::f(e);` (a whole initializer or a ternary's arm): the value lands in a compiler temp and the
+		// `T v = -e;`, `T v = math::f(e);` or `T v = p.x;` with T a primitive (a whole initializer or a ternary's arm; an object or string member is an alias the declaration must copy, DECL_VAR's business): the value lands in a compiler temp and the
 		// move row takes it, no push
 		const size_t temp_mark = temp_next_;
 		fused_operand src;

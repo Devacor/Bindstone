@@ -2972,6 +2972,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_PROBE") >= 3, "the loops around them close with the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			const std::string envl = listing_of("int G = 5; int twice(int v) { return v * 2; } var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };");
 			check_true(envl.find("CALL_TEMP") == std::string::npos, "an environment partner keeps the general order: " + envl);
+			const std::string refl = listing_of("function mutate(int& v) -> int { v = 20; return 2; } var g = function(int n) { int acc = 0; for (int i = 0; i < n; i++) { int x = 3; acc = acc + (x + mutate(x)); } return acc; };");
+			check_true(refl.find("CALL_TEMP") == std::string::npos, "a partner the call names as an argument keeps the stack form (the binary reads x before the call writes it): " + refl);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);

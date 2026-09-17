@@ -475,6 +475,7 @@ namespace jai::vm {
             chunk::cell_mask dirty;
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
             std::vector<const script_array*> site_node2;  // per copy instruction: a push site's source container (an element push), resolved at entry
+            std::vector<const script_value*> site_member;   // per copy instruction: a member read site's field value, resolved at entry (the instance's plain field)
             // how each site's container is reached (recorded by the resolution): its frame slot, or its environment binding; a landing
             // after a call re-checks the node's identity through that path instead of resolving again. An environment cell's binding
             // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
@@ -1664,6 +1665,7 @@ namespace jai::vm {
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
         type_info* temp_stamp_for(const script_array& node, size_t at) const;
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
+        op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise

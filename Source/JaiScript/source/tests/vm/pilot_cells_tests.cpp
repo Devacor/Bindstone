@@ -3215,6 +3215,42 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "return exits under an injected miss at every " + std::to_string(every)); }
 		});
+		test("a_span_never_begins_with_a_return_and_an_exit_at_the_head_runs_the_trampoline", [this]() {
+			// row 151.4: a refused if whose arm is `return;` (a method call in its condition refuses the statement) is followed by a long
+			// straight-line rest: the half after it begins at the if's join (the common path lands there), never at the return inside the
+			// arm, where a block would have entered and exited at its own entry without end; a body whose first statement is a return keeps
+			// the general form; the values hold on both backends, under the middle end's switch off and under the injected miss
+			const std::string prelude =
+				"class Rng { int state = 1; Rng(int s) { state = s; } int next(int n) { state = (state * 1103515245 + 12345) & 2147483647; if (n <= 0) { return 0; } return (state >> 8) % n; } }\n"
+				"array<int> C = [0, 3, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0];\n"
+				"var stepper = function(int i, int x, int w, var r) {\n"
+				"\tif (r.next(100) >= 60) { return -7; }\n"
+				"\tint drink = -1;\n"
+				"\tif (x > 0 && C[i - 1] == 3) { drink = i - 1; }\n"
+				"\telse if (x < w - 1 && C[i + 1] == 3) { drink = i + 1; }\n"
+				"\telse if (i >= w && C[i - w] == 3) { drink = i - w; }\n"
+				"\tif (drink < 0) { return -1; }\n"
+				"\tint sprout = -1;\n"
+				"\tif (x > 0 && C[i - 1] == 0) { sprout = i - 1; }\n"
+				"\telse if (x < w - 1 && C[i + 1] == 0) { sprout = i + 1; }\n"
+				"\tint a = drink * 3 + sprout; int b = a * 2 - i; int c = b + x; int d = c - w;\n"
+				"\treturn d * 10 + sprout;\n"
+				"};\n"
+				"var early = function(int a, int b) { return a * a + b * b + a * b + a - b + 7 - a * 3 + b * 5; };\n";
+			const std::string body = "string run() { var r = Rng(99); int s = 0; for (int i = 1; i < 11; i++) { s = s * 7 + stepper(i, i % 4, 4, r) + early(i, 3); } return to_string(s); }\nrun();";
+			both(prelude + body, "", "head exits");
+			both(prelude + body, "", "head exits, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			check_true(l.find("-- span") != std::string::npos, "the rest of stepper is a span: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "head exits under an injected miss at every " + std::to_string(every)); }
+		});
 	}
 };
 

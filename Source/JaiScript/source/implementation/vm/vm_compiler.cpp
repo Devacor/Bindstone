@@ -2453,8 +2453,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (o == opcode::op_halt || o == opcode::op_implicit_return) return true;   // a body's end
 			return (o == opcode::op_return || o == opcode::op_return_ident || o == opcode::op_return_binary) && !(sn && sn->get_type() == node_type::return_stmt);
 		};
+		auto return_stmt_at = [&](size_t ip) { const ast_node* sn = ip < c.stmt_nodes.size() ? c.stmt_nodes[ip] : nullptr; return sn && sn->get_type() == node_type::return_stmt; };
 		for (size_t ip = 0; ip < original_size;) {
 			if (covered[ip] || implicit_return(ip)) { ++ip; continue; }
+			if (return_stmt_at(ip)) {   // a run that begins with a return statement is that statement: its block would enter and exit at once
+				const ast_node* sn = c.stmt_nodes[ip];
+				while (ip < original_size && ip < c.stmt_nodes.size() && c.stmt_nodes[ip] == sn) { ++ip; }
+				continue;
+			}
 			size_t end = ip + 1;
 			while (end < original_size && !covered[end] && first_source[end] >= ip && !implicit_return(end)) { ++end; }   // a target of a jump from before the run cuts it
 			if (end - ip >= chunk::k_span_min_instructions) { requests.push_back(region_request{ end, true, ip }); }
@@ -3309,8 +3315,30 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					while (sb > head && sb - 1 < c.stmt_nodes.size() && c.stmt_nodes[sb - 1] == rs) { --sb; }
 					while (se < back && se < c.stmt_nodes.size() && c.stmt_nodes[se] == rs) { ++se; }
 				}
+				// the statement's extent closes over the jumps inside it (an if's arms end at its join; a nested refused statement takes its
+				// enclosing statement's extent), so a half begins where the common path lands, never inside an arm
+				auto jump_target_of = [&](size_t k) -> size_t {
+					const vm_instruction& in = code[k];
+					switch (in.op) {
+					case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true: case opcode::op_null_guard: case opcode::op_fused_cmp_jump: return in.a;
+					default: return in.op >= opcode::op_t_jlt_ii && in.op <= opcode::op_t_jne_ff ? static_cast<size_t>(in.c) : SIZE_MAX;
+					}
+				};
+				for (bool grew = true; grew;) {
+					grew = false;
+					for (size_t k = sb; k < se; ++k) { const size_t tg = jump_target_of(k); if (tg != SIZE_MAX && tg > se && tg <= back) { se = tg; grew = true; } }
+					for (size_t k = head; k < sb; ++k) {
+						const size_t tg = jump_target_of(k);
+						if (tg == SIZE_MAX || tg <= sb || tg >= se) continue;
+						const ast_node* ks = k < c.stmt_nodes.size() ? c.stmt_nodes[k] : nullptr;
+						size_t nb = k;
+						while (nb > head && nb - 1 < c.stmt_nodes.size() && c.stmt_nodes[nb - 1] == ks) { --nb; }
+						sb = nb; grew = true; break;
+					}
+				}
+				auto return_stmt_at = [&](size_t k) { const ast_node* sn = k < c.stmt_nodes.size() ? c.stmt_nodes[k] : nullptr; return sn && sn->get_type() == node_type::return_stmt; };
 				if (sb > head && sb - head >= chunk::k_span_min_instructions) { requests.push_back(region_request{ sb, true, head }); }
-				if (se < back && back - se >= chunk::k_span_min_instructions) { requests.push_back(region_request{ back, true, se }); }
+				if (se < back && back - se >= chunk::k_span_min_instructions && !return_stmt_at(se)) { requests.push_back(region_request{ back, true, se }); }
 			}
 			continue;
 		}
@@ -3650,6 +3678,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const bool origin_in_c = ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_push || ci.op == opcode::op_c_index_store || ci.op == opcode::op_c_rebind;
 				if (origin_in_c && ci.c == static_cast<uint32_t>(head)) { ci.c = loop.trampoline; }
 				if (ci.op == opcode::op_c_bail && ci.a == static_cast<uint32_t>(head)) { ci.a = loop.trampoline; }
+				if (ci.op == opcode::op_c_exit && ci.a == static_cast<uint32_t>(head)) { ci.a = loop.trampoline; }   // an exit statement that begins at the head: the entry word stands there, the general form runs from the trampoline
 				if (ci.op == opcode::op_c_guard && (ci.b >> 8) != 0xFFFFFFu && ci.c == static_cast<uint32_t>(head)) { ci.c = loop.trampoline; }   // a container guard reads its snapshot instruction (OPERAND_TEMP) at c: relocated with the first instruction
 			}
 			const vm_instruction entry_original = code[head];

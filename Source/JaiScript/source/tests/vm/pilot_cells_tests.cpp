@@ -1239,7 +1239,7 @@ public:
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect (a break was one until row 119f, a string append
-			// a representation until row 122: both close now), a member read of a frame-slot instance is a load site (row 147a; a temp the block did not take between rows 142 and 146), a tree deeper than
+			// a representation until row 122: both close now), a member read is a temp the block does not take yet (a translation gap since row 142), a tree deeper than
 			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
@@ -1247,13 +1247,11 @@ public:
 				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
 				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
 				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };"
-				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };"
-				" var f6 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + to_string(i).size(); i = i + 1; } return acc; };");
+				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
-			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect: " + listing);
-			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door (row 146a): " + listing);
+			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
-			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes (row 147a): " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(MEMBER_TEMP)") != std::string::npos, "the member read is a temp the block does not take yet, a translation gap: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
@@ -2784,7 +2782,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of("class P { float x = 1.5; float vx = 0.25; } var f = function(P p, float y) { float w = p.x; p.x = w + y; return p.x + p.vx; };");
-			check_true(l.find("MEMBER_TEMP") != std::string::npos && (l.find("SET_MEMBER_FUSED") != std::string::npos || l.find("SET_MEMBER_VALUE") != std::string::npos) && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
+			check_true(l.find("MEMBER_TEMP") != std::string::npos && l.find("SET_MEMBER_FUSED") != std::string::npos && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
 		});
 		test("an_alias_lives_to_the_end_of_the_body_and_an_inner_counted_step_polls_the_budget", [this]() {
 			// Astra's reproductions on the landed 016175eb (2026-09-16): a return inside the body reading the alias after its last read
@@ -2940,173 +2938,6 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "two environment arguments, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
-		});
-		test("a_call_the_expression_consumes_lands_in_a_temp_and_the_loop_closes", [this]() {
-			// row 146a: `if (side(x, y, n) == 0)`, `acc + twice(i) * 2`, `while (dec(k) > 0)`: the call's result lands in a compiler temp
-			// (op_call_temp) when its partner is a literal or a private local, the consumer reads a slot, the door lands it in a temp
-			// cell; an environment partner keeps the stack form (the general read must follow the call); a string result and a
-			// reference result land on the general form; an error inside the callee keeps its text
-			const std::string prelude =
-				"array<float> NX = [0.0, 1.0, 2.0]; array<float> NY = [0.0, 1.0, 0.0]; array<int> RIGHT = [1, 2, -1]; array<int> LEFT = [2, -1, -1]; int G = 5;\n"
-				"int side(float x, float y, int n) { float dx = x - NX[n]; float dy = y - NY[n]; if (dx * 2.0 > dy) { return 1; } return 0; }\n"
-				"int twice(int v) { return v * 2; }\n"
-				"int dec(int v) { return v - 1; }\n"
-				"string name(int i) { if (i % 2 == 0) { return \"a\"; } return \"b\"; }\n"
-				"int ovf(int v) { return v * 3; }\n"
-				"var walk = function(float x, float y) { int n = 0; int steps = 0; while (n >= 0 && steps < 8) { if (side(x, y, n) == 0) { n = RIGHT[n]; } else { n = LEFT[n]; } steps = steps + 1; } return steps * 10 + n; };\n"
-				"var sum = function(int k) { int acc = 0; for (int i = 0; i < k; i++) { acc = acc + twice(i); } return acc; };\n"
-				"var down = function(int k) { int c = 0; while (dec(k) > 0) { k = k - 1; c = c + 1; } return c; };\n"
-				"var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };\n"
-				"var names = function(int k) { int c = 0; for (int i = 0; i < k; i++) { if (name(i) == \"b\") { c = c + 1; } } return c; };\n"
-				"var blows = function(int k) { int c = 0; string m = \"\"; try { for (int i = 0; i < k; i++) { if (ovf(4611686018427387904) > 0) { c = c + 1; } } } catch (err) { m = err; } return m; };\n";
-			const std::string body =
-				"string run() { return to_string(walk(0.5, 0.2)) + \"|\" + to_string(sum(6)) + \"|\" + to_string(down(5)) + \"|\" + to_string(envpartner(4)) + \"|\" + to_string(names(7)) + \"|\" + blows(2); }\n"
-				"run();";
-			both(prelude + body, "", "calls as operands");
-			both(prelude + body, "", "calls as operands, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("CALL_TEMP") >= 4, "the calls the expressions consume land in temps: " + std::to_string(count("CALL_TEMP")) + "\n" + l);
-			check_true(count("C_PROBE") >= 3, "the loops around them close with the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
-			const std::string envl = listing_of("int G = 5; int twice(int v) { return v * 2; } var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };");
-			check_true(envl.find("CALL_TEMP") == std::string::npos, "an environment partner keeps the general order: " + envl);
-			const std::string refl = listing_of("function mutate(int& v) -> int { v = 20; return 2; } var g = function(int n) { int acc = 0; for (int i = 0; i < n; i++) { int x = 3; acc = acc + (x + mutate(x)); } return acc; };");
-			check_true(refl.find("CALL_TEMP") == std::string::npos, "a partner the call names as an argument keeps the stack form (the binary reads x before the call writes it): " + refl);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
-		});
-		test("a_member_read_of_a_frame_slot_instance_is_a_block_site", [this]() {
-			// row 147a: `p.x` inside a loop and inside a span is a load site: the field resolved once at entry, C_MLOAD lands its kind; a
-			// string field, a user accessor and a null base keep the general form (the entry refuses); a callee that rewrites the field
-			// between reads is seen (the hold check after the call re-resolves); both backends, proofs on and off
-			const std::string prelude =
-				"class P { int x = 3; float y = 1.5; bool on = true; string name = \"p\"; int _get_z() { return x * 100; } }\n"
-				"int bump(P& p) { p.x = p.x + 1; return p.x; }\n"
-				"var sum = function(P p, int n) { int acc = 0; for (int i = 0; i < n; i++) { acc = acc + p.x * i; if (p.on) { acc = acc + 1; } } return acc; };\n"
-				"var mix = function(P p) { float a = p.y * 2.0; int b = p.x + 4; float c = a + b; int d = b * 3; float e = c - d; int f = d + 1; float g = e + f; return g; };\n"
-				"var mix2 = function(P p, int n) { float acc = 0.0; for (int i = 0; i < n; i++) { acc = acc + p.y * 2.0 + p.x * 3; } return acc; };\n"
-				"var strs = function(P p, int n) { int acc = 0; for (int i = 0; i < n; i++) { acc = acc + p.name.size(); } return acc; };\n"
-				"var acc = function(P p, int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + p.z; } return t; };\n"
-				"var rewritten = function(P p, int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + p.x; bump(p); } return t; };\n";
-			const std::string body =
-				"string run() { P p = P(); P q = P(); q.x = 10;\n"
-				"  return to_string(sum(p, 5)) + \"|\" + to_string(mix(q)) + \"|\" + to_string(mix2(q, 4)) + \"|\" + to_string(strs(p, 3)) + \"|\" + to_string(acc(p, 2)) + \"|\" + to_string(rewritten(q, 4)) + \"|\" + to_string(q.x); }\n"
-				"run();";
-			both(prelude + body, "", "member read sites");
-			both(prelude + body, "", "member read sites, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_MLOAD") >= 2, "the member reads are sites: " + std::to_string(count("C_MLOAD")) + "\n" + l);
-			check_true(l.find("-- cell loop") != std::string::npos, "the loop over p.x closes: " + l);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member read sites under an injected miss at every " + std::to_string(every)); }
-		});
-		test("a_member_read_through_an_element_alias_is_resolved_per_rebind", [this]() {
-			// row 148: `for (auto& p : pool) { p.x }` over a hetero list of instances and over a class-typed buffer, `var& e = list[i]; e.x`,
-			// a subclass element with the same field (the per-site cache re-probes on a class change), a callee that replaces the element
-			// between reads (the hold check re-applies the rebind), a string field (the general form); both backends, proofs on and off
-			const std::string prelude =
-				"class P { int x = 3; float y = 1.5; bool on = true; string name = \"p\"; }\n"
-				"class D : P { int extra = 7; D(int v) { x = v; on = false; } }\n"
-				"var LIST = [P(), P(), D(10), P()];\n"
-				"array<P> BUF = [P(), P(), P()];\n"
-				"int swap(int i) { LIST[i] = D(100); return 1; }\n"
-				"var sum = function(int n) { int acc = 0; for (int r = 0; r < n; r++) { for (auto& p : LIST) { acc = acc + p.x * 2; if (p.x > 5) { acc = acc + 1; } } } return acc; };\n"
-				"var fsum = function() { float acc = 0.0; for (auto& p : BUF) { acc = acc + p.y * 2.0; } return acc; };\n"
-				"var byidx = function() { int acc = 0; int n = LIST.size(); for (int i = 0; i < n; i++) { var& e = LIST[i]; acc = acc + e.x * 3; } return acc; };\n"
-				"var replaced = function() { int acc = 0; int n = LIST.size(); for (int i = 0; i < n; i++) { var& e = LIST[i]; int before = e.x; int s = swap(i); acc = acc + before + s + e.x; } return acc; };\n"
-				"var names = function() { int acc = 0; for (auto& p : LIST) { acc = acc + p.name.size(); } return acc; };\n";
-			const std::string body =
-				"string run() { string a = to_string(sum(3)) + \"|\" + to_string(fsum()) + \"|\" + to_string(byidx()) + \"|\" + to_string(names());\n"
-				"  return a + \"|\" + to_string(replaced()) + \"|\" + to_string(byidx()); }\n"
-				"run();";
-			both(prelude + body, "", "alias member sites");
-			both(prelude + body, "", "alias member sites, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_MLOAD") >= 5, "the member reads through the aliases are sites: " + std::to_string(count("C_MLOAD")) + "\n" + l);
-			check_true(count("-- cell loop") >= 4, "the loops over the aliases close: " + std::to_string(count("-- cell loop")) + "\n" + l);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias member sites under an injected miss at every " + std::to_string(every)); }
-		});
-		test("a_member_store_in_statement_position_is_one_op_and_a_block_site", [this]() {
-			// row 147b: `p.x = v;` takes its value as an operand (SET_MEMBER_VALUE, no push, no POP) and a block writes the field in place
-			// (C_MSTORE) when the value's kind is the field's kind; an int into a float field, a float into a var field holding an int, a
-			// string field and a user setter run the general store (its conversions and texts); the value read back after the loop, both
-			// backends, proofs on and off, and under an injected miss
-			const std::string prelude =
-				"class P { int x = 0; float y = 0.0; bool on = false; var w = 1; string name = \"p\"; int _set_z(int v) { x = v * 100; return v; } int z = 0; }\n"
-				"class T { float posx = 0.0; float posy = 0.0; int hits = 0; }\n"
-				"var WS = [T(), T(), T()];\n"
-				"var fill = function(P p, int n) { for (int i = 0; i < n; i++) { p.x = i; p.y = i * 0.5; p.on = i > 2; p.w = i; } return p.x * 1000 + p.w * 10 + (p.on ? 1 : 0); };\n"
-				"var conv = function(P p, int n) { for (int i = 0; i < n; i++) { p.y = i; p.w = i * 0.5; p.x = p.x + 2; } return to_string(p.y) + \"|\" + to_string(p.w) + \"|\" + to_string(p.x); };\n"
-				"var sweep = function(float px, float py) { int t = 0; for (auto& w : WS) { w.posx = px; w.posy = py + w.hits; w.hits = w.hits + 1; t = t + w.hits; } return t; };\n"
-				"var strs = function(P p, int n) { for (int i = 0; i < n; i++) { p.name = \"n\" + to_string(i); } return p.name; };\n"
-				"var setter = function(P p, int n) { for (int i = 0; i < n; i++) { p.z = i; } return p.x; };\n";
-			const std::string body =
-				"string run() { P a = P(); P b = P(); P c = P(); P d = P(); string out = to_string(fill(a, 5)) + \"|\" + conv(b, 3) + \"|\" + to_string(sweep(1.5, 2.0)) + \"|\" + to_string(sweep(0.5, 0.0));\n"
-				"  return out + \"|\" + strs(c, 3) + \"|\" + to_string(setter(d, 4)) + \"|\" + to_string(WS[1].posy) + \"|\" + to_string(WS[2].hits); }\n"
-				"run();";
-			both(prelude + body, "", "member stores");
-			both(prelude + body, "", "member stores, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("SET_MEMBER_VALUE") >= 8, "the statement stores take the value as an operand: " + std::to_string(count("SET_MEMBER_VALUE")) + "\n" + l);
-			check_true(count("C_MSTORE") >= 6, "the stores are block sites: " + std::to_string(count("C_MSTORE")) + "\n" + l);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
-		});
-		test("an_element_alias_passed_to_a_callee_passes_its_reference_and_the_loop_stays_closed", [this]() {
-			// row 148.1: `for (auto& p : pool) { step(p); }` with `step(var& p)` writing the element's fields: the alias is a call argument, the door
-			// pushes the element reference the general LOAD pushes, the callee's writes land in the element, the loop closes and runs without a
-			// miss (the injected-miss controls cover the door); a by-value callee copies as on the general form; a body-declared alias too
-			const std::string prelude =
-				"class P { int kind = 1; float x = 0.0; int life = 5; }\n"
-				"function step(var& p) -> void { if (p.kind == 0) { return; } int life = p.life - 1; if (life <= 0) { p.kind = 0; p.life = 0; return; } p.x = p.x + 1.5; p.life = life; }\n"
-				"function peek(P p) -> int { p.life = 100; return p.life + p.kind; }\n"
-				"array<P> POOL = [new P(), new P(), new P(), new P()];\n"
-				"var LIST = [P(), P(), P()];\n"
-				"var run_steps = function(int n) { for (int t = 0; t < n; t++) { for (auto& p : POOL) { step(p); } } float s = 0.0; for (auto& p : POOL) { s = s + p.x + p.life + p.kind; } return s; };\n"
-				"var peeks = function() { int s = 0; for (auto& p : LIST) { s = s + peek(p); } int u = 0; for (auto& p : LIST) { u = u + p.life; } return s * 1000 + u; };\n"
-				"var byidx = function() { float s = 0.0; int n = LIST.size(); for (int i = 0; i < n; i++) { var& e = LIST[i]; step(e); s = s + e.x; } return s; };\n";
-			const std::string body = "string run() { return to_string(run_steps(7)) + \"|\" + to_string(peeks()) + \"|\" + to_string(byidx()); }\nrun();";
-			both(prelude + body, "", "alias arguments");
-			both(prelude + body, "", "alias arguments, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_PROBE") >= 3, "the loops with the calls close through the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
 		});
 	}
 };

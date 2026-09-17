@@ -150,8 +150,6 @@ namespace jai::vm {
                                // a one-argument math:: intrinsic's result lands in the temp
         op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
         op_set_member_fused,   // a=nodes index (a member_expr), b=the store proof, c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
-        op_call_temp,          // a = frame slot (a compiler temp): the call's result, popped from the stack, lands in it: a call an
-                               // expression consumes as an operand (the partner a literal or a private local); the door's temp consumer
         op_operand_temp,       // a=fused_binary_protos index (left = a subscript operand), b=frame
                                // slot: the operand resolves RAW into a compiler temp BEFORE a
                                // lifted right subtree computes (left-to-right sequencing of the
@@ -212,11 +210,6 @@ namespace jai::vm {
         // closed typed loops as cell blocks (docs/typed_regions_design.md): the cell-form copy of a closed typed loop
         op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
                             // unboxing, then the copy's head (or the general head when a guard refuses)
-        op_c_mload,         // a = dst cell, b = member_expr node, c = the base slot: a member read site, the field's value pointer resolved
-                            // at entry (cell_state::site_member), its kind and payload landed in the cell
-        op_c_mstore,        // a = value (a cell, or k_typed_const_bit | constant), b = member_expr node, c = the base slot: a member store site,
-                            // the field's payload written in place when the kinds agree, the general store otherwise
-        op_set_member_value,   // a = member_store_protos index: `base.member = operand;` in statement position, the value an operand (no push, no result)
         op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
         op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
@@ -364,9 +357,6 @@ namespace jai::vm {
             case opcode::op_jump_if_true: return "JUMP_IF_TRUE";
             case opcode::op_loop_back: return "LOOP_BACK";
             case opcode::op_cells_back: return "CELLS_BACK";
-            case opcode::op_c_mload: return "C_MLOAD";
-            case opcode::op_c_mstore: return "C_MSTORE";
-            case opcode::op_set_member_value: return "SET_MEMBER_VALUE";
             case opcode::op_c_arith: return "C_ARITH";
             case opcode::op_c_cmp: return "C_CMP";
             case opcode::op_c_load: return "C_LOAD";
@@ -460,7 +450,6 @@ namespace jai::vm {
             case opcode::op_member_temp: return "MEMBER_TEMP";
             case opcode::op_set_member_fused: return "SET_MEMBER_FUSED";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
-            case opcode::op_call_temp: return "CALL_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";
             case opcode::op_unary_temp: return "UNARY_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";

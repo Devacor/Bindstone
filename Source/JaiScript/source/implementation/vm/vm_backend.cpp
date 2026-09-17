@@ -7672,37 +7672,37 @@ bool vm_backend::cells_second_half_injected(frame& f) {
 // fused cell pairs (row 150): the first instruction's executor on its own word; when the block is still live and the ip fell
 // through to the next instruction (no jump taken, no miss: a miss leaves the block and puts the general form's ip in the frame),
 // the second's executor on the second's own word; the pair is one dispatch of the block loop and nothing else changes
-op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_arith(f, ins, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
 	return exec_c_arith(f, f.code->code[next], false);
 }
-op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_jcmp(f, ins, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
 	return exec_c_jcmp(f, f.code->code[next], false);
 }
-op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_load(f, ins, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
 	return exec_c_load(f, f.code->code[next], false);
 }
-op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_arith(f, ins, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
 	return exec_c_load(f, f.code->code[next], false);
 }
-op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_load(f, ins, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
 	return exec_c_jcmp(f, f.code->code[next], false);
 }
-op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins) {
 	const size_t next = f.ip + 1;
 	const op_status st = exec_c_arith(f, ins, false);
 	if (st != op_status::ok || f.ip != next) return st;

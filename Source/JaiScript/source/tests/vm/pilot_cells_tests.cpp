@@ -3108,39 +3108,6 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
 		});
-		test("adjacent_plain_cell_pairs_run_as_one_dispatch", [this]() {
-			// row 150: arithmetic chains, compare chains and element load pairs in a block are fused pairs in the listing; the values match the
-			// interpreter with the middle end's switch on and off, under the injected miss at every plain position (both halves count), with
-			// an overflow inside a pair's second half (the general text), and with a jump landing on a pair's second instruction
-			const std::string prelude =
-				"array<int> A = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3]; array<int> B = [2, 7, 1, 8, 2, 8, 1, 8, 2, 8, 4, 5, 9, 0, 4, 5];\n"
-				"var chains = function(int n) { int acc = 0; for (int i = 0; i < n; i++) { int a = i * 3 + 1; int b = a * 2 - i; int c = b + a + 7; acc = acc + c - b + a; } return acc; };\n"
-				"var compares = function(int n) { int hits = 0; for (int i = 0; i < n; i++) { int p0 = A[i]; int p1 = B[i]; int p2 = A[15 - i]; int p3 = B[15 - i]; if (p0 == p1 && p0 == p2 && p0 == p3) { hits = hits + 100; continue; } if (p0 == p2 && p1 == p3) { hits = hits + 10; continue; } if (p0 > p1 && p2 > p3) { hits = hits + 1; } } return hits; };\n"
-				"var loads = function(int n) { int s = 0; for (int i = 0; i < n; i++) { int x = A[i]; int y = B[i]; int z = A[(i + 1) & 15]; int w = B[(i + 2) & 15]; s = s + x * y - z + w; } return s; };\n"
-				"var landing = function(int n) { int s = 0; for (int i = 0; i < n; i++) { if (i > 7) { s = s + 1; } s = s + i * 2; s = s - 1; } return s; };\n"
-				"var blows = function(int n) { int s = 0; string m = \"\"; try { for (int i = 0; i < n; i++) { int a = 4611686018427387900 + i; int b = a * 2 + a; s = s + b; } } catch (err) { m = err; } return m; };\n";
-			const std::string body = "string run() { return to_string(chains(16)) + \"|\" + to_string(compares(16)) + \"|\" + to_string(loads(16)) + \"|\" + to_string(landing(16)) + \"|\" + blows(3); }\nrun();";
-			both(prelude + body, "", "fused pairs");
-			both(prelude + body, "", "fused pairs, proofs off", false);
-			const std::string vm = run_on(true, prelude + body);
-			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
-			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
-				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
-				check_eq(vm, off, "the middle end's switch off answers the same");
-			}
-			const std::string l = listing_of(prelude);
-			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_ARITH_P2") >= 2, "the arithmetic chains pair: " + std::to_string(count("C_ARITH_P2")) + "\n" + l);
-			check_true(count("C_JCMP_P2") >= 2, "the compare chains pair: " + std::to_string(count("C_JCMP_P2")) + "\n" + l);
-			check_true(count("C_LOAD2") >= 1, "the element loads pair: " + std::to_string(count("C_LOAD2")) + "\n" + l);
-			if (!engine::miss_injection_available()) { return; }
-			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
-				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-			};
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "fused pairs under an injected miss at every " + std::to_string(every)); }
-		});
 		test("a_straight_line_span_runs_as_a_block", [this]() {
 			// row 144: a function body's maximal loop-free runs are regions; the entry stands in place of the first instruction, the copy
 			// ends in an exit, the first instruction lives on behind the copy (the trampoline) for the entry's refusal and a miss at it

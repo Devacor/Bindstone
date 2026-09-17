@@ -179,7 +179,6 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
-			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 			case opcode::op_c_append:
 			case opcode::op_c_push:
 			case opcode::op_call:
@@ -356,7 +355,6 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
-			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 			case opcode::op_c_append:
 			case opcode::op_c_push:
 			case opcode::op_call:
@@ -3686,22 +3684,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			append(vm_instruction{opcode::op_jump, static_cast<uint32_t>(head + 1), 0, 0}, head);
 			if (head < c.typed_sites.size()) { if (c.typed_sites.size() <= loop.trampoline) { c.typed_sites.resize(loop.trampoline + 1); } c.typed_sites[loop.trampoline] = c.typed_sites[head]; }
 			code[head] = vm_instruction{opcode::op_cells_span, loop_index, static_cast<uint32_t>(head), 0};
-		}
-		// fused pairs (row 150): the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
-		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
-		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are
-		if (ir_passes_) {   // the middle end's switch: off, the pairs stay two instructions (jaiscript_fuzz --no-passes compares)
-			for (uint32_t ip2 = loop.copy_head; ip2 + 1 < loop.copy_back; ++ip2) {
-				const opcode a1 = code[ip2].op, b1 = code[ip2 + 1].op;
-				opcode fused = opcode::op_halt;
-				if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_arith_p) { fused = opcode::op_c_arith2; }
-				else if (a1 == opcode::op_c_jcmp_p && b1 == opcode::op_c_jcmp_p) { fused = opcode::op_c_jcmp2; }
-				else if (a1 == opcode::op_c_load && b1 == opcode::op_c_load) { fused = opcode::op_c_load2; }
-				else if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_load) { fused = opcode::op_c_arith_load; }
-				else if (a1 == opcode::op_c_load && b1 == opcode::op_c_jcmp_p) { fused = opcode::op_c_load_jcmp; }
-				else if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_jump) { fused = opcode::op_c_arith_jump; }
-				if (fused != opcode::op_halt) { code[ip2].op = fused; ++ip2; }
-			}
 		}
 		c.cell_loops.push_back(std::move(loop));
 	}

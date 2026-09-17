@@ -218,6 +218,7 @@ namespace jai::vm {
         const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
         uint64_t profile_fn_counts_[256] = {}, profile_fn_cycles_[256] = {};           // that function's general instructions
         uint64_t profile_fn_cell_ops_[256] = {}, profile_fn_cell_cycles_[256] = {};   // that function's cell instructions
+        std::vector<uint64_t> profile_cell_pairs_, profile_fn_cell_pairs_;   // consecutive cell opcode pairs (prev * 256 + this), all functions and the named one
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};

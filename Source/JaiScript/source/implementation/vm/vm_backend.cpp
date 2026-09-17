@@ -7347,6 +7347,10 @@ static bool cells_miss_plain(opcode op) {
 // its status; the budget is polled at the cell back edge as before
 op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
+#ifdef JAISCRIPT_VM_PROFILE
+	size_t prof_prev_cell = 256;
+	if (profile_cell_pairs_.size() < 256 * 256) { profile_cell_pairs_.assign(256 * 256, 0); profile_fn_cell_pairs_.assign(256 * 256, 0); }
+#endif
 	for (;;) {
 		const vm_instruction& ci = f.code->code[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7399,10 +7403,12 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		{
 			const uint64_t prof_dt = __rdtsc() - prof_c0; const size_t prof_k = static_cast<size_t>(ci.op) & 0xFF;
 			profile_cell_cycles_[prof_k] += prof_dt;
+			if (prof_prev_cell < 256) { ++profile_cell_pairs_[prof_prev_cell * 256 + prof_k]; }
 			if (!profile_filter_name_.empty()) {
 				if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
-				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; }
+				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; if (prof_prev_cell < 256) { ++profile_fn_cell_pairs_[prof_prev_cell * 256 + prof_k]; } }
 			}
+			prof_prev_cell = prof_k;
 		}
 #endif
 		if (st == op_status::failed) return st;
@@ -16363,6 +16369,16 @@ void vm_backend::dump_opcode_profile() const {
 				for (int i : ord) { fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(), (unsigned long long)counts[i], cycles[i] / 1e6, (double)cycles[i] / (double)counts[i], 100.0 * (double)cycles[i] / (double)tot); }
 			};
 			table("cell instruction self-time (the block loop's switch)", profile_cell_ops_, profile_cell_cycles_);
+			auto pairs = [&](const char* title, const std::vector<uint64_t>& counts) {
+				if (counts.size() < 256 * 256) return;
+				std::vector<size_t> ord; uint64_t tot = 0; for (size_t i = 0; i < counts.size(); ++i) { if (counts[i]) { ord.push_back(i); tot += counts[i]; } }
+				std::sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return counts[a] > counts[b]; });
+				fprintf(stderr, "\n[vm-profile] %s (%llu pairs)\n", title, (unsigned long long)tot);
+				size_t shown = 0;
+				for (size_t i : ord) { fprintf(stderr, "  %-16.*s -> %-16.*s %12llu %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i / 256)).size(), opcode_name(static_cast<opcode>(i / 256)).data(), (int)opcode_name(static_cast<opcode>(i % 256)).size(), opcode_name(static_cast<opcode>(i % 256)).data(), (unsigned long long)counts[i], 100.0 * (double)counts[i] / (double)tot); if (++shown >= 24) break; }
+			};
+			pairs("consecutive cell instruction pairs", profile_cell_pairs_);
+			if (!profile_filter_name_.empty()) { const std::string t3 = "consecutive cell instruction pairs of " + profile_filter_name_; pairs(t3.c_str(), profile_fn_cell_pairs_); }
 			if (!profile_filter_name_.empty()) {
 				const std::string t1 = "general instructions of " + profile_filter_name_, t2 = "cell instructions of " + profile_filter_name_;
 				table(t1.c_str(), profile_fn_counts_, profile_fn_cycles_);

@@ -213,6 +213,11 @@ namespace jai::vm {
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
         uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
         uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
+        uint64_t profile_cell_cycles_[256] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
+        std::string profile_filter_name_;                // JAI_VMPROF_FUNCTION: one function's own tables (empty = none)
+        const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
+        uint64_t profile_fn_counts_[256] = {}, profile_fn_cycles_[256] = {};           // that function's general instructions
+        uint64_t profile_fn_cell_ops_[256] = {}, profile_fn_cell_cycles_[256] = {};   // that function's cell instructions
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};

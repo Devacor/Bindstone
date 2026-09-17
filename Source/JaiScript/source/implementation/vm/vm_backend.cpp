@@ -315,6 +315,9 @@ vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environmen
 	stack_.owner = this;
 	stack_.reserve(256);
 	frames_.reserve(64);
+#ifdef JAISCRIPT_VM_PROFILE
+	if (const char* fn = std::getenv("JAI_VMPROF_FUNCTION")) { profile_filter_name_ = fn; }
+#endif
 }
 
 void vm_backend::set_engine_reference(engine* engine_ref) {
@@ -7348,6 +7351,7 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
+		const uint64_t prof_c0 = __rdtsc();
 #endif
 #ifdef JAISCRIPT_MISS_INJECTION
 		if (miss_every_ && cells_miss_plain(ci.op) && --miss_countdown_ == 0) {
@@ -7389,10 +7393,18 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci); break;
 		case opcode::op_c_append: st = exec_c_append(f, ci); break;
 		case opcode::op_c_push: st = exec_c_push(f, ci); break;
-		case opcode::op_c_mload: st = exec_c_mload(f, ci); break;
-		case opcode::op_c_mstore: st = exec_c_mstore(f, ci); break;
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
+#ifdef JAISCRIPT_VM_PROFILE
+		{
+			const uint64_t prof_dt = __rdtsc() - prof_c0; const size_t prof_k = static_cast<size_t>(ci.op) & 0xFF;
+			profile_cell_cycles_[prof_k] += prof_dt;
+			if (!profile_filter_name_.empty()) {
+				if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
+				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; }
+			}
+		}
+#endif
 		if (st == op_status::failed) return st;
 		if (cs.loop == k_invalid_u32) return {};   // flushed at an exit or a miss: f.ip is the general form's
 	}
@@ -7405,6 +7417,8 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
 	case opcode::op_c_rebind: return exec_c_rebind(f, ci);
+	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
+	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
 	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
@@ -15831,6 +15845,9 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_cells_push_), std::end(profile_cells_push_), 0ull);
 	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
 	std::fill(std::begin(profile_cell_ops_), std::end(profile_cell_ops_), 0ull);
+	std::fill(std::begin(profile_cell_cycles_), std::end(profile_cell_cycles_), 0ull);
+	std::fill(std::begin(profile_fn_counts_), std::end(profile_fn_counts_), 0ull); std::fill(std::begin(profile_fn_cycles_), std::end(profile_fn_cycles_), 0ull);
+	std::fill(std::begin(profile_fn_cell_ops_), std::end(profile_fn_cell_ops_), 0ull); std::fill(std::begin(profile_fn_cell_cycles_), std::end(profile_fn_cell_cycles_), 0ull);
 	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
 	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
 	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
@@ -16336,6 +16353,23 @@ void vm_backend::dump_opcode_profile() const {
 		for (size_t k = 0; k < 256; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
 		fprintf(stderr, "\n");
 		{
+			// the block loop's own switch, cycles per cell opcode; then the named function's general and cell tables
+			auto table = [&](const char* title, const uint64_t* counts, const uint64_t* cycles) {
+				uint64_t tot = 0; for (int i = 0; i < 256; ++i) tot += cycles[i];
+				if (tot == 0) return;
+				std::vector<int> ord; for (int i = 0; i < 256; ++i) if (counts[i]) ord.push_back(i);
+				std::sort(ord.begin(), ord.end(), [&](int a, int b) { return cycles[a] > cycles[b]; });
+				fprintf(stderr, "\n[vm-profile] %s (total %llu Mcycles)\n%-24s %10s %14s %8s %7s\n", title, (unsigned long long)(tot / 1000000), "opcode", "count", "cycles(M)", "avg", "pct");
+				for (int i : ord) { fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(), (unsigned long long)counts[i], cycles[i] / 1e6, (double)cycles[i] / (double)counts[i], 100.0 * (double)cycles[i] / (double)tot); }
+			};
+			table("cell instruction self-time (the block loop's switch)", profile_cell_ops_, profile_cell_cycles_);
+			if (!profile_filter_name_.empty()) {
+				const std::string t1 = "general instructions of " + profile_filter_name_, t2 = "cell instructions of " + profile_filter_name_;
+				table(t1.c_str(), profile_fn_counts_, profile_fn_cycles_);
+				table(t2.c_str(), profile_fn_cell_ops_, profile_fn_cell_cycles_);
+			}
+		}
+		{
 			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
 			size_t closed = 0, by_class[8] = {};
 			for (const auto& [code, st] : profile_chunks_) { closed += st.closed_loops; for (const auto& r : st.refusals) { ++by_class[r.reason < 8 ? r.reason : 0]; } }
@@ -16429,6 +16463,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				const uint64_t dt = raw > nested ? raw - nested : 0;
 				profile_cycles_[prof_prev] += dt;
 				++profile_counts_[prof_prev];
+				if (!profile_filter_name_.empty()) {
+					if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
+					if (f.code == profile_filter_chunk_) { profile_fn_cycles_[prof_prev] += dt; ++profile_fn_counts_[prof_prev]; }
+				}
 				if (prof_stats && prof_ip < prof_stats->ip_cycles.size()) {
 					prof_stats->ip_cycles[prof_ip] += dt;
 					++prof_stats->ip_counts[prof_ip];

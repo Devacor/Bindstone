@@ -2415,6 +2415,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// straight-line spans: the maximal runs of a function body's instructions outside every loop, cut at the targets of jumps
 	// from before the run (its own arms' joins stay inside) and before an implicit return; each is a region request after
 	// the loops and takes the loop body's walk below; a refused span splits at the refused instruction (the record below)
+	for (size_t ip = 0; ip < original_size; ++ip) { if (code[ip].op == opcode::op_try_push) { c.has_try = true; break; } }
 	struct region_request { size_t back; bool span; size_t first; };
 	std::vector<region_request> requests;
 	for (size_t b = 0; b < original_size; ++b) { requests.push_back(region_request{ b, false, 0 }); }
@@ -3628,6 +3629,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a
 		// miss), never a statement's value: live from its rebind to the end of the copy, so every flush after the rebind materializes it
 		for (const chunk::cell_loop::rebind& rb : loop.rebinds) { for (size_t m = rb.copy_ip - loop.copy_head; m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(rb.cell); } }
+		// an exit into a return statement (`return x;`, `return k;`): the exit flushes the environment cells and x's cell only, the frame
+		// dying at the return; a function with a try block keeps the full flush (a raise inside the return could reach a catch in this frame)
+		if (!c.has_try) {
+			for (uint32_t cip = loop.copy_head; cip < static_cast<uint32_t>(code.size()); ++cip) {
+				vm_instruction& ci = code[cip];
+				if (ci.op != opcode::op_c_exit || ci.a >= code.size()) continue;
+				const vm_instruction& tgt = code[ci.a];
+				if (tgt.op == opcode::op_return_ident && tgt.a < loop.slot_to_cell.size()) { ci.b = loop.slot_to_cell[tgt.a]; ci.c = 1; }
+				else if (tgt.op == opcode::op_const && ci.a + 1 < code.size() && code[ci.a + 1].op == opcode::op_return) { ci.b = k_invalid_u32; ci.c = 1; }
+			}
+		}
 		if (span) {
 			// the entry takes the first instruction's place; the instruction itself moves behind the copy with a jump to the second: the
 			// general form of the entry's refusal and the miss path of every copy instruction standing for the first

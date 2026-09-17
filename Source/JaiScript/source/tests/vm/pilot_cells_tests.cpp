@@ -3191,6 +3191,30 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "spans under an injected miss at every " + std::to_string(every)); }
 		});
+		test("a_span_exit_into_a_return_writes_only_what_the_return_reads", [this]() {
+			// row 151: a leaf whose body is a span ending in `return x;` returns x written from its cell; a captured local written in the span is
+			// seen by the closure after the return (the environment cell is flushed); a function with a try around its return keeps the
+			// full flush (the catch reads the locals); a return of a constant; the injected miss at every plain position holds the values
+			const std::string prelude =
+				"array<int> T = [5, 6, 7, 8, 9, 10, 11, 12];\n"
+				"var leaf = function(int i, int k) { int a = T[i] * 3; int b = a + k; int c = b * 2 - i; int d = c + a; int e = d - b; int f = e + 1; int g = f * 2; return g; };\n"
+				"var konst = function(int i) { int a = T[i] * 3; int b = a + 1; int c = b * 2; int d = c + a; int e = d - b; int f = e + 1; int g = f * 2; if (g > 1000000) { return 1; } return 0; };\n"
+				"var captured = function(int i) { int seen = 0; var peek = function() { return seen; }; int a = T[i] + 1; int b = a * 2; int c = b + a; int d = c - 1; int e = d * 3; seen = e; int f = e + 1; int g = f - a; return g + peek(); };\n"
+				"var guarded = function(int i, int z) { int a = T[i] + 1; int b = a * 2; int c = b + a; int d = c - 1; int e = d * 3; int f = e + 1; int g = f / z; string m = \"\"; try { return g; } catch (err) { m = err + to_string(e); } return m.size(); };\n";
+			const std::string body = "string run() { int s = 0; for (int i = 0; i < 8; i++) { s = s + leaf(i, 2) + konst(i) + captured(i) + guarded(i, 1); } return to_string(s) + \"|\" + to_string(leaf(3, 4)) + \"|\" + to_string(captured(2)); }\nrun();";
+			both(prelude + body, "", "return exits");
+			both(prelude + body, "", "return exits, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			check_true(l.find("-- span") != std::string::npos, "the leaves are spans: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "return exits under an injected miss at every " + std::to_string(every)); }
+		});
 	}
 };
 

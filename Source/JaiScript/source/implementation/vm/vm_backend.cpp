@@ -6739,6 +6739,21 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	cs.reset();
 }
 
+// an exit into a return statement: the frame dies at the return, so no local is read after it except the one the return names;
+// the environment cells (a captured local, a global) are written as always, the returned local's cell (keep) is written, the rest
+// are dropped; a temp is written only where its definition is live, as the full flush has it
+void vm_backend::cells_flush_return(frame& f, const chunk::cell_loop& loop, uint32_t keep) {
+	cell_state& cs = *f.cells;
+	const size_t at = f.ip - loop.copy_head;
+	const chunk::cell_mask pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : chunk::cell_mask::all());
+	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+		if (!pending.test(k) || cs.kind[k] == 0) continue;
+		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); continue; }
+		if (k == keep) { cell_flush_one(f, loop, k); }
+	}
+	cs.reset();
+}
+
 // one cell's payload back to its slot with the stamp the landing rule gives it: in place when the slot already holds the kind
 JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
 	cell_state& cs = *f.cells;
@@ -7456,7 +7471,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
 	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
-	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
+	case opcode::op_c_exit: JAI_CELLS_COUNT(4); if (ci.c & 1) { cells_flush_return(f, loop, ci.b); } else { cells_flush(f, loop); } f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target; c & 1: the statement is a return the frame dies at
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 	}
 }

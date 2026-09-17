@@ -6739,21 +6739,6 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	cs.reset();
 }
 
-// an exit into a return statement: the frame dies at the return, so no local is read after it except the one the return names;
-// the environment cells (a captured local, a global) are written as always, the returned local's cell (keep) is written, the rest
-// are dropped; a temp is written only where its definition is live, as the full flush has it
-void vm_backend::cells_flush_return(frame& f, const chunk::cell_loop& loop, uint32_t keep) {
-	cell_state& cs = *f.cells;
-	const size_t at = f.ip - loop.copy_head;
-	const chunk::cell_mask pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : chunk::cell_mask::all());
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
-		if (!pending.test(k) || cs.kind[k] == 0) continue;
-		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); continue; }
-		if (k == keep) { cell_flush_one(f, loop, k); }
-	}
-	cs.reset();
-}
-
 // one cell's payload back to its slot with the stamp the landing rule gives it: in place when the slot already holds the kind
 JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
 	cell_state& cs = *f.cells;
@@ -6918,25 +6903,20 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	return cells_run(f, loop);
 }
 
-// a straight-line span's entry (docs/typed_regions_design.md): in place of the span's first instruction; the guards and the unboxing
-// as at a back edge, no budget poll (the span has no back edge; the calls and loops around it poll), then the copy; a refusal runs
-// the trampoline (the first instruction relocated behind the copy, then a jump to the second)
-op_status vm_backend::exec_cells_span(frame& f, const vm_instruction& ins) {
-	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_CELLS_COUNT(14); f.ip = loop.trampoline; return {}; }
-	cell_state& cs = *f.cells;
-	cs.loop = ins.a;
-	cs.dirty.reset();
-	JAI_CELLS_COUNT(0); JAI_CELLS_COUNT(13);
-	f.ip = loop.copy_head;
-	return cells_run(f, loop);
-}
-
 // the load and store sites' containers, resolved at the entry and again after every call inside the block (a callee may
 // replace or grow a container the block reads): false = a site whose container is not a plain array node
 // a container reached through a member of a frame-slot instance (`ch.odist[ci]`): the plain field the member IC's probe
 // names, read once at the entry; a user accessor anywhere in the chain, a non-public chain, a missing field or a base that
 // is not a class instance leaves the site to the general form, which runs the accessor or raises per read
+// the opcode the first instruction of a fused pair had before the peephole (row 150): what the site logic and the lever ask of it
+static opcode cell_first_op(opcode op) {
+	switch (op) {
+	case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump: return opcode::op_c_arith_p;
+	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
+	case opcode::op_c_load2: case opcode::op_c_load_jcmp: return opcode::op_c_load;
+	default: return op;
+	}
+}
 const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin) {
 	pin = nullptr;
 	const script_value* base = frame_slot(f, container.slot);
@@ -7036,7 +7016,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			cs.site_member[ip - loop.copy_head] = fv; cs.site_slot[k] = ci.c; cs.site_node[ip - loop.copy_head] = nullptr;
 			continue;
 		}
-		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
+		if (cell_first_op(ci.op) == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			if (site.cont_slot == chunk::k_iter_container) {
 				// a range-for head's container: the iteration state's array (ITER_INIT dereferenced and holds it; no callee rebinds it)
@@ -7365,6 +7345,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
 	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore:
+	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 		return true;
 	default:
 		return false;
@@ -7407,6 +7388,12 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_back_step: st = exec_c_back_step(f, ci); break;
 		case opcode::op_c_range: st = exec_c_range(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
+		case opcode::op_c_arith2: st = exec_c_arith2(f, ci); break;
+		case opcode::op_c_jcmp2: st = exec_c_jcmp2(f, ci); break;
+		case opcode::op_c_load2: st = exec_c_load2(f, ci); break;
+		case opcode::op_c_arith_load: st = exec_c_arith_load(f, ci); break;
+		case opcode::op_c_load_jcmp: st = exec_c_load_jcmp(f, ci); break;
+		case opcode::op_c_arith_jump: st = exec_c_arith_jump(f, ci); break;
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
 			// original back edge with materialized slots)
@@ -7455,7 +7442,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
 	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
-	case opcode::op_c_exit: JAI_CELLS_COUNT(4); if (ci.c & 1) { cells_flush_return(f, loop, ci.b); } else { cells_flush(f, loop); } f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target; c & 1: the statement is a return the frame dies at
+	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 	}
 }
@@ -7475,7 +7462,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		f.cells->dirty &= ~loop.env_mask;
 	}
 	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
-	const op_status st = exec_probe_callee(f, f.code->code[loop.span && cc.probe_ip == loop.head ? loop.trampoline : cc.probe_ip], &observed);   // a span whose first instruction is the probe holds the entry there: the probe itself moved to the trampoline
+	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
 	if (observed && !cells_reland(f, loop, cc)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
@@ -7667,6 +7654,64 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction
 	f.ip = loop.copy_head;
 	return {};
 }
+// the injection lever's count for a fused pair's second instruction: the same countdown the block loop runs before each dispatch,
+// so every plain position stays a candidate under injection (a build without the lever counts nothing)
+bool vm_backend::cells_second_half_injected(frame& f) {
+#ifdef JAISCRIPT_MISS_INJECTION
+	if (miss_every_ && --miss_countdown_ == 0) {
+		miss_countdown_ = miss_every_;
+		const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop];
+		const uint32_t origin = loop.origin[f.ip - loop.copy_head];
+		if (loop.iter_proto == k_invalid_u32 || origin != loop.head) { cells_miss(f, loop, origin, 7); return true; }
+	}
+#else
+	(void)f;
+#endif
+	return false;
+}
+// fused cell pairs (row 150): the first instruction's executor on its own word; when the block is still live and the ip fell
+// through to the next instruction (no jump taken, no miss: a miss leaves the block and puts the general form's ip in the frame),
+// the second's executor on the second's own word; the pair is one dispatch of the block loop and nothing else changes
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_arith(f, f.code->code[next], false);
+}
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_jcmp(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_jcmp(f, f.code->code[next], false);
+}
+JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_load(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_load(f, f.code->code[next], false);
+}
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_load(f, f.code->code[next], false);
+}
+JAI_FORCEINLINE op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_load(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_jcmp(f, f.code->code[next], false);
+}
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next) return st;
+	const vm_instruction& j = f.code->code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
+	if (j.c == 1 && execution_limit_exhausted()) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss(f, loop, loop.origin[next - loop.copy_head], 0); return {}; }
+	f.ip = j.a;
+	return {};
+}
+
 JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins, bool checked) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
@@ -16378,7 +16423,6 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
-		fprintf(stderr, "[vm-profile] spans (measured span): entries %llu | entries refused %llu\n", (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[14]);
 		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
@@ -16423,7 +16467,7 @@ void vm_backend::dump_opcode_profile() const {
 				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7]);
 			for (const auto& [code, st] : profile_chunks_) {
 				for (const auto& r : st.refusals) {
-					fprintf(stderr, "[vm-profile]   open %s: %s line %u (ips %u..%u): %s at ip %u (%s)\n", r.span ? "span" : "loop", st.name.empty() ? "<top level>" : st.name.c_str(),
+					fprintf(stderr, "[vm-profile]   open loop: %s line %u (ips %u..%u): %s at ip %u (%s)\n", st.name.empty() ? "<top level>" : st.name.c_str(),
 						r.head < st.lines.size() ? st.lines[r.head] : 0u, r.head, r.back, chunk::cell_refusal_name(r.reason), r.ip, std::string(opcode_name(static_cast<opcode>(r.op))).c_str());
 				}
 			}
@@ -16858,11 +16902,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				continue;
 			case opcode::op_cells_cfor_back:
 				VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins));
-				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
-				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
-				continue;
-			case opcode::op_cells_span:
-				VM_TRY_OP_SHARED(exec_cells_span(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;

@@ -551,30 +551,17 @@ backends, so the store-value hoist is already in that order. A reference declara
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
 
-### Straight-line spans
+### Fused cell pairs
 
-A function body's instructions outside every loop form spans: the maximal runs cut at the targets of jumps from before the
-run (its own arms' joins stay inside), at the machinery around a loop and before an implicit return. A span of at
-least `chunk::k_span_min_instructions` instructions is admitted by the loop body's walk (the same operations and refusals,
-the bails inside arms, the calls through the door, a return as an exit) and, when it closes, gets a cell-form copy like a
-loop's: its entry (`op_cells_span`) takes the place of its first instruction and runs the guards, the site resolution and
-the unboxing a back edge runs (no budget poll: a span has no back edge, the calls and loops around it poll), the copy ends
-in an exit that flushes and continues after the span, and a miss re-runs the original instruction as in a loop. The first
-instruction lives on behind the copy, followed by a jump to the second (the trampoline): the general form an entry refusal
-A cell instruction that carries an original ip in its own word (a load's, a push's, an index store's or a rebind's origin, a bail's
-target, a container guard's snapshot instruction) names the trampoline when that ip was the span's first.
-runs, and the miss path of every copy instruction standing for the first. A span the walk refuses splits at the refused
-statement's boundaries (never inside a statement: a temp defined in one half and consumed on the general form would be dead at
-the half's exit); the statement's extent closes over the jumps inside it (an if's arms and join, the enclosing statement of a nested
-refusal), so a half begins where the common path lands; each half is admitted on its own. A run or a half that begins with a return
-statement keeps the general form (its block would enter and exit at once), and an exit whose statement begins at a span's head runs
-the general form from the trampoline, as every instruction-carried ip does. A span's exit into a return statement (`return x;`, `return k;`) flushes
-the environment cells and x's cell only, the frame dying at the return; a function with a try block keeps the full flush. A span runs once per call, so its entry is paid per call; the minimum
-length keeps the general form where a copy would not pay for it. An environment operand's lookup row in a block is the general
-instruction's row for that operand (a read's container at 0, or 2 behind a binary index; a simple index at 1; a binary index's sides
-at 0 and 1; a store's value at 2): the rows are keyed by environment and epoch, never by name, so two names on one row would answer
-each other; a store whose index is a binary and whose value is an environment scalar has no free row and keeps the general form. The listing names a span's copy and trampoline, and a
-refused span as an open span; the profile counts span entries and their refusals.
+The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes
+(`C_ARITH_P C_ARITH_P`, `C_JCMP_P C_JCMP_P`, `C_LOAD C_LOAD`, `C_ARITH_P C_LOAD`, `C_LOAD C_JCMP_P`, `C_ARITH_P C_JUMP`): after a
+loop's copy is complete, a peephole gives the first instruction of such a pair the fused opcode and leaves its word and the second
+instruction untouched; the fused executor runs the first instruction's own executor, and when the block is still live and the ip fell
+through to the next instruction, the second's on the second's own word. A jump into the second instruction dispatches it alone, a miss
+inside either half reads its own origin, its own site row and its own liveness, the injection lever counts both halves, and the middle
+end's switch (`engine::ir_passes`) off leaves every pair two instructions. The site logic asks `cell_first_op` what a fused instruction
+was. The fused executors are out of line (the block switch's shape rule).
+
 ### Member read sites
 
 A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:

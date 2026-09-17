@@ -204,7 +204,7 @@ namespace jai::vm {
         uint64_t profile_typed_inplace_[4] = {};
         // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
-        uint64_t profile_cells_[15] = {};   // [13] span entries [14] span entries refused                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed
+        uint64_t profile_cells_[13] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
@@ -1675,10 +1675,17 @@ namespace jai::vm {
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
+        // fused cell pairs (row 150): the first instruction's executor on its own word, then the second's on the next word when the block is
+        // still live and the ip fell through; out of line, so the block switch keeps its shape (the row 148.2 rule)
+        op_status exec_c_arith2(frame& f, const vm_instruction& ins);
+        op_status exec_c_jcmp2(frame& f, const vm_instruction& ins);
+        op_status exec_c_load2(frame& f, const vm_instruction& ins);
+        op_status exec_c_arith_load(frame& f, const vm_instruction& ins);
+        op_status exec_c_load_jcmp(frame& f, const vm_instruction& ins);
+        op_status exec_c_arith_jump(frame& f, const vm_instruction& ins);
+        bool cells_second_half_injected(frame& f);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
         op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
-        op_status exec_cells_span(frame& f, const vm_instruction& ins);
-        void cells_flush_return(frame& f, const chunk::cell_loop& loop, uint32_t keep);   // an exit into a return: the environment cells and the returned local's cell only (the frame dies)   // a straight-line span's entry: the guards and the unboxing, then the copy; the trampoline when refused
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise

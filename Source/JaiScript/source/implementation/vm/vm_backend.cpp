@@ -7447,6 +7447,15 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 			const uint32_t k = a.v;
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			const uint8_t kind = cs.kind[k];
+			if (kind == static_cast<uint8_t>(script_value::TYPEID_REFERENCE)) {
+				// an element alias (`for (auto& p : pool) { step(p); }`): the element reference its declaration binds, built into the slot when the
+				// rebind left the cell dirty, pushed as the general LOAD of the alias pushes it; the callee binds through it as on the general form
+				if (cs.dirty.test(k)) { cell_flush_one(f, loop, k); cs.dirty.clear(k); }
+				const script_value* s = frame_slot(f, cl.slot);
+				if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE) [[unlikely]] { stack_.truncate(stack_.size() - i); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }
+				stack_.push_back(*s);
+				continue;
+			}
 			if (kind != kint && kind != kflt && kind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) [[unlikely]] {
 				// a value the block never defined (unreachable by construction): undo the pushes, re-run from the first argument with the callee parked
 				stack_.truncate(stack_.size() - i);

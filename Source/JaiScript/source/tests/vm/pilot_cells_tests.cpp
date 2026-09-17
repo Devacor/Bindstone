@@ -3080,6 +3080,34 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
 		});
+		test("an_element_alias_passed_to_a_callee_passes_its_reference_and_the_loop_stays_closed", [this]() {
+			// row 148.1: `for (auto& p : pool) { step(p); }` with `step(var& p)` writing the element's fields: the alias is a call argument, the door
+			// pushes the element reference the general LOAD pushes, the callee's writes land in the element, the loop closes and runs without a
+			// miss (the injected-miss controls cover the door); a by-value callee copies as on the general form; a body-declared alias too
+			const std::string prelude =
+				"class P { int kind = 1; float x = 0.0; int life = 5; }\n"
+				"function step(var& p) -> void { if (p.kind == 0) { return; } int life = p.life - 1; if (life <= 0) { p.kind = 0; p.life = 0; return; } p.x = p.x + 1.5; p.life = life; }\n"
+				"function peek(P p) -> int { p.life = 100; return p.life + p.kind; }\n"
+				"array<P> POOL = [new P(), new P(), new P(), new P()];\n"
+				"var LIST = [P(), P(), P()];\n"
+				"var run_steps = function(int n) { for (int t = 0; t < n; t++) { for (auto& p : POOL) { step(p); } } float s = 0.0; for (auto& p : POOL) { s = s + p.x + p.life + p.kind; } return s; };\n"
+				"var peeks = function() { int s = 0; for (auto& p : LIST) { s = s + peek(p); } int u = 0; for (auto& p : LIST) { u = u + p.life; } return s * 1000 + u; };\n"
+				"var byidx = function() { float s = 0.0; int n = LIST.size(); for (int i = 0; i < n; i++) { var& e = LIST[i]; step(e); s = s + e.x; } return s; };\n";
+			const std::string body = "string run() { return to_string(run_steps(7)) + \"|\" + to_string(peeks()) + \"|\" + to_string(byidx()); }\nrun();";
+			both(prelude + body, "", "alias arguments");
+			both(prelude + body, "", "alias arguments, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("C_PROBE") >= 3, "the loops with the calls close through the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
+		});
 	}
 };
 

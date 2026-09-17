@@ -144,6 +144,7 @@ namespace {
 			case opcode::op_loop_back:
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
+			case opcode::op_c_mload:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
@@ -316,6 +317,7 @@ namespace {
 			case opcode::op_loop_back:
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
+			case opcode::op_c_mload:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
@@ -2710,6 +2712,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (dst_kind == 0 && from_const && decl) { const size_t ck = c.constants[st.b].raw_storage_index(); dst_kind = ck == script_value::TYPEID_INT ? kint : ck == script_value::TYPEID_FLOAT ? kflt : kbool; }
 				use_slot(st.a, dst_kind, true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
+			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask && !is_alias(st.c)) {
+				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
+				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind
+				use_slot(st.b, 0, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::load; op.a = st.b; op.writes = st.b; op.container = st.c; op.member = st.a;
 			} else if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
 				// load through a site the typed lowering flattened: the fold operands are int values; a scalar decl needs a stamp
 				// (an unstamped decl lands the element's own tag, which a raw cell loses), a compiler value takes the element's kind
@@ -3277,6 +3284,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::load: {
+				if (op.member != k_invalid_u32) { append(vm_instruction{opcode::op_c_mload, dst_of(op.a), op.member, op.container}, ip); break; }   // a member read site: the field resolved at entry
 				// the copy's own site row at the copy instruction's index: the general row keeps slots, this one names cells
 				chunk::typed_site site;
 				if (op.container == chunk::k_iter_container) {
@@ -3448,7 +3456,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range || o == opcode::op_c_mload) { loop.sites.push_back(ip2); } }
 		for (uint32_t k = 0; k < loop.sites.size(); ++k) { if (code[loop.sites[k]].op == opcode::op_c_range) { loop.iter_site = k; } }
 		if (!loop.rebinds.empty()) {
 			// the alias's sites: every load or store whose container slot is the alias, resolved by the rebind and never by the entry

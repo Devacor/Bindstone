@@ -6952,6 +6952,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		return false;
 	};
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
+	if (cs.site_member.size() < span) { cs.site_member.resize(span, nullptr); }
 	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
 	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
@@ -6966,6 +6967,18 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
+		if (ci.op == opcode::op_c_mload) {
+			// a member read site: the base slot's instance and its plain field through the read-side probe (the class, the slot, no user
+			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
+			fused_operand lc; lc.slot = ci.c; lc.member_node = ci.b; lc.direct = true;
+			const script_array* member_pin = nullptr;
+			const script_value* fv = cells_member_container(f, lc, member_pin);
+			if (!fv) return refuse_site(ip, "a member read whose base is not an instance with that plain field");
+			const size_t fk = fv->raw_storage_index();
+			if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return refuse_site(ip, "a member read of a field that is not a scalar");
+			cs.site_member[ip - loop.copy_head] = fv; cs.site_slot[k] = ci.c; cs.site_node[ip - loop.copy_head] = nullptr;
+			continue;
+		}
 		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
@@ -7147,6 +7160,14 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
 		if (k < loop.site_alias.size() && loop.site_alias[k]) continue;   // a site through an alias: cells_rebinds_hold names its element again
 		if (loop.sites[k] < f.code->typed_sites.size() && f.code->typed_sites[loop.sites[k]].cont_slot == chunk::k_iter_container) continue;   // a range head's container: the iteration state's, which no callee rebinds
+		if (f.code->code[loop.sites[k]].op == opcode::op_c_mload) {
+			// a member read site: the instance and its field resolved again (a callee may rebind the slot's instance or migrate its fields)
+			const vm_instruction& mi = f.code->code[loop.sites[k]];
+			fused_operand lc; lc.slot = mi.c; lc.member_node = mi.b; lc.direct = true;
+			const script_array* member_pin = nullptr;
+			if (cells_member_container(f, lc, member_pin) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
+			continue;
+		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
 		if (!cp) return false;
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
@@ -7270,7 +7291,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
-	case opcode::op_c_append: case opcode::op_c_push:
+	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload:
 		return true;
 	default:
 		return false;
@@ -7327,6 +7348,7 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci); break;
 		case opcode::op_c_append: st = exec_c_append(f, ci); break;
 		case opcode::op_c_push: st = exec_c_push(f, ci); break;
+		case opcode::op_c_mload: st = exec_c_mload(f, ci); break;
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 		if (st == op_status::failed) return st;
@@ -8265,6 +8287,26 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 	}
 	if (!adopted || cs.kind[ins.a] == expect) { cs.payload[ins.a] = bits; cs.kind[ins.a] = expect; cs.dirty.set(ins.a); }
 	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
+	++f.ip;
+	return {};
+}
+
+// a member read site: the field's value the entry resolved (the hold check after a call re-resolves it), its kind and payload
+// landed in the cell; a field that is not a scalar at this read misses onto the general member read
+JAI_FORCEINLINE op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
+	JAI_CELLS_COUNT(7);
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 2); return {}; };
+	const script_value* fv = cs.site_member[f.ip - loop.copy_head];
+	if (!fv) return miss();
+	const size_t vk = fv->raw_storage_index();
+	uint8_t kind; int64_t bits;
+	if (vk == script_value::TYPEID_INT) { kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = static_cast<int64_t>(fv->unchecked_as_int()); }
+	else if (vk == script_value::TYPEID_FLOAT) { kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT); bits = cell_bits_of_float(fv->unchecked_as_float()); }
+	else if (vk == script_value::TYPEID_BOOL) { kind = static_cast<uint8_t>(script_value::TYPEID_BOOL); bits = fv->unchecked_as_bool() ? 1 : 0; }
+	else return miss();
+	if (!cell_land(f, loop, ins.a, kind, bits)) return miss();
 	++f.ip;
 	return {};
 }

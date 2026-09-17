@@ -3299,9 +3299,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (refusal == chunk::cell_refusal_none) { const region_verdict v = verify(region, cells); if (v.refusal != chunk::cell_refusal_none) { refuse(v.refusal, v.at); } }
 		if (refusal != chunk::cell_refusal_none) {
 			c.cell_refusals.push_back(chunk::cell_refusal{ static_cast<uint32_t>(head), static_cast<uint32_t>(back), refusal_ip, refusal, static_cast<uint8_t>(refusal_ip < code.size() ? code[refusal_ip].op : opcode::op_halt), span });
-			if (span && refusal_ip > head && refusal_ip < back) {   // the halves around the refused instruction are spans of their own
-				if (refusal_ip - head >= chunk::k_span_min_instructions) { requests.push_back(region_request{ refusal_ip, true, head }); }
-				if (back - (refusal_ip + 1) >= chunk::k_span_min_instructions) { requests.push_back(region_request{ back, true, refusal_ip + 1 }); }
+			if (span && refusal_ip > head && refusal_ip < back) {
+				// the halves around the refused statement are spans of their own; the cut is the statement's boundary, never an instruction
+				// inside it (a statement's temp defined in one half and consumed on the general form would be dead at the half's exit)
+				const ast_node* rs = refusal_ip < c.stmt_nodes.size() ? c.stmt_nodes[refusal_ip] : nullptr;
+				size_t sb = refusal_ip, se = refusal_ip + 1;
+				if (rs) {
+					while (sb > head && sb - 1 < c.stmt_nodes.size() && c.stmt_nodes[sb - 1] == rs) { --sb; }
+					while (se < back && se < c.stmt_nodes.size() && c.stmt_nodes[se] == rs) { ++se; }
+				}
+				if (sb > head && sb - head >= chunk::k_span_min_instructions) { requests.push_back(region_request{ sb, true, head }); }
+				if (se < back && back - se >= chunk::k_span_min_instructions) { requests.push_back(region_request{ back, true, se }); }
 			}
 			continue;
 		}
@@ -3637,6 +3645,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			append(vm_instruction{opcode::op_jump, static_cast<uint32_t>(head + 1), 0, 0}, head);
 			if (head < c.typed_sites.size()) { if (c.typed_sites.size() <= loop.trampoline) { c.typed_sites.resize(loop.trampoline + 1); } c.typed_sites[loop.trampoline] = c.typed_sites[head]; }
 			code[head] = vm_instruction{opcode::op_cells_span, loop_index, static_cast<uint32_t>(head), 0};
+		}
 		// fused pairs (row 150): the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are

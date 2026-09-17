@@ -1686,7 +1686,8 @@ namespace jai::vm {
         bool cells_second_half_injected(frame& f);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
         op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
-        op_status exec_cells_span(frame& f, const vm_instruction& ins);   // a straight-line span's entry: the guards and the unboxing, then the copy; the trampoline when refused
+        op_status exec_cells_span(frame& f, const vm_instruction& ins);
+        void cells_flush_return(frame& f, const chunk::cell_loop& loop, uint32_t keep);   // an exit into a return: the environment cells and the returned local's cell only (the frame dies)   // a straight-line span's entry: the guards and the unboxing, then the copy; the trampoline when refused
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise

@@ -565,7 +565,8 @@ A cell instruction that carries an original ip in its own word (a load's, a push
 target, a container guard's snapshot instruction) names the trampoline when that ip was the span's first.
 runs, and the miss path of every copy instruction standing for the first. A span the walk refuses splits at the refused
 statement's boundaries (never inside a statement: a temp defined in one half and consumed on the general form would be dead at
-the half's exit) and each half is admitted on its own. A span runs once per call, so its entry is paid per call; the minimum
+the half's exit) and each half is admitted on its own. A span's exit into a return statement (`return x;`, `return k;`) flushes
+the environment cells and x's cell only, the frame dying at the return; a function with a try block keeps the full flush. A span runs once per call, so its entry is paid per call; the minimum
 length keeps the general form where a copy would not pay for it. The listing names a span's copy and trampoline, and a
 refused span as an open span; the profile counts span entries and their refusals.
 ### Fused cell pairs

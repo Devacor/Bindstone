@@ -484,6 +484,7 @@ namespace jai::vm {
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
+        bool has_try = false;   // the body holds a try block: a span's exit into a return keeps the full flush (a catch in this frame may read locals)
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

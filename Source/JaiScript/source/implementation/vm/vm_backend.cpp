@@ -4775,15 +4775,6 @@ static const script_array* ref_element_table(const script_value& v) noexcept {
 	return h->container.get();
 }
 
-// a call's result into a compiler temp (an expression consumes the call as an operand): the value as the call left it, a
-// reference included, which the consumer dereferences as it would a slot's
-op_status vm_backend::exec_call_temp(frame& f, const vm_instruction& ins) {
-	if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "call temp: empty stack"); }
-	frame_slot_set(f, ins.a, std::move(stack_.back()));
-	stack_.pop_back();
-	return {};
-}
-
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
 		// the container guard's plain-cell form, a slot form: a plain cell (or no reference at all) needs no snapshot, the readers
@@ -6930,29 +6921,6 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	return v ? &v->deref() : nullptr;
 }
 
-// a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
-// class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
-// value dereferenced; a field that is not an int, a float or a bool is the general form's
-const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe) {
-	cell_state& cs = *f.cells;
-	class_definition* cd = inst->get_class_definition();
-	if (!cd) return nullptr;
-	uint32_t slot;
-	if (!reprobe && cs.site_member_class[off] == cd) { slot = cs.site_member_slot[off]; }
-	else {
-		auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
-		slot = member_read_slot_probe(cd, expr);
-		if (slot == UINT32_MAX) { cs.site_member_class[off] = nullptr; return nullptr; }
-		cs.site_member_class[off] = cd; cs.site_member_slot[off] = slot;
-	}
-	script_value* v = inst->field_slot_value(slot);
-	if (!v) return nullptr;
-	const script_value* fv = &v->deref();
-	const size_t fk = fv->raw_storage_index();
-	if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return nullptr;
-	return fv;
-}
-
 bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	// the load and store sites' containers: the body has no rebinding and no
@@ -6975,8 +6943,6 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		return false;
 	};
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
-	if (cs.site_member.size() < span) { cs.site_member.resize(span, nullptr); }
-	if (cs.site_member_class.size() < span) { cs.site_member_class.resize(span, nullptr); cs.site_member_slot.resize(span, 0); }
 	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
 	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
@@ -6991,19 +6957,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
-		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; cs.site_member[ip - loop.copy_head] = nullptr; cs.site_member_class[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
-		if (ci.op == opcode::op_c_mload || ci.op == opcode::op_c_mstore) {
-			// a member read or store site: the base slot's instance and its plain field through the read-side probe (the class, the slot, no user
-			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
-			fused_operand lc; lc.slot = ci.c; lc.member_node = ci.b; lc.direct = true;
-			const script_array* member_pin = nullptr;
-			const script_value* fv = cells_member_container(f, lc, member_pin);
-			if (!fv) return refuse_site(ip, "a member read whose base is not an instance with that plain field");
-			const size_t fk = fv->raw_storage_index();
-			if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return refuse_site(ip, "a member read of a field that is not a scalar");
-			cs.site_member[ip - loop.copy_head] = fv; cs.site_slot[k] = ci.c; cs.site_node[ip - loop.copy_head] = nullptr;
-			continue;
-		}
+		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			if (site.cont_slot == chunk::k_iter_container) {
@@ -7119,45 +7073,28 @@ op_status vm_backend::exec_c_rebind(frame& f, const vm_instruction& ins) {
 		ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
 		for (uint8_t k = 1; ok && k < site.fold_count; ++k) { ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index); }
 	}
-	if (!ok || !cells_rebind_apply(f, loop, rb, index, false)) { cells_miss(f, loop, ins.c, 6); return {}; }
+	if (!ok || !cells_rebind_apply(f, loop, rb, index)) { cells_miss(f, loop, ins.c, 6); return {}; }
 	++f.ip;
 	return {};
 }
 // the alias's sites take the source table's element at index: an array node that is plain, as the entry has it (a hetero node with a
 // declared element type is the general form's); the alias cell holds the index, and its flush builds the element reference the general
 // form's declaration binds
-bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe) {
+bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index) {
 	cell_state& cs = *f.cells;
 	const script_array* table = cs.site_node[rb.copy_ip - loop.copy_head];
 	if (!table || index < 0 || static_cast<size_t>(index) >= table->size()) return false;
 	const script_array* node = nullptr;
-	class_instance* inst = nullptr;   // an element that is an instance: the alias's member sites read its fields
 	if (table->kind() == script_array::kind_t::hetero) {
 		const script_value& el = table->values()[static_cast<size_t>(index)];
 		if (el.raw_storage_index() == script_value::TYPEID_ARRAY) {
 			const script_array* n = el.unchecked_array_node();
 			const type_info* ti = el.get_type_info().get();
 			if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
-		} else if (el.raw_storage_index() == script_value::TYPEID_OBJECT) {
-			auto& holder = const_cast<script_value&>(el).unchecked_get_object_storage();
-			if (holder && holder->is_class_instance_wrapper && holder->data) { inst = static_cast<class_instance*>(holder->data.get()); }
-		}
-	} else if (table->kind() == script_array::kind_t::obj) {
-		const obj_slot& s = table->objs()[static_cast<size_t>(index)];
-		if (s.handle && s.handle->is_class_instance_wrapper && s.handle->data) { inst = static_cast<class_instance*>(s.handle->data.get()); }
-	}
-	if (!node && !inst) return false;
-	for (const uint32_t d : rb.dependents) {
-		const uint32_t cip = loop.sites[d];
-		if (f.code->code[cip].op == opcode::op_c_mload || f.code->code[cip].op == opcode::op_c_mstore) {
-			const script_value* fv = inst ? cells_member_field(f, inst, f.code->code[cip].b, cip - loop.copy_head, reprobe) : nullptr;
-			if (!fv) return false;
-			cs.site_member[cip - loop.copy_head] = fv;
-		} else {
-			if (!node) return false;
-			cs.site_node[cip - loop.copy_head] = node;
 		}
 	}
+	if (!node) return false;
+	for (const uint32_t d : rb.dependents) { cs.site_node[loop.sites[d] - loop.copy_head] = node; }
 	cs.kind[rb.cell] = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.payload[rb.cell] = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
 	return true;
 }
@@ -7168,7 +7105,7 @@ bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {
 	const size_t at = f.ip - loop.copy_head;
 	for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
 		if (at < loop.live_temps.size() && !loop.live_temps[at].test(rb.cell)) continue;
-		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]), true)) return false;
+		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]))) return false;
 	}
 	return true;
 }
@@ -7201,14 +7138,6 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
 		if (k < loop.site_alias.size() && loop.site_alias[k]) continue;   // a site through an alias: cells_rebinds_hold names its element again
 		if (loop.sites[k] < f.code->typed_sites.size() && f.code->typed_sites[loop.sites[k]].cont_slot == chunk::k_iter_container) continue;   // a range head's container: the iteration state's, which no callee rebinds
-		if (f.code->code[loop.sites[k]].op == opcode::op_c_mload || f.code->code[loop.sites[k]].op == opcode::op_c_mstore) {
-			// a member site: the instance and its field resolved again (a callee may rebind the slot's instance or migrate its fields)
-			const vm_instruction& mi = f.code->code[loop.sites[k]];
-			fused_operand lc; lc.slot = mi.c; lc.member_node = mi.b; lc.direct = true;
-			const script_array* member_pin = nullptr;
-			if (cells_member_container(f, lc, member_pin) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
-			continue;
-		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
 		if (!cp) return false;
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
@@ -7332,7 +7261,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
-	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore:
+	case opcode::op_c_append: case opcode::op_c_push:
 		return true;
 	default:
 		return false;
@@ -7389,8 +7318,6 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci); break;
 		case opcode::op_c_append: st = exec_c_append(f, ci); break;
 		case opcode::op_c_push: st = exec_c_push(f, ci); break;
-		case opcode::op_c_mload: st = exec_c_mload(f, ci); break;
-		case opcode::op_c_mstore: st = exec_c_mstore(f, ci); break;
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 		if (st == op_status::failed) return st;
@@ -7447,15 +7374,6 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 			const uint32_t k = a.v;
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			const uint8_t kind = cs.kind[k];
-			if (kind == static_cast<uint8_t>(script_value::TYPEID_REFERENCE)) {
-				// an element alias (`for (auto& p : pool) { step(p); }`): the element reference its declaration binds, built into the slot when the
-				// rebind left the cell dirty, pushed as the general LOAD of the alias pushes it; the callee binds through it as on the general form
-				if (cs.dirty.test(k)) { cell_flush_one(f, loop, k); cs.dirty.clear(k); }
-				const script_value* s = frame_slot(f, cl.slot);
-				if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE) [[unlikely]] { stack_.truncate(stack_.size() - i); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }
-				stack_.push_back(*s);
-				continue;
-			}
 			if (kind != kint && kind != kflt && kind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) [[unlikely]] {
 				// a value the block never defined (unreachable by construction): undo the pushes, re-run from the first argument with the callee parked
 				stack_.truncate(stack_.size() - i);
@@ -8338,55 +8256,6 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 	}
 	if (!adopted || cs.kind[ins.a] == expect) { cs.payload[ins.a] = bits; cs.kind[ins.a] = expect; cs.dirty.set(ins.a); }
 	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
-	++f.ip;
-	return {};
-}
-
-// a member store site: the field the entry (or the alias's rebind) resolved takes the value's payload in place when the value's kind is
-// the field's kind and the field carries the plain stamp of that kind (a typed field converts nothing then, a var field keeps its kind and
-// stamp as the general store would leave them); any other pair misses onto the general store, which converts or raises by its own rules
-JAI_FORCEINLINE op_status vm_backend::exec_c_mstore(frame& f, const vm_instruction& ins) {
-	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
-	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 3); return {}; };
-	script_value* fv = const_cast<script_value*>(cs.site_member[f.ip - loop.copy_head]);
-	if (!fv) return miss();
-	uint8_t vk; int64_t bits;
-	if (ins.a & k_typed_const_bit) {
-		const script_value& c = f.code->constants[ins.a & ~k_typed_const_bit];
-		vk = static_cast<uint8_t>(c.raw_storage_index());
-		if (vk == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = static_cast<int64_t>(c.unchecked_as_int()); }
-		else if (vk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(c.unchecked_as_float()); }
-		else if (vk == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { bits = c.unchecked_as_bool() ? 1 : 0; }
-		else return miss();
-	} else { vk = cs.kind[ins.a]; bits = cs.payload[ins.a]; }
-	const size_t fk = fv->raw_storage_index();
-	if (fk != vk) return miss();
-	if (fk == script_value::TYPEID_INT) { if (fv->type_info_raw() != engine_->get_type_info_int()) return miss(); fv->unchecked_set_int_payload(static_cast<script_int>(bits)); }
-	else if (fk == script_value::TYPEID_FLOAT) { if (fv->type_info_raw() != engine_->get_type_info_float()) return miss(); fv->unchecked_set_float_payload(cell_float_of_bits(bits)); }
-	else if (fk == script_value::TYPEID_BOOL) { if (fv->type_info_raw() != engine_->get_type_info_bool()) return miss(); fv->unchecked_set_bool_payload(bits != 0); }
-	else return miss();
-	++f.ip;
-	return {};
-}
-
-// a member read site: the field's value the entry resolved (the hold check after a call re-resolves it), its kind and payload
-// landed in the cell; a field that is not a scalar at this read misses onto the general member read
-JAI_FORCEINLINE op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
-	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
-	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 2); return {}; };
-	const script_value* fv = cs.site_member[f.ip - loop.copy_head];
-	if (!fv) return miss();
-	const size_t vk = fv->raw_storage_index();
-	uint8_t kind; int64_t bits;
-	if (vk == script_value::TYPEID_INT) { kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = static_cast<int64_t>(fv->unchecked_as_int()); }
-	else if (vk == script_value::TYPEID_FLOAT) { kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT); bits = cell_bits_of_float(fv->unchecked_as_float()); }
-	else if (vk == script_value::TYPEID_BOOL) { kind = static_cast<uint8_t>(script_value::TYPEID_BOOL); bits = fv->unchecked_as_bool() ? 1 : 0; }
-	else return miss();
-	if (!cell_land(f, loop, ins.a, kind, bits)) return miss();
 	++f.ip;
 	return {};
 }
@@ -11998,53 +11867,30 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 }
 
 op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
+	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value objectValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
-	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), ins.a, ins.b, std::move(objectValue), std::move(value), true);
-}
 
-// SET_MEMBER's kernel with the operands in hand: the proven or cached field write, else the ladder (accessors, C++ properties,
-// the texts); the statement form (want_result false) pushes nothing and reads nothing back, the expression form pushes the
-// destination's value as the assignment's value
-op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& objectValue, script_value&& value, bool want_result) {
-	auto* member = static_cast<member_expr*>(f.code->nodes[node].get());
 	script_value dereferenced = objectValue.deref();
 	if (!dereferenced.is_object()) {
 		raise_script_exception("Cannot assign to member of non-object type", member->location);
-		if (want_result) { stack_.push_back(make_null()); }
+		stack_.push_back(make_null());
 		return {};
 	}
 
-	if (auto landed = member_field_write_fast(f, ins_index, proof, member, dereferenced, value)) {
+	if (auto landed = member_field_write_fast(f, static_cast<size_t>(&ins - f.code->code.data()), ins.b, member, dereferenced, value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
-		return want_result ? land_member_store_result(f, dereferenced, member, std::move(value)) : op_status{};
+		return land_member_store_result(f, dereferenced, member, std::move(value));
 	}
 
 	VM_TRY(assign_member(f, dereferenced, member, value));
 	if (is_unwinding_) {
-		if (want_result) { stack_.push_back(make_null()); }
+		stack_.push_back(make_null());
 		return {};
 	}
-	return want_result ? land_member_store_result(f, dereferenced, member, std::move(value)) : op_status{};
-}
-
-// `base.member = operand;` in statement position: the value read as an operand (a slot, a temp, a constant; never a name whose
-// lookup could fail here), the base from its slot, the kernel with no result
-op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins) {
-	const member_store_proto& p = f.code->member_store_protos[ins.a];
-	script_value value = make_null();
-	if (p.value.const_index != k_invalid_u32) {
-		push_constant(*f.code, p.value.const_index);   // a literal takes the engine as CONST gives it (the chunk's template carries none)
-		value = std::move(stack_.back()); stack_.pop_back();
-	} else {
-		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
-		if (!vp) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member store: the value operand did not resolve"); }
-		value = *vp;
-	}
-	const script_value* base = frame_slot(f, p.base);
-	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, p.proof, base ? script_value(*base) : make_null(), std::move(value), false);
+	return land_member_store_result(f, dereferenced, member, std::move(value));
 }
 
 op_status vm_backend::land_member_store_result(frame& f, const script_value& object, member_expr* member, script_value&& rhs) {
@@ -15428,7 +15274,6 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_get_member: return exec_get_member(f, ins);
 		case opcode::op_member_temp: return exec_member_temp(f, ins);
 		case opcode::op_set_member_fused: return exec_set_member_fused(f, ins);
-		case opcode::op_set_member_value: return exec_set_member_value(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
 		case opcode::op_set_member: return exec_set_member(f, ins);
 		case opcode::op_set_static: return exec_set_static(f, ins);
@@ -16541,7 +16386,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_store_mov: VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); break;
 			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
-			case opcode::op_call_temp: VM_TRY_OP_SHARED(exec_call_temp(f, ins)); break;
 			case opcode::op_math_temp: VM_TRY_OP_SHARED(exec_math_temp(f, ins)); break;
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
@@ -16638,10 +16482,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_set_member_fused:
 				VM_TRY_OP_SHARED(exec_set_member_fused(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_set_member_value:
-				VM_TRY_OP_SHARED(exec_set_member_value(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_set_member:

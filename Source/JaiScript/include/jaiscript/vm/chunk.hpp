@@ -66,14 +66,6 @@ namespace jai::vm {
     // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
     // literal value; site is the call_site the unfused sequence would have used (the replay
     // path and its argument metadata)
-    // `base.member = value;` in statement position (op_set_member_value): the member node, the assignment's static store proof, the
-    // base's frame slot and the value as an operand (an identifier, a literal, or the temp a computed value lands in)
-    struct member_store_proto {
-        uint32_t node = k_invalid_u32;
-        uint32_t proof = 0;
-        uint32_t base = k_invalid_u32;
-        fused_operand value;
-    };
     struct push_proto {
         fused_operand receiver;
         fused_operand value;              // ident / literal / one-level subscript (base ident, ident-or-literal index)
@@ -424,7 +416,7 @@ namespace jai::vm {
             // descriptor. An argument is a cell (boxed at the call; a slot's cell is flushed first so a by-reference parameter
             // binds the current value) or a push the block runs verbatim (a constant, an environment name, a slot the loop
             // holds no cell for). The consumer lands the result into dst by the declared-type rule (1 = a scalar declaration,
-            // 2 = a no-result store, 3 = a compiler temp: op_call_temp, the expression around the call reads it as a slot) or drops it (0 = a statement).
+            // 2 = a no-result store) or drops it (0 = a statement).
             struct call_arg { uint8_t kind; uint32_t v; uint32_t ip; };   // kind 0 = a slot (a cell or verbatim, decided at emission), 1 = cell v, 2 = the push at ip verbatim
             struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; };
             std::vector<cell_call> calls;
@@ -459,7 +451,7 @@ namespace jai::vm {
             case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index: case opcode::op_index_assign:
             case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
-            case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
+            case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
             case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused:
                 return cell_refusal_translation;
@@ -477,7 +469,6 @@ namespace jai::vm {
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
-        std::vector<member_store_proto> member_store_protos;
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

@@ -522,11 +522,6 @@ index of an outer read. The typed lowering gives the read the `T_LOAD` row, land
 the checker proved the binary and the runtime kind otherwise, in place when the temp already holds it; a
 non-scalar element lands boxed in the temp; the read happens before its partner only when the partner
 cannot raise first (a slot, a literal, a temp, another read), so the interpreter's error order stands.
-A call the expression consumes as an operand takes the same row when its callee is a plain name and its partner is a
-literal or a private local (a slot no user code can rebind, so running the call ahead of the partner's read is
-unobservable): the call, then `op_call_temp` lands the result in a compiler temp, and the binary or the compare reads
-the temp as a slot; inside a block the door's third consumer lands the result in a temp cell. An environment partner
-keeps the stack form, since the callee may write the global the partner reads.
 
 A reference alias of a declared typed container (`var& pix = PIX;` with `PIX` an `array<int>`) carries the
 container's type for element reads: the checker keeps it a reference for diagnostics and marks the element
@@ -550,25 +545,6 @@ backends, so the store-value hoist is already in that order. A reference declara
 (`var& pix = PIX;`) keeps its function on the lazy-environment path: the reference lands in the alias's slot and the
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
-
-### Member read sites
-
-A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:
-the entry resolves the base slot's instance and its plain field once through the read-side probe (the class, the field slot,
-no user accessor in the chain) and keeps the field's value for the copy, and `op_c_mload` lands the field's kind and payload
-in the temp cell at every read. A base that is not such an instance, a field that is not an int, a float or a bool, refuses
-the entry, and the general form runs; the hold check after a call resolves the field again and misses on a change (a callee
-that rebound the slot's instance or migrated its fields). Nothing is deferred: the site reads the instance's field storage as an
-element site reads an array's, so the miss protocol needs no flush of members. A base that is an element alias (`for (auto& p
-: pool)`, `var& e = list[i]`) makes the site the alias's dependent: each rebind resolves the field from the element instance (a
-hetero table's object, a class-typed buffer's slot) through the probe, with the slot cached per site by class (a subclass element
-re-probes), and the hold check after a call re-applies the rebinds with a re-probe. A member store in statement position
-(`p.x = v;`, `op_set_member_value`: the value an operand, no push and no result on the general form) is a store site resolved
-the same way; `op_c_mstore` writes the field's payload in place when the value's kind is the field's kind and the field carries
-that kind's plain stamp, and misses onto the general store otherwise (its conversions, its accessors, its texts). Environment-name
-bases (`G.player`) follow in their row. An element alias passed as a call argument passes its element reference: the door
-flushes the alias (the reference its declaration binds, built into the slot) and pushes the slot's value as the general LOAD does,
-so a loop whose body calls a function on each element (`for (auto& p : pool) { step(p); }`) closes and lands without a miss.
 
 ### The region IR module
 

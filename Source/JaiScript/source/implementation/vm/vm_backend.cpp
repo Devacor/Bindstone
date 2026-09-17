@@ -7792,6 +7792,12 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 	if (!node || !recv) return miss();
 	if (recv->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*recv)) return miss(); recv = &recv->deref(); }
 	if (recv->raw_storage_index() != script_value::TYPEID_ARRAY || recv->unchecked_array_node() != node) return miss();
+	// the source: a constant or a hetero element is a value; a cell or a typed element is a raw kind and payload, which a typed
+	// destination takes directly (no intermediate value: row 143), and a hetero destination takes boxed, a cell's with its declared
+	// stamp as the general push has it; the guards, their order, the conversion subset, the memory charge and the fallback are unchanged
+	enum class src_form : uint8_t { value, raw_int, raw_float, raw_str };
+	src_form form = src_form::value;
+	script_int raw_int = 0; script_float raw_float = 0.0; const strong_ptr<script_string>* raw_str = nullptr;
 	std::optional<script_value> boxed;
 	const script_value* pv = nullptr;
 	if (p.value.const_index != k_invalid_u32) {
@@ -7805,12 +7811,12 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		if (!src || index < 0 || static_cast<size_t>(index) >= src->size()) return miss();
 		const size_t at = static_cast<size_t>(index);
 		switch (src->kind()) {
-		case script_array::kind_t::i64: boxed.emplace(static_cast<script_int>(src->ints()[at]), engine_); pv = &*boxed; break;
-		case script_array::kind_t::f64: boxed.emplace(src->floats()[at], engine_); pv = &*boxed; break;
-		case script_array::kind_t::str: boxed.emplace(src->strs()[at], engine_); pv = &*boxed; break;
+		case script_array::kind_t::i64: form = src_form::raw_int; raw_int = static_cast<script_int>(src->ints()[at]); break;
+		case script_array::kind_t::f64: form = src_form::raw_float; raw_float = src->floats()[at]; break;
+		case script_array::kind_t::str: form = src_form::raw_str; raw_str = &src->strs()[at]; break;
 		case script_array::kind_t::hetero:
 			pv = &src->values()[at];
-			if (pv->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*pv)) return miss();   // a property or element reference observes on dereference: the general push runs its getter once, after the flush
+			if (pv->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*pv)) return miss();   // a property or element reference observes on dereference: the general push runs its getter
 			break;
 		default: return miss();
 		}
@@ -7818,39 +7824,91 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		const uint32_t k = p.value.slot;
 		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
 		const uint8_t vk = cs.kind[k];
-		if (vk == kint) { boxed.emplace(static_cast<script_int>(cs.payload[k]), engine_); }
-		else if (vk == kflt) { boxed.emplace(cell_float_of_bits(cs.payload[k]), engine_); }
-		else if (vk == kbool) { boxed.emplace(cs.payload[k] != 0, engine_); }
-		else return miss();   // a string cell is a borrow, never pushed
-		const chunk::cell_loop::cell& vc = loop.cells[k];
-		if (vc.landing == k_typed_dst_decl && vc.stamp) { boxed->set_type_info(type_info_ptr{vc.stamp}); }   // the general form pushes the slot's value with its declared stamp
-		pv = &*boxed;
+		if (vk == kint) { form = src_form::raw_int; raw_int = static_cast<script_int>(cs.payload[k]); }
+		else if (vk == kflt) { form = src_form::raw_float; raw_float = cell_float_of_bits(cs.payload[k]); }
+		else if (vk != kbool) return miss();   // a string cell is a borrow, never pushed
+		if (vk == kbool || node->kind() == script_array::kind_t::hetero) {
+			// a hetero destination stores the value: boxed with the slot's declared stamp, as the general form pushes the slot's value
+			if (vk == kint) { boxed.emplace(raw_int, engine_); } else if (vk == kflt) { boxed.emplace(raw_float, engine_); } else { boxed.emplace(cs.payload[k] != 0, engine_); }
+			const chunk::cell_loop::cell& vc = loop.cells[k];
+			if (vc.landing == k_typed_dst_decl && vc.stamp) { boxed->set_type_info(type_info_ptr{vc.stamp}); }
+			pv = &*boxed; form = src_form::value;
+		}
 	}
-	const script_value& v = pv->deref();
-	const size_t vi = v.raw_storage_index();
+	if (form == src_form::value) {
+		const script_value& v = pv->deref();
+		const size_t vi = v.raw_storage_index();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_push_[3];
+#endif
+		switch (node->kind()) {
+		case script_array::kind_t::hetero: {
+			const type_info* ti = recv->get_type_info().get();
+			const type_info* et = ti ? ti->element_type().get() : nullptr;
+			if ((et && et->base_type != script_value_type::jai_any_type) ||
+			    !(vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+			      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) return miss();
+			if (!limits_->memory_charge(sizeof(script_value) + (vi == script_value::TYPEID_STRING ? v.unchecked_as_string().size() : 0))) return miss();
+			node->values().push_back(v);
+			break;
+		}
+		case script_array::kind_t::i64:
+			if (vi != script_value::TYPEID_INT || !limits_->memory_charge(sizeof(script_value))) return miss();
+			node->ints().push_back(v.unchecked_as_int());
+			break;
+		case script_array::kind_t::f64:
+			if ((vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_INT) || !limits_->memory_charge(sizeof(script_value))) return miss();
+			node->floats().push_back(vi == script_value::TYPEID_FLOAT ? v.unchecked_as_float() : static_cast<script_float>(v.unchecked_as_int()));
+			break;
+		case script_array::kind_t::str:
+			if (vi != script_value::TYPEID_STRING || !limits_->memory_charge(sizeof(script_value) + v.unchecked_as_string().size())) return miss();
+			node->strs().push_back(v.unchecked_string_handle());
+			break;
+		default:
+			return miss();
+		}
+		++f.ip;
+		return {};
+	}
+	// a raw source into a typed destination: the payload, under the same charge and the same conversion subset (an int widens into a
+	// float buffer; a float into an int buffer, a string into a number buffer and a number into a string buffer are the general form's)
 	switch (node->kind()) {
+	case script_array::kind_t::i64:
+		if (form != src_form::raw_int || !limits_->memory_charge(sizeof(script_value))) return miss();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_push_[0];
+#endif
+		node->ints().push_back(raw_int);
+		break;
+	case script_array::kind_t::f64:
+		if ((form != src_form::raw_float && form != src_form::raw_int) || !limits_->memory_charge(sizeof(script_value))) return miss();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_push_[1];
+#endif
+		node->floats().push_back(form == src_form::raw_float ? raw_float : static_cast<script_float>(raw_int));
+		break;
+	case script_array::kind_t::str:
+		if (form != src_form::raw_str || !raw_str->get() || !limits_->memory_charge(sizeof(script_value) + raw_str->get()->size())) return miss();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_push_[2];
+#endif
+		node->strs().push_back(*raw_str);   // one handle copy (the source's node stays where it is); a self push reads the handle before the vector grows
+		break;
 	case script_array::kind_t::hetero: {
+		// a typed element into a hetero destination: the value, as the general push stores it
+		if (form == src_form::raw_int) { boxed.emplace(raw_int, engine_); } else if (form == src_form::raw_float) { boxed.emplace(raw_float, engine_); } else { boxed.emplace(*raw_str, engine_); }
+		const script_value& v = *boxed;
+		const size_t vi = v.raw_storage_index();
 		const type_info* ti = recv->get_type_info().get();
 		const type_info* et = ti ? ti->element_type().get() : nullptr;
-		if ((et && et->base_type != script_value_type::jai_any_type) ||
-		    !(vi == script_value::TYPEID_NULL || vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-		      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) return miss();
+		if (et && et->base_type != script_value_type::jai_any_type) return miss();
 		if (!limits_->memory_charge(sizeof(script_value) + (vi == script_value::TYPEID_STRING ? v.unchecked_as_string().size() : 0))) return miss();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_cells_push_[3];
+#endif
 		node->values().push_back(v);
 		break;
 	}
-	case script_array::kind_t::i64:
-		if (vi != script_value::TYPEID_INT || !limits_->memory_charge(sizeof(script_value))) return miss();
-		node->ints().push_back(v.unchecked_as_int());
-		break;
-	case script_array::kind_t::f64:
-		if ((vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_INT) || !limits_->memory_charge(sizeof(script_value))) return miss();
-		node->floats().push_back(vi == script_value::TYPEID_FLOAT ? v.unchecked_as_float() : static_cast<script_float>(v.unchecked_as_int()));
-		break;
-	case script_array::kind_t::str:
-		if (vi != script_value::TYPEID_STRING || !limits_->memory_charge(sizeof(script_value) + v.unchecked_as_string().size())) return miss();
-		node->strs().push_back(v.unchecked_string_handle());
-		break;
 	default:
 		return miss();
 	}
@@ -15575,6 +15633,7 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
 	std::fill(std::begin(profile_cells_), std::end(profile_cells_), 0ull);
 	std::fill(std::begin(profile_cells_refused_slot_), std::end(profile_cells_refused_slot_), 0ull);
+	std::fill(std::begin(profile_cells_push_), std::end(profile_cells_push_), 0ull);
 	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
 	std::fill(std::begin(profile_cell_ops_), std::end(profile_cell_ops_), 0ull);
 	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
@@ -16076,6 +16135,8 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
+		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
+			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
 		fprintf(stderr, "[vm-profile] cell instructions by opcode (measured span):");
 		for (size_t k = 0; k < 256; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
 		fprintf(stderr, "\n");

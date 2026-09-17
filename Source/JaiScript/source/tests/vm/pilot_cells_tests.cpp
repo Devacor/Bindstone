@@ -2819,6 +2819,29 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(closed >= 2 && l.find("-- open loop") == std::string::npos, "a while holding a counted for closes over it (the duplicate test names the counted loop's own fallback): " + l);
 			check_true(l.find("C_JUMP") != std::string::npos, "the inner step is preceded by the budget poll: " + l);
 		});
+		test("a_typed_push_moves_the_payload_without_an_intermediate_value", [this]() {
+			// row 143 (Astra's first value-level experiment): a cell or a typed element pushed into a typed buffer moves its payload; a hetero
+			// destination still takes a value with the cell's declared stamp; the conversion subset, the memory charge, self pushes and the
+			// fallbacks are the general push's. Both backends, proofs on and off
+			const std::string script = R"(
+				array<int> INTS = [1, 2, 3]; array<float> FLOATS = [0.5, 1.5]; array<string> STRS = ["a", "bb"]; var PAL = ["x", "yy", "zzz"];
+				function ints(int n) -> int { array<int> out = []; int i = 0; while (i < n) { int v = i * 3; out.push(v); int m = i % 3; out.push(INTS[m]); i = i + 1; } int s = 0; int k = 0; while (k < out.size()) { s = s + out[k]; k = k + 1; } return s * 100 + out.size(); }
+				function floats(int n) -> float { array<float> out = []; int i = 0; while (i < n) { float v = i * 0.25; out.push(v); out.push(i); int m = i % 2; out.push(FLOATS[m]); i = i + 1; } float s = 0.0; int k = 0; while (k < out.size()) { s = s + out[k]; k = k + 1; } return s * 10.0 + out.size(); }
+				function strings(int n) -> string { array<string> out = []; int i = 0; while (i < n) { int m = i % 2; out.push(STRS[m]); i = i + 1; } string s = ""; int k = 0; while (k < out.size()) { s = s + out[k]; k = k + 1; } return s + to_string(out.size()); }
+				function hetero(int n) -> string { var out = []; int i = 0; while (i < n) { int v = i + 1; float w = i * 0.5; bool b = i % 2 == 0; out.push(v); out.push(w); out.push(b); int m = i % 3; out.push(PAL[m]); out.push(INTS[m]); i = i + 1; } return to_string(out.size()) + type_of(out[0]) + type_of(out[1]) + type_of(out[2]) + type_of(out[3]) + type_of(out[4]) + to_string(out[3]); }
+				function float_into_ints(int n) -> string { array<int> out = []; int i = 0; try { while (i < n) { float v = i * 1.5; out.push(v); i = i + 1; } } catch (err) { return "caught:" + to_string(out.size()); } return "ok:" + to_string(out.size()); }
+				function string_into_ints(int n) -> string { array<int> out = []; int i = 0; try { while (i < n) { int m = i % 2; var s = STRS[m]; out.push(s); i = i + 1; } } catch (err) { return "caught:" + to_string(out.size()); } return "ok:" + to_string(out.size()); }
+				function self_push(int n) -> int { array<int> a = [1, 2]; int i = 0; while (i < n) { a.push(a[i]); i = i + 1; } int s = 0; int k = 0; while (k < a.size()) { s = s + a[k]; k = k + 1; } return s * 100 + a.size(); }
+				function self_push_strings(int n) -> string { array<string> a = ["p", "q"]; int i = 0; while (i < n) { a.push(a[i]); i = i + 1; } string s = ""; int k = 0; while (k < a.size()) { s = s + a[k]; k = k + 1; } return s; }
+				to_string(ints(6)) + "|" + to_string(floats(5)) + "|" + strings(5) + "|" + hetero(4) + "|" + float_into_ints(3) + "|" + string_into_ints(3) + "|" + to_string(self_push(6)) + "|" + self_push_strings(5);
+			)";
+			both(script, "", "typed pushes");
+			both(script, "", "typed pushes, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of("array<int> INTS = [1, 2, 3]; var f = function(int n) { array<int> out = []; int i = 0; while (i < n) { int v = i * 3; out.push(v); int m = i % 3; out.push(INTS[m]); i = i + 1; } return out.size(); };");
+			check_true(l.find("C_PUSH") != std::string::npos && l.find("-- open loop") == std::string::npos, "the typed pushes close the loop: " + l);
+		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
 			auto vm = engine::make();
 			vm->set_backend(backend_type::vm);

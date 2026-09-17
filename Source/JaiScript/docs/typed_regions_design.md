@@ -279,6 +279,12 @@ a base reads the base from the slot (`SET_MEMBER_FUSED`, `SET_MEMBER` whole othe
 environment bases and `this` keep the general shape. Inside a loop these instructions are a translation gap until the block
 takes member sites.
 
+A block's push of a cell or a typed element into a typed buffer moves the raw payload (an int, a float, a string handle)
+without an intermediate value, under the general push's guards in their order, its conversion subset (an int widens into a
+float buffer; every other mismatch misses onto the general push and its text), its memory charge and its fallback; a hetero
+destination still takes a value, a cell's boxed with its declared stamp as the general push has it. The VMPROF report counts
+the direct pushes by kind and the value pushes (`cell pushes`).
+
 A comparison used as a value and the `JUMP_IF_TRUE` or `JUMP_IF_FALSE` that consumes it (the `||` and `&&`
 chains, `!e`) translate to one `cmp` whose target word carries the jump's sense (never an inverted operator,
 since a NaN fails both `<` and `>=`); the pair's origin is the value instruction and the jump's copy is a

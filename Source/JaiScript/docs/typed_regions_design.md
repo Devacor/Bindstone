@@ -551,6 +551,17 @@ backends, so the store-value hoist is already in that order. A reference declara
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
 
+### Member read sites
+
+A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:
+the entry resolves the base slot's instance and its plain field once through the read-side probe (the class, the field slot,
+no user accessor in the chain) and keeps the field's value for the copy, and `op_c_mload` lands the field's kind and payload
+in the temp cell at every read. A base that is not such an instance, a field that is not an int, a float or a bool, refuses
+the entry, and the general form runs; the hold check after a call resolves the field again and misses on a change (a callee
+that rebound the slot's instance or migrated its fields). Nothing is deferred: the site reads the instance's field storage as an
+element site reads an array's, so the miss protocol needs no flush of members. Member stores, environment-name bases (`G.player`)
+and instances held by an alias follow in their rows.
+
 ### The region IR module
 
 The canonical operations of a closed loop and the analyses over them live in `include/jaiscript/vm/region_ir.hpp`

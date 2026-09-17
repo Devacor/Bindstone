@@ -117,6 +117,7 @@ struct console_state {
 struct options {
 	std::string script;                    // empty = REPL
 	std::string backend = "vm";
+	uint32_t miss_every = 0;               // --miss-every=<n>: the miss injection lever (a build with JAISCRIPT_MISS_INJECTION)
 	std::string check = "strict";          // static checker mode (the engine default); warn = load anyway, report
 	double budget = 0.0;                   // seconds per execute; 0 = unlimited (runner default —
 	                                       // the ENGINE default is 1.0s, deliberately overridden:
@@ -194,6 +195,7 @@ void print_usage() {
 		"\n"
 		"options:\n"
 		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
+		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION; the flush at every position)\n"
 		"  --check=strict|warn|off\n"
 		"  --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>\n"
 		"  --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits) to <file>\n"
@@ -267,6 +269,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--selftest") { opt.selftest = true; }
 		else if (a.rfind("--benchmark-main", 0) == 0) { opt.benchmark_main = std::stoi(value_of("--benchmark-main")); }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
+		else if (a.rfind("--miss-every", 0) == 0) { opt.miss_every = static_cast<uint32_t>(std::stoul(value_of("--miss-every"))); }
 		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
 		else if (a.rfind("--manifest", 0) == 0) { opt.manifest = value_of("--manifest"); }
@@ -1071,6 +1074,7 @@ bool spill_file(const std::string& path, const std::string& content) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
+	if (opt.miss_every) { eng->cells_miss_every(opt.miss_every); }
 	if (opt.unsafe_parallel) { eng->allow_unsafe_parallel(true); }
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);

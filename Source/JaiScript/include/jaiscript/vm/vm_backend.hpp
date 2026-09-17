@@ -754,6 +754,10 @@ namespace jai::vm {
         std::vector<std::shared_ptr<environment>> instance_scope_saved_;
         std::shared_ptr<environment> pending_instance_env_;
         engine* engine_ = nullptr;
+#ifdef JAISCRIPT_MISS_INJECTION
+        uint32_t miss_every_ = 0;        // engine::cells_miss_every, read at every block entry
+        uint32_t miss_countdown_ = 0;    // plain cell instructions until the next injected miss; runs across entries
+#endif
         // Step-debugger controller (engine-owned, shared with the interpreter backend).
         // Atomic: engine::debugger() may wire it from another thread mid-run; NOT read per
         // op — sync_debug_hook mirrors it into the plain gate below at the sync points only.

@@ -286,6 +286,16 @@ namespace jai {
         // next compile; a chunk already compiled keeps its form.
         void ir_passes(bool on);
         bool ir_passes() const;
+        // === MISS INJECTION (a testing lever; docs/typed_regions_design.md, the cell block section) ===
+        // Built only when JAISCRIPT_MISS_INJECTION is defined (the fuzz's MISS configuration): every nth cell
+        // instruction whose own miss re-runs its original instruction misses before it runs, as a failed guard
+        // would, so the flush and the continuation contract run against the interpreter at every such position
+        // (`jaiscript_fuzz --miss-every n`, the runner's `--miss-every=<n>`). 0 = off, the default. A build
+        // without the lever throws std::logic_error on a nonzero n, so a gate never runs without the misses it
+        // asked for; miss_injection_available() says which build this is.
+        void cells_miss_every(uint32_t n);
+        uint32_t cells_miss_every() const;
+        static bool miss_injection_available();
         // === THE LISTING SINK (`jaiscript --disasm=<file>`; out/fable/plan_row125_ir_module.md) ===
         // Unset by default. When set, every chunk the VM compiles from here on (a program, a function at its
         // define, a standalone expression or declaration) is disassembled as it is compiled, with the regions'

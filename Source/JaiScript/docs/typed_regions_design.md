@@ -498,6 +498,16 @@ builds count entries, refusals, cell iterations, unboxes, exits, misses by step,
 flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
 (21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.
 
+A build with `JAISCRIPT_MISS_INJECTION` defined carries a testing lever, `engine::cells_miss_every(n)`: every nth cell
+instruction whose own miss re-runs its original instruction (a compare, an arithmetic, a load, a store, a move, a math
+call, an append, a push) misses before it runs, as a failed guard would; the back edges, an iteration head's landing (a
+miss there refuses the block for the call), the call door, a bail, an exit and a rebind keep their own protocols. So the
+flush, the liveness of temps and aliases, an inner counted loop's state and the continuation on the general form are
+exercised at every such position against the interpreter (`jaiscript_fuzz --miss-every n`, the runner's
+`--miss-every=<n>` and GLOOM's `--miss-every N` under the hash tripwires, suite `Cell Loops`). A build without the
+define never reads the knob and throws on a nonzero setting, so a gate cannot run without the misses it asked for;
+`engine::miss_injection_available()` says which build this is.
+
 Element reads inside expressions take the same row: a subscript expression the fused index op can read
 (an identifier container with an identifier or literal index, a member-base container, or a computed index
 chain) lands in a compiler temp through the declaration-landing op with a temp flag, and the consumer takes

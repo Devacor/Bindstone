@@ -6817,7 +6817,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
-	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "rebind", "other" };
+	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "rebind", "injected" };
 	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
 #else
 	(void)step;
@@ -7148,6 +7148,10 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
 bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+#ifdef JAISCRIPT_MISS_INJECTION
+	miss_every_ = engine_ ? engine_->cells_miss_every() : 0;
+	if (miss_countdown_ == 0 || miss_countdown_ > miss_every_) { miss_countdown_ = miss_every_; }
+#endif
 	cell_state& cs = *f.cells;
 	if (loop.iter_proto != k_invalid_u32) {
 		// a range-for block: the general form's iteration state (ITER_INIT pushed it) is an array iteration, the loop variable a frame slot
@@ -7245,6 +7249,25 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	return true;
 }
 
+#ifdef JAISCRIPT_MISS_INJECTION
+// the injection points: the cell instructions whose own miss re-runs their original instruction (loop.origin); the back
+// edges, the iteration head and its landing (a miss there refuses the block for the call), the call door, a bail, an
+// exit and a rebind carry their own protocols and keep their own misses
+static bool cells_miss_plain(opcode op) {
+	switch (op) {
+	case opcode::op_c_cmp: case opcode::op_c_cmp_p: case opcode::op_c_jcmp: case opcode::op_c_jcmp_p:
+	case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any:
+	case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_index_store:
+	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
+	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
+	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
+	case opcode::op_c_append: case opcode::op_c_push:
+		return true;
+	default:
+		return false;
+	}
+}
+#endif
 // the copy runs as one block from here, each cell instruction through its own handler and no outer dispatch
 // between them; an exit or a miss flushes (cs.loop clears) and leaves f.ip on the general form, a raise returns
 // its status; the budget is polled at the cell back edge as before
@@ -7254,6 +7277,13 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
+#endif
+#ifdef JAISCRIPT_MISS_INJECTION
+		if (miss_every_ && cells_miss_plain(ci.op) && --miss_countdown_ == 0) {
+			miss_countdown_ = miss_every_;
+			const uint32_t origin = loop.origin[f.ip - loop.copy_head];
+			if (loop.iter_proto == k_invalid_u32 || origin != loop.head) { cells_miss(f, loop, origin, 7); return {}; }
+		}
 #endif
 		op_status st = op_status::ok;
 		switch (ci.op) {

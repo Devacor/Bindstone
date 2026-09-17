@@ -33,6 +33,7 @@ public:
 		eng_->execution_budget(0.0);
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		eng_->parameter_alias(opt.param_alias);
+		if (opt.miss_every) { eng_->cells_miss_every(opt.miss_every); }
 		jai::stdlib::register_all(eng_);
 
 		jai::dynamic_binder<gloom::gloom_rng>(*eng_, "Rng")

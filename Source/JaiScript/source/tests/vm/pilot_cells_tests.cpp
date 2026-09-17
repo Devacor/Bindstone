@@ -2864,6 +2864,48 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(listing.find("CELLS_BACK") != std::string::npos, "the closed typed loop's back edge is the cell entry: " + listing);
 			check_true(listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the cell copy is present: " + listing);
 		});
+		test("an_injected_miss_at_every_plain_position_keeps_the_interpreter_s_answer", [this]() {
+			// the miss injection lever (row 143.1; a build with JAISCRIPT_MISS_INJECTION defined, else the shapes run as plain parity):
+			// every nth plain cell instruction misses before it runs, so the flush, the alias and temp liveness, the inner counted
+			// loop's state, the call door's landing and the range head's index sync continue on the general form from every position
+			const char* body = R"(
+				array<int> G = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8];
+				array<float> F = [0.5, 1.5, 2.5, 3.5];
+				int twice(int v) { return v * 2; }
+				string probe() {
+					int acc = 0; float facc = 0.0; array<int> out = [];
+					int n = G.size();
+					for (int i = 0; i < n; i++) {
+						var& e = G[i];
+						int t = e * 3 + i;
+						if (t % 2 == 0) { acc = acc + twice(t); } else { acc = acc - t; }
+						for (int j = 0; j < 3; j++) { acc = acc + j * e; }
+						e = e + 1;
+						out.push(t);
+					}
+					for (auto v : G) { acc = acc + v; }
+					int k = 0; int m = F.size();
+					while (k < m) { facc = facc + F[k] * 2.0; F[k] = F[k] + 1.0; k = k + 1; }
+					return to_string(acc) + "|" + to_string(facc) + "|" + to_string(out.size()) + "|" + to_string(G[0]) + "|" + to_string(F[3]);
+				}
+				probe();
+			)";
+			auto run = [&](bool vm, uint32_t every) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				if (every) { e->cells_miss_every(every); }
+				stdlib::register_all(*e);
+				try { return e->execute(body).to_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string oracle = run(false, 0);
+			check_true(oracle.rfind("throw:", 0) != 0, "the shapes run: " + oracle);
+			check_eq(oracle, run(true, 0), "the vm without the lever");
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
+				check_eq(oracle, run(true, every), "an injected miss at every " + std::to_string(every) + " plain cell instructions");
+			}
+		});
 	}
 };
 

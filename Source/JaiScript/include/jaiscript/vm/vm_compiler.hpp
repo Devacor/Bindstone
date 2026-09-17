@@ -4,6 +4,7 @@
 #define __JAISCRIPT_VM_VM_COMPILER_HPP__
 
 #include "chunk.hpp"
+#include <functional>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <memory>
 #include <unordered_set>
@@ -138,6 +139,18 @@ namespace jai::vm {
         // compile_call so nested arg calls never inherit it; stamped as c=1 on
         // op_call_from_scratch (a pure hint — every correctness gate lives at runtime)
         bool pending_tail_call_ = false;
+        // inlined leaves (vm_inline.cpp): the callable's own body (no recursion), the graft's own compile (no inlining inside a graft or its
+        // fallback) and the result slot's name
+        const block_stmt* callable_body_ = nullptr;
+        bool inlining_off_ = false;
+        uint64_t inline_symbol_ = 0;
+        bool inline_eligible(const call_expr* call, const function_decl* fn) const;
+        std::shared_ptr<call_expr> inline_call_of(const expression_ptr& e, const function_decl** fn_out) const;
+        void compile_inlined(const std::shared_ptr<call_expr>& call, const function_decl* fn, const expression_ptr& stmt_expr,
+                             const std::function<void(const expression_ptr&)>& emit_replaced, const std::function<void()>& emit_original);
+        bool try_inline_expression(const expression_ptr& e);
+        bool try_inline_variable_decl(const std::shared_ptr<variable_decl>& decl);
+        bool try_inline_return(const statement_ptr& stmt);
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
         // Fuses a trailing fused-comparison condition with its jump_if_false

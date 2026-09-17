@@ -1213,17 +1213,19 @@ private:
 
     // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
     // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
-    void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args) {
+    void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args, bool free_callee) {
         if (proofs_ == proof_mode::leave) { return; }
         const size_t n = c->arguments.size();
         const function_decl* fn = nullptr;
+        bool by_value = true;   // the identity bind's proof asks for no reference parameter; the inliner takes the decl and the per-argument proofs either way
         if (stamping() && !has_includes_ && ov && ov->size() == 1) {
             fn = (*ov)[0];
             auto [lo, hi] = arity_range(fn);
             bool ok = fn->body && !fn->is_coroutine && lo == n && hi == n && args.size() == n;
-            for (const auto& p : fn->parameters) { if (p.is_reference) { ok = false; } }
+            for (const auto& p : fn->parameters) { if (p.is_reference) { by_value = false; } }
             if (!ok) { fn = nullptr; }
         }
+        c->proven_callee_decl = fn && free_callee ? fn : nullptr;
         if (!fn) {
             c->static_arg_proofs.clear();
             c->proven_callee_body = nullptr;
@@ -1232,14 +1234,15 @@ private:
         c->static_arg_proofs.assign(n, proof_none);
         for (size_t i = 0; i < n; ++i) {
             const parameter& p = fn->parameters[i];
+            if (p.is_reference) { continue; }   // a reference parameter binds, never converts: no proof, no count
             const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
             if (untyped || same_type(ctype_from_type_info(p.type.get()), args[i])) {
                 c->static_arg_proofs[i] = proof_same_type;
                 ++counts_.args;
             }
         }
-        c->proven_callee_body = fn->body.get();
-        ++counts_.calls;
+        c->proven_callee_body = by_value ? fn->body.get() : nullptr;
+        if (by_value) { ++counts_.calls; }
     }
 
     // -------------------------------------------------------------- assignability
@@ -2039,7 +2042,12 @@ private:
         for (auto& a : c->arguments) { args.push_back(infer(a.get())); }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ctype t = infer_call_impl(c, args, ov);
-        stamp_call_proofs(c, ov, args);
+        bool free_callee = false;   // resolved through the program's free functions (a method by its bare name, a constructor: never inlined)
+        if (ov && c->callee && c->callee->get_type() == node_type::identifier_expr) {
+            auto it = functions_.find(static_cast<identifier_expr*>(c->callee.get())->name);
+            free_callee = it != functions_.end() && ov == &it->second;
+        }
+        stamp_call_proofs(c, ov, args, free_callee);
         if (ov) {
             // a map key passed where every viable overload binds the parameter by reference
             // or as a shared_ptr handle (a by-value parameter copies)

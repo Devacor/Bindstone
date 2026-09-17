@@ -1672,6 +1672,8 @@ namespace jai::vm {
         JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
         type_info* temp_stamp_for(const script_array& node, size_t at) const;
+        op_status exec_inline_guard(frame& f, const vm_instruction& ins);   // an inlined leaf's guard: the callee name binds the site's function, or the fallback
+        bool inline_site_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree

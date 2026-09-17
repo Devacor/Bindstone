@@ -562,6 +562,30 @@ inside either half reads its own origin, its own site row and its own liveness, 
 end's switch (`engine::ir_passes`) off leaves every pair two instructions. The site logic asks `cell_first_op` what a fused instruction
 was. The fused executors are out of line (the block switch's shape rule).
 
+### Inlined leaves
+
+A plain identifier call that the checker resolved to one free script function (`call_expr::proven_callee_decl`: exact arity, a
+body, not a coroutine, not a method) compiles at its call site as the callee's body when the callee is small (at most 12 statements
+and the clone's node budget) and made of the forms the graft takes: declarations, expression statements, ifs, returns; literals,
+identifiers, arithmetic, assignments, members, elements, ternaries, casts and math intrinsics. A loop, a try, a lambda, `this`, a
+nested script or host call or a method call leaves the call a call. The by-value parameters must be scalars or strings the checker
+proved (the same assignment table `bind_parameters` runs, so nothing converts) or `var` taking a scalar local or a literal; a
+reference parameter must be a `var&` bound to a plain identifier (the parameter's uses become the caller's variable) or to an element
+lvalue (an alias declaration, a rebind). The return type is void, a scalar or a string. The call sits in a position the graft may take:
+`f(...);`, `T v = f(...);`, `v = f(...);`, `return f(...);`, or an operand where every leaf the statement evaluates before the call is
+a local or a literal, or a global or a member when the body writes neither.
+
+The graft is compiled, never spliced into the caller's tree (the interpreter walks that tree): a guard (`op_inline_guard`, site,
+fallback ip) that reads the callee name's binding through the name's own cache row without running a getter and compares the bound
+function's body with the decl's, one declaration per by-value parameter in slots above the caller's frame, the callee's body cloned
+with its slots offset and every `return e` converted to a store into the result slot by the structured rule (a statement after an if
+that returns nests into the arms that fall through), the caller's statement with the call replaced by the result, a jump, and behind
+it the original statement with its real call as the fallback, which a rebind or a reload of the callee, or an armed debugger, takes.
+The middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every
+effect point (`cell_loop::inline_sites`), the fallback's instructions are skips, and the inlined body's instructions are the region's.
+A raise inside an inlined body names the callee in the trace (the range table on the chunk, `chunk::inline_sites`). The listing
+names each graft (`-- inlined light_band guard 12: 13..40 fallback 40..47`); the manifest lists the sites.
+
 ### Member read sites
 
 A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:

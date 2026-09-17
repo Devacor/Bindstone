@@ -184,6 +184,11 @@ namespace {
 				out << static_cast<int>(s.fold_count) << " expect=" << static_cast<int>(s.decl_expect) << " proto=" << u(s.index_proto) << " temp=" << b(s.temp) << " spec=" << b(s.speculative)
 				    << " guard=" << u(s.guard_temp) << " always=" << b(s.guard_always) << "\n";
 			}
+			out << pre << "inline_sites " << ch.inline_sites.size() << "\n";
+			for (size_t i = 0; i < ch.inline_sites.size(); ++i) {
+				const chunk::inline_site& s = ch.inline_sites[i];
+				out << pre << " " << i << " guard=" << s.guard_ip << " begin=" << s.begin_ip << " fallback=" << s.fallback_ip << " join=" << s.join_ip << " name=" << u(s.name_symbol) << "\n";
+			}
 			out << pre << "cell_loops " << ch.cell_loops.size() << "\n";
 			for (size_t i = 0; i < ch.cell_loops.size(); ++i) {
 				const chunk::cell_loop& l = ch.cell_loops[i];

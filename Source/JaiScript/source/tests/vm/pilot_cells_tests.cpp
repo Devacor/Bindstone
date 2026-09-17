@@ -86,6 +86,17 @@ public:
 		compiler.ir_listing(true);
 		return jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 	}
+	// the listing of every chunk the engine's own compiler makes for a script (the checker's proofs stamped, so the grafts of the
+	// inliner appear), through the disassembly sink; the script runs on the vm
+	std::string listing_run(const std::string& source) {
+		auto e = engine::make();
+		e->set_backend(backend_type::vm);
+		stdlib::register_all(*e);
+		std::string out;
+		e->disassembly_sink([&out](const std::string& listing, const std::string&) { out += listing; out += "\n"; });
+		try { e->execute(source); } catch (const std::exception& ex) { out += std::string("throw:") + ex.what(); }
+		return out;
+	}
 	// the compiled program of a snippet and its symbolizer (the manifest controls mutate a copy)
 	struct compiled_snippet { std::shared_ptr<engine> eng; std::shared_ptr<jai::vm::chunk> program; std::shared_ptr<jai::vm::chunk> function; };   // function: the first function's body (its loops close; program-scope loops run over environment values)
 	compiled_snippet compile_snippet(const std::string& source) {
@@ -3100,7 +3111,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			const std::string l = listing_of(prelude);
 			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_PROBE") >= 3, "the loops with the calls close through the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
+			check_true(count("C_PROBE") + count("-- inlined ") >= 3, "the loops with the calls close through the door or take the leaf inline: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
@@ -3140,6 +3151,99 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "fused pairs under an injected miss at every " + std::to_string(every)); }
+		});
+		test("inlined_leaves_run_inside_blocks", [this]() {
+			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
+			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs
+			// off, with the middle end's switch off (no graft) and under the injected miss; the listing names the grafts and the loop closes
+			const std::string prelude =
+				"int light_band(int l, int d) { int b = l - d / 8; if (b < 0) { return 0; } if (b > 31) { return 31; } return b; }\n"
+				"int dist2(int ax, int ay, int bx, int by) { int dx = ax - bx; int dy = ay - by; return dx * dx + dy * dy; }\n"
+				"float lerp(float a, float b, float t) { return a + (b - a) * t; }\n"
+				"var twice(var v) { return v * 2; }\n"
+				"class P { int x = 0; int y = 0; }\n"
+				"void nudge(var& p, int k) { p.x = p.x + k; if (p.x > 50) { p.y = p.y + 1; } }\n"
+				"var pool = []; for (int i = 0; i < 6; ++i) { pool.push(P()); }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { int lb = light_band(i, i * 3); int d = dist2(i, i + 1, 7, 9); float f = lerp(1.0, 5.0, i * 0.01); s = s + lb * 1000 + d % 977 + twice(i) + math::itrunc(f * 10.0); for (auto& p : pool) { nudge(p, i % 5); } } for (auto& p : pool) { s = s * 7 + p.x * 3 + p.y; } return s; };\n";
+			const std::string body = "to_string(run(60)) + \"|\" + to_string(run(7));";
+			both(prelude + body, "", "inlined leaves");
+			both(prelude + body, "", "inlined leaves, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off (no graft) agrees");
+			}
+			const std::string l = listing_run(prelude + body);
+			check_true(l.find("-- inlined light_band") != std::string::npos && l.find("-- inlined dist2") != std::string::npos && l.find("-- inlined nudge") != std::string::npos, "the leaves are inlined: " + l);
+			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the grafts: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "inlined leaves under an injected miss at every " + std::to_string(every)); }
+		});
+		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
+			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
+			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without
+			// recompiling; both backends agree across the reload
+			const std::string prelude =
+				"int f(int a) { return a * 2; }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
+			auto sequence = [&](bool vm) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				try {
+					e->execute(prelude);
+					const std::string a = e->execute("run(6);").to_string();
+					e->execute("int f(int a) { return a * 3 + 1; }");
+					const std::string b = e->execute("run(6);").to_string();
+					return a + "|" + b;
+				} catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string iv = sequence(false), vv = sequence(true);
+			check_eq(iv, vv, "the reload takes the fallback on the vm");
+			check_eq(std::string("30|51"), vv, "the values before and after the reload");
+		});
+		test("a_raise_inside_an_inlined_body_names_the_callee", [this]() {
+			// row 152: an inlined body that raises keeps the text and the trace's first frame is the callee, as the interpreter's is
+			const std::string prelude =
+				"int f(int a) { return 100 / a; }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(3 - i); } return s; };\n";
+			both(prelude + "run(6);", "", "a raise inside an inlined body");
+			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			std::string text;
+			try { e->execute(prelude + "run(6);"); } catch (const std::exception& ex) { text = ex.what(); }
+			check_true(text.find("zero") != std::string::npos || text.find("Zero") != std::string::npos, "the division text: " + text);
+			const auto trace = e->last_stack_trace();
+			check_true(!trace.empty() && trace.front().function == "f", "the trace names the callee first: " + (trace.empty() ? std::string("<empty>") : trace.front().function));
+		});
+		test("a_global_read_before_a_writing_callee_is_not_hoisted", [this]() {
+			// row 152: `s + G + bump()` reads G before the call on both backends; a body that writes a global keeps a statement that reads
+			// one before it on the general form (no graft), so the order holds
+			const std::string prelude =
+				"int G = 1;\n"
+				"int bump() { G = G + 1; return G; }\n"
+				"int pure(int a) { return a + 1; }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + bump(); s = s + G + pure(i); } return s; };\n";
+			both(prelude + "run(8);", "", "a global read before a writing callee");
+			const std::string l = listing_run(prelude + "run(8);");
+			check_true(l.find("-- inlined bump") == std::string::npos, "bump is not inlined after a global read: " + l);
+			check_true(l.find("-- inlined pure") != std::string::npos, "pure is inlined after a global read: " + l);
+		});
+		test("string_and_var_parameters_at_the_grafts_edge", [this]() {
+			// row 152: a var parameter taking a scalar local with a proven int return is a graft; a string parameter, a string result or a
+			// var result keeps the call (their declarations would open the enclosing block); the values hold either way
+			const std::string prelude =
+				"string tag(string s, int k) { if (k > 2) { return s + \"!\"; } return s; }\n"
+				"var half(var v) { return v / 2; }\n"
+				"int half2(var v) { int r = v / 2; return r; }\n"
+				"var run = function(int n) { int s = 0; string acc = \"\"; for (int i = 0; i < n; ++i) { acc = acc + tag(\"a\", i); s = s + tag(\"bc\", i).size(); s = s + half(i); s = s + half2(i); } return acc + \"|\" + to_string(s); };\n";
+			both(prelude + "run(6);", "", "string and var parameters");
+			const std::string l = listing_run(prelude + "run(6);");
+			check_true(l.find("-- inlined half2") != std::string::npos, "half2 is inlined: " + l);
+			check_true(l.find("-- inlined tag") == std::string::npos && l.find("-- inlined half ") == std::string::npos, "tag (a string) and half (a var result) keep their calls: " + l);
 		});
 	}
 };

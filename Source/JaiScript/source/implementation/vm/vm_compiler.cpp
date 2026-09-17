@@ -175,6 +175,7 @@ namespace {
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
+			case opcode::op_inline_guard:
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
@@ -351,6 +352,7 @@ namespace {
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
+			case opcode::op_inline_guard:
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
@@ -699,6 +701,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 
 	callable_ = {};
 	callable_.active = true;
+	callable_body_ = body.get();
 	for (const auto& p : parameters) {
 		uint64_t id = p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name);
 		callable_.declared.insert(id);
@@ -812,6 +815,7 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 	case node_type::expression_decl: {
 		auto* ed = static_cast<expression_decl*>(decl.get());
 		const bool implicit = top_level && ed->implicit_return;
+		if (!implicit && try_inline_expression(ed->expression)) return;
 		if (!implicit && compile_no_result_expression(ed->expression)) return;
 		compile_expression(ed->expression, !implicit);
 		emit(implicit ? opcode::op_implicit_return : opcode::op_pop);
@@ -887,6 +891,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	switch (stmt->get_type()) {
 	case node_type::expression_stmt: {
 		const auto& e = static_cast<expression_stmt*>(stmt.get())->expression;
+		if (try_inline_expression(e)) return;
 		if (compile_no_result_expression(e)) return;
 		compile_expression(e, true);
 		emit(opcode::op_pop);
@@ -905,6 +910,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		compile_for(static_cast<for_stmt*>(stmt.get()));
 		return;
 	case node_type::return_stmt: {
+		if (try_inline_return(stmt)) return;
 		auto* rs = static_cast<return_stmt*>(stmt.get());
 		// Return-site fusion is legal only when the region exits emit NOTHING for a
 		// return (try/catch regions emit op_try_pop/op_catch_end between value and
@@ -2465,6 +2471,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::vector<chunk::cell_loop::cell> cells;
 		std::vector<chunk::cell_loop::env_operand_ref> env_ops;
 		std::vector<chunk::cell_loop::cell_call> calls;
+		std::vector<uint32_t> loop_inline_sites;   // the inlined leaves inside the region: their guards are sites of the entry and the landings
+		auto inline_fallback_of = [&](size_t ip) -> size_t { for (const chunk::inline_site& s : c.inline_sites) { if (s.fallback_ip == ip && s.join_ip > ip) return s.join_ip; } return SIZE_MAX; };
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
@@ -2648,6 +2656,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				continue;
 			}
 			if (ip < inner_skip_until) { op.kind = ir::skip; ops.push_back(op); continue; }   // an inner counted loop's generic cond or update code, its loop back or its pop: dead in the block
+			if (st.op == opcode::op_inline_guard) {   // an inlined leaf's guard: checked at the entry and after every effect point, no copy instruction
+				if (std::find(loop_inline_sites.begin(), loop_inline_sites.end(), st.a) == loop_inline_sites.end()) { loop_inline_sites.push_back(st.a); }
+				op.kind = ir::skip; ops.push_back(op); continue;
+			}
+			if (const size_t join = inline_fallback_of(ip); join != SIZE_MAX) {   // the guard's fallback: the original statement, unreachable in the block
+				const size_t end = std::min(join, back);
+				for (size_t k = ip; k < end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
+				ip = end - 1; continue;
+			}
 			if (ip == inner_cmp_at) {
 				// the inner counted loop's compare back to its body, in the place of the first generic update instruction
 				const counted_for_proto& p = c.counted_for_protos[inner_cmp_proto];
@@ -3308,6 +3325,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		struct fixup { uint32_t at; uint8_t field; uint32_t target; uint32_t bits; };   // field 0 = a (a jump), 1 = c (a compare's target | its sense bit), 2 = b (a guard: alias | read offset << 8)
 		std::vector<fixup> fixups;
 		loop.calls = calls;
+		loop.inline_sites = loop_inline_sites;
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
 		auto append = [&](vm_instruction ins, size_t from_ip) {
 			if (origin_override != SIZE_MAX) { from_ip = origin_override; }
@@ -5110,6 +5128,7 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 	const bool is_reference = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
 	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
+	if (!is_reference && try_inline_variable_decl(decl)) return;
 
 	// Locals declared through env fallback in lambda contexts keep working because the
 	// slot decision below mirrors identifier loads (declared symbols keep parser slots).

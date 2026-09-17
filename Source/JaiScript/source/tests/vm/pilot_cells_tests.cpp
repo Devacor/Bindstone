@@ -2784,7 +2784,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of("class P { float x = 1.5; float vx = 0.25; } var f = function(P p, float y) { float w = p.x; p.x = w + y; return p.x + p.vx; };");
-			check_true(l.find("MEMBER_TEMP") != std::string::npos && l.find("SET_MEMBER_FUSED") != std::string::npos && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
+			check_true(l.find("MEMBER_TEMP") != std::string::npos && (l.find("SET_MEMBER_FUSED") != std::string::npos || l.find("SET_MEMBER_VALUE") != std::string::npos) && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
 		});
 		test("an_alias_lives_to_the_end_of_the_body_and_an_inner_counted_step_polls_the_budget", [this]() {
 			// Astra's reproductions on the landed 016175eb (2026-09-16): a return inside the body reading the alias after its last read
@@ -3046,6 +3046,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias member sites under an injected miss at every " + std::to_string(every)); }
+		});
+		test("a_member_store_in_statement_position_is_one_op_and_a_block_site", [this]() {
+			// row 147b: `p.x = v;` takes its value as an operand (SET_MEMBER_VALUE, no push, no POP) and a block writes the field in place
+			// (C_MSTORE) when the value's kind is the field's kind; an int into a float field, a float into a var field holding an int, a
+			// string field and a user setter run the general store (its conversions and texts); the value read back after the loop, both
+			// backends, proofs on and off, and under an injected miss
+			const std::string prelude =
+				"class P { int x = 0; float y = 0.0; bool on = false; var w = 1; string name = \"p\"; int _set_z(int v) { x = v * 100; return v; } int z = 0; }\n"
+				"class T { float posx = 0.0; float posy = 0.0; int hits = 0; }\n"
+				"var WS = [T(), T(), T()];\n"
+				"var fill = function(P p, int n) { for (int i = 0; i < n; i++) { p.x = i; p.y = i * 0.5; p.on = i > 2; p.w = i; } return p.x * 1000 + p.w * 10 + (p.on ? 1 : 0); };\n"
+				"var conv = function(P p, int n) { for (int i = 0; i < n; i++) { p.y = i; p.w = i * 0.5; p.x = p.x + 2; } return to_string(p.y) + \"|\" + to_string(p.w) + \"|\" + to_string(p.x); };\n"
+				"var sweep = function(float px, float py) { int t = 0; for (auto& w : WS) { w.posx = px; w.posy = py + w.hits; w.hits = w.hits + 1; t = t + w.hits; } return t; };\n"
+				"var strs = function(P p, int n) { for (int i = 0; i < n; i++) { p.name = \"n\" + to_string(i); } return p.name; };\n"
+				"var setter = function(P p, int n) { for (int i = 0; i < n; i++) { p.z = i; } return p.x; };\n";
+			const std::string body =
+				"string run() { P a = P(); P b = P(); P c = P(); P d = P(); string out = to_string(fill(a, 5)) + \"|\" + conv(b, 3) + \"|\" + to_string(sweep(1.5, 2.0)) + \"|\" + to_string(sweep(0.5, 0.0));\n"
+				"  return out + \"|\" + strs(c, 3) + \"|\" + to_string(setter(d, 4)) + \"|\" + to_string(WS[1].posy) + \"|\" + to_string(WS[2].hits); }\n"
+				"run();";
+			both(prelude + body, "", "member stores");
+			both(prelude + body, "", "member stores, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("SET_MEMBER_VALUE") >= 8, "the statement stores take the value as an operand: " + std::to_string(count("SET_MEMBER_VALUE")) + "\n" + l);
+			check_true(count("C_MSTORE") >= 6, "the stores are block sites: " + std::to_string(count("C_MSTORE")) + "\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
 		});
 	}
 };

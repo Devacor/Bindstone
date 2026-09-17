@@ -162,6 +162,11 @@ namespace {
 				const push_proto& p = ch.push_protos[i];
 				out << pre << " " << i << " recv=" << operand(ch, p.receiver) << " value=" << operand(ch, p.value) << " site=" << u(p.site) << " subscript=" << b(p.value_is_subscript) << " flags=" << p.value_index_flags << "\n";
 			}
+			out << pre << "member_store_protos " << ch.member_store_protos.size() << "\n";
+			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {
+				const member_store_proto& p = ch.member_store_protos[i];
+				out << pre << " " << i << " node=" << u(p.node) << " proof=" << p.proof << " base=" << u(p.base) << " value=" << operand(ch, p.value) << "\n";
+			}
 			out << pre << "counted_for_protos " << ch.counted_for_protos.size() << "\n";
 			for (size_t i = 0; i < ch.counted_for_protos.size(); ++i) {
 				const counted_for_proto& p = ch.counted_for_protos[i];

@@ -66,6 +66,14 @@ namespace jai::vm {
     // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
     // literal value; site is the call_site the unfused sequence would have used (the replay
     // path and its argument metadata)
+    // `base.member = value;` in statement position (op_set_member_value): the member node, the assignment's static store proof, the
+    // base's frame slot and the value as an operand (an identifier, a literal, or the temp a computed value lands in)
+    struct member_store_proto {
+        uint32_t node = k_invalid_u32;
+        uint32_t proof = 0;
+        uint32_t base = k_invalid_u32;
+        fused_operand value;
+    };
     struct push_proto {
         fused_operand receiver;
         fused_operand value;              // ident / literal / one-level subscript (base ident, ident-or-literal index)
@@ -469,6 +477,7 @@ namespace jai::vm {
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
+        std::vector<member_store_proto> member_store_protos;
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

@@ -123,6 +123,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_call_temp:
 			case opcode::op_member_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
@@ -294,6 +295,7 @@ namespace {
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
+			case opcode::op_call_temp:
 			case opcode::op_member_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
@@ -3121,6 +3123,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					land.writes = cn.b;
 				} else if (cn.op == opcode::op_store && cn.b == k_invalid_u32 && !(cn.c & (store_flag_ref_alias | store_flag_global_only)) && (cn.c & store_flag_no_result)) {
 					cc.consumer = 2; cc.dst = k_ir_env_bit | env_written(cn.a, k_typed_dst_store, consumer_ip);   // an environment value takes the result
+				} else if (cn.op == opcode::op_call_temp && cn.a < k_typed_slot_mask) {
+					cc.consumer = 3; cc.dst = cn.a;   // the result into a compiler temp: the expression around the call reads it as a slot operand
+					use_slot(cn.a, 0, true, k_typed_dst_temp, nullptr, consumer_ip);
+					land.writes = cn.a;
 				} else { refuse(chunk::cell_refusal_of(cn.op), consumer_ip); break; }   // the result flows into an operation without a door yet
 				for (const auto& arg : cc.args) {
 					// a compiler temp passed as an argument stays live to the call (a miss ahead of it re-runs the pushes from the slot)
@@ -3879,6 +3885,36 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 	out.direct = true;
 }
 
+// a call the expression consumes as an operand: a plain-name callee (never a member call, never the reflective or parallel
+// intrinsics), its result landed in a compiler temp by op_call_temp, so the consumer takes a slot operand and a block's door lands
+// the result in a temp cell. The call runs ahead of its partner, so the partner must be one the call cannot change: a literal or
+// a private local (a slot no user code can rebind)
+bool vm_compiler::call_temp_operand(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (!e || e->get_type() != node_type::call_expr) return false;
+	const auto* call = static_cast<const call_expr*>(e);
+	if (!call->callee || call->callee->get_type() != node_type::identifier_expr) return false;
+	const auto* ident = static_cast<const identifier_expr*>(call->callee.get());
+	if (ident->name == "weak_from_this" || ident->name == "shared_from_this" || ident->name == "__jai_parallel_advance" || ident->name == "__jai_parallel_element") return false;
+	return call->arguments.size() <= 8;
+}
+bool vm_compiler::call_partner_ok(const expression* e) {
+	if (!e) return false;
+	if (e->get_type() == node_type::literal_expr) return true;
+	return e->get_type() == node_type::identifier_expr && private_local(e);
+}
+void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
+	compile_call(std::static_pointer_cast<call_expr>(e));
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	emit(opcode::op_call_temp, t);
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
+}
+
 // The fused index read of `e` lands in a fresh compiler temp: op_index_fused_decl with decl_temp (its general
 // form is the read plus a slot store, exec_index_fused_decl's temp arm); the typed lowering gives it the
 // T_LOAD row when the shape allows. `out` becomes the direct temp operand. Function bodies only.
@@ -4116,8 +4152,8 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e); };
-	const bool lsub = hoists(b->left.get()) && quiet_partner(b->right.get());
-	const bool rsub = hoists(b->right.get()) && quiet_partner(b->left.get());
+	const bool lsub = (hoists(b->left.get()) && quiet_partner(b->right.get())) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get()));
+	const bool rsub = (hoists(b->right.get()) && quiet_partner(b->left.get())) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get()));
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
 	if (binary_shape(b) != binary_shape_none) return true;
 	const int ln = lift_fusible_nodes(b->left.get());
@@ -4167,8 +4203,8 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e); };
-		const bool lsub = hoists(expr->left.get()) && quiet_partner(expr->right.get());
-		const bool rsub = hoists(expr->right.get()) && quiet_partner(expr->left.get());
+		const bool lsub = (hoists(expr->left.get()) && quiet_partner(expr->right.get())) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get()));
+		const bool rsub = (hoists(expr->right.get()) && quiet_partner(expr->left.get())) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get()));
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind
@@ -4180,6 +4216,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				if (math_temp_operand(side.get()) != detail::math_fn::none) { compile_math_into_temp(side, out); }
 				else if (unary_temp_operand(side.get())) { compile_unary_into_temp(side, out); }
 				else if (member_temp_operand(side.get())) { compile_member_into_temp(side, out); }
+				else if (call_temp_operand(side.get())) { compile_call_into_temp(side, out); }
 				else { compile_subscript_into_temp(side, expect_of(side), out); }
 			};
 			fused_binary_proto proto;
@@ -4267,6 +4304,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				fused_operand o;
 				if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, o); return o; }   // partners_ok admitted it
 				if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, o); return o; }
+				if (call_temp_operand(e.get()) && call_partner_ok(partner)) { compile_call_into_temp(e, o); return o; }   // a call ahead of a partner it cannot change
 				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner))) {
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
 					if (compile_subscript_into_temp(e, expect, o)) { return o; }

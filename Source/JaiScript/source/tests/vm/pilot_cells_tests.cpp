@@ -1247,9 +1247,11 @@ public:
 				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
 				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
 				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };"
-				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };");
+				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };"
+				" var f6 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + to_string(i).size(); i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
-			check_true(listing.find(": effect at") != std::string::npos, "the call and the break are effects: " + listing);
+			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect: " + listing);
+			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door (row 146a): " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(MEMBER_TEMP)") != std::string::npos, "the member read is a temp the block does not take yet, a translation gap: " + listing);
 		});
@@ -2938,6 +2940,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "two environment arguments, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+		});
+		test("a_call_the_expression_consumes_lands_in_a_temp_and_the_loop_closes", [this]() {
+			// row 146a: `if (side(x, y, n) == 0)`, `acc + twice(i) * 2`, `while (dec(k) > 0)`: the call's result lands in a compiler temp
+			// (op_call_temp) when its partner is a literal or a private local, the consumer reads a slot, the door lands it in a temp
+			// cell; an environment partner keeps the stack form (the general read must follow the call); a string result and a
+			// reference result land on the general form; an error inside the callee keeps its text
+			const std::string prelude =
+				"array<float> NX = [0.0, 1.0, 2.0]; array<float> NY = [0.0, 1.0, 0.0]; array<int> RIGHT = [1, 2, -1]; array<int> LEFT = [2, -1, -1]; int G = 5;\n"
+				"int side(float x, float y, int n) { float dx = x - NX[n]; float dy = y - NY[n]; if (dx * 2.0 > dy) { return 1; } return 0; }\n"
+				"int twice(int v) { return v * 2; }\n"
+				"int dec(int v) { return v - 1; }\n"
+				"string name(int i) { if (i % 2 == 0) { return \"a\"; } return \"b\"; }\n"
+				"int ovf(int v) { return v * 3; }\n"
+				"var walk = function(float x, float y) { int n = 0; int steps = 0; while (n >= 0 && steps < 8) { if (side(x, y, n) == 0) { n = RIGHT[n]; } else { n = LEFT[n]; } steps = steps + 1; } return steps * 10 + n; };\n"
+				"var sum = function(int k) { int acc = 0; for (int i = 0; i < k; i++) { acc = acc + twice(i); } return acc; };\n"
+				"var down = function(int k) { int c = 0; while (dec(k) > 0) { k = k - 1; c = c + 1; } return c; };\n"
+				"var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };\n"
+				"var names = function(int k) { int c = 0; for (int i = 0; i < k; i++) { if (name(i) == \"b\") { c = c + 1; } } return c; };\n"
+				"var blows = function(int k) { int c = 0; string m = \"\"; try { for (int i = 0; i < k; i++) { if (ovf(4611686018427387904) > 0) { c = c + 1; } } } catch (err) { m = err; } return m; };\n";
+			const std::string body =
+				"string run() { return to_string(walk(0.5, 0.2)) + \"|\" + to_string(sum(6)) + \"|\" + to_string(down(5)) + \"|\" + to_string(envpartner(4)) + \"|\" + to_string(names(7)) + \"|\" + blows(2); }\n"
+				"run();";
+			both(prelude + body, "", "calls as operands");
+			both(prelude + body, "", "calls as operands, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("CALL_TEMP") >= 4, "the calls the expressions consume land in temps: " + std::to_string(count("CALL_TEMP")) + "\n" + l);
+			check_true(count("C_PROBE") >= 3, "the loops around them close with the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
+			const std::string envl = listing_of("int G = 5; int twice(int v) { return v * 2; } var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };");
+			check_true(envl.find("CALL_TEMP") == std::string::npos, "an environment partner keeps the general order: " + envl);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
 		});
 	}
 };

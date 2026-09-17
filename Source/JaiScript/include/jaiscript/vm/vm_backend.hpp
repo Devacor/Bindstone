@@ -211,6 +211,7 @@ namespace jai::vm {
         std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
         std::map<std::string, uint64_t> profile_cells_miss_sites_;       // misses by function, the original instruction and the step
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
+        uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
         uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident

@@ -3251,6 +3251,41 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "head exits under an injected miss at every " + std::to_string(every)); }
 		});
+		test("environment_container_and_index_take_the_general_rows", [this]() {
+			// row 151.5: a site whose container and index are both environment values (`TEX_PIX[SKY_TEX]` as an element alias in a span,
+			// `A[G]` as a load and `B[G] = s` as a store in a loop) resolves each through the general instruction's own cache row; the
+			// values hold on both backends, with proofs off and under the injected miss (JaiDOOM's sky column: the alias never bound)
+			const std::string prelude =
+				"int VIEWH = 16; int SKY_TEX = 1; int G = 3;\n"
+				"array<var> TEX_PIX = []; array<int> TEX_H = [8, 8, 4]; array<int> A = [1, 2, 3, 4, 5, 6, 7, 8]; array<int> B = [0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"for (int t = 0; t < 3; ++t) { array<int> px = []; for (int i = 0; i < 64 * TEX_H[t]; ++i) { px.push((i * 7 + t * 13) % 251); } TEX_PIX.push(px); }\n"
+				"var sky = function(int x, int y0, int y1) {\n"
+				"\tif (y0 < 0) { y0 = 0; }\n"
+				"\tif (y1 >= VIEWH) { y1 = VIEWH - 1; }\n"
+				"\tif (SKY_TEX < 0) { return -1; }\n"
+				"\tint tc = (x * 37) % 64; if (tc < 0) { tc = tc + 64; }\n"
+				"\tvar& tp = TEX_PIX[SKY_TEX];\n"
+				"\tint th = TEX_H[SKY_TEX];\n"
+				"\tint base = tc * th; int acc = base * 2 - tc; int acc2 = acc + th; int acc3 = acc2 * 3;\n"
+				"\tint s = acc3;\n"
+				"\tfor (int y = y0; y <= y1; ++y) { int iv = (y * th) / VIEWH; if (iv >= th) { iv = th - 1; } s = s + tp[base + iv]; }\n"
+				"\treturn s;\n"
+				"};\n"
+				"var sweep = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + A[G] + i; B[G] = s; G = (G + 1) % 8; } return s + B[2] + B[5]; };\n";
+			const std::string body = "string run() { int s = 0; for (int x = 0; x < 12; x++) { SKY_TEX = x % 3 == 2 ? -1 : x % 3; s = s * 3 + sky(x, x % 5 - 2, 12 + x % 7); } return to_string(s) + \"|\" + to_string(sweep(40)) + \"|\" + to_string(G); }\nrun();";
+			both(prelude + body, "", "environment rows");
+			both(prelude + body, "", "environment rows, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			check_true(l.find("-- span") != std::string::npos && l.find("-- cell loop") != std::string::npos, "the sky span and the loops are blocks: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "environment rows under an injected miss at every " + std::to_string(every)); }
+		});
 	}
 };
 

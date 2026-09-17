@@ -42,8 +42,9 @@ include inside a block or a function body scopes with it (its names vanish with 
 function body a literal include (`include "file"` or `include("file")`) is spliced at parse time, as
 C++'s is: the included text is parsed into the function, so it reads and writes the function's
 parameters and locals, the locals and functions it declares are the function's own, and the checker
-and both backends see one function; a change to the included file re-parses the includer, and such a
-unit keeps no jaibite sibling. A computed path (`include(p)`) stays a runtime include: it runs in the
+and both backends see one function; a change to the included file re-parses the includer on every cache
+tier (the parse cache, the file cache's fast path and the literal cache's fast path all revalidate the spliced
+files' stamps before a hit runs), and such a unit keeps no jaibite sibling. A computed path (`include(p)`) stays a runtime include: it runs in the
 function's environment and does not see the frame (its parameters and slot locals), and the checker
 names them undeclared. A function without an include pays nothing for this. An included file the VM
 compiles at run time belongs to the including unit:

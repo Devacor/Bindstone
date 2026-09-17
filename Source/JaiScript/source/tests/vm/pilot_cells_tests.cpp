@@ -2923,6 +2923,22 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_of("var f = function() -> int { int acc = 0; for (int i = 0; i < 40; i++) { var n = 0; n++; ++n; acc = acc + n; } return acc; };");
 			check_true(l.find("-- cell loop") != std::string::npos, "an int var under the typed rows still closes: " + l);
 		});
+		test("two_environment_arguments_of_one_call_push_their_own_values", [this]() {
+			// row 143.3: a call with two global arguments inside a block ran both general loads at the copy's ip, so they shared one
+			// lookup cache slot and the second argument received the first's value (JaiDOOM's draw_weapon once its body was a span);
+			// the loop shape and the span shape, both backends, and the values through a third callee that writes the globals first
+			const char* script =
+				"var PX = 0.0; var PY = 0.0; var W = 320; int HITS = 0;\n"
+				"function place(int k, float s) -> void { PX = W / 2.0 + k * s; PY = W / 4.0 - k * s; }\n"
+				"function take(int k, float x, float y, float s) -> void { HITS = HITS + math::itrunc(x * 10.0) + math::itrunc(y * 1000.0) + k; }\n"
+				"function span_shape(int k) -> int { int lump = k + 1; if (lump < 0) { return -1; } float scale = W / 320.0; place(lump, scale); take(lump, PX, PY, scale); return HITS; }\n"
+				"function loop_shape(int n) -> int { int acc = 0; for (int i = 0; i < n; i++) { place(i, 0.5); take(i, PX, PY, 0.5); acc = acc + HITS; } return acc; }\n"
+				"to_string(span_shape(3)) + \"|\" + to_string(span_shape(7)) + \"|\" + to_string(loop_shape(4));";
+			both(script, "", "two environment arguments");
+			both(script, "", "two environment arguments, proofs off", false);
+			const std::string vm = run_on(true, script);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+		});
 	}
 };
 

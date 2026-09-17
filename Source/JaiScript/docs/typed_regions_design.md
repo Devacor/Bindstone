@@ -562,8 +562,11 @@ that rebound the slot's instance or migrated its fields). Nothing is deferred: t
 element site reads an array's, so the miss protocol needs no flush of members. A base that is an element alias (`for (auto& p
 : pool)`, `var& e = list[i]`) makes the site the alias's dependent: each rebind resolves the field from the element instance (a
 hetero table's object, a class-typed buffer's slot) through the probe, with the slot cached per site by class (a subclass element
-re-probes), and the hold check after a call re-applies the rebinds with a re-probe. Member stores and environment-name bases
-(`G.player`) follow in their rows.
+re-probes), and the hold check after a call re-applies the rebinds with a re-probe. A member store in statement position
+(`p.x = v;`, `op_set_member_value`: the value an operand, no push and no result on the general form) is a store site resolved
+the same way; `op_c_mstore` writes the field's payload in place when the value's kind is the field's kind and the field carries
+that kind's plain stamp, and misses onto the general store otherwise (its conversions, its accessors, its texts). Environment-name
+bases (`G.player`) follow in their row.
 
 ### The region IR module
 

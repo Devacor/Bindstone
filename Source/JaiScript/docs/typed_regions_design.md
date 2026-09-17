@@ -564,7 +564,8 @@ instruction lives on behind the copy, followed by a jump to the second (the tram
 A cell instruction that carries an original ip in its own word (a load's, a push's, an index store's or a rebind's origin, a bail's
 target, a container guard's snapshot instruction) names the trampoline when that ip was the span's first.
 runs, and the miss path of every copy instruction standing for the first. A span the walk refuses splits at the refused
-instruction and each half is admitted on its own. A span runs once per call, so its entry is paid per call; the minimum
+statement's boundaries (never inside a statement: a temp defined in one half and consumed on the general form would be dead at
+the half's exit) and each half is admitted on its own. A span runs once per call, so its entry is paid per call; the minimum
 length keeps the general form where a copy would not pay for it. The listing names a span's copy and trampoline, and a
 refused span as an open span; the profile counts span entries and their refusals.
 ### Fused cell pairs

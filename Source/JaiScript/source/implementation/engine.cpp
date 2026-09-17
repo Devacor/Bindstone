@@ -1731,7 +1731,7 @@ script_value engine::execute(script_source source) {
     if (source.literal()) {
         auto it = impl->literal_script_cache.find({source.data(), source.size()});
         if (it != impl->literal_script_cache.end()) {
-            if (it->second->epoch == impl->script_cache_epoch) {
+            if (it->second->epoch == impl->script_cache_epoch && !impl->spliced_changed(*it->second)) {   // a spliced include's change re-parses on this tier too
                 auto entry = it->second;
                 return impl->execute_cache_hit(*this, *entry, instance_variables{},
                                                std::string_view(source.data(), source.size()));
@@ -2109,7 +2109,8 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
             auto& node = it->second;
             bool stampValid = node.entry && node.entry->epoch == impl->script_cache_epoch &&
                               node.attributed_path == scriptPath &&
-                              node.size == size && mtime <= node.mtime;
+                              node.size == size && mtime <= node.mtime &&
+                              !impl->spliced_changed(*node.entry);   // the spliced includes' stamps, as find_cached_script checks them: a changed dependency is a miss on every tier
             if (stampValid && !node.verified) {
                 // One-shot equal-stamp verify: an edit in the same filesystem tick as
                 // the original read is invisible to the stat, so compare bytes once.

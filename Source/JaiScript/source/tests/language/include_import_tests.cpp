@@ -421,6 +421,27 @@ public:
             check_eq((int64_t)1005, eng->execute_file_source(includer, text).as_int());
             cleanup_temp_file(local);
         });
+        test("a_changed_spliced_file_reparses_its_includer_on_every_cache_tier", [=, this]() {
+            // Astra's finding of 2026-09-16 on 126.1's cache path: the same engine's execute_file (the file cache's fast path) and a literal
+            // execute (the literal cache's fast path) kept the old parse when only the spliced file changed (3, 3, 3 for 3, 11, 119); every tier
+            // now revalidates the spliced stamps before a hit runs. Different sizes move the stamp within one clock tick
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            auto dep = create_temp_file("splice_live_dep.jai", "return 3;");
+            auto parent = create_temp_file("splice_live_parent.jai", "int probe() { include \"splice_live_dep.jai\"; return 7; } return probe();");
+            check_eq((int64_t)3, eng->execute_file(parent).as_int());
+            dep = create_temp_file("splice_live_dep.jai", "return 11;");
+            check_eq((int64_t)11, eng->execute_file(parent).as_int());
+            dep = create_temp_file("splice_live_dep.jai", "return 119;");
+            check_eq((int64_t)119, eng->execute_file(parent).as_int());
+            dep = create_temp_file("splice_live_dep.jai", "return 5;");
+            check_eq((int64_t)5, eng->execute("int lit() { include \"splice_live_dep.jai\"; return 7; } return lit();").as_int());
+            dep = create_temp_file("splice_live_dep.jai", "return 55;");
+            check_eq((int64_t)55, eng->execute("int lit() { include \"splice_live_dep.jai\"; return 7; } return lit();").as_int());
+            cleanup_temp_file(dep);
+            cleanup_temp_file(parent);
+        });
         test("a_textual_include_shared_by_two_units_resolves_each_units_cells", [=, this]() {
             // row 123.5 (Astra, 2026-09-12 19:32): an included file's compiled program and the functions it defines belong to
             // the including unit; two units including the same file each get their own, so the VM's lookup caches never serve

@@ -7387,7 +7387,12 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 		} else {
 			const vm_instruction& oi = f.code->code[a.v];
 			if (oi.op == opcode::op_load) {
+				// the general load runs at its own ip: its lookup cache slot is its own, so two environment pushes of one call never share
+				// the block's (the second would answer the first's binding)
+				const size_t here = f.ip;
+				f.ip = a.v;
 				const op_status st = exec_load(f, oi);
+				f.ip = here;
 				if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = a.v; return st; }
 			} else {
 				push_constant(*f.code, oi.a);

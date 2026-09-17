@@ -2702,7 +2702,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(st.b, 0, false, 0, nullptr, ip); op.b = st.b; slot_read(op, st.b);
 				}
 				if (st.a >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
-				use_slot(st.a, stamp_kind(stamp), true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
+				// a var or auto declaration from a constant holds the constant's kind: the cell takes it, so a later typed use of another
+				// kind (the speculative rows on an unproven slot) is a disagreement the walk refuses rather than a contract the landing breaks
+				uint8_t dst_kind = stamp_kind(stamp);
+				if (dst_kind == 0 && from_const && decl) { const size_t ck = c.constants[st.b].raw_storage_index(); dst_kind = ck == script_value::TYPEID_INT ? kint : ck == script_value::TYPEID_FLOAT ? kflt : kbool; }
+				use_slot(st.a, dst_kind, true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
 			} else if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
 				// load through a site the typed lowering flattened: the fold operands are int values; a scalar decl needs a stamp

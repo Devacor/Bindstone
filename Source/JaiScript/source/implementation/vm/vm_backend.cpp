@@ -7771,10 +7771,13 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp_any(frame& f, const vm_instruct
 bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits) {
 	cell_state& cs = *f.cells;
 	const uint8_t have = cs.kind[dk];
+	const uint8_t contract = loop.cells[dk].kind;   // the kind the copy's operations assume for this cell (0: adopted, any kind)
 	if (have == 0 && !loop.cells[dk].temp) {
-		// a local the body declares enters empty: its declaration is the first write, judged by the declared kind (a var or
-		// auto declaration takes any kind; the flush stamps it with the declaration's type)
-		const uint8_t declared = loop.cells[dk].kind;
+		// a local the body declares enters empty: its declaration is the first write, judged by the declaration's own kind (a var or
+		// auto declaration takes any kind; the flush stamps it with the declaration's type); the cell's contract, which a typed use
+		// may have fixed, is checked after the landing
+		const type_info* ds = loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
+		const uint8_t declared = ds && ds->base_type == script_value_type::jai_any_type ? 0 : contract;
 		if (declared != 0 && declared != kind) {
 			if (declared == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = declared; }
 			else if (declared == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
@@ -7789,7 +7792,8 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		// a local the body declares has no slot stamp: its declaration's type is the cell's contract on every iteration
 		const type_info* st = cs.stamp[dk] ? cs.stamp[dk] : loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
 		if (st && st->base_type == script_value_type::jai_any_type) {
-			// a var: the language lands any kind; the flush keeps the any stamp
+			// a var: the language lands any kind; the flush keeps the any stamp; a kind the cell's contract does not hold misses
+			if (contract != 0 && kind != contract) return false;
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;   // a float slot widens an int (decl or store)
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && st && st->base_type == script_value_type::jai_int_type) {
@@ -7801,6 +7805,7 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 			return false;   // an int slot fed a float without a declared int stamp: the general form's conversion
 		}
 	}
+	if (have == 0 && contract != 0 && kind != contract && !loop.cells[dk].temp) return false;   // the first write of a body-declared local under its contract
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);
 	return true;
 }

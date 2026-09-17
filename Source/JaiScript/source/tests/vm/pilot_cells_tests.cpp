@@ -1239,7 +1239,7 @@ public:
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect (a break was one until row 119f, a string append
-			// a representation until row 122: both close now), a member read is a temp the block does not take yet (a translation gap since row 142), a tree deeper than
+			// a representation until row 122: both close now), a member read of a frame-slot instance is a load site (row 147a; a temp the block did not take between rows 142 and 146), a tree deeper than
 			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
@@ -1253,7 +1253,7 @@ public:
 			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect: " + listing);
 			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door (row 146a): " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(MEMBER_TEMP)") != std::string::npos, "the member read is a temp the block does not take yet, a translation gap: " + listing);
+			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes (row 147a): " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
@@ -2978,6 +2978,37 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
+		});
+		test("a_member_read_of_a_frame_slot_instance_is_a_block_site", [this]() {
+			// row 147a: `p.x` inside a loop and inside a span is a load site: the field resolved once at entry, C_MLOAD lands its kind; a
+			// string field, a user accessor and a null base keep the general form (the entry refuses); a callee that rewrites the field
+			// between reads is seen (the hold check after the call re-resolves); both backends, proofs on and off
+			const std::string prelude =
+				"class P { int x = 3; float y = 1.5; bool on = true; string name = \"p\"; int _get_z() { return x * 100; } }\n"
+				"int bump(P& p) { p.x = p.x + 1; return p.x; }\n"
+				"var sum = function(P p, int n) { int acc = 0; for (int i = 0; i < n; i++) { acc = acc + p.x * i; if (p.on) { acc = acc + 1; } } return acc; };\n"
+				"var mix = function(P p) { float a = p.y * 2.0; int b = p.x + 4; float c = a + b; int d = b * 3; float e = c - d; int f = d + 1; float g = e + f; return g; };\n"
+				"var strs = function(P p, int n) { int acc = 0; for (int i = 0; i < n; i++) { acc = acc + p.name.size(); } return acc; };\n"
+				"var acc = function(P p, int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + p.z; } return t; };\n"
+				"var rewritten = function(P p, int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + p.x; bump(p); } return t; };\n";
+			const std::string body =
+				"string run() { P p = P(); P q = P(); q.x = 10;\n"
+				"  return to_string(sum(p, 5)) + \"|\" + to_string(mix(q)) + \"|\" + to_string(strs(p, 3)) + \"|\" + to_string(acc(p, 2)) + \"|\" + to_string(rewritten(q, 4)) + \"|\" + to_string(q.x); }\n"
+				"run();";
+			both(prelude + body, "", "member read sites");
+			both(prelude + body, "", "member read sites, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("C_MLOAD") >= 4, "the member reads are sites: " + std::to_string(count("C_MLOAD")) + "\n" + l);
+			check_true(l.find("-- cell loop") != std::string::npos && l.find("-- span") != std::string::npos, "the loop over p.x closes and mix's body is a span: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member read sites under an injected miss at every " + std::to_string(every)); }
 		});
 	}
 };

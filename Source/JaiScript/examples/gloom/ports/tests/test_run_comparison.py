@@ -165,5 +165,79 @@ class MultiVariantTests(unittest.TestCase):
 		self.assertNotIn("baseline_variant",row)
 		self.assertAlmostEqual(-20,row["median_delta_percent"])
 
+
+class LuaTimedemoTests(unittest.TestCase):
+	def test_jai_only_campaign_stays_jai_only(self):
+		self.assertEqual(["jaiscript"],[c["target"] for c in comparison.selected_configurations(["timedemo"],"jai")])
+		self.assertEqual(["jaiscript","jai_doom_lua"],[c["target"] for c in comparison.selected_configurations(["timedemo"],"all")])
+
+	def test_language_pairs_interleave_in_every_build_and_layout(self):
+		configs=comparison.selected_configurations(["timedemo"],"all")
+		builds={"baseline":pathlib.Path("base"),"candidate":pathlib.Path("candidate")}
+		plan=comparison.timing_plan(configs,builds,3)
+		for build in builds:
+			for layout in ("normal","padding"):
+				order=[c["target"] for c,v,l,n in plan if v==build and l==layout]
+				self.assertEqual(["jaiscript","jai_doom_lua"]*6,order)
+
+	def test_lua_warm_replay_has_the_same_tic_hash_exit_gate(self):
+		run="played 3984 tics in 3984 ms = 1.00 ms/tic\nSTATE_HASH: 1746772898\n"
+		text="JaiDOOM Lua 5.4.8\nJAI_BENCHMARK_PHASE warmup\n"+run+"JAI_BENCHMARK_PHASE measured 1\n"+run+"JAI_BENCHMARK_END 1 exit 0\n"
+		self.assertTrue(comparison.parse_timedemo(text)["hash_match"])
+		self.assertEqual(1.0,comparison.parse_timedemo(text)["metric_ms"])
+		for invalid in [text.replace("1746772898","123",1),text.replace("3984 tics","10 tics"),text.replace("exit 0","exit 1"),text.replace("JAI_BENCHMARK_PHASE measured 1","missing")]:
+			self.assertFalse(comparison.parse_timedemo(invalid)["hash_match"])
+
+
+class FrameCertificateTests(unittest.TestCase):
+	def setUp(self):
+		import json
+		self.temp=tempfile.TemporaryDirectory()
+		self.addCleanup(self.temp.cleanup)
+		self.root=pathlib.Path(self.temp.name)
+		self.game=self.root/"examples/jaidoom"
+		self.build=self.root/"build"
+		self.cert=self.root/"certificate"
+		self.cert.mkdir()
+		self.inputs={}
+		for path in [self.game/"scripts/main.jai",self.game/"ports/lua/main.lua",
+			self.game/"demo.json",self.game/"wads/doom1.wad",
+			self.build/"bin/jai_doom_lua.exe",self.build/"bin/jai_doom_lua_padding.exe"]:
+			path.parent.mkdir(parents=True,exist_ok=True)
+			path.write_bytes(b"fixture input")
+			self.inputs[str(path)]=comparison.file_hash(path)
+		(self.cert/"inputs.json").write_text(json.dumps(self.inputs))
+		(self.cert/"comparison.json").write_text(json.dumps({"complete":True,"passed":True,
+			"inputs_unchanged":True,"replays":2,"tics_per_replay":3984}))
+		rows=[]
+		for phase,last in enumerate(("0ad5f98ab443f0bb","c2502bc18d9f42c2")):
+			for tic in range(1,3985):
+				rows.append(f"{phase}\t{tic}\t1746772898\t79443\t"+(last if tic==3984 else "0000000000000000"))
+		self.trace="\n".join(rows)+"\n"
+		for name in ("jai-vm","jai-interpreter","lua-normal","lua-padding"):
+			(self.cert/(name+".trace")).write_text(self.trace)
+
+	def validate(self):
+		return comparison.validate_timedemo_conformance(self.cert,{"baseline":self.build},self.root)
+
+	def test_complete_matching_frame_certificate_is_accepted(self):
+		self.assertEqual(7968,self.validate()["records_per_configuration"])
+
+	def test_changed_script_invalidates_the_certificate(self):
+		(self.game/"ports/lua/main.lua").write_text("changed")
+		with self.assertRaisesRegex(RuntimeError,"input changed"):
+			self.validate()
+
+	def test_matching_final_hash_cannot_hide_an_intermediate_frame_difference(self):
+		path=self.cert/"lua-normal.trace"
+		path.write_text(self.trace.replace("0000000000000000","0000000000000001",1))
+		with self.assertRaisesRegex(RuntimeError,"trace differs"):
+			self.validate()
+
+	def test_partial_trace_cannot_be_reused_as_full_conformance(self):
+		(self.cert/"lua-padding.trace").write_text(self.trace.splitlines()[0]+"\n")
+		with self.assertRaisesRegex(RuntimeError,"Incomplete frame"):
+			self.validate()
+
 if __name__=="__main__":
 	unittest.main()

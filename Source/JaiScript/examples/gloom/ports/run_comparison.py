@@ -98,7 +98,7 @@ class WindowsMachine:
 			more = self.kernel.Process32FirstW(handle,ctypes.byref(entry))
 			while more:
 				name = entry.name.lower()
-				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript")):
+				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript","jai_doom_","reference_host")):
 					result.append({"name":name,"pid":entry.pid})
 				more = self.kernel.Process32NextW(handle,ctypes.byref(entry))
 		finally:
@@ -147,27 +147,78 @@ def parse_timedemo(text, warmed=True):
 		"reported_ms_per_tic":float(reported),"played_tics":int(tics),"reported_elapsed_ms":int(elapsed),
 		"state_hash":int(hashes[-1]) if hashes else None,"frame_hash":None}
 
+
+def validate_timedemo_conformance(directory, builds, workload_root):
+	directory=directory.resolve()
+	report=json.loads((directory/"comparison.json").read_text())
+	inputs=json.loads((directory/"inputs.json").read_text())
+	if not (report.get("complete") and report.get("passed") and report.get("inputs_unchanged") and report.get("replays")==2 and report.get("tics_per_replay")==3984):
+		raise RuntimeError("A complete cold/warm JaiDOOM frame certificate is required")
+	for path,sha in inputs.items():
+		if file_hash(pathlib.Path(path))!=sha:
+			raise RuntimeError("Conformance input changed: "+path)
+	required=[* (workload_root/"examples/jaidoom/scripts").glob("*.jai"),
+		* (workload_root/"examples/jaidoom/ports/lua").glob("*.lua"),
+		workload_root/"examples/jaidoom/demo.json",workload_root/"examples/jaidoom/wads/doom1.wad"]
+	for build in builds.values():
+		required += [build/"bin/jai_doom_lua.exe",build/"bin/jai_doom_lua_padding.exe"]
+	for path in required:
+		sha=file_hash(path)
+		matched=inputs.get(str(path))==sha
+		if not matched and path.name in ("jai_doom_lua.exe","jai_doom_lua_padding.exe"):
+			matched=any(pathlib.Path(recorded).name==path.name and value==sha for recorded,value in inputs.items())
+		if not matched:
+			raise RuntimeError("Current timedemo input lacks matching frame conformance: "+str(path))
+	reference=None
+	for name in ("jai-vm","jai-interpreter","lua-normal","lua-padding"):
+		rows=(directory/(name+".trace")).read_text().splitlines()
+		if len(rows)!=7968:raise RuntimeError("Incomplete frame trace: "+name)
+		for index,line in enumerate(rows):
+			parts=line.split("\t")
+			if len(parts)!=5 or int(parts[0])!=index//3984 or int(parts[1])!=index%3984+1:
+				raise RuntimeError("Invalid frame sequence: "+name)
+		for phase,expected in enumerate(("0ad5f98ab443f0bb","c2502bc18d9f42c2")):
+			last=rows[(phase+1)*3984-1].split("\t")
+			if last[2:]!=["1746772898","79443",expected]:
+				raise RuntimeError("Reference frame/state mismatch: "+name)
+		if reference is None:reference=rows
+		elif rows!=reference:raise RuntimeError("Frame trace differs: "+name)
+	return {"directory":str(directory),"comparison_sha256":file_hash(directory/"comparison.json"),
+		"inputs_sha256":file_hash(directory/"inputs.json"),"records_per_configuration":7968}
+
 def selected_configurations(workloads, engines):
 	configs=[]
 	if "gloom" in workloads:
 		for label,target,backend,workers,cores in CONFIGURATIONS:
-			if engines=="jai" and target!="jai_gloom":
+			if (engines=="jai" and target!="jai_gloom") or (engines=="jai-lua" and target not in ("jai_gloom","gloom_lua")):
 				continue
 			configs.append({"workload":"gloom","name":label,"target":target,"backend":backend,
 				"workers":workers,"cores":cores,"unit":"ms/tick"})
 	if "timedemo" in workloads:
 		configs.append({"workload":"timedemo","name":"JaiDOOM VM timedemo","target":"jaiscript",
 			"backend":"vm","workers":0,"cores":1,"unit":"ms/tic"})
+		if engines!="jai":
+			configs.append({"workload":"timedemo","name":"JaiDOOM Lua 5.4.8 timedemo","target":"jai_doom_lua",
+				"backend":"lua","workers":0,"cores":1,"unit":"ms/tic"})
 	return configs
 
 
 def timing_plan(configs, builds, rounds):
-	return [(config, variant, layout, number)
-		for number in range(1, rounds+1)
-		for config in configs
+	# Interleave JaiDOOM languages within each layout, retaining the existing
+	# order for single-runtime campaigns and GLOOM's configurations.
+	groups=[]
+	for config in configs:
+		if config["workload"]=="timedemo" and groups and groups[-1][0]["workload"]=="timedemo":
+			groups[-1].append(config)
+		else:
+			groups.append([config])
+	return [(config,variant,layout,number)
+		for number in range(1,rounds+1)
+		for group in groups
 		for _ in range(2)
-		for layout in ("normal", "padding")
-		for variant in builds]
+		for layout in ("normal","padding")
+		for variant in builds
+		for config in group]
 
 
 def validate_resume(previous, current, records, configs, builds, out):
@@ -175,7 +226,7 @@ def validate_resume(previous, current, records, configs, builds, out):
 	for key in ("jai_workload_root", "builds", "binary_sha256", "workload_sha256",
 		"cpu_sets", "performance_cpus", "rounds", "recording", "max_background_cores",
 		"order", "warmup", "units", "padding", "competitor_poll_interval_seconds",
-		"build_input_manifests", "variant_order"):
+		"build_input_manifests", "variant_order", "timedemo_conformance"):
 		if previous.get(key) != current.get(key):
 			raise RuntimeError("Cannot resume: changed " + key)
 	if [r["sequence"] for r in records] != list(range(1,len(records)+1)):
@@ -287,9 +338,10 @@ def main():
 	parser.add_argument("--resume",action="store_true",help="Resume after completed gates, verifying the original inputs and exact accepted ABAB prefix.")
 	parser.add_argument("--max-attempts",type=int,default=10,help="Busy attempts per required timing; acceptance threshold is unchanged.")
 	parser.add_argument("--workloads",default="gloom,timedemo")
-	parser.add_argument("--engines",choices=("all","jai"),default="all")
+	parser.add_argument("--engines",choices=("all","jai","jai-lua"),default="all")
 	parser.add_argument("--max-background-cores",type=float,default=0.20)
 	parser.add_argument("--conformance-only",action="store_true")
+	parser.add_argument("--timedemo-conformance",type=pathlib.Path,help="Reuse a complete frame certificate for these exact Lua binaries and workload; otherwise generate it before timing.")
 	parser.add_argument("--recording",default="none",help="Provenance label; profiled timing is not an uninstrumented performance result.")
 	args=parser.parse_args()
 	workloads=args.workloads.split(",")
@@ -309,6 +361,21 @@ def main():
 	try:builds=variant_builds(args.build,args.compare_build,args.variant_build)
 	except ValueError as error:parser.error(str(error))
 	machine=WindowsMachine()
+	timedemo_certificate=None
+	if any(c["target"]=="jai_doom_lua" for c in configs):
+		certificate=args.timedemo_conformance
+		if certificate is None:
+			if len(builds)!=1:
+				parser.error("For multiple builds, supply a frame certificate covering their Lua binaries or use --engines jai.")
+			certificate=out/"frame-conformance"
+			if args.resume:
+				if not certificate.exists():raise RuntimeError("Missing original frame conformance")
+			else:
+				machine.wait_for_quiet(args.max_background_cores)
+				subprocess.run([os.sys.executable,str(root/"examples/jaidoom/ports/verify_conformance.py"),
+					"--build",str(next(iter(builds.values()))),"--game-root",str(jai_workload_root/"examples/jaidoom"),
+					"--output",str(certificate)],check=True)
+		timedemo_certificate=validate_timedemo_conformance(certificate,builds,jai_workload_root)
 	# Pin executable identities. Runtime source may advance in Fable's lane after a build.
 	binaries={}
 	for build in builds.values():
@@ -318,6 +385,7 @@ def main():
 				binaries[str(exe)]=file_hash(exe)
 	script_paths=list((jai_workload_root/"examples/gloom/scripts").glob("*.jai"))
 	script_paths+=list((jai_workload_root/"examples/jaidoom/scripts").glob("*.jai"))
+	script_paths+=list((jai_workload_root/"examples/jaidoom/ports/lua").glob("*.lua")) if any(c["target"]=="jai_doom_lua" for c in configs) else []
 	script_paths+=list((root/"examples/gloom/ports").rglob("*.lua"))
 	script_paths+=list((jai_workload_root/"examples/gloom/ports/squirrel/scripts").glob("*.nut"))
 	script_paths += [jai_workload_root/"examples/jaidoom/demo.json",jai_workload_root/"examples/jaidoom/wads/doom1.wad"] if "timedemo" in workloads else []
@@ -327,11 +395,12 @@ def main():
 		"jai_workload_root":str(jai_workload_root),"builds":{k:str(v) for k,v in builds.items()},"binary_sha256":binaries,"workload_sha256":workload_hashes,
 		"cpu_sets":machine.cpu_sets,"performance_cpus":machine.performance_cpus,
 		"rounds":args.rounds,"recording":args.recording,"max_background_cores":args.max_background_cores,
-		"order":"For each workload/round: normal baseline/candidate, padding baseline/candidate, repeated twice.",
+		"order":"For each workload/round: normal baseline/candidate, padding baseline/candidate, repeated twice; timedemo languages interleave inside each variant/layout.",
 		"warmup":{"gloom":"600 ticks then reboot in the same runtime","timedemo":"initial file/main execution then another main() in the same engine"},
 		"units":{"gloom":"ms/tick","timedemo":"reported elapsed integer ms / reported tic count"},
 		"competitor_poll_interval_seconds":0.25,
 		"padding":"40 retained volatile statements in each executable's cold help function"}
+	if timedemo_certificate is not None:metadata["timedemo_conformance"]=timedemo_certificate
 	if len(builds)>2:
 		metadata["variant_order"]=list(builds)
 		metadata["order"]="For each workload/round: normal variants in variant_order, padding variants in variant_order, repeated twice."
@@ -368,6 +437,10 @@ def main():
 				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad"]
 			if config["target"]=="jai_gloom":command+=["--scripts",str(jai_workload_root/"examples/gloom/scripts")]
 			elif config["target"]=="gloom_squirrel":command+=["--scripts",str(jai_workload_root/"examples/gloom/ports/squirrel/scripts")]
+		elif config["target"]=="jai_doom_lua":
+			command=[str(exe),"--scripts",str(jai_workload_root/"examples/jaidoom/ports/lua"),
+				"--game-root",str(jai_workload_root/"examples/jaidoom"),"--repeat","0" if cold else "1","--",
+				str(jai_workload_root/"examples/jaidoom/demo.json"),"120x78"]
 		else:
 			command=[str(exe),"--no-debug","--no-pause","--backend="+config["backend"]]
 			if not cold:command+=["--benchmark-main=1"]
@@ -411,7 +484,14 @@ def main():
 			ok=len(rows)==1 and rows[0][3]==expected[1] and int(rows[0][4])==expected[2]
 			parsed={"hash_match":ok,"metric_ms":float(rows[0][2]) if len(rows)==1 else None,
 				"frame_hash":rows[0][3] if len(rows)==1 else None,"state_hash":int(rows[0][4]) if len(rows)==1 else None}
-		else:parsed=parse_timedemo(text,not cold)
+		else:
+			parsed=parse_timedemo(text,not cold)
+			if config["target"]=="jai_doom_lua":
+				version=re.search(r"^JaiDOOM (Lua [0-9.]+)",text,re.M)
+				parsed["runtime_version"]=version.group(1) if version else None
+				if parsed["runtime_version"]!="Lua 5.4.8":
+					parsed["hash_match"]=False
+					parsed["error"]="Lua runtime version does not match the configuration label"
 		record={"sequence":sequence,"configuration":config["name"],"workload":config["workload"],
 			"unit":config["unit"],"variant":variant,"layout":layout,"phase":phase,"round":round_number,
 			"command":command,"log":filename,"pid":process.pid,"exit_code":process.returncode,

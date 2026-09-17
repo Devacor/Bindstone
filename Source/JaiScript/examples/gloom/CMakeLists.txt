@@ -141,3 +141,9 @@ endif()
 
 # Additional pinned Lua comparisons and optional placement controls.
 include(ports/comparison.cmake)
+
+# JaiDOOM uses the same Lua runtime and whole-program comparison protocol.
+option(JAIDOOM_PORT_LUA "Build the headless Lua JaiDOOM comparison" OFF)
+if(JAIDOOM_PORT_LUA)
+	add_subdirectory("../jaidoom/ports" "jaidoom_ports")
+endif()

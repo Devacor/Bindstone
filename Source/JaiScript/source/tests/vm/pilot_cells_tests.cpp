@@ -3158,10 +3158,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var sited = function(var arr, int k) { int a = arr[k] + 1; int b = a * 2; int c = b - k; int d = c * 3; int e = d + a; int f = e - 2; int g = f + 1; return g; };\n"
 				"array<char> CH = ['x', 'y'];\n"
 				"var charspan = function(int i) { var d = CH[0]; int a = i + 1; int b = a * 2; int c = b - i; int e = c + 3; int f = e * 2; int g = f - 1; int h = g + 2; return to_string(h) + d; };\n"
-				"var callfirst = function(int x) { int b = twice(x); int c = b + 1; int d = c * 2; int e = d - x; int f = e + 3; int g = f * 2; int h = g - 1; int k = h + 4; return k; };\n";
+				"var callfirst = function(int x) { int b = twice(x); int c = b + 1; int d = c * 2; int e = d - x; int f = e + 3; int g = f * 2; int h = g - 1; int k = h + 4; return k; };\n"
+				"array<int> IDX = [3, 1, 2, 0]; array<int> VAL = [10, 20, 30, 40];\n"
+				"var headguard = function(int i) { int a = VAL[IDX[i]]; int b = VAL[IDX[(i + 1) & 3]]; int c = a + b; int d = c * 2; int e = d - a; int f = e + b; int g = f * 3; int h = g - 1; return h; };\n";   // row 144.1: the span's first instruction is a container guard's snapshot (OPERAND_TEMP); a miss after it re-runs the guarded read on the general form
 			const std::string body =
 				"string run() {\n"
-				"  int s = 0; var A = [4, 5, 6]; string cs = charspan(3) + charspan(4); int cf = callfirst(3) + callfirst(10);\n"
+				"  int s = 0; var A = [4, 5, 6]; string cs = charspan(3) + charspan(4); int cf = callfirst(3) + callfirst(10) + headguard(1) + headguard(2) + headguard(3);\n"
 				"  for (int i = 0; i < 64; i++) { s = s + light_band(i * 7, 12) + col(i, 40 + i % 9, 3) + door(i) + early(i - 30) + armed(i * 2, A) + tiny(i); }\n"
 				"  string ov = \"\"; try { ov = to_string(overflow_first(4611686018427387904)); } catch (err) { ov = \"caught\"; }\n"
 				"  string ov2 = \"\"; try { ov2 = to_string(overflow_first(5)); } catch (err) { ov2 = \"caught\"; }\n"

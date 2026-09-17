@@ -551,6 +551,20 @@ backends, so the store-value hoist is already in that order. A reference declara
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
 
+### Straight-line spans
+
+A function body's instructions outside every loop form spans: the maximal runs cut at the targets of jumps from before the
+run (its own arms' joins stay inside), at the machinery around a loop and before an implicit return. A span of at
+least `chunk::k_span_min_instructions` instructions is admitted by the loop body's walk (the same operations and refusals,
+the bails inside arms, the calls through the door, a return as an exit) and, when it closes, gets a cell-form copy like a
+loop's: its entry (`op_cells_span`) takes the place of its first instruction and runs the guards, the site resolution and
+the unboxing a back edge runs (no budget poll: a span has no back edge, the calls and loops around it poll), the copy ends
+in an exit that flushes and continues after the span, and a miss re-runs the original instruction as in a loop. The first
+instruction lives on behind the copy, followed by a jump to the second (the trampoline): the general form an entry refusal
+runs, and the miss path of every copy instruction standing for the first. A span the walk refuses splits at the refused
+instruction and each half is admitted on its own. A span runs once per call, so its entry is paid per call; the minimum
+length keeps the general form where a copy would not pay for it. The listing names a span's copy and trampoline, and a
+refused span as an open span; the profile counts span entries and their refusals.
 ### Fused cell pairs
 
 The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes

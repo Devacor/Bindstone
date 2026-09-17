@@ -206,7 +206,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 	}
 
 	for (const auto& loop : ch.cell_loops) {
-		out << "-- cell loop " << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "");
+		out << (loop.span ? "-- span " : "-- cell loop ") << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.span ? " (trampoline " + std::to_string(loop.trampoline) + ")" : std::string()) << (loop.counted != k_invalid_u32 ? " (counted)" : "");
 		if (!loop.calls.empty()) { out << " (calls " << loop.calls.size() << ")"; }
 		out << " cells";
 		for (const auto& cl : loop.cells) { out << " " << (cl.env_operand != k_invalid_u32 ? "env" : cl.temp ? "t" : "s") << cl.slot << ":" << static_cast<unsigned>(cl.kind); }   // slot:kind (kinds: 0 adopted, 1 int, 2 float, 5 bool)
@@ -214,7 +214,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 		if (!loop.ir_text.empty()) { out << "-- ir " << loop.ir_text << "\n"; }
 	}
 	for (const auto& r : ch.cell_refusals) {
-		out << "-- open loop " << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";
+		out << (r.span ? "-- open span " : "-- open loop ") << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";
 	}
 	for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
 		if (ch.closure_protos[i].body_chunk) {

@@ -8345,7 +8345,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 // a member store site: the field the entry (or the alias's rebind) resolved takes the value's payload in place when the value's kind is
 // the field's kind and the field carries the plain stamp of that kind (a typed field converts nothing then, a var field keeps its kind and
 // stamp as the general store would leave them); any other pair misses onto the general store, which converts or raises by its own rules
-JAI_FORCEINLINE op_status vm_backend::exec_c_mstore(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_c_mstore(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
@@ -8373,7 +8373,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mstore(frame& f, const vm_instructi
 
 // a member read site: the field's value the entry resolved (the hold check after a call re-resolves it), its kind and payload
 // landed in the cell; a field that is not a scalar at this read misses onto the general member read
-JAI_FORCEINLINE op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];

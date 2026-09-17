@@ -6903,6 +6903,20 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	return cells_run(f, loop);
 }
 
+// a straight-line span's entry (docs/typed_regions_design.md): in place of the span's first instruction; the guards and the unboxing
+// as at a back edge, no budget poll (the span has no back edge; the calls and loops around it poll), then the copy; a refusal runs
+// the trampoline (the first instruction relocated behind the copy, then a jump to the second)
+op_status vm_backend::exec_cells_span(frame& f, const vm_instruction& ins) {
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_CELLS_COUNT(14); f.ip = loop.trampoline; return {}; }
+	cell_state& cs = *f.cells;
+	cs.loop = ins.a;
+	cs.dirty.reset();
+	JAI_CELLS_COUNT(0); JAI_CELLS_COUNT(13);
+	f.ip = loop.copy_head;
+	return cells_run(f, loop);
+}
+
 // the load and store sites' containers, resolved at the entry and again after every call inside the block (a callee may
 // replace or grow a container the block reads): false = a site whose container is not a plain array node
 // a container reached through a member of a frame-slot instance (`ch.odist[ci]`): the plain field the member IC's probe
@@ -7462,7 +7476,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 		f.cells->dirty &= ~loop.env_mask;
 	}
 	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
-	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
+	const op_status st = exec_probe_callee(f, f.code->code[loop.span && cc.probe_ip == loop.head ? loop.trampoline : cc.probe_ip], &observed);   // a span whose first instruction is the probe holds the entry there: the probe itself moved to the trampoline
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
 	if (observed && !cells_reland(f, loop, cc)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
@@ -16423,6 +16437,7 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
+		fprintf(stderr, "[vm-profile] spans (measured span): entries %llu | entries refused %llu\n", (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[14]);
 		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
@@ -16467,7 +16482,7 @@ void vm_backend::dump_opcode_profile() const {
 				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7]);
 			for (const auto& [code, st] : profile_chunks_) {
 				for (const auto& r : st.refusals) {
-					fprintf(stderr, "[vm-profile]   open loop: %s line %u (ips %u..%u): %s at ip %u (%s)\n", st.name.empty() ? "<top level>" : st.name.c_str(),
+					fprintf(stderr, "[vm-profile]   open %s: %s line %u (ips %u..%u): %s at ip %u (%s)\n", r.span ? "span" : "loop", st.name.empty() ? "<top level>" : st.name.c_str(),
 						r.head < st.lines.size() ? st.lines[r.head] : 0u, r.head, r.back, chunk::cell_refusal_name(r.reason), r.ip, std::string(opcode_name(static_cast<opcode>(r.op))).c_str());
 				}
 			}
@@ -16902,6 +16917,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				continue;
 			case opcode::op_cells_cfor_back:
 				VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins));
+				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
+				continue;
+			case opcode::op_cells_span:
+				VM_TRY_OP_SHARED(exec_cells_span(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;

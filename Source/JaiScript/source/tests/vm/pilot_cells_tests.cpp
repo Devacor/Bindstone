@@ -911,8 +911,8 @@ public:
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			size_t maths = 0, temps = 0;
-			for (size_t at = listing.find("MATH"); at != std::string::npos; at = listing.find("MATH", at + 4)) { ++maths; if (listing.compare(at, 9, "MATH_TEMP") == 0) { ++temps; } }
-			check_true(maths == 3 && temps == 3, "every intrinsic lands in a temp: " + listing);
+			for (size_t at = listing.find("MATH"); at != std::string::npos; at = listing.find("MATH", at + 4)) { if (at >= 2 && listing.compare(at - 2, 2, "C_") == 0) { continue; } ++maths; if (listing.compare(at, 9, "MATH_TEMP") == 0) { ++temps; } }
+			check_true(maths == temps && temps >= 3, "every intrinsic lands in a temp (a span's trampoline may repeat one): " + listing);
 			check_true(listing.find("T_AND_II") != std::string::npos && listing.find("T_SHL_II") != std::string::npos && listing.find("T_ADD_II") != std::string::npos, "the binaries around them take the int rows: " + listing);
 		});
 		test("an_index_tree_lands_in_a_temp_and_the_read_takes_the_typed_row", [this]() {
@@ -3140,6 +3140,54 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "fused pairs under an injected miss at every " + std::to_string(every)); }
+		});
+		test("a_straight_line_span_runs_as_a_block", [this]() {
+			// row 144: a function body's maximal loop-free runs are regions; the entry stands in place of the first instruction, the copy
+			// ends in an exit, the first instruction lives on behind the copy (the trampoline) for the entry's refusal and a miss at it
+			const std::string prelude =
+				"array<int> LIGHT = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];\n"
+				"var light_band = function(int dist, int base) { int shift = dist >> 4; int idx = base - shift; if (idx < 0) { idx = 0; } if (idx > 15) { idx = 15; } int band = LIGHT[idx] * 2 + 1; return band; };\n"
+				"var col = function(int x, int h, int base) { int sh = h << 8; int step = sh / 40; int acc = base * 3 + x; int frac = acc & 255; int top = h / 4; int bottom = h - top; int mid = top + bottom; int sum = mid - mid;"
+				" for (int y = top; y < bottom; y++) { sum = sum + ((y * step) >> 8) + frac; } int t1 = sum + bottom * 2; int t2 = t1 - top; int t3 = t2 + mid; int t4 = t3 - mid; int t5 = t4 + frac; int t6 = t5 - frac; int t7 = t6 * 2; int t8 = t7 / 2; return t8; };\n"
+				"int twice(int v) { return v * 2; }\n"
+				"var door = function(int x) { int a = x * 3; int b = twice(a); int b2 = b + 1; int c = b2 - x; int d = c * 2; int e = d + a; int f = e - 7; int g = f + 1; return g; };\n"
+				"var early = function(int x) { int a = x + 1; if (a < 0) { return -1; } int b = a * 2; int c = b + x; int d = c - 3; int e = d * 2; int f = e + 1; int g = f - 1; return g; };\n"
+				"var armed = function(int x, var& arr) { int a = x + 2; int b = a * 3; if (x > 100) { b = b + cast<int>(x); } int c = b - x; int d = c * 2; int e = d + a; int f = e - 1; int g = f + 3; return g; };\n"
+				"var tiny = function(int a) { return a + 1; };\n"
+				"var overflow_first = function(int a) { int b = a * 3; int c = b + 1; int d = c * 2; int e = d - 7; int f = e + a; int g = f * 2; int h = g - 1; int i2 = h + 1; return i2; };\n"
+				"var sited = function(var arr, int k) { int a = arr[k] + 1; int b = a * 2; int c = b - k; int d = c * 3; int e = d + a; int f = e - 2; int g = f + 1; return g; };\n"
+				"array<char> CH = ['x', 'y'];\n"
+				"var charspan = function(int i) { var d = CH[0]; int a = i + 1; int b = a * 2; int c = b - i; int e = c + 3; int f = e * 2; int g = f - 1; int h = g + 2; return to_string(h) + d; };\n"
+				"var callfirst = function(int x) { int b = twice(x); int c = b + 1; int d = c * 2; int e = d - x; int f = e + 3; int g = f * 2; int h = g - 1; int k = h + 4; return k; };\n";
+			const std::string body =
+				"string run() {\n"
+				"  int s = 0; var A = [4, 5, 6]; string cs = charspan(3) + charspan(4); int cf = callfirst(3) + callfirst(10);\n"
+				"  for (int i = 0; i < 64; i++) { s = s + light_band(i * 7, 12) + col(i, 40 + i % 9, 3) + door(i) + early(i - 30) + armed(i * 2, A) + tiny(i); }\n"
+				"  string ov = \"\"; try { ov = to_string(overflow_first(4611686018427387904)); } catch (err) { ov = \"caught\"; }\n"
+				"  string ov2 = \"\"; try { ov2 = to_string(overflow_first(5)); } catch (err) { ov2 = \"caught\"; }\n"
+				"  var M = {0: 3, 1: 4}; int st = sited(A, 1) + sited(M, 1) + sited(A, 2);\n"
+				"  return to_string(s) + \"|\" + ov + \"|\" + ov2 + \"|\" + to_string(st) + \"|\" + cs + \"|\" + to_string(cf);\n"
+				"}\n"
+				"run();";
+			both(prelude + body, "", "straight-line spans");
+			both(prelude + body, "", "straight-line spans, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|caught|") != std::string::npos, "the shapes ran: " + vm);
+			const std::string l = listing_of(prelude);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("CELLS_SPAN") >= 6, "the whole bodies and the prologue and epilogue enter as spans: " + std::to_string(count("CELLS_SPAN")) + " entries\n" + l);
+			check_true(count("-- span ") >= 6 && l.find("(trampoline ") != std::string::npos, "the spans are listed with their trampolines: " + l);
+			check_true(l.find("-- cell loop ") != std::string::npos, "col's loop closes beside its spans: " + l);
+			check_true(count("C_BAIL") >= 1, "the arm with the method call bails: " + l);
+			check_true(count("C_PROBE") >= 1, "door's call runs through the door: " + l);
+			const std::string tiny_l = listing_of("var tiny = function(int a) { return a + 1; };");
+			check_true(tiny_l.find("CELLS_SPAN") == std::string::npos, "a short body keeps the general form: " + tiny_l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "spans under an injected miss at every " + std::to_string(every)); }
 		});
 	}
 };

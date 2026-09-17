@@ -21,6 +21,10 @@ region_cfg control_flow(const region_ir& r) {
 		}
 	}
 	g.succ[g.back_node][0] = 0;
+	if (r.span) {   // a span: whatever would continue to the back node leaves the region
+		g.succ[g.back_node] = std::array<size_t, 2>{ g.exit_node, g.exit_node };
+		for (size_t k = 0; k < n_ops; ++k) { for (size_t& s : g.succ[k]) { if (s == g.back_node) { s = g.exit_node; } } }
+	}
 	g.preds.assign(n_ops + 1, {});
 	for (size_t k = 0; k <= n_ops; ++k) { for (size_t s : g.succ[k]) { if (s <= n_ops && s != 0) { g.preds[s].push_back(k); } } }
 	return g;
@@ -82,7 +86,7 @@ std::string listing(const region_ir& r) {
 		const ir_op& op = r.ops[k];
 		text += std::to_string(k) + ":" + ir_name(op.kind);
 		if (op.kind == ir::cmp || op.kind == ir::jump || op.kind == ir::exit || op.kind == ir::bail || op.kind == ir::range) {
-			text += op.kind == ir::exit || op.kind == ir::bail || op.head || op.target > r.back || op.target < r.first ? "->exit" : op.target == r.back ? "->back" : "->" + std::to_string(op.target - r.first);
+			text += op.kind == ir::exit || op.kind == ir::bail || op.head || op.target > r.back || op.target < r.first ? "->exit" : op.target == r.back ? (r.span ? "->exit" : "->back") : "->" + std::to_string(op.target - r.first);
 		}
 		if (op.writes != k_invalid_u32) { text += " w" + std::to_string(op.writes); }
 		for (uint8_t x = 0; x < op.nreads; ++x) { text += (x ? "," : " r") + std::to_string(op.reads[x]); }

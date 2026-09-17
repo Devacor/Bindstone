@@ -225,6 +225,8 @@ namespace jai::vm {
         op_c_arith_load,    // C_ARITH_P then C_LOAD
         op_c_load_jcmp,     // C_LOAD then C_JCMP_P
         op_c_arith_jump,    // C_ARITH_P then C_JUMP
+        op_cells_span,      // a = cell loop index: a straight-line span's entry, in place of its first instruction; the guards
+                            // and the unboxing, then the copy (or the trampoline, the first instruction relocated, when a guard refuses)
         op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
         op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
@@ -381,6 +383,7 @@ namespace jai::vm {
             case opcode::op_c_arith_load: return "C_ARITH_P+C_LOAD";
             case opcode::op_c_load_jcmp: return "C_LOAD+C_JCMP_P";
             case opcode::op_c_arith_jump: return "C_ARITH_P+C_JUMP";
+            case opcode::op_cells_span: return "CELLS_SPAN";
             case opcode::op_c_arith: return "C_ARITH";
             case opcode::op_c_cmp: return "C_CMP";
             case opcode::op_c_load: return "C_LOAD";

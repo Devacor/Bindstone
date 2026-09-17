@@ -3630,6 +3630,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const bool origin_in_c = ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_push || ci.op == opcode::op_c_index_store || ci.op == opcode::op_c_rebind;
 				if (origin_in_c && ci.c == static_cast<uint32_t>(head)) { ci.c = loop.trampoline; }
 				if (ci.op == opcode::op_c_bail && ci.a == static_cast<uint32_t>(head)) { ci.a = loop.trampoline; }
+				if (ci.op == opcode::op_c_guard && (ci.b >> 8) != 0xFFFFFFu && ci.c == static_cast<uint32_t>(head)) { ci.c = loop.trampoline; }   // a container guard reads its snapshot instruction (OPERAND_TEMP) at c: relocated with the first instruction
 			}
 			const vm_instruction entry_original = code[head];
 			append(entry_original, head);

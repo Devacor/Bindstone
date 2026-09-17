@@ -561,6 +561,8 @@ loop's: its entry (`op_cells_span`) takes the place of its first instruction and
 the unboxing a back edge runs (no budget poll: a span has no back edge, the calls and loops around it poll), the copy ends
 in an exit that flushes and continues after the span, and a miss re-runs the original instruction as in a loop. The first
 instruction lives on behind the copy, followed by a jump to the second (the trampoline): the general form an entry refusal
+A cell instruction that carries an original ip in its own word (a load's, a push's, an index store's or a rebind's origin, a bail's
+target, a container guard's snapshot instruction) names the trampoline when that ip was the span's first.
 runs, and the miss path of every copy instruction standing for the first. A span the walk refuses splits at the refused
 instruction and each half is admitted on its own. A span runs once per call, so its entry is paid per call; the minimum
 length keeps the general form where a copy would not pay for it. The listing names a span's copy and trampoline, and a

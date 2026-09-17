@@ -402,6 +402,7 @@ namespace jai::vm {
             struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint)
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
+            std::vector<uint32_t> inline_sites;   // the inlined leaves inside the region (chunk::inline_sites indexes): their guards hold at the entry and after every effect point
             // a range-for head (`for (auto& p : pool)`): the iter_protos index (the loop variable's slot and binding), the index cell (the
             // iteration state's index at entry, stepped by the back edge, synced on a miss and at the exit) and the head's site (the state's container)
             uint32_t iter_proto = k_invalid_u32, iter_index_cell = k_invalid_u32, iter_site = k_invalid_u32;
@@ -478,6 +479,17 @@ namespace jai::vm {
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
+        // an inlined leaf (docs/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
+        // name binds the function whose body is `body`; otherwise the fallback [fallback_ip, join_ip) runs the original statement
+        struct inline_site {
+            fused_operand callee;                 // the callee identifier, resolved as the probe resolves it
+            uint32_t name_symbol = k_invalid_u32;
+            const block_stmt* body = nullptr;
+            const function_decl* decl = nullptr;   // the callee: its name for the trace
+            const ast_node* call_stmt = nullptr;   // the caller's statement: the trace's line for the caller's frame
+            uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
+        };
+        std::vector<inline_site> inline_sites;
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

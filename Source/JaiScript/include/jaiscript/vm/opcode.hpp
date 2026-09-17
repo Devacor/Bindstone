@@ -105,6 +105,7 @@ namespace jai::vm {
         op_return_binary,   // a=token_type, b=operand shape, c=static_return_proof: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
+        op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (docs/typed_regions_design.md, Inlined leaves)
         op_probe_callee,    // a=site index, b=argc: resolve the identifier callee at the
                             // callee-first observation point (Dev ruling 2026-07-08:
                             // callee-before-args IS the language, matching C++17) into the
@@ -459,6 +460,7 @@ namespace jai::vm {
             case opcode::op_return_ident: return "RETURN_IDENT";
             case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_return_convert: return "RETURN_CONVERT";
+            case opcode::op_inline_guard: return "INLINE_GUARD";
             case opcode::op_probe_callee: return "PROBE_CALLEE";
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
             case opcode::op_probe_member: return "PROBE_MEMBER";

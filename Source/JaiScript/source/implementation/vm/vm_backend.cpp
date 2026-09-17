@@ -1148,6 +1148,13 @@ void vm_backend::capture_stack_trace() {
 			top_node = node;
 			continue;
 		}
+		for (const chunk::inline_site& s : fr->code->inline_sites) {   // an inlined leaf: the callee's frame as the interpreter has it, the caller's line the call's
+			if (fr->ip >= s.begin_ip && fr->ip < s.fallback_ip && s.decl) {
+				captured_trace_.push_back({ std::string(s.decl->name), node ? node->location.filename : std::string(), node ? node->location.line : 0 });
+				node = s.call_stmt;
+				break;
+			}
+		}
 		captured_trace_.push_back({
 			fr->code->function_name.empty() ? std::string("<anonymous>") : fr->code->function_name,
 			node ? node->location.filename : std::string(),
@@ -7289,6 +7296,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		}
 	}
 	if (!loop.sites.empty() && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
+	for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
 	if (cs.payload.size() < loop.cells.size()) {
@@ -7575,6 +7583,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 	}
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
+	for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; }   // a callee rebound the inlined leaf's name
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
@@ -9975,6 +9984,25 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 	                                    target.class_def ? std::string_view(target.class_def->get_name()) : std::string_view{},
 	                                    target.class_def ? target.class_def->get_type_id() : 0);
 	return raise_(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
+}
+
+// an inlined leaf's guard (docs/typed_regions_design.md, Inlined leaves): the site's name binds the function the graft was made from,
+// read through the name's own cache row without running a getter (a binding that is a property or an element reference takes the
+// fallback), and no debugger is armed; otherwise the fallback runs the original statement with its real call
+bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
+	if (debug_hook_) return false;
+	const script_value* v = fused_cmp_operand(f, site.callee, static_cast<size_t>(site.guard_ip) * 3);
+	if (!v) return false;
+	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
+	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+	const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
+	return thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && !thunk->payload.fn->closure_env && thunk->payload.fn->body.get() == site.body;
+}
+op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
+	const chunk::inline_site& site = f.code->inline_sites[ins.a];
+	if (inline_site_holds(f, site)) { ++f.ip; return {}; }
+	f.ip = ins.b;
+	return {};
 }
 
 op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, bool* observed) {
@@ -16694,6 +16722,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
+			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
 			case opcode::op_probe_callee:
 				VM_TRY_OP_SHARED(exec_probe_callee(f, ins));
 				break;

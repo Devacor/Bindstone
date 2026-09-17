@@ -498,6 +498,12 @@ builds count entries, refusals, cell iterations, unboxes, exits, misses by step,
 flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
 (21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.
 
+A cell's kind is the contract of the copy's operations (a pinned operation reads the payload as that kind without a check).
+A live-in cell's slot proves it at the entry; a local the body declares proves it at its landings: a typed declaration lands
+by its own kind's conversion, a `var` or `auto` declaration takes the kind its value has (a constant seeds the cell's kind at
+admission, so a typed use of another kind refuses the block), and a landing of any other kind into a cell with a fixed kind is a
+miss, never a conversion the language does not make.
+
 A build with `JAISCRIPT_MISS_INJECTION` defined carries a testing lever, `engine::cells_miss_every(n)`: every nth cell
 instruction whose own miss re-runs its original instruction (a compare, an arithmetic, a load, a store, a move, a math
 call, an append, a push) misses before it runs, as a failed guard would; the back edges, an iteration head's landing (a

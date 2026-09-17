@@ -2906,6 +2906,23 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, run(true, every), "an injected miss at every " + std::to_string(every) + " plain cell instructions");
 			}
 		});
+		test("a_var_local_fixed_to_int_by_a_typed_use_keeps_its_float", [this]() {
+			// row 143.2: a var local declared in the body from a float constant, incremented by the speculative typed row: the cell's
+			// kind was fixed to int by the increment and the landing took that for the declaration's kind (a span truncated the
+			// constant, a loop's pinned arithmetic read the float's bits). The declaration's own kind judges the first write, the
+			// cell's contract refuses any other kind at the landing, and a constant seeds the cell's kind at admission
+			const char* script =
+				"function span_shape() -> string { var f = 1.5; ++f; f--; ++f; return to_string(f); }\n"
+				"function loop_shape() -> float { float acc = 0.0; for (int i = 0; i < 3; i++) { var f = 1.5; ++f; f--; ++f; acc = acc + f; } return acc; }\n"
+				"function any_shape() -> float { float acc = 0.0; for (int i = 0; i < 3; i++) { var f = 1.5; f = f * 1.5; ++f; acc = acc + f; } return acc; }\n"
+				"function from_slot(var g) -> float { float acc = 0.0; for (int i = 0; i < 3; i++) { var f = g; ++f; acc = acc + f; } return acc; }\n"
+				"function int_var() -> int { int acc = 0; for (int i = 0; i < 40; i++) { var n = 0; n++; ++n; acc = acc + n; } return acc; }\n"
+				"span_shape() + \"|\" + to_string(loop_shape()) + \"|\" + to_string(any_shape()) + \"|\" + to_string(from_slot(2.5)) + \"|\" + to_string(from_slot(2)) + \"|\" + to_string(int_var());";
+			both(script, "2.500000|7.500000|9.750000|10.500000|9.000000|80", "a var local under a typed use");
+			both(script, "", "a var local under a typed use, proofs off", false);
+			const std::string l = listing_of("var f = function() -> int { int acc = 0; for (int i = 0; i < 40; i++) { var n = 0; n++; ++n; acc = acc + n; } return acc; };");
+			check_true(l.find("-- cell loop") != std::string::npos, "an int var under the typed rows still closes: " + l);
+		});
 	}
 };
 

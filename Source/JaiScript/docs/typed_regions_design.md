@@ -559,8 +559,11 @@ no user accessor in the chain) and keeps the field's value for the copy, and `op
 in the temp cell at every read. A base that is not such an instance, a field that is not an int, a float or a bool, refuses
 the entry, and the general form runs; the hold check after a call resolves the field again and misses on a change (a callee
 that rebound the slot's instance or migrated its fields). Nothing is deferred: the site reads the instance's field storage as an
-element site reads an array's, so the miss protocol needs no flush of members. Member stores, environment-name bases (`G.player`)
-and instances held by an alias follow in their rows.
+element site reads an array's, so the miss protocol needs no flush of members. A base that is an element alias (`for (auto& p
+: pool)`, `var& e = list[i]`) makes the site the alias's dependent: each rebind resolves the field from the element instance (a
+hetero table's object, a class-typed buffer's slot) through the probe, with the slot cached per site by class (a subclass element
+re-probes), and the hold check after a call re-applies the rebinds with a re-probe. Member stores and environment-name bases
+(`G.player`) follow in their rows.
 
 ### The region IR module
 

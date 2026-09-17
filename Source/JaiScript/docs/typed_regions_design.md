@@ -566,7 +566,9 @@ re-probes), and the hold check after a call re-applies the rebinds with a re-pro
 (`p.x = v;`, `op_set_member_value`: the value an operand, no push and no result on the general form) is a store site resolved
 the same way; `op_c_mstore` writes the field's payload in place when the value's kind is the field's kind and the field carries
 that kind's plain stamp, and misses onto the general store otherwise (its conversions, its accessors, its texts). Environment-name
-bases (`G.player`) follow in their row.
+bases (`G.player`) follow in their row. An element alias passed as a call argument passes its element reference: the door
+flushes the alias (the reference its declaration binds, built into the slot) and pushes the slot's value as the general LOAD does,
+so a loop whose body calls a function on each element (`for (auto& p : pool) { step(p); }`) closes and lands without a miss.
 
 ### The region IR module
 

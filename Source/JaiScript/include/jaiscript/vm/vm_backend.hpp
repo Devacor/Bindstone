@@ -476,6 +476,8 @@ namespace jai::vm {
             std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
             std::vector<const script_array*> site_node2;  // per copy instruction: a push site's source container (an element push), resolved at entry
             std::vector<const script_value*> site_member;   // per copy instruction: a member read site's field value, resolved at entry (the instance's plain field)
+            std::vector<class_definition*> site_member_class;   // per copy instruction: the class the member site's field slot was probed for (an alias site: per element; nullptr = probe)
+            std::vector<uint32_t> site_member_slot;              // per copy instruction: that class's field slot
             // how each site's container is reached (recorded by the resolution): its frame slot, or its environment binding; a landing
             // after a call re-checks the node's identity through that path instead of resolving again. An environment cell's binding
             // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
@@ -1691,10 +1693,11 @@ namespace jai::vm {
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
-        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
+        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);
+        const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
-        bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index);   // the alias's sites take the table's element at index, a plain array node, else false
+        bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe);   // the alias's sites take the table's element at index, a plain array node, else false
         op_status exec_c_rebind(frame& f, const vm_instruction& ins);
         op_status exec_c_range(frame& f, const vm_instruction& ins);
         op_status exec_c_back_step(frame& f, const vm_instruction& ins);   // after a call: every site's container is the node resolved at entry, reached the same way

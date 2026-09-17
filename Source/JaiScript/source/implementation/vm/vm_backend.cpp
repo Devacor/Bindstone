@@ -6930,6 +6930,29 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	return v ? &v->deref() : nullptr;
 }
 
+// a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
+// class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
+// value dereferenced; a field that is not an int, a float or a bool is the general form's
+const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe) {
+	cell_state& cs = *f.cells;
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) return nullptr;
+	uint32_t slot;
+	if (!reprobe && cs.site_member_class[off] == cd) { slot = cs.site_member_slot[off]; }
+	else {
+		auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
+		slot = member_read_slot_probe(cd, expr);
+		if (slot == UINT32_MAX) { cs.site_member_class[off] = nullptr; return nullptr; }
+		cs.site_member_class[off] = cd; cs.site_member_slot[off] = slot;
+	}
+	script_value* v = inst->field_slot_value(slot);
+	if (!v) return nullptr;
+	const script_value* fv = &v->deref();
+	const size_t fk = fv->raw_storage_index();
+	if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return nullptr;
+	return fv;
+}
+
 bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	// the load and store sites' containers: the body has no rebinding and no
@@ -6953,6 +6976,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	};
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
 	if (cs.site_member.size() < span) { cs.site_member.resize(span, nullptr); }
+	if (cs.site_member_class.size() < span) { cs.site_member_class.resize(span, nullptr); cs.site_member_slot.resize(span, 0); }
 	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
 	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
 	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
@@ -6967,6 +6991,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
+		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; cs.site_member[ip - loop.copy_head] = nullptr; cs.site_member_class[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_mload) {
 			// a member read site: the base slot's instance and its plain field through the read-side probe (the class, the slot, no user
 			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
@@ -6979,7 +7004,6 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			cs.site_member[ip - loop.copy_head] = fv; cs.site_slot[k] = ci.c; cs.site_node[ip - loop.copy_head] = nullptr;
 			continue;
 		}
-		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			if (site.cont_slot == chunk::k_iter_container) {
@@ -7095,28 +7119,45 @@ op_status vm_backend::exec_c_rebind(frame& f, const vm_instruction& ins) {
 		ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
 		for (uint8_t k = 1; ok && k < site.fold_count; ++k) { ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index); }
 	}
-	if (!ok || !cells_rebind_apply(f, loop, rb, index)) { cells_miss(f, loop, ins.c, 6); return {}; }
+	if (!ok || !cells_rebind_apply(f, loop, rb, index, false)) { cells_miss(f, loop, ins.c, 6); return {}; }
 	++f.ip;
 	return {};
 }
 // the alias's sites take the source table's element at index: an array node that is plain, as the entry has it (a hetero node with a
 // declared element type is the general form's); the alias cell holds the index, and its flush builds the element reference the general
 // form's declaration binds
-bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index) {
+bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe) {
 	cell_state& cs = *f.cells;
 	const script_array* table = cs.site_node[rb.copy_ip - loop.copy_head];
 	if (!table || index < 0 || static_cast<size_t>(index) >= table->size()) return false;
 	const script_array* node = nullptr;
+	class_instance* inst = nullptr;   // an element that is an instance: the alias's member sites read its fields
 	if (table->kind() == script_array::kind_t::hetero) {
 		const script_value& el = table->values()[static_cast<size_t>(index)];
 		if (el.raw_storage_index() == script_value::TYPEID_ARRAY) {
 			const script_array* n = el.unchecked_array_node();
 			const type_info* ti = el.get_type_info().get();
 			if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
+		} else if (el.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			auto& holder = const_cast<script_value&>(el).unchecked_get_object_storage();
+			if (holder && holder->is_class_instance_wrapper && holder->data) { inst = static_cast<class_instance*>(holder->data.get()); }
+		}
+	} else if (table->kind() == script_array::kind_t::obj) {
+		const obj_slot& s = table->objs()[static_cast<size_t>(index)];
+		if (s.handle && s.handle->is_class_instance_wrapper && s.handle->data) { inst = static_cast<class_instance*>(s.handle->data.get()); }
+	}
+	if (!node && !inst) return false;
+	for (const uint32_t d : rb.dependents) {
+		const uint32_t cip = loop.sites[d];
+		if (f.code->code[cip].op == opcode::op_c_mload) {
+			const script_value* fv = inst ? cells_member_field(f, inst, f.code->code[cip].b, cip - loop.copy_head, reprobe) : nullptr;
+			if (!fv) return false;
+			cs.site_member[cip - loop.copy_head] = fv;
+		} else {
+			if (!node) return false;
+			cs.site_node[cip - loop.copy_head] = node;
 		}
 	}
-	if (!node) return false;
-	for (const uint32_t d : rb.dependents) { cs.site_node[loop.sites[d] - loop.copy_head] = node; }
 	cs.kind[rb.cell] = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.payload[rb.cell] = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
 	return true;
 }
@@ -7127,7 +7168,7 @@ bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {
 	const size_t at = f.ip - loop.copy_head;
 	for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
 		if (at < loop.live_temps.size() && !loop.live_temps[at].test(rb.cell)) continue;
-		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]))) return false;
+		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]), true)) return false;
 	}
 	return true;
 }

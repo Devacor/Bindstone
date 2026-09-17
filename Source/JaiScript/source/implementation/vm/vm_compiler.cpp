@@ -2712,9 +2712,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (dst_kind == 0 && from_const && decl) { const size_t ck = c.constants[st.b].raw_storage_index(); dst_kind = ck == script_value::TYPEID_INT ? kint : ck == script_value::TYPEID_FLOAT ? kflt : kbool; }
 				use_slot(st.a, dst_kind, true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
-			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask && !is_alias(st.c)) {
+			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
-				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind
+				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
+				// base that is an element alias (`for (auto& prt : pool)`, `var& e = list[i]`) is the rebind's dependent, resolved per element
 				use_slot(st.b, 0, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::load; op.a = st.b; op.writes = st.b; op.container = st.c; op.member = st.a;
 			} else if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
@@ -3469,6 +3470,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					return s.cont_slot;
 				}
 				if (o == opcode::op_c_index_store) { const fused_operand& co = c.fused_index_protos[code[cip].a].container; return co.const_index == k_invalid_u32 && co.slot != k_invalid_u32 && co.slot < k_typed_slot_mask ? co.slot : k_invalid_u32; }
+				if (o == opcode::op_c_mload) return code[cip].c;   // a member site: its base slot (an alias's member sites are its dependents)
 				return k_invalid_u32;
 			};
 			for (chunk::cell_loop::rebind& rb : loop.rebinds) {
@@ -4120,13 +4122,13 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 
 bool vm_compiler::lift_operand_shape(const expression* e) {
 	return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr ||
-	       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e);
+	       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);
 }
 
 // a subscript only a temp can carry (not a chain operand) or an intrinsic needs a partner that cannot raise first;
 // the rule holds at every node of the lifted tree, the outer one included
 bool vm_compiler::lift_temp_only(const expression* c) {
-	return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none || unary_temp_operand(c);
+	return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none || unary_temp_operand(c) || member_temp_operand(c);   // a member read lands in a temp: its partner must be quiet or lifted
 }
 
 // a partner that is itself a value binary is quiet here: the lift computes it into its temp in operand order,
@@ -4321,6 +4323,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				fused_operand o;
 				if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, o); return o; }   // partners_ok admitted it
 				if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, o); return o; }
+				if (member_temp_operand(e.get())) { compile_member_into_temp(e, o); return o; }   // a member read lands in a temp in operand order (partners_ok admitted it)
 				if (call_temp_operand(e.get()) && call_partner_ok(partner, e.get())) { compile_call_into_temp(e, o); return o; }   // a call ahead of a partner it cannot change
 				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner))) {
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
@@ -4329,6 +4332,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				return make_fused_operand(e);
 			};
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
+				if (member_temp_operand(e.get())) { fused_operand o; compile_member_into_temp(e, o); return o; }   // a member leaf of a lifted subtree: its temp
 				if (operand_shape(e.get())) { return make_fused_operand(e); }
 				const auto* b = static_cast<const binary_expr*>(e.get());
 				fused_binary_proto p;

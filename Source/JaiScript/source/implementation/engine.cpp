@@ -696,6 +696,7 @@ struct engine::implementation {
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
     bool type_proofs_ = true;
     bool ir_passes_ = true;
+    uint32_t cells_miss_every_ = 0;   // the miss injection lever; the VM reads it at block entry under JAISCRIPT_MISS_INJECTION
     engine::disassembly_sink_fn disassembly_sink_;   // the listing tool's sink; unset = no listing
     proof_stats last_proof_stats_;
 
@@ -1992,6 +1993,27 @@ void engine::ir_passes(bool on) {
 
 bool engine::ir_passes() const {
     return impl->ir_passes_;
+}
+
+void engine::cells_miss_every(uint32_t n) {
+#ifdef JAISCRIPT_MISS_INJECTION
+    impl->cells_miss_every_ = n;   // the next block entry follows it
+#else
+    if (n != 0) { throw std::logic_error("engine::cells_miss_every: this build carries no miss injection (define JAISCRIPT_MISS_INJECTION)"); }
+    impl->cells_miss_every_ = 0;
+#endif
+}
+
+uint32_t engine::cells_miss_every() const {
+    return impl->cells_miss_every_;
+}
+
+bool engine::miss_injection_available() {
+#ifdef JAISCRIPT_MISS_INJECTION
+    return true;
+#else
+    return false;
+#endif
 }
 
 void engine::disassembly_sink(disassembly_sink_fn sink) {

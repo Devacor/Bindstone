@@ -570,7 +570,10 @@ refusal), so a half begins where the common path lands; each half is admitted on
 statement keeps the general form (its block would enter and exit at once), and an exit whose statement begins at a span's head runs
 the general form from the trampoline, as every instruction-carried ip does. A span's exit into a return statement (`return x;`, `return k;`) flushes
 the environment cells and x's cell only, the frame dying at the return; a function with a try block keeps the full flush. A span runs once per call, so its entry is paid per call; the minimum
-length keeps the general form where a copy would not pay for it. The listing names a span's copy and trampoline, and a
+length keeps the general form where a copy would not pay for it. An environment operand's lookup row in a block is the general
+instruction's row for that operand (a read's container at 0, or 2 behind a binary index; a simple index at 1; a binary index's sides
+at 0 and 1; a store's value at 2): the rows are keyed by environment and epoch, never by name, so two names on one row would answer
+each other; a store whose index is a binary and whose value is an environment scalar has no free row and keeps the general form. The listing names a span's copy and trampoline, and a
 refused span as an open span; the profile counts span entries and their refusals.
 ### Fused cell pairs
 

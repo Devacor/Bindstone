@@ -2605,7 +2605,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// the index of a load or store: a value or the fold over values; every operand an int
 		auto index_values = [&](ir_op& op, const fused_index_proto& fp, size_t ip) -> bool {
 			uint32_t sink;
-			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3), ip, sink);
+			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);   // the general read's row for a simple index (its container takes ip * 3)
 			if (fp.index_binary >= c.fused_binary_protos.size()) return false;
 			const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
 			bool ok = is_index_chain_arith(static_cast<token_type>(bp.op)) && value(op, bp.left, kint, static_cast<uint32_t>(ip * 3), ip, sink) && value(op, bp.right, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);
@@ -2906,7 +2906,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!container_operand(fp.container)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (st.c == 0) { refuse(chunk::cell_refusal_translation, ip); break; }   // an element store whose value is used
 				uint32_t sink;
-				if (!index_values(op, fp, ip) || (fp.store_value.const_index == k_invalid_u32 && !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink))) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!index_values(op, fp, ip) || (fp.store_value.const_index == k_invalid_u32 && ((fp.index_binary != k_invalid_u32 && env_scalar(fp.store_value)) || !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink)))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.proto = st.a;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_unary_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {

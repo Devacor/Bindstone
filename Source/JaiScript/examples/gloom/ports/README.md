@@ -88,7 +88,7 @@ no timing result.
 
 ## JaiDOOM timedemo
 
-The default command runs both whole programs. For JaiScript increments, omit
+The default command runs both whole programs. JaiDOOM now includes the Lua 5.4.8 port as well as JaiScript. For JaiScript increments, omit
 the rival configurations with:
 
 ```powershell
@@ -247,3 +247,11 @@ Windows accounting is quantized, so pool repeated spans and report that
 resolution alongside per-capture variation. Keep CPU time separate from elapsed
 time and report additional-thread CPU separately. Profiled wall times are
 capture diagnostics; speed claims use the uninstrumented paired binaries.
+
+## Lua JaiDOOM
+
+The [JaiDOOM Lua port](../../jaidoom/ports/PORTING.md) adds jai_doom_lua and its padding control to the comparison build. --engines jai-lua selects JaiScript and Lua 5.4.8; --engines jai retains the existing compiler-campaign behavior. With --workloads timedemo, the two languages interleave inside each normal/padding layout, twice per round.
+
+Before accepting a Lua timedemo point, the runner generates or validates a full cold/warm frame certificate. --timedemo-conformance PATH reuses an existing certificate only when the recorded scripts, data and Lua binaries still match. The certificate includes both JaiScript backends and both Lua layouts, with 7968 per-tic state/frame records per configuration. All four traces must agree, including the pinned cold/warm frame hashes. Trace runs are excluded from timing.
+
+The competitor screen now also recognizes jai_doom_* and reference_host processes. For the data, conversion and headless-scope rules, use the port's own documentation.

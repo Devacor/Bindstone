@@ -145,6 +145,8 @@ namespace {
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_mload:
+			case opcode::op_c_mstore:
+			case opcode::op_set_member_value:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
@@ -318,6 +320,8 @@ namespace {
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_mload:
+			case opcode::op_c_mstore:
+			case opcode::op_set_member_value:
 			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
@@ -1704,6 +1708,46 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			}
 			return true;
 		}
+		// Statement-position member store onto a frame-slot base (`p.x = v;`, `t.posx = px;`, `p.life = p.life - 1;`): the value an
+		// operand (an identifier, a literal, or the temp a computed value lands in, as the subscript store takes it), one op, no push,
+		// no result; a static member, an environment base or a value shape the temps decline keep the general form
+		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::member_expr && callable_.active) {
+			auto* member = static_cast<member_expr*>(assign->target.get());
+			const uint32_t base_slot = member->is_static ? k_invalid_u32 : member_base_slot(member);
+			if (base_slot != k_invalid_u32 && base_slot < k_typed_slot_mask) {
+				const expression_ptr& value = assign->value;
+				member_store_proto mp; mp.node = add_node(assign->target); mp.proof = assign->static_store_proof; mp.base = base_slot;
+				bool value_operand = false;
+				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
+					mp.value = make_fused_operand(value); value_operand = true;
+				} else if (fusable_index_expr(value.get()) && compile_subscript_into_temp(value, operand_expect(static_cast<const binary_expr*>(value.get())), mp.value)) {
+					value_operand = true;
+				} else if (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none || member_temp_operand(value.get())) {
+					compile_value_into_temp(value, 0xFF, mp.value); value_operand = true;
+				} else if (value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
+					compile_expression(value);
+					vm_instruction& last = chunk_->code.back();
+					if (last.op == opcode::op_binary_fused) {
+						const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+						++temp_next_;
+						if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+						last.op = opcode::op_binary_fused_temp; last.b = t0;
+						mp.value = fused_operand{}; mp.value.slot = t0; mp.value.symbol = temp_symbol_index(); mp.value.direct = true;
+						value_operand = true;
+					} else {
+						// the value is on the stack: the general store consumes it
+						emit(opcode::op_set_member_fused, mp.node, mp.proof, base_slot);
+						emit(opcode::op_pop);
+						return true;
+					}
+				}
+				if (value_operand) {
+					chunk_->member_store_protos.push_back(mp);
+					emit(opcode::op_set_member_value, static_cast<uint32_t>(chunk_->member_store_protos.size() - 1));
+					return true;
+				}
+			}
+		}
 		// Statement-position subscript store: the fused op elides the result push
 		// (c=1) and an ident/literal RHS rides as an operand — no LOAD, no pushes
 		if (assign->op.type == token_type::equal &&
@@ -2712,6 +2756,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (dst_kind == 0 && from_const && decl) { const size_t ck = c.constants[st.b].raw_storage_index(); dst_kind = ck == script_value::TYPEID_INT ? kint : ck == script_value::TYPEID_FLOAT ? kflt : kbool; }
 				use_slot(st.a, dst_kind, true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
+			} else if (st.op == opcode::op_set_member_value && st.a < c.member_store_protos.size()) {
+				// `base.member = operand;` onto a frame-slot instance (an alias included): a store site whose field the entry or the rebind
+				// resolves; the value a cell or a constant of a scalar kind (an environment value keeps the general form)
+				const member_store_proto& mp = c.member_store_protos[st.a];
+				if (mp.base == k_invalid_u32 || mp.base >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (mp.value.const_index != k_invalid_u32) {
+					const size_t ck = mp.value.const_index < c.constants.size() ? c.constants[mp.value.const_index].raw_storage_index() : script_value::TYPEID_NULL;
+					if (ck != script_value::TYPEID_INT && ck != script_value::TYPEID_FLOAT && ck != script_value::TYPEID_BOOL) { refuse(chunk::cell_refusal_representation, ip); break; }
+					op.b = k_typed_const_bit | mp.value.const_index;
+				} else if (mp.value.slot != k_invalid_u32 && mp.value.slot < k_typed_slot_mask) {
+					use_slot(mp.value.slot, 0, false, 0, nullptr, ip); op.b = mp.value.slot; slot_read(op, mp.value.slot);
+				} else { refuse(chunk::cell_refusal_representation, ip); break; }
+				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
 			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
@@ -3327,6 +3384,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::store: {
+				if (op.member != k_invalid_u32) { append(vm_instruction{opcode::op_c_mstore, (op.b & k_typed_const_bit) ? op.b : current[op.b], op.member, op.container}, ip); break; }   // a member store site
 				// the copy reads environment values through synthetic-slot operands: a clone of the proto (and of its index binaries)
 				// with each environment value replaced; the original proto stays the general form's
 				// the copy's proto: a clone whose index and value operands name cells (the container stays the general operand,
@@ -3457,7 +3515,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range || o == opcode::op_c_mload) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range || o == opcode::op_c_mload || o == opcode::op_c_mstore) { loop.sites.push_back(ip2); } }
 		for (uint32_t k = 0; k < loop.sites.size(); ++k) { if (code[loop.sites[k]].op == opcode::op_c_range) { loop.iter_site = k; } }
 		if (!loop.rebinds.empty()) {
 			// the alias's sites: every load or store whose container slot is the alias, resolved by the rebind and never by the entry
@@ -3470,7 +3528,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					return s.cont_slot;
 				}
 				if (o == opcode::op_c_index_store) { const fused_operand& co = c.fused_index_protos[code[cip].a].container; return co.const_index == k_invalid_u32 && co.slot != k_invalid_u32 && co.slot < k_typed_slot_mask ? co.slot : k_invalid_u32; }
-				if (o == opcode::op_c_mload) return code[cip].c;   // a member site: its base slot (an alias's member sites are its dependents)
+				if (o == opcode::op_c_mload || o == opcode::op_c_mstore) return code[cip].c;   // a member site: its base slot (an alias's member sites are its dependents)
 				return k_invalid_u32;
 			};
 			for (chunk::cell_loop::rebind& rb : loop.rebinds) {
@@ -4170,7 +4228,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (b->op.type == token_type::left_bracket || b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return false;
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
-	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e); };
+	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e); };
 	const bool lsub = (hoists(b->left.get()) && quiet_partner(b->right.get())) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
 	const bool rsub = (hoists(b->right.get()) && quiet_partner(b->left.get())) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;

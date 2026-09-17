@@ -1675,6 +1675,15 @@ namespace jai::vm {
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
+        // fused cell pairs (row 150): the first instruction's executor on its own word, then the second's on the next word when the block is
+        // still live and the ip fell through; out of line, so the block switch keeps its shape (the row 148.2 rule)
+        op_status exec_c_arith2(frame& f, const vm_instruction& ins);
+        op_status exec_c_jcmp2(frame& f, const vm_instruction& ins);
+        op_status exec_c_load2(frame& f, const vm_instruction& ins);
+        op_status exec_c_arith_load(frame& f, const vm_instruction& ins);
+        op_status exec_c_load_jcmp(frame& f, const vm_instruction& ins);
+        op_status exec_c_arith_jump(frame& f, const vm_instruction& ins);
+        bool cells_second_half_injected(frame& f);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
         op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry

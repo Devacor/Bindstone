@@ -217,8 +217,14 @@ namespace jai::vm {
         op_c_mstore,        // a = value (a cell, or k_typed_const_bit | constant), b = member_expr node, c = the base slot: a member store site,
                             // the field's payload written in place when the kinds agree, the general store otherwise
         op_set_member_value,   // a = member_store_protos index: `base.member = operand;` in statement position, the value an operand (no push, no result)
-        op_cells_span,      // a = cell loop index: a straight-line span's entry, in place of its first instruction; the guards
-                            // and the unboxing, then the copy (or the trampoline, the first instruction relocated, when a guard refuses)
+        // fused cell pairs (row 150): the opcode of the first instruction of an adjacent pair, its own word; the second instruction keeps its own
+        // word and opcode and runs from the fused executor when the first fell through to it (a jump into it dispatches it alone)
+        op_c_arith2,        // C_ARITH_P then C_ARITH_P
+        op_c_jcmp2,         // C_JCMP_P then C_JCMP_P (the second when the first falls through)
+        op_c_load2,         // C_LOAD then C_LOAD
+        op_c_arith_load,    // C_ARITH_P then C_LOAD
+        op_c_load_jcmp,     // C_LOAD then C_JCMP_P
+        op_c_arith_jump,    // C_ARITH_P then C_JUMP
         op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
         op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
@@ -369,7 +375,12 @@ namespace jai::vm {
             case opcode::op_c_mload: return "C_MLOAD";
             case opcode::op_c_mstore: return "C_MSTORE";
             case opcode::op_set_member_value: return "SET_MEMBER_VALUE";
-            case opcode::op_cells_span: return "CELLS_SPAN";
+            case opcode::op_c_arith2: return "C_ARITH_P2";
+            case opcode::op_c_jcmp2: return "C_JCMP_P2";
+            case opcode::op_c_load2: return "C_LOAD2";
+            case opcode::op_c_arith_load: return "C_ARITH_P+C_LOAD";
+            case opcode::op_c_load_jcmp: return "C_LOAD+C_JCMP_P";
+            case opcode::op_c_arith_jump: return "C_ARITH_P+C_JUMP";
             case opcode::op_c_arith: return "C_ARITH";
             case opcode::op_c_cmp: return "C_CMP";
             case opcode::op_c_load: return "C_LOAD";

@@ -382,7 +382,6 @@ namespace jai::vm {
             static cell_mask all() noexcept { cell_mask r; r.w[0] = ~uint64_t(0); r.w[1] = ~uint64_t(0); return r; }
         };
         static constexpr uint32_t k_cell_limit = 128;
-        static constexpr size_t k_span_min_instructions = 8;   // a shorter straight-line span keeps the general form: its entry would not pay for itself
         struct cell_loop {
             // env_operand: the environment scalar this cell holds (index into env_operands; k_invalid_u32 = a frame
             // slot); such a cell has a synthetic slot above the frame's, is resolved once at entry and never written
@@ -397,11 +396,6 @@ namespace jai::vm {
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
             uint32_t counted = k_invalid_u32;
-            // span: a straight-line span (docs/typed_regions_design.md): head is its first instruction, where op_cells_span stands; back the ip
-            // after its last; no back edge. trampoline: the first instruction relocated behind the copy, followed by a jump to head + 1: the
-            // general form an entry refusal runs and the miss path of every copy instruction standing for the first
-            bool span = false;
-            uint32_t trampoline = k_invalid_u32;
             // an element alias declared in the body (`var& strip = STRIPS[sidx]`): the copy instruction that rebinds it, its cell (a compiler value of
             // kind reference: the element index is its payload, the source table its own site), the site index of its source table and the site
             // indices of the loads and stores through the alias, whose containers the rebind sets and the entry never resolves
@@ -440,7 +434,7 @@ namespace jai::vm {
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
         // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
         // translation does not normalize yet, a coverage gap rather than a limit of the model
-        struct cell_refusal { uint32_t head, back, ip; uint8_t reason; uint8_t op; bool span = false; };
+        struct cell_refusal { uint32_t head, back, ip; uint8_t reason; uint8_t op; };
         static constexpr uint8_t cell_refusal_none = 0, cell_refusal_head = 1, cell_refusal_representation = 2, cell_refusal_effect = 3,
                                  cell_refusal_translation = 4, cell_refusal_malformed = 5, cell_refusal_no_cells = 6, cell_refusal_too_many_cells = 7;
         static const char* cell_refusal_name(uint8_t r) {
@@ -466,7 +460,7 @@ namespace jai::vm {
             case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
             case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
-            case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back: case opcode::op_cells_span:
+            case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
             case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused:
                 return cell_refusal_translation;
             case opcode::op_get_member: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
@@ -484,7 +478,6 @@ namespace jai::vm {
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
-        bool has_try = false;   // the body holds a try block: a span's exit into a return keeps the full flush (a catch in this frame may read locals)
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

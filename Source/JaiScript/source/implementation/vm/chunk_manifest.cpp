@@ -187,7 +187,7 @@ namespace {
 			out << pre << "cell_loops " << ch.cell_loops.size() << "\n";
 			for (size_t i = 0; i < ch.cell_loops.size(); ++i) {
 				const chunk::cell_loop& l = ch.cell_loops[i];
-				out << pre << " " << i << " head=" << l.head << " back=" << l.back << " copy=" << l.copy_head << ".." << l.copy_back << " exit=" << l.exit_ip << " counted=" << u(l.counted) << " span=" << b(l.span) << " trampoline=" << u(l.trampoline)
+				out << pre << " " << i << " head=" << l.head << " back=" << l.back << " copy=" << l.copy_head << ".." << l.copy_back << " exit=" << l.exit_ip << " counted=" << u(l.counted)
 				    << " temp_mask=" << mask(l.temp_mask) << " env_mask=" << mask(l.env_mask) << " iter=" << u(l.iter_proto) << "/" << u(l.iter_index_cell) << "/" << u(l.iter_site) << "\n";
 				if (!l.rebinds.empty()) {
 					out << pre << "  rebinds";

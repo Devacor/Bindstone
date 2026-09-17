@@ -522,6 +522,11 @@ index of an outer read. The typed lowering gives the read the `T_LOAD` row, land
 the checker proved the binary and the runtime kind otherwise, in place when the temp already holds it; a
 non-scalar element lands boxed in the temp; the read happens before its partner only when the partner
 cannot raise first (a slot, a literal, a temp, another read), so the interpreter's error order stands.
+A call the expression consumes as an operand takes the same row when its callee is a plain name and its partner is a
+literal or a private local (a slot no user code can rebind, so running the call ahead of the partner's read is
+unobservable): the call, then `op_call_temp` lands the result in a compiler temp, and the binary or the compare reads
+the temp as a slot; inside a block the door's third consumer lands the result in a temp cell. An environment partner
+keeps the stack form, since the callee may write the global the partner reads.
 
 A reference alias of a declared typed container (`var& pix = PIX;` with `PIX` an `array<int>`) carries the
 container's type for element reads: the checker keeps it a reference for diagnostics and marks the element

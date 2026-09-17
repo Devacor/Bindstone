@@ -4775,6 +4775,15 @@ static const script_array* ref_element_table(const script_value& v) noexcept {
 	return h->container.get();
 }
 
+// a call's result into a compiler temp (an expression consumes the call as an operand): the value as the call left it, a
+// reference included, which the consumer dereferences as it would a slot's
+op_status vm_backend::exec_call_temp(frame& f, const vm_instruction& ins) {
+	if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "call temp: empty stack"); }
+	frame_slot_set(f, ins.a, std::move(stack_.back()));
+	stack_.pop_back();
+	return {};
+}
+
 op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
 		// the container guard's plain-cell form, a slot form: a plain cell (or no reference at all) needs no snapshot, the readers
@@ -16386,6 +16395,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_store_mov: VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); break;
 			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
+			case opcode::op_call_temp: VM_TRY_OP_SHARED(exec_call_temp(f, ins)); break;
 			case opcode::op_math_temp: VM_TRY_OP_SHARED(exec_math_temp(f, ins)); break;
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 

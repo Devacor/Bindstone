@@ -1610,6 +1610,7 @@ namespace jai::vm {
         op_status exec_binary(frame& f, const vm_instruction& ins);
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
+        op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)
         op_status exec_member_temp(frame& f, const vm_instruction& ins);
         op_status exec_set_member_fused(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);

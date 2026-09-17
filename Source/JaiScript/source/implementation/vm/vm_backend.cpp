@@ -6908,6 +6908,15 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 // a container reached through a member of a frame-slot instance (`ch.odist[ci]`): the plain field the member IC's probe
 // names, read once at the entry; a user accessor anywhere in the chain, a non-public chain, a missing field or a base that
 // is not a class instance leaves the site to the general form, which runs the accessor or raises per read
+// the opcode the first instruction of a fused pair had before the peephole (row 150): what the site logic and the lever ask of it
+static opcode cell_first_op(opcode op) {
+	switch (op) {
+	case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump: return opcode::op_c_arith_p;
+	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
+	case opcode::op_c_load2: case opcode::op_c_load_jcmp: return opcode::op_c_load;
+	default: return op;
+	}
+}
 const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin) {
 	pin = nullptr;
 	const script_value* base = frame_slot(f, container.slot);
@@ -7007,7 +7016,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			cs.site_member[ip - loop.copy_head] = fv; cs.site_slot[k] = ci.c; cs.site_node[ip - loop.copy_head] = nullptr;
 			continue;
 		}
-		if (ci.op == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
+		if (cell_first_op(ci.op) == opcode::op_c_load || ci.op == opcode::op_c_load_any || ci.op == opcode::op_c_rebind || ci.op == opcode::op_c_range) {
 			const chunk::typed_site& site = f.code->typed_sites[ip];   // the copy's own row (its operands name cells; cont_slot and the proto are the general ones)
 			if (site.cont_slot == chunk::k_iter_container) {
 				// a range-for head's container: the iteration state's array (ITER_INIT dereferenced and holds it; no callee rebinds it)
@@ -7336,6 +7345,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
 	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore:
+	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 		return true;
 	default:
 		return false;
@@ -7378,6 +7388,12 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_back_step: st = exec_c_back_step(f, ci); break;
 		case opcode::op_c_range: st = exec_c_range(f, ci); break;
 		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
+		case opcode::op_c_arith2: st = exec_c_arith2(f, ci); break;
+		case opcode::op_c_jcmp2: st = exec_c_jcmp2(f, ci); break;
+		case opcode::op_c_load2: st = exec_c_load2(f, ci); break;
+		case opcode::op_c_arith_load: st = exec_c_arith_load(f, ci); break;
+		case opcode::op_c_load_jcmp: st = exec_c_load_jcmp(f, ci); break;
+		case opcode::op_c_arith_jump: st = exec_c_arith_jump(f, ci); break;
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
 			// original back edge with materialized slots)
@@ -7638,6 +7654,64 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction
 	f.ip = loop.copy_head;
 	return {};
 }
+// the injection lever's count for a fused pair's second instruction: the same countdown the block loop runs before each dispatch,
+// so every plain position stays a candidate under injection (a build without the lever counts nothing)
+bool vm_backend::cells_second_half_injected(frame& f) {
+#ifdef JAISCRIPT_MISS_INJECTION
+	if (miss_every_ && --miss_countdown_ == 0) {
+		miss_countdown_ = miss_every_;
+		const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop];
+		const uint32_t origin = loop.origin[f.ip - loop.copy_head];
+		if (loop.iter_proto == k_invalid_u32 || origin != loop.head) { cells_miss(f, loop, origin, 7); return true; }
+	}
+#else
+	(void)f;
+#endif
+	return false;
+}
+// fused cell pairs (row 150): the first instruction's executor on its own word; when the block is still live and the ip fell
+// through to the next instruction (no jump taken, no miss: a miss leaves the block and puts the general form's ip in the frame),
+// the second's executor on the second's own word; the pair is one dispatch of the block loop and nothing else changes
+op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_arith(f, f.code->code[next], false);
+}
+op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_jcmp(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_jcmp(f, f.code->code[next], false);
+}
+op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_load(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_load(f, f.code->code[next], false);
+}
+op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_load(f, f.code->code[next], false);
+}
+op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_load(f, ins, false);
+	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
+	return exec_c_jcmp(f, f.code->code[next], false);
+}
+op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins) {
+	const size_t next = f.ip + 1;
+	const op_status st = exec_c_arith(f, ins, false);
+	if (st != op_status::ok || f.ip != next) return st;
+	const vm_instruction& j = f.code->code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
+	if (j.c == 1 && execution_limit_exhausted()) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss(f, loop, loop.origin[next - loop.copy_head], 0); return {}; }
+	f.ip = j.a;
+	return {};
+}
+
 JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins, bool checked) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;

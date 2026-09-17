@@ -551,6 +551,17 @@ backends, so the store-value hoist is already in that order. A reference declara
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
 
+### Fused cell pairs
+
+The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes
+(`C_ARITH_P C_ARITH_P`, `C_JCMP_P C_JCMP_P`, `C_LOAD C_LOAD`, `C_ARITH_P C_LOAD`, `C_LOAD C_JCMP_P`, `C_ARITH_P C_JUMP`): after a
+loop's copy is complete, a peephole gives the first instruction of such a pair the fused opcode and leaves its word and the second
+instruction untouched; the fused executor runs the first instruction's own executor, and when the block is still live and the ip fell
+through to the next instruction, the second's on the second's own word. A jump into the second instruction dispatches it alone, a miss
+inside either half reads its own origin, its own site row and its own liveness, the injection lever counts both halves, and the middle
+end's switch (`engine::ir_passes`) off leaves every pair two instructions. The site logic asks `cell_first_op` what a fused instruction
+was. The fused executors are out of line (the block switch's shape rule).
+
 ### Member read sites
 
 A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:

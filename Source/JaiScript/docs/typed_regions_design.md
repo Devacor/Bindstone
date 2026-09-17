@@ -575,17 +575,6 @@ instruction's row for that operand (a read's container at 0, or 2 behind a binar
 at 0 and 1; a store's value at 2): the rows are keyed by environment and epoch, never by name, so two names on one row would answer
 each other; a store whose index is a binary and whose value is an environment scalar has no free row and keeps the general form. The listing names a span's copy and trampoline, and a
 refused span as an open span; the profile counts span entries and their refusals.
-### Fused cell pairs
-
-The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes
-(`C_ARITH_P C_ARITH_P`, `C_JCMP_P C_JCMP_P`, `C_LOAD C_LOAD`, `C_ARITH_P C_LOAD`, `C_LOAD C_JCMP_P`, `C_ARITH_P C_JUMP`): after a
-loop's copy is complete, a peephole gives the first instruction of such a pair the fused opcode and leaves its word and the second
-instruction untouched; the fused executor runs the first instruction's own executor, and when the block is still live and the ip fell
-through to the next instruction, the second's on the second's own word. A jump into the second instruction dispatches it alone, a miss
-inside either half reads its own origin, its own site row and its own liveness, the injection lever counts both halves, and the middle
-end's switch (`engine::ir_passes`) off leaves every pair two instructions. The site logic asks `cell_first_op` what a fused instruction
-was. The fused executors are out of line (the block switch's shape rule).
-
 ### Member read sites
 
 A member read of a frame-slot instance that lands in a compiler temp (`p.x`, `op_member_temp`) is a load site of the block:

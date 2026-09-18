@@ -1213,12 +1213,34 @@ private:
 
     // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
     // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
+    // an argument whose static type an include cannot change: a literal, a local or a parameter (a frame slot), and arithmetic, a
+    // unary, a ternary, a cast or a math intrinsic over those; a global or a member may be redeclared by an included file
+    static bool certain_under_includes(const expression* e) {
+        if (!e) return false;
+        switch (e->get_type()) {
+        case node_type::literal_expr: return true;
+        case node_type::identifier_expr: return static_cast<const identifier_expr*>(e)->slot_index != SIZE_MAX;
+        case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return b->op.type != token_type::left_bracket && certain_under_includes(b->left.get()) && certain_under_includes(b->right.get()); }
+        case node_type::unary_expr: return certain_under_includes(static_cast<const unary_expr*>(e)->operand.get());
+        case node_type::ternary_expr: { auto* x = static_cast<const ternary_expr*>(e); return certain_under_includes(x->condition.get()) && certain_under_includes(x->then_expression.get()) && certain_under_includes(x->else_expression.get()); }
+        case node_type::cast_expr: return certain_under_includes(static_cast<const cast_expr*>(e)->operand.get());
+        case node_type::call_expr: {
+            auto* ce = static_cast<const call_expr*>(e);
+            if (!ce->callee || ce->callee->get_type() != node_type::member_expr || detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) == detail::math_fn::none) return false;
+            for (const auto& a : ce->arguments) { if (!certain_under_includes(a.get())) return false; }
+            return true;
+        }
+        default: return false;
+        }
+    }
+
     void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args, bool free_callee) {
         if (proofs_ == proof_mode::leave) { return; }
         const size_t n = c->arguments.size();
         const function_decl* fn = nullptr;
         bool by_value = true;   // the identity bind's proof asks for no reference parameter; the inliner takes the decl and the per-argument proofs either way
-        if (stamping() && !has_includes_ && ov && ov->size() == 1) {
+        const bool certain_program = !has_includes_;   // the identity bind's proof and the statistics keep the includes-free gate; the inliner's decl and its argument proofs go by the argument
+        if (stamping() && ov && ov->size() == 1) {
             fn = (*ov)[0];
             auto [lo, hi] = arity_range(fn);
             bool ok = fn->body && !fn->is_coroutine && lo == n && hi == n && args.size() == n;
@@ -1236,13 +1258,14 @@ private:
             const parameter& p = fn->parameters[i];
             if (p.is_reference) { continue; }   // a reference parameter binds, never converts: no proof, no count
             const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
+            if (!(certain_program || certain_under_includes(c->arguments[i].get()))) { continue; }
             if (untyped || same_type(ctype_from_type_info(p.type.get()), args[i])) {
                 c->static_arg_proofs[i] = proof_same_type;
-                ++counts_.args;
+                if (certain_program) { ++counts_.args; }
             }
         }
-        c->proven_callee_body = by_value ? fn->body.get() : nullptr;
-        if (by_value) { ++counts_.calls; }
+        c->proven_callee_body = by_value && certain_program ? fn->body.get() : nullptr;
+        if (by_value && certain_program) { ++counts_.calls; }
     }
 
     // -------------------------------------------------------------- assignability

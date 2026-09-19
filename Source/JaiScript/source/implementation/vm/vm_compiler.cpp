@@ -2473,6 +2473,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::vector<chunk::cell_loop::cell_call> calls;
 		std::vector<uint32_t> loop_inline_sites;   // the inlined leaves inside the region: their guards are sites of the entry and the landings
 		auto inline_fallback_of = [&](size_t ip) -> size_t { for (const chunk::inline_site& s : c.inline_sites) { if (s.fallback_ip == ip && s.join_ip > ip) return s.join_ip; } return SIZE_MAX; };
+		// a graft's declarations (its parameters, its locals, its result) land in compiler slots a later temp may take with another kind: compiler values, not the body's locals
+		auto decl_landing = [&](size_t ip) -> uint8_t { for (const chunk::inline_site& s : c.inline_sites) { if (ip >= s.begin_ip && ip < s.fallback_ip) return k_typed_dst_temp; } return k_typed_dst_decl; };
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
@@ -2718,7 +2720,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 			} else if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
 				const uint8_t kind = st.op <= opcode::op_t_shr_ii ? kint : kflt;
-				const uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
+				uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
+				if (landing == k_typed_dst_decl) { landing = decl_landing(ip); }
 				type_info* stamp = landing == k_typed_dst_decl && ip < c.typed_sites.size() ? c.typed_sites[ip].stamp : nullptr;
 				use_slot(st.b, kind, false, 0, nullptr, ip); use_slot(st.c, kind, false, 0, nullptr, ip);
 				use_slot(st.a & k_typed_slot_mask, kind, true, landing, stamp, ip);
@@ -2736,7 +2739,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						stamp = decl ? decl->type.get() : nullptr;
 						if (!decl || (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX) { refuse(chunk::cell_refusal_representation, ip); break; }
 						if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }   // a string, bool or class local
-						dst = static_cast<uint32_t>(decl->slot_index); landing = k_typed_dst_decl;
+						dst = static_cast<uint32_t>(decl->slot_index); landing = decl_landing(ip); if (landing == k_typed_dst_temp) { stamp = nullptr; }
 					} else {
 						if (dp.flags & store_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`: the global environment only, a binding the block does not hold
 						if (dp.flags & store_flag_ref_alias) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -2773,7 +2776,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// kind (the speculative rows on an unproven slot) is a disagreement the walk refuses rather than a contract the landing breaks
 				uint8_t dst_kind = stamp_kind(stamp);
 				if (dst_kind == 0 && from_const && decl) { const size_t ck = c.constants[st.b].raw_storage_index(); dst_kind = ck == script_value::TYPEID_INT ? kint : ck == script_value::TYPEID_FLOAT ? kflt : kbool; }
-				use_slot(st.a, dst_kind, true, decl ? k_typed_dst_decl : k_typed_dst_store, stamp, ip);
+				const uint8_t mov_landing = decl ? decl_landing(ip) : k_typed_dst_store;
+				use_slot(st.a, dst_kind, true, mov_landing, mov_landing == k_typed_dst_temp ? nullptr : stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
 			} else if (st.op == opcode::op_set_member_value && st.a < c.member_store_protos.size()) {
 				// `base.member = operand;` onto a frame-slot instance (an alias included): a store site whose field the entry or the rebind
@@ -2801,7 +2805,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const bool classed = site.decl_expect == kint || site.decl_expect == kflt;
 				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
-				use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, site.temp ? k_typed_dst_temp : k_typed_dst_decl, site.temp ? nullptr : site.stamp, ip);
+				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(ip); use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
 			           && code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a] && c.nodes[code[ip + 1].a]->get_type() == node_type::variable_decl) {
@@ -2853,7 +2857,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t dk = stamp_kind(fp.decl_type);
 				if (!fp.decl_temp && dk == 0 && fp.decl_type && fp.decl_type->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				use_slot(fp.decl_slot, fp.decl_temp ? 0 : dk, true, fp.decl_temp ? k_typed_dst_temp : k_typed_dst_decl, fp.decl_temp ? nullptr : fp.decl_type, ip);
+				{ const uint8_t ld = fp.decl_temp ? k_typed_dst_temp : decl_landing(ip); use_slot(fp.decl_slot, fp.decl_temp ? 0 : dk, true, ld, ld == k_typed_dst_temp ? nullptr : fp.decl_type, ip); }
 				op.kind = ir::load; op.a = fp.decl_slot; op.proto = st.a; op.writes = fp.decl_slot;
 				op.container = direct_slot(fp.container) || (fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask) ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_index_store_fused && st.a < c.fused_index_protos.size()) {
@@ -3038,7 +3042,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					type_info* stamp = decl->type.get();
 					if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip + 1); break; }
 					if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip + 1); break; }   // a string or class local
-					use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, k_typed_dst_decl, stamp, ip + 1);
+					{ const uint8_t ld = decl_landing(ip + 1); use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, ip + 1); }
 					op.a = static_cast<uint32_t>(decl->slot_index); op.writes = op.a;
 				} else if (sn.b == k_invalid_u32) { op.a = k_ir_env_bit | env_written(sn.a, k_typed_dst_store, ip + 1); }
 				else { use_slot(sn.b, 0, true, k_typed_dst_store, nullptr, ip + 1); op.a = sn.b; op.writes = sn.b; }
@@ -3197,7 +3201,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, consumer_ip); break; }
 					if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, consumer_ip); break; }   // a string, bool or class local
 					cc.consumer = 1; cc.dst = static_cast<uint32_t>(decl->slot_index);
-					use_slot(cc.dst, stamp_kind(stamp), true, k_typed_dst_decl, stamp, consumer_ip);
+					{ const uint8_t ld = decl_landing(consumer_ip); use_slot(cc.dst, stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, consumer_ip); }
 					land.writes = cc.dst;
 				} else if (cn.op == opcode::op_store && cn.b != k_invalid_u32 && cn.b < k_typed_slot_mask) {
 					if (cn.c & (store_flag_ref_alias | store_flag_global_only)) { refuse(chunk::cell_refusal_representation, consumer_ip); break; }

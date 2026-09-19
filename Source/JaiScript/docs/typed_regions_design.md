@@ -581,7 +581,9 @@ function's body with the decl's, one declaration per by-value parameter in slots
 with its slots offset and every `return e` converted to a store into the result slot by the structured rule (a statement after an if
 that returns nests into the arms that fall through), the caller's statement with the call replaced by the result, a jump, and behind
 it the original statement with its real call as the fallback, which a rebind or a reload of the callee, or an armed debugger, takes.
-The middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every
+The checker stamps the resolved callee decl for any program, includes or not (the guard carries the identity), and an argument
+proof under includes when the argument's type an include cannot change (a literal, a typed local or parameter, arithmetic, a
+unary, a ternary, a cast or a math intrinsic over those; never a global or a member). The middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every
 effect point (`cell_loop::inline_sites`), the fallback's instructions are skips, and the inlined body's instructions are the region's.
 A raise inside an inlined body names the callee in the trace (the range table on the chunk, `chunk::inline_sites`). The listing
 names each graft (`-- inlined light_band guard 12: 13..40 fallback 40..47`); the manifest lists the sites.

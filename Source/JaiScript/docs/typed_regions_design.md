@@ -573,7 +573,10 @@ proved (the same assignment table `bind_parameters` runs, so nothing converts) o
 reference parameter must be a `var&` bound to a plain identifier (the parameter's uses become the caller's variable) or to an element
 lvalue (an alias declaration, a rebind). The return type is void, a scalar or a string. The call sits in a position the graft may take:
 `f(...);`, `T v = f(...);`, `v = f(...);`, `return f(...);`, or an operand where every leaf the statement evaluates before the call is
-a local or a literal, or a global or a member when the body writes neither.
+a local or a literal, or a global or a member when the body writes neither; a body that writes through a reference parameter (a
+store or an increment of the parameter's name) takes a call with no leaf before it; a call under a conditional operand (a ternary's
+arm, the right side of `&&` or `||`) runs on the paths that choose it and is never hoisted. The call's own arguments run before
+the body in both forms and count as nothing before it.
 
 The graft is compiled, never spliced into the caller's tree (the interpreter walks that tree): a guard (`op_inline_guard`, site,
 fallback ip) that reads the callee name's binding through the name's own cache row without running a getter and compares the bound

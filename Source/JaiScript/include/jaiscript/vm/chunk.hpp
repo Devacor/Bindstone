@@ -524,6 +524,7 @@ namespace jai::vm {
 
         std::string function_name;                         // empty = top level
         size_t local_count = 0;
+        size_t first_temp_slot = 0;   // the parser's locals end here; every slot from it on is the compiler's (temps, a graft's slots)
         bool is_function_body = false;
 #ifdef JAISCRIPT_VM_PROFILE
         // slot census input: each parameter's slot, declared type (null = untyped) and by-reference flag

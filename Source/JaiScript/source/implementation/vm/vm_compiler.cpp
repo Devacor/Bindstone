@@ -667,6 +667,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->pinned_decls = declarations;
+	chunk_->first_temp_slot = SIZE_MAX;   // a program chunk has no compiler slots (temps_active_ is false)
 	loops_.clear();
 	callable_ = {};
 	scope_depth_ = 0;
@@ -690,6 +691,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	chunk_ = result.get();
 	chunk_->function_name = std::string(name);
 	chunk_->local_count = local_count;
+	chunk_->first_temp_slot = local_count;
 	chunk_->is_function_body = true;
 	loops_.clear();
 	scope_depth_ = 0;
@@ -2475,7 +2477,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		auto inline_fallback_of = [&](size_t ip) -> size_t { for (const chunk::inline_site& s : c.inline_sites) { if (s.fallback_ip == ip && s.join_ip > ip) return s.join_ip; } return SIZE_MAX; };
 		// a declaration landing on a compiler slot (a graft's parameters, locals and result; a hoisted call's temps) is a compiler value, not one of the
 		// body's locals: a later temp may take the slot with another kind, and it is flushed while live like any temp
-		auto decl_landing = [&](uint32_t slot) -> uint8_t { return slot >= c.local_count ? k_typed_dst_temp : k_typed_dst_decl; };
+		auto decl_landing = [&](uint32_t slot) -> uint8_t { return slot >= c.first_temp_slot ? k_typed_dst_temp : k_typed_dst_decl; };   // local_count is the frame's size by the end of the compile
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map

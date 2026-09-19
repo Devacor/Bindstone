@@ -28,6 +28,8 @@ struct inline_context {
 	bool ok = true;
 	bool writes_global = false;
 	bool writes_member = false;
+	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
+	std::vector<uint8_t> ref_slots;                                // per callee slot: a reference parameter
 	std::vector<std::shared_ptr<ast_node>> pins;
 	std::vector<uint64_t> declared_names;                          // the callee's locals: declared in the caller for the graft's compile (a slot identifier compiles to its slot only when its name is declared)
 	const call_expr* replace = nullptr;                            // the caller's statement clone: this call becomes the result
@@ -95,6 +97,14 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	}
 	case node_type::unary_expr: {
 		auto* u = static_cast<const unary_expr*>(e.get());
+		if (u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus) {   // an identifier's increment (any other target desugars to a compound store)
+			if (u->operand && u->operand->get_type() == node_type::identifier_expr) {
+				auto* t = static_cast<const identifier_expr*>(u->operand.get());
+				const bool renamed = t->slot_index != SIZE_MAX && t->slot_index < c.renames.size() && c.renames[t->slot_index];
+				if (t->slot_index == SIZE_MAX || renamed) { c.writes_global = true; }
+				if (t->slot_index != SIZE_MAX && t->slot_index < c.ref_slots.size() && c.ref_slots[t->slot_index]) { c.writes_ref = true; }
+			} else { c.writes_member = true; }
+		}
 		auto o = clone_expr(u->operand, c);
 		if (!c.ok) return nullptr;
 		return c.make<unary_expr>(u->location, u->op, o, u->is_postfix);
@@ -105,6 +115,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			auto* t = static_cast<const identifier_expr*>(a->target.get());
 			const bool renamed = t->slot_index != SIZE_MAX && t->slot_index < c.renames.size() && c.renames[t->slot_index];
 			if (t->slot_index == SIZE_MAX || renamed) { c.writes_global = true; }   // a global, or the caller's variable through a reference parameter
+			if (t->slot_index != SIZE_MAX && t->slot_index < c.ref_slots.size() && c.ref_slots[t->slot_index]) { c.writes_ref = true; }
 		} else if (a->target->get_type() == node_type::member_expr || a->target->get_type() == node_type::binary_expr) { c.writes_member = true; }   // a field or an element
 		else { c.fail(); return nullptr; }
 		auto t = clone_expr(a->target, c); auto v = clone_expr(a->value, c);
@@ -307,11 +318,16 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 }
 
 // the leaves an expression reads, in evaluation order, up to the call (left to right, a store's target after its value, as both
-// backends evaluate): locals and literals hoist past anything; a global or a member only past a body that writes neither
+// backends evaluate): locals and literals hoist past anything but a body that writes through a reference parameter; a global or a
+// member only past a body that writes neither; the call's own arguments run before the body in both forms and count as nothing
+// before it; a call under a conditional operand (a ternary's arm, the right side of && or ||) runs on the paths that choose it
+// and is never hoisted
 struct hoist_scan {
 	const call_expr* call = nullptr;
 	bool before_call = true;
+	bool conditional = false;
 	bool other_call = false;
+	bool leaf_before = false;
 	bool global_before = false;
 	bool member_before = false;
 	bool unsupported = false;
@@ -319,11 +335,24 @@ struct hoist_scan {
 		if (!e || unsupported) return;
 		switch (e->get_type()) {
 		case node_type::literal_expr: return;
-		case node_type::identifier_expr: if (before_call && static_cast<const identifier_expr*>(e)->slot_index == SIZE_MAX) { global_before = true; } return;
-		case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); visit(b->left.get()); visit(b->right.get()); return; }
+		case node_type::identifier_expr:
+			if (before_call) { leaf_before = true; if (static_cast<const identifier_expr*>(e)->slot_index == SIZE_MAX) { global_before = true; } }
+			return;
+		case node_type::binary_expr: {
+			auto* b = static_cast<const binary_expr*>(e);
+			visit(b->left.get());
+			if (b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) { const bool was = conditional; conditional = true; visit(b->right.get()); conditional = was; }
+			else { visit(b->right.get()); }
+			return;
+		}
 		case node_type::unary_expr: visit(static_cast<const unary_expr*>(e)->operand.get()); return;
-		case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); if (m->is_static) return; if (before_call) { member_before = true; } visit(m->object.get()); return; }
-		case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(e); visit(t->condition.get()); visit(t->then_expression.get()); visit(t->else_expression.get()); return; }
+		case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); if (m->is_static) return; if (before_call) { leaf_before = true; member_before = true; } visit(m->object.get()); return; }
+		case node_type::ternary_expr: {
+			auto* t = static_cast<const ternary_expr*>(e);
+			visit(t->condition.get());
+			const bool was = conditional; conditional = true; visit(t->then_expression.get()); visit(t->else_expression.get()); conditional = was;
+			return;
+		}
 		case node_type::cast_expr: visit(static_cast<const cast_expr*>(e)->operand.get()); return;
 		case node_type::assignment_expr: {
 			auto* a = static_cast<const assignment_expr*>(e);
@@ -334,7 +363,12 @@ struct hoist_scan {
 		}
 		case node_type::call_expr: {
 			auto* ce = static_cast<const call_expr*>(e);
-			if (ce == call) { for (const auto& a : ce->arguments) { visit(a.get()); } before_call = false; return; }
+			if (ce == call) {
+				if (conditional) { unsupported = true; return; }
+				before_call = false;
+				for (const auto& a : ce->arguments) { visit(a.get()); }
+				return;
+			}
 			if (math_call(ce)) { for (const auto& a : ce->arguments) { visit(a.get()); } return; }
 			other_call = true; return;
 		}
@@ -420,10 +454,13 @@ std::shared_ptr<call_expr> vm_compiler::inline_call_of(const expression_ptr& e, 
 	if (hs.unsupported || hs.other_call) return nullptr;
 	// the body's writes decide what may stand before the call in the statement; the probe also proves the body clones
 	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = fn->return_type;
+	probe.ref_slots.assign(fn->local_count, 0);
+	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { probe.ref_slots[p.slot_index] = 1; } }
 	if (!void_type(fn->return_type.get())) { auto r = std::make_shared<identifier_expr>(fn->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 	(void)clone_body(fn->body->declarations, 0, probe, nullptr);
 	if (!probe.ok) return nullptr;
 	if ((hs.global_before || hs.member_before) && (probe.writes_global || probe.writes_member)) return nullptr;
+	if (probe.writes_ref && hs.leaf_before) return nullptr;   // a leaf before the call may be the referent
 	*fn_out = fn;
 	return call;
 }
@@ -453,6 +490,8 @@ void vm_compiler::compile_inlined(const std::shared_ptr<call_expr>& call, const 
 	inline_context ctx;
 	ctx.slot_offset = base;
 	ctx.renames.assign(fn->local_count, nullptr);
+	ctx.ref_slots.assign(fn->local_count, 0);
+	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { ctx.ref_slots[p.slot_index] = 1; } }
 	ctx.result_type = fn->return_type;
 	std::shared_ptr<variable_decl> result_decl;
 	if (!void_type(fn->return_type.get())) {

@@ -3245,6 +3245,43 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined half2") != std::string::npos, "half2 is inlined: " + l);
 			check_true(l.find("-- inlined tag") == std::string::npos && l.find("-- inlined half ") == std::string::npos, "tag (a string) and half (a var result) keep their calls: " + l);
 		});
+		test("a_call_under_a_conditional_operand_keeps_its_call", [this]() {
+			// row 152: a leaf in a ternary's arm or on the right side of && / || runs on the paths that choose it; a graft would run its body
+			// on every path, so the statement keeps the call (N counts bump's runs); a leaf in a plain operand of the same loop grafts
+			const std::string prelude =
+				"int N = 0;\n"
+				"int bump(int x) { N = N + 1; return x; }\n"
+				"int pure(int a) { return a + 1; }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = (i % 2 == 0) ? bump(i) : 0; bool ok = (i > 2) && bump(i) > 0; int w = ((i > 100) || bump(i) < 0) ? 1 : 0; s = s + v + (ok ? 1 : 0) + w + pure(i); } return s * 1000 + N; };\n";
+			both(prelude + "run(8);", "53017", "a call under a conditional operand");
+			const std::string l = listing_run(prelude + "run(8);");
+			check_true(l.find("-- inlined bump") == std::string::npos, "bump under a conditional operand keeps its call: " + l);
+			check_true(l.find("-- inlined pure") != std::string::npos, "pure in a plain operand is inlined: " + l);
+		});
+		test("a_body_writing_through_a_reference_parameter_grafts_only_at_the_statements_front", [this]() {
+			// row 152: `s + i + inc(i)` reads i before inc writes it through its var& parameter (a store, or tick's ++ of the parameter's
+			// name), so the statement keeps the call; `int t = inc2(j)` has no leaf before the call and grafts
+			const std::string prelude =
+				"int inc(var& p) { p = p + 1; int r = p; return r; }\n"
+				"int inc2(var& p) { p = p + 1; int r = p; return r; }\n"
+				"int tick(var& p) { p++; int r = p; return r; }\n"
+				"var run = function(int n) { int s = 0; int i = 0; int j = 0; int k = 0; while (i < n) { s = s + i + inc(i); j = j + k + tick(k); int t = inc2(j); s = s + t; } return s * 100 + j + k; };\n";
+			both(prelude + "run(6);", "14848", "a reference write behind a read");
+			const std::string l = listing_run(prelude + "run(6);");
+			check_true(l.find("-- inlined inc2") != std::string::npos, "inc2 at the statement's front is inlined: " + l);
+			check_true(l.find("-- inlined inc ") == std::string::npos && l.find("-- inlined tick") == std::string::npos, "inc and tick behind a read of their referent keep their calls: " + l);
+		});
+		test("an_increment_of_a_global_in_the_body_is_a_write", [this]() {
+			// row 152: `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before
+			// the call keeps it
+			const std::string prelude =
+				"int G = 0;\n"
+				"int nextg() { G++; int r = G; return r; }\n"
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + nextg(); } return s; };\n";
+			both(prelude + "run(5);", "25", "an increment of a global in the body");
+			const std::string l = listing_run(prelude + "run(5);");
+			check_true(l.find("-- inlined nextg") == std::string::npos, "nextg after a read of G keeps its call: " + l);
+		});
 	}
 };
 

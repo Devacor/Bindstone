@@ -1676,6 +1676,9 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         op_status exec_inline_guard(frame& f, const vm_instruction& ins);   // an inlined leaf's guard: the callee name binds the site's function, or the fallback
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell

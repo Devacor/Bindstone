@@ -7296,7 +7296,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		}
 	}
 	if (!loop.sites.empty() && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
-	for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
+	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
 	if (cs.payload.size() < loop.cells.size()) {
@@ -7583,7 +7583,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 	}
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
-	for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; }   // a callee rebound the inlined leaf's name
+	if (!loop.inline_sites.empty()) { for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; } }   // a callee rebound the inlined leaf's name
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any

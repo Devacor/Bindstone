@@ -2672,9 +2672,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string k = listing_of(lights);
 			size_t bails = 0, last_bail = std::string::npos;
 			for (size_t at = k.find("C_BAIL"); at != std::string::npos; at = k.find("C_BAIL", at + 1)) { ++bails; last_bail = at; }
-			const size_t after_last = last_bail == std::string::npos ? std::string::npos : k.find('\n', last_bail);
-			const std::string next_line = after_last == std::string::npos ? std::string() : k.substr(after_last + 1, k.find('\n', after_last + 1) - after_last - 1);
-			check_true(bails == 3 && k.find("-- open loop") == std::string::npos && next_line.find("C_CFOR_BACK") != std::string::npos, "the light loop closes with three bails, the last standing for the rest of its arm up to the back edge: " + k);
+			// row 152: the third statement the translation did not take, `int l2 = LT_MAX[i] - jitter(i) * 16`, is a graft now (jitter is a leaf in a
+			// declaration position; the two element stores of a call result are not), so the loop holds two bails and the graft, each bail
+			// standing for the rest of its arm (the skips after it in the region's listing)
+			(void)last_bail;
+			check_true(bails == 2 && k.find("-- open loop") == std::string::npos && k.find("-- inlined jitter") != std::string::npos && k.find("bail->exit;") != std::string::npos && k.find("bail->exit;") < k.find("skip;", k.find("bail->exit;")),
+			           "the light loop closes with two bails standing for the rest of their arms and the jitter graft in the third: " + k);
 			const size_t cells_at = k.find("-- cell loop");
 			const std::string cells_line = cells_at == std::string::npos ? std::string() : k.substr(cells_at, k.find('\n', cells_at) - cells_at);
 			bool adopted_slot = false;

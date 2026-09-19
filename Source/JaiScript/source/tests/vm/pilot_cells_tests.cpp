@@ -3306,6 +3306,20 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(prelude + "run(5);");
 			check_true(l.find("-- inlined bumpc") == std::string::npos, "bumpc after a read of the static keeps its call: " + l);
 		});
+		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
+			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call; the graft declares no default for its result (a bare
+			// DECL_VAR is no block instruction, and inside the conditional span after the continue it made the graft a planned bail), so the
+			// loop's copy holds the graft and runs it as a block
+			const std::string prelude =
+				"array<int> done = [0, 1, 0, 0, 1, 0, 0, 0];\n"
+				"int light_band(int l, int d) { int b = l - d / 8; if (b < 0) { return 0; } if (b > 31) { return 31; } return b; }\n"
+				"var run = function(int n) { int s = 0; for (int x = 0; x < n; ++x) { if (done[x] != 0) { continue; } int band = light_band(x * 9, x); s = s + band; } return s; };\n";
+			both(prelude + "to_string(run(8));", "138", "a graft after a continue");
+			const std::string l = listing_run(prelude + "run(8);");
+			check_true(l.find("-- inlined light_band") != std::string::npos, "light_band is inlined: " + l);
+			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes: " + l);
+			check_true(l.find("bail->") == std::string::npos && l.find("C_BAIL") == std::string::npos, "no bail inside the loop: " + l);
+		});
 	}
 };
 

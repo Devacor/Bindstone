@@ -506,14 +506,10 @@ void vm_compiler::compile_inlined(const std::shared_ptr<call_expr>& call, const 
 	ctx.ref_slots.assign(fn->local_count, 0);
 	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { ctx.ref_slots[p.slot_index] = 1; } }
 	ctx.result_type = fn->return_type;
-	std::shared_ptr<variable_decl> result_decl;
 	if (!void_type(fn->return_type.get())) {
 		auto r = std::make_shared<identifier_expr>(call->location, std::string_view("\x01inl"), inline_symbol_);
 		r->slot_index = base + fn->local_count; r->names_value_decl = true;
-		ctx.result = r; ctx.pins.push_back(r);
-		result_decl = std::make_shared<variable_decl>(call->location, fn->return_type, std::string_view("\x01inl"), inline_symbol_, nullptr);
-		result_decl->slot_index = r->slot_index;
-		ctx.pins.push_back(result_decl);
+		ctx.result = r; ctx.pins.push_back(r);   // every path declares it (terminates), and so does the fallback: no default declaration (a bare DECL_VAR is no block instruction)
 	}
 	// the parameters: a by-value parameter is a declaration of the callee's type from the argument (the assignment table
 	// bind_parameters runs; the checker proved the type, so nothing converts); a reference parameter bound to an identifier is a
@@ -542,7 +538,6 @@ void vm_compiler::compile_inlined(const std::shared_ptr<call_expr>& call, const 
 	declare(inline_symbol_);
 	for (const parameter& p : fn->parameters) { declare(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name)); }
 	for (const uint64_t id : ctx.declared_names) { declare(id); }
-	if (result_decl) { compile_variable_decl(result_decl); }   // `T __r;`: the declared default
 	for (const auto& d : params) { compile_variable_decl(d); }
 	for (const auto& d : body) { compile_declaration(d, false); }
 	// the caller's statement with the call replaced by the result

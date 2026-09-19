@@ -321,13 +321,15 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 // backends evaluate): locals and literals hoist past anything but a body that writes through a reference parameter; a global or a
 // member only past a body that writes neither; the call's own arguments run before the body in both forms and count as nothing
 // before it; a call under a conditional operand (a ternary's arm, the right side of && or ||) runs on the paths that choose it
-// and is never hoisted
+// and is never hoisted; a store or an increment the statement completes before the call keeps the call (the arguments and the
+// body would run before it); a static member read is a member read
 struct hoist_scan {
 	const call_expr* call = nullptr;
 	bool before_call = true;
 	bool conditional = false;
 	bool other_call = false;
 	bool leaf_before = false;
+	bool store_before = false;
 	bool global_before = false;
 	bool member_before = false;
 	bool unsupported = false;
@@ -345,8 +347,18 @@ struct hoist_scan {
 			else { visit(b->right.get()); }
 			return;
 		}
-		case node_type::unary_expr: visit(static_cast<const unary_expr*>(e)->operand.get()); return;
-		case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); if (m->is_static) return; if (before_call) { leaf_before = true; member_before = true; } visit(m->object.get()); return; }
+		case node_type::unary_expr: {
+			auto* u = static_cast<const unary_expr*>(e);
+			visit(u->operand.get());
+			if (before_call && (u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus)) { store_before = true; }
+			return;
+		}
+		case node_type::member_expr: {
+			auto* m = static_cast<const member_expr*>(e);
+			if (before_call) { leaf_before = true; member_before = true; }
+			if (!m->is_static) { visit(m->object.get()); }
+			return;
+		}
 		case node_type::ternary_expr: {
 			auto* t = static_cast<const ternary_expr*>(e);
 			visit(t->condition.get());
@@ -359,6 +371,7 @@ struct hoist_scan {
 			visit(a->value.get());
 			if (a->target->get_type() == node_type::member_expr) { visit(static_cast<const member_expr*>(a->target.get())->object.get()); }
 			else if (a->target->get_type() != node_type::identifier_expr) { unsupported = true; }
+			if (before_call) { store_before = true; }
 			return;
 		}
 		case node_type::call_expr: {
@@ -451,7 +464,7 @@ std::shared_ptr<call_expr> vm_compiler::inline_call_of(const expression_ptr& e, 
 	const function_decl* fn = call->proven_callee_decl;
 	if (!inline_eligible(call.get(), fn)) return nullptr;
 	hoist_scan hs; hs.call = call.get(); hs.visit(e.get());
-	if (hs.unsupported || hs.other_call) return nullptr;
+	if (hs.unsupported || hs.other_call || hs.store_before) return nullptr;
 	// the body's writes decide what may stand before the call in the statement; the probe also proves the body clones
 	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = fn->return_type;
 	probe.ref_slots.assign(fn->local_count, 0);

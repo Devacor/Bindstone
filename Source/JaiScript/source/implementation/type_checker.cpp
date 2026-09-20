@@ -252,6 +252,7 @@ public:
             extra_globals_.insert(opts.program_names->begin(), opts.program_names->end());
         }
         program_classes_ = opts.program_classes;
+        program_functions_ = opts.program_functions;
     }
 
     check_report run() {
@@ -339,6 +340,7 @@ private:
     // Program-closure classes, modeled on first use from the engine's table (a same-unit class
     // always wins over its table entry).
     const program_class_map* program_classes_ = nullptr;
+    const program_function_map* program_functions_ = nullptr;
     std::unordered_map<std::string_view, sclass> program_sclasses_;
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
@@ -2070,7 +2072,17 @@ private:
             auto it = functions_.find(static_cast<identifier_expr*>(c->callee.get())->name);
             free_callee = it != functions_.end() && ov == &it->second;
         }
-        stamp_call_proofs(c, ov, args, free_callee);
+        // a free function another unit of the program declares (one unit, once): the inliner's decl and the argument proofs; the
+        // unit's own diagnostics keep their view (ov stays the unit's)
+        std::vector<const function_decl*> program_ov;
+        if (!ov && program_functions_ && c->callee && c->callee->get_type() == node_type::identifier_expr) {
+            const std::string_view name = static_cast<identifier_expr*>(c->callee.get())->name;
+            if (functions_.find(name) == functions_.end()) {
+                auto pit = program_functions_->find(std::string(name));
+                if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
+            }
+        }
+        stamp_call_proofs(c, program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty());
         if (ov) {
             // a map key passed where every viable overload binds the parameter by reference
             // or as a shared_ptr handle (a by-value parameter copies)
@@ -3242,6 +3254,18 @@ void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordere
             }
             default:
                 break;
+        }
+    }
+}
+
+void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out) {
+    for (const auto& d : decls) {   // the unit's earlier entries go first: a re-gather replaces, never accumulates
+        if (d && d->get_type() == node_type::function_decl) { out[std::string(static_cast<const function_decl*>(d.get())->name)][unit_path].clear(); }
+    }
+    for (const auto& d : decls) {
+        if (d && d->get_type() == node_type::function_decl) {
+            auto fd = std::static_pointer_cast<const function_decl>(d);
+            out[std::string(fd->name)][unit_path].push_back(std::move(fd));
         }
     }
 }

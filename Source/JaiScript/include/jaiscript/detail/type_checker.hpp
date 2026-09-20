@@ -22,6 +22,7 @@ namespace jai {
     class engine;
     class declaration;
     class class_decl;
+    class function_decl;
     using declaration_ptr = std::shared_ptr<declaration>;
 
     enum class check_mode : uint8_t {
@@ -105,6 +106,11 @@ namespace jai {
         // replaces an entry (newest declaration wins); a unit's own declaration always wins
         // over the table.
         using program_class_map = std::unordered_map<std::string, std::shared_ptr<class_decl>>;
+        // Program closure functions: name -> unit path -> the unit's declarations of it (a re-gather of a unit replaces its own; the
+        // declarations stay alive with the table, so a stamped decl never dangles and no address is reused). A call whose name the
+        // unit does not declare, and exactly one other unit declares once, resolves to that decl for the inliner and the argument
+        // proofs; diagnostics never read the table.
+        using program_function_map = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::shared_ptr<const function_decl>>>>;
 
         // One checker walk does two independent jobs: diagnostics (off -> the report stays
         // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
@@ -123,6 +129,7 @@ namespace jai {
             // of the engine's registrations. Diagnostics only until the class is registered -
             // a member typed through the table alone never seeds a proof.
             const program_class_map* program_classes = nullptr;
+            const program_function_map* program_functions = nullptr;
         };
 
         // Every top-level name `decls` declares (functions, variables, externs, destructured
@@ -131,6 +138,8 @@ namespace jai {
         void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordered_set<std::string>& out);
         // Every top-level class `decls` declares (namespace members flattened), newest wins.
         void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out);
+        // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
+        void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
 
         // AST-level static check against `eng`'s current registration surface.
         // extra_globals: names the host defines for this execution (instance variables).

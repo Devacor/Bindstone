@@ -1229,7 +1229,8 @@ namespace jai::vm {
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                 std::string_view var_name = {},
-                                                                detail::slot_kind kind = detail::slot_kind::assignment);
+                                                                detail::slot_kind kind = detail::slot_kind::assignment,
+                                                                std::string_view owner = {});
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)); interpreter twin:
         // interpreter::compound_typed_store_back
         op_status compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name = {});

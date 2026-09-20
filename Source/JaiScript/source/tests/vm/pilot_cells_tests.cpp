@@ -2672,12 +2672,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string k = listing_of(lights);
 			size_t bails = 0, last_bail = std::string::npos;
 			for (size_t at = k.find("C_BAIL"); at != std::string::npos; at = k.find("C_BAIL", at + 1)) { ++bails; last_bail = at; }
-			// row 152: the third statement the translation did not take, `int l2 = LT_MAX[i] - jitter(i) * 16`, is a graft now (jitter is a leaf in a
-			// declaration position; the two element stores of a call result are not), so the loop holds two bails and the graft, each bail
-			// standing for the rest of its arm (the skips after it in the region's listing)
+			// row 153: the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - jitter(i) * 16`
+			// stands behind `LT_MAX[i]`, an element read of a var array with no kind to spill, so it keeps its call and its bail, standing for
+			// the rest of its arm (the skips after it in the region's listing)
 			(void)last_bail;
-			check_true(bails == 2 && k.find("-- open loop") == std::string::npos && k.find("-- inlined jitter") != std::string::npos && k.find("bail->exit;") != std::string::npos && k.find("bail->exit;") < k.find("skip;", k.find("bail->exit;")),
-			           "the light loop closes with two bails standing for the rest of their arms and the jitter graft in the third: " + k);
+			size_t jitter_grafts = 0; for (size_t at = k.find("-- inlined jitter"); at != std::string::npos; at = k.find("-- inlined jitter", at + 1)) { ++jitter_grafts; }
+			check_true(bails == 1 && jitter_grafts == 2 && k.find("-- open loop") == std::string::npos && k.find("bail->exit;") != std::string::npos && k.find("bail->exit;") < k.find("skip;", k.find("bail->exit;")),
+			           "the light loop closes with one bail standing for the rest of its arm and two jitter grafts: " + k);
 			const size_t cells_at = k.find("-- cell loop");
 			const std::string cells_line = cells_at == std::string::npos ? std::string() : k.substr(cells_at, k.find('\n', cells_at) - cells_at);
 			bool adopted_slot = false;
@@ -2982,8 +2983,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of(prelude);
 			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("CALL_TEMP") >= 4, "the calls the expressions consume land in temps: " + std::to_string(count("CALL_TEMP")) + "\n" + l);
-			check_true(count("C_PROBE") >= 3, "the loops around them close with the door: " + std::to_string(count("C_PROBE")) + "\n" + l);
+			// row 153: side, twice and dec are leaves and graft; a call the graft does not take lands in a temp as before
+			check_true(count("CALL_TEMP") + count("-- inlined ") >= 4, "the calls the expressions consume land in temps or graft: " + std::to_string(count("CALL_TEMP")) + " + " + std::to_string(count("-- inlined ")) + "\n" + l);
+			check_true(count("C_PROBE") + count("-- inlined ") >= 3, "the loops around them close with the door or the graft: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			const std::string envl = listing_of("int G = 5; int twice(int v) { return v * 2; } var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };");
 			check_true(envl.find("CALL_TEMP") == std::string::npos, "an environment partner keeps the general order: " + envl);
 			const std::string refl = listing_of("function mutate(int& v) -> int { v = 20; return 2; } var g = function(int n) { int acc = 0; for (int i = 0; i < n; i++) { int x = 3; acc = acc + (x + mutate(x)); } return acc; };");
@@ -3255,15 +3257,15 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int N = 0;\n"
 				"int bump(int x) { N = N + 1; return x; }\n"
 				"int pure(int a) { return a + 1; }\n"
-				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = (i % 2 == 0) ? bump(i) : 0; bool ok = (i > 2) && bump(i) > 0; int w = ((i > 100) || bump(i) < 0) ? 1 : 0; s = s + v + (ok ? 1 : 0) + w + pure(i); } return s * 1000 + N; };\n";
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = (i % 2 == 0) ? bump(i) : 0; bool ok = (i > 2) && bump(i) > 0; int w = ((i > 100) || bump(i) < 0) ? 1 : 0; s = s + v + w + pure(i) + (ok ? 1 : 0); } return s * 1000 + N; };\n";
 			both(prelude + "to_string(run(8));", "53017", "a call under a conditional operand");
 			const std::string l = listing_run(prelude + "run(8);");
 			check_true(l.find("-- inlined bump") == std::string::npos, "bump under a conditional operand keeps its call: " + l);
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure in a plain operand is inlined: " + l);
 		});
 		test("a_body_writing_through_a_reference_parameter_grafts_only_at_the_statements_front", [this]() {
-			// row 152: `s + i + inc(i)` reads i before inc writes it through its var& parameter (a store, or tick's ++ of the parameter's
-			// name), so the statement keeps the call; `int t = inc2(j)` has no leaf before the call and grafts
+			// row 153: `s + i + inc(i)` reads i before inc writes it through its var& parameter (a store, or tick's ++ of the parameter's
+			// name); the exact hoist spills `s + i` into a typed temp ahead of the body, so all three graft and the values hold
 			const std::string prelude =
 				"int inc(var& p) { p = p + 1; int r = p; return r; }\n"
 				"int inc2(var& p) { p = p + 1; int r = p; return r; }\n"
@@ -3271,8 +3273,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(int n) { int s = 0; int i = 0; int j = 0; int k = 0; while (i < n) { s = s + i + inc(i); j = j + k + tick(k); int t = inc2(j); s = s + t; } return s * 100 + j + k; };\n";
 			both(prelude + "to_string(run(6));", "14848", "a reference write behind a read");
 			const std::string l = listing_run(prelude + "run(6);");
-			check_true(l.find("-- inlined inc2") != std::string::npos, "inc2 at the statement's front is inlined: " + l);
-			check_true(l.find("-- inlined inc ") == std::string::npos && l.find("-- inlined tick") == std::string::npos, "inc and tick behind a read of their referent keep their calls: " + l);
+			check_true(l.find("-- inlined inc2") != std::string::npos && l.find("-- inlined inc ") != std::string::npos && l.find("-- inlined tick") != std::string::npos, "inc, tick and inc2 are inlined (the reads before them spilled): " + l);
+			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the three grafts: " + l);
 		});
 		test("an_increment_of_a_global_in_the_body_is_a_write", [this]() {
 			// row 152: `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before
@@ -3308,6 +3310,104 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + "to_string(run(5));", "25", "a static read before a body writing it");
 			const std::string l = listing_run(prelude + "run(5);");
 			check_true(l.find("-- inlined bumpc") == std::string::npos, "bumpc after a read of the static keeps its call: " + l);
+		});
+		test("every_position_takes_the_same_graft", [this]() {
+			// row 153: the call becomes a temp, so an operand, a declaration, an assignment, an if condition, a while condition, a for condition
+			// and update, an argument of another leaf and an argument of a host function are one position; the values on both backends
+			const std::string prelude =
+				"int add1(int a) { return a + 1; }\n"
+				"int twice(int a) { return a * 2; }\n"
+				"var run = function(int n) { int s = 0; int sum_d = 0; int sum_t = 0; int t = 0; int c1 = 0; int sum_e = 0; string acc = \"\";\n"
+				"  for (int i = 0; i < n; ++i) { s = s + add1(i); int d = add1(i); sum_d = sum_d + d; t = add1(i); sum_t = sum_t + t; if (add1(i) > 3) { c1 = c1 + 1; } int e = twice(add1(i)); sum_e = sum_e + e; acc = acc + to_string(add1(i)); }\n"
+				"  int w = 0; while (add1(w) < 4) { w = w + 1; }\n"
+				"  int c2 = 0; for (int k = 0; add1(k) < 4; k = add1(k)) { c2 = c2 + 1; }\n"
+				"  return to_string(s) + \",\" + to_string(sum_d) + \",\" + to_string(sum_t) + \",\" + to_string(c1) + \",\" + to_string(w) + \",\" + to_string(c2) + \",\" + to_string(sum_e) + \",\" + acc; };\n";
+			both(prelude + "run(5);", "15,15,15,2,3,3,30,12345", "every position");
+			both(prelude + "run(5);", "15,15,15,2,3,3,30,12345", "every position, proofs off", false);
+			const std::string l = listing_run(prelude + "run(5);");
+			size_t grafts = 0; for (size_t at = l.find("-- inlined add1"); at != std::string::npos; at = l.find("-- inlined add1", at + 1)) { ++grafts; }
+			check_true(grafts >= 9, "add1 grafts at every position (" + std::to_string(grafts) + "): " + l);
+			check_true(l.find("-- inlined twice") != std::string::npos, "twice over the hoisted add1 is inlined: " + l);
+		});
+		test("a_spilled_operand_raises_before_the_body", [this]() {
+			// row 153: `A[i] + div(1, i - 9)` reads the element before the call; the graft spills the read into a typed temp ahead of the body, so
+			// with i out of range the element's raise comes first, as the interpreter's does, never the body's division
+			const std::string prelude =
+				"array<int> A = [1, 2, 3];\n"
+				"int div(int a, int b) { return a / b; }\n"
+				"var run = function(int i) { int s = A[i] + div(1, i - 9); return s; };\n";
+			both(prelude + "to_string(run(1));", "2", "a spilled element read, in range");
+			both(prelude + "to_string(run(9));", "", "a spilled element read, out of range");
+			const std::string vm = run_on(true, prelude + "to_string(run(9));");
+			check_true(vm.rfind("throw:", 0) == 0 && vm.find("ivision") == std::string::npos, "the element's raise comes first: " + vm);
+			const std::string l = listing_run(prelude + "run(1);");
+			check_true(l.find("-- inlined div") != std::string::npos, "div behind a spilled read is inlined: " + l);
+		});
+		test("returns_in_many_arms_jump_to_one_join", [this]() {
+			// row 153: a body with returns in six arms and one inside a nested block grafts (each return declares the result and jumps to the join;
+			// the rests are never cloned), on both backends, proofs on and off
+			const std::string prelude =
+				"int tone(int kind, int tx) {\n"
+				"  if (kind == 1) { int t = tx & 1; if (tx > 4) { t = 2; } return t; }\n"
+				"  if (kind == 2) { int t = (tx >> 1) & 1; return t; }\n"
+				"  if (kind == 3) { return 3; }\n"
+				"  if (kind == 4) { { int q = tx * 2; return q; } }\n"
+				"  if (tx < 3) { return 7; }\n"
+				"  return 0;\n"
+				"}\n"
+				"var run = function(int n) { int s = 0; for (int k = 0; k <= 5; ++k) { for (int tx = 0; tx < n; ++tx) { s = s + tone(k, tx); } } return s; };\n";
+			both(prelude + "to_string(run(6));", "96", "returns in many arms");
+			both(prelude + "to_string(run(6));", "96", "returns in many arms, proofs off", false);
+			const std::string l = listing_run(prelude + "run(6);");
+			check_true(l.find("-- inlined tone") != std::string::npos, "tone is inlined through the join: " + l);
+		});
+		test("an_unproven_return_converts_with_the_returns_text", [this]() {
+			// row 153: `return cells[i]` from a var container has no proof; the graft declares the result with the return site, so a string
+			// element raises the callee's own text on both backends, and an int element is the value
+			const std::string prelude =
+				"var cells = [1, 2, \"x\"];\n"
+				"int cell_at(int i) { return cells[i]; }\n"
+				"var run = function(int i) { int v = cell_at(i) + 1; return v; };\n";
+			both(prelude + "to_string(run(1));", "3", "an unproven return, an int element");
+			both(prelude + "to_string(run(2));", "", "an unproven return, a string element");
+			const std::string vm = run_on(true, prelude + "to_string(run(2));");
+			check_true(vm.find("Cannot return") != std::string::npos && vm.find("cell_at") != std::string::npos, "the return's text: " + vm);
+			const std::string l = listing_run(prelude + "run(1);");
+			check_true(l.find("-- inlined cell_at") != std::string::npos, "cell_at is inlined with the return site: " + l);
+		});
+		test("a_hoisted_condition_takes_the_fallback_after_a_reload", [this]() {
+			// row 153: a leaf in an if condition grafts ahead of the condition's jumps; a reload of the callee fails the guard and the fallback
+			// declares the real call's result into the same temp, so the condition reads the new body's value
+			const std::string prelude =
+				"int lim(int a) { return a + 10; }\n"
+				"var run = function(int n) { int c = 0; for (int i = 0; i < n; ++i) { if (lim(i) > 12) { c = c + 1; } } return c; };\n";
+			auto sequence = [&](bool vm) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				try {
+					e->execute(prelude);
+					const std::string a = e->execute("run(5);").to_string();
+					e->execute("int lim(int a) { return a - 10; }");
+					const std::string b = e->execute("run(5);").to_string();
+					return a + "|" + b;
+				} catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string iv = sequence(false), vv = sequence(true);
+			check_eq(iv, vv, "the reload takes the fallback on the vm");
+			check_eq(std::string("2|0"), vv, "the condition before and after the reload");
+			const std::string l = listing_run(prelude + "run(5);");
+			check_true(l.find("-- inlined lim") != std::string::npos, "lim in the condition is inlined: " + l);
+		});
+		test("a_call_behind_an_effect_stays_a_call", [this]() {
+			// row 153: the first call a statement runs is the one hoisted; a method call or a host call first keeps every later leaf a call
+			// (it would run behind an effect), while a leaf first grafts and the effect follows
+			const std::string prelude =
+				"int add1(int a) { return a + 1; }\n"
+				"int add2(int a) { return a + 2; }\n"
+				"var run = function(int n) { var a = [1, 2]; int s = 0; for (int i = 0; i < n; ++i) { s = s + a.size() + add1(i); s = s + add2(i) + a.size(); } return s; };\n";
+			both(prelude + "to_string(run(4));", "40", "a call behind an effect");
+			const std::string l = listing_run(prelude + "run(4);");
+			check_true(l.find("-- inlined add1") == std::string::npos, "add1 behind the method call keeps its call: " + l);
+			check_true(l.find("-- inlined add2") != std::string::npos, "add2 ahead of the method call is inlined: " + l);
 		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the

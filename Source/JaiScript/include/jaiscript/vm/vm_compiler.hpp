@@ -48,6 +48,7 @@ namespace jai::vm {
             switch_ctx,  // consumes break; continue passes through (pops the [value, ft] stack pair)
             try_block,   // pass-through: op_try_pop before jumps that exit it
             catch_block, // pass-through: op_catch_end before jumps that exit it
+            graft,       // an inlined body: its returns jump to the graft's join (vm_inline.cpp)
         };
 
         struct loop_context {
@@ -144,13 +145,19 @@ namespace jai::vm {
         const block_stmt* callable_body_ = nullptr;
         bool inlining_off_ = false;
         uint64_t inline_symbol_ = 0;
+        struct hoist_plan { std::shared_ptr<call_expr> call; const function_decl* fn = nullptr; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; };
         bool inline_eligible(const call_expr* call, const function_decl* fn) const;
-        std::shared_ptr<call_expr> inline_call_of(const expression_ptr& e, const function_decl** fn_out) const;
-        void compile_inlined(const std::shared_ptr<call_expr>& call, const function_decl* fn, const expression_ptr& stmt_expr,
-                             const std::function<void(const expression_ptr&)>& emit_replaced, const std::function<void()>& emit_original);
+        bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
+        type_info_ptr inline_type(script_value_type kind);
+        std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);
+        expression_ptr compile_hoist(const hoist_plan& plan, const expression_ptr& root);
+        expression_ptr hoist_leaf_calls(const expression_ptr& e, bool statement_position, bool& changed);
+        void compile_graft_exit();
         bool try_inline_expression(const expression_ptr& e);
         bool try_inline_variable_decl(const std::shared_ptr<variable_decl>& decl);
         bool try_inline_return(const statement_ptr& stmt);
+        expression_ptr hoisted_condition(const expression_ptr& cond);
+        void compile_hoisted_update(const expression_ptr& update);
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
         // Fuses a trailing fused-comparison condition with its jump_if_false

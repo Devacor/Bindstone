@@ -912,6 +912,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		compile_for(static_cast<for_stmt*>(stmt.get()));
 		return;
 	case node_type::return_stmt: {
+		if (static_cast<return_stmt*>(stmt.get())->inline_exit) { compile_graft_exit(); return; }
 		if (try_inline_return(stmt)) return;
 		auto* rs = static_cast<return_stmt*>(stmt.get());
 		// Return-site fusion is legal only when the region exits emit NOTHING for a
@@ -1126,7 +1127,9 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 
 void vm_compiler::compile_if(if_stmt* stmt) {
 	std::vector<size_t> false_jumps;
-	compile_branch_condition(stmt->condition, false_jumps);
+	const size_t cond_mark = temp_next_;
+	compile_branch_condition(hoisted_condition(stmt->condition), false_jumps);
+	temp_next_ = cond_mark;   // the hoisted leaves' temps die at the jumps
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
@@ -1141,7 +1144,9 @@ void vm_compiler::compile_if(if_stmt* stmt) {
 void vm_compiler::compile_while(while_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
-	compile_branch_condition(stmt->condition, exit_jumps);
+	const size_t cond_mark = temp_next_;
+	compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps);
+	temp_next_ = cond_mark;
 
 	loops_.push_back({});
 	loops_.back().continue_target = top;
@@ -1179,7 +1184,9 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
 	if (stmt->condition) {
-		compile_branch_condition(stmt->condition, exit_jumps);
+		const size_t cond_mark = temp_next_;
+		compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps);
+		temp_next_ = cond_mark;
 	}
 
 	loops_.push_back({});
@@ -1191,12 +1198,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	for (size_t at : loops_.back().continue_patches) {
 		patch_jump(at, continue_target);
 	}
-	if (stmt->update) {
-		if (!compile_no_result_expression(stmt->update)) {
-			compile_expression(stmt->update, true);
-			emit(opcode::op_pop);
-		}
-	}
+	if (stmt->update) { compile_hoisted_update(stmt->update); }
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
 	const size_t end = chunk_->code.size();

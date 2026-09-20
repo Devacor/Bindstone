@@ -615,7 +615,8 @@ middle end's switch off compiles no graft. In a region the guard is a site: its 
 point (`cell_loop::inline_sites`), the fallback's instructions are skips, the spills and the inlined body's instructions are the
 region's, and a return's jump is a forward edge to the join like an if's. A raise inside an inlined body names the callee in the
 trace (the range table on the chunk, `chunk::inline_sites`). The listing names each graft (`-- inlined light_band guard 12: 13..40
-fallback 40..47`); the manifest lists the sites.
+fallback 40..47`); the manifest lists the sites. Inside a parallel worker the guard holds for the worker's copy of the
+callee, whose closure is the worker's root environment, so a graft runs in the workers as it does on the main thread.
 
 ### Member read sites
 

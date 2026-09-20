@@ -1645,6 +1645,27 @@ public:
 	}
 
 	void forge_tests() override {
+		test("inlined_leaf_inside_a_worker_body_matches_serial_1_2_8", [this]() {
+			// row 153.3: a leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
+			// worker's root, which the guard accepts); the values match the serial loop at every worker count
+			auto e = make_engine();
+			const std::string src = R"(
+				class P { int kind = 1; float x = 0.0; float vx = 0.1; int life = 10; }
+				int CAP = 4;
+				void step(var& p) { int kind = p.kind; if (kind == 0) { return; } float x = p.x; float vx = p.vx; int life = p.life; life = life - 1;
+				  if (life <= 0) { p.kind = 0; p.x = 0.0; p.life = 0; return; } if (kind == 1) { vx = vx * 0.9; } else { vx = vx * 0.5; } x = x + vx * 0.5;
+				  if (x > 2.0) { x = 2.0; if (kind == 1 || kind == 2) { life = life < CAP ? life : CAP; } } p.x = x; p.vx = vx; p.life = life; }
+				array<P> a = []; array<P> b = [];
+				for (int i = 0; i < 64; i++) { P p = P(); p.kind = i % 3; p.x = i * 0.3; a.push(p); P q = P(); q.kind = i % 3; q.x = i * 0.3; b.push(q); }
+				for (int t = 0; t < 12; t++) { parallel_for (auto& p : a) { step(p); } }
+				for (int t = 0; t < 12; t++) { for (auto& p : b) { step(p); } }
+				var ra = []; var rb = [];
+				for (auto& p : a) { ra.push(p.x); ra.push(p.life); ra.push(p.kind); }
+				for (auto& p : b) { rb.push(p.x); rb.push(p.life); rb.push(p.kind); }
+				return [ra, rb];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
 		test("inplace_row_mutation_matches_serial_1_2_8", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

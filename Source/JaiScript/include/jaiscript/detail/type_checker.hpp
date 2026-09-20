@@ -23,6 +23,7 @@ namespace jai {
     class declaration;
     class class_decl;
     class function_decl;
+        class variable_decl;
     using declaration_ptr = std::shared_ptr<declaration>;
 
     enum class check_mode : uint8_t {
@@ -93,6 +94,7 @@ namespace jai {
         uint32_t args = 0;      // call_expr::static_arg_proofs entries == proof_same_type
         uint32_t returns = 0;   // return_stmt::static_return_proof
         uint32_t members = 0;   // member_expr / identifier_expr field proofs
+        uint32_t deferred = 0;  // program-table classes the walk met before the engine defined them: the unit's proofs re-stamp after the next import
         uint32_t calls = 0;     // call_expr nodes with a proven callee body
     };
 
@@ -111,6 +113,11 @@ namespace jai {
         // unit does not declare, and exactly one other unit declares once, resolves to that decl for the inliner and the argument
         // proofs; diagnostics never read the table.
         using program_function_map = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::shared_ptr<const function_decl>>>>;
+        // Program closure globals: name -> unit path -> the unit's top-level variable declarations of it (kept alive like the
+        // functions). A name the unit does not declare, and exactly one other unit declares once with a spelled non-reference type,
+        // is typed by that declaration in the PROOF pass alone (diagnostics never read the table); a class-typed one is typed once
+        // its class is defined, and a unit whose proofs waited re-stamps after each import completes (proof_stats::deferred).
+        using program_global_map = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::shared_ptr<const variable_decl>>>>;
 
         // One checker walk does two independent jobs: diagnostics (off -> the report stays
         // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
@@ -130,6 +137,8 @@ namespace jai {
             // a member typed through the table alone never seeds a proof.
             const program_class_map* program_classes = nullptr;
             const program_function_map* program_functions = nullptr;
+            const program_global_map* program_globals = nullptr;
+            std::vector<std::string>* deferred_classes = nullptr;   // out: the program-table classes the walk met before the engine defined them
         };
 
         // Every top-level name `decls` declares (functions, variables, externs, destructured
@@ -140,6 +149,7 @@ namespace jai {
         void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out);
         // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
         void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
+        void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out);
 
         // AST-level static check against `eng`'s current registration surface.
         // extra_globals: names the host defines for this execution (instance variables).

@@ -57,6 +57,15 @@ namespace jai::vm {
     class vm_backend : public execution_backend {
     public:
         vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);
+#if defined(JAISCRIPT_VM_COARSE_PROFILE) && !defined(JAISCRIPT_VM_PROFILE)
+        // The coarse profile (a Release build with the define): two clock reads per block run, per call push, per frame pop and per
+        // method call, one pair around the dispatcher's outermost run, the shares at exit. The fine profile's per-instruction clocks
+        // distort what they measure; this one costs a few reads per call.
+        void dump_coarse_profile() const;
+        uint64_t coarse_total_ = 0, coarse_blocks_ = 0, coarse_block_runs_ = 0, coarse_push_ = 0, coarse_pushes_ = 0, coarse_pop_ = 0, coarse_pops_ = 0, coarse_method_ = 0, coarse_methods_ = 0;
+        uint32_t coarse_depth_ = 0;
+        uint64_t coarse_enter_ = 0, coarse_enters_ = 0, coarse_flush_ = 0, coarse_flushes_ = 0, coarse_miss_ = 0, coarse_misses_ = 0, coarse_land_ = 0, coarse_lands_ = 0;   // inside the block bucket
+#endif
 #ifdef JAISCRIPT_VM_PROFILE
         ~vm_backend() override { dump_opcode_profile(); }
         void dump_opcode_profile() const;
@@ -253,6 +262,8 @@ namespace jai::vm {
         // [5]=general replay [6]=binary-index raw fold [7]=member-node container
         uint64_t profile_index_read_paths_[8] = {};
         std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
+#elif defined(JAISCRIPT_VM_COARSE_PROFILE)
+        ~vm_backend() override { dump_coarse_profile(); }
 #else
         ~vm_backend() override = default;
 #endif

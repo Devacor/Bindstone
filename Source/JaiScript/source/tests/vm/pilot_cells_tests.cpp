@@ -3451,6 +3451,19 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(prelude + "tick(12);");
 			check_true(l.find("-- inlined step") != std::string::npos, "step grafts inside the range-for with its ternary store: " + l);
 		});
+		test("the_listing_names_each_kept_call_with_its_rule", [this]() {
+			// row 154.0: a call the inliner keeps is named in the listing with the rule that kept it: a var local into an int parameter (an
+			// unproven argument), a leaf as a method call's argument, and a leaf returning a var element inside a loop (an unproven return)
+			const std::string l = listing_run(
+				"int add1(int a) { return a + 1; }\n"
+				"var G = [3, 4, 5];\n"
+				"int at(int i) { return G[i]; }\n"
+				"int run() { var v = 3; int s = add1(v); var acc = []; acc.push(add1(2)); for (int i = 0; i < 3; ++i) { s = s + at(i); } return s; }\n"
+				"run();");
+			check_true(l.find("-- call kept add1 line 4: an unproven argument") != std::string::npos, "an unproven argument keeps the call: " + l);
+			check_true(l.find("-- call kept add1 line 4: a method call's argument") != std::string::npos, "a method call's argument keeps the call: " + l);
+			check_true(l.find("-- call kept at line 4: an unproven return in a loop") != std::string::npos, "an unproven return in a loop keeps the call: " + l);
+		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the
 			// graft declared as an int; the graft declares no default for its result (a bare DECL_VAR is no block instruction, and inside the

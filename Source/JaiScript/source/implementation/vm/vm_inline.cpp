@@ -30,6 +30,7 @@ struct inline_context {
 	size_t nodes = 0;
 	size_t budget = k_inline_max_nodes;                            // the body's clone is bounded; the statement's clone is compiled once whatever its size
 	bool ok = true;
+	const char* why = nullptr;                                     // the first rule that kept the call
 	bool writes_global = false;
 	bool writes_member = false;
 	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
@@ -41,10 +42,10 @@ struct inline_context {
 	template <class T, class... A> std::shared_ptr<T> make(A&&... a) {
 		auto n = std::make_shared<T>(std::forward<A>(a)...);
 		pins.push_back(n);
-		if (++nodes > budget) { ok = false; }
+		if (++nodes > budget) { fail("a body too large"); }
 		return n;
 	}
-	void fail() { ok = false; }
+	void fail(const char* w) { if (ok) { why = w; } ok = false; }
 };
 
 bool scalar_type(const type_info* t) {
@@ -172,7 +173,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	case node_type::assignment_expr: {
 		auto* a = static_cast<const assignment_expr*>(e.get());
 		const node_type tk = a->target->get_type();
-		if (tk != node_type::identifier_expr && tk != node_type::member_expr && tk != node_type::binary_expr) { c.fail(); return nullptr; }
+		if (tk != node_type::identifier_expr && tk != node_type::member_expr && tk != node_type::binary_expr) { c.fail("a store target the graft does not take"); return nullptr; }
 		note_store(a->target.get(), c);
 		auto t = clone_expr(a->target, c); auto v = clone_expr(a->value, c);
 		if (!c.ok) return nullptr;
@@ -205,7 +206,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
-		if (!c.replace && !math_call(ce)) { c.fail(); return nullptr; }   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
+		if (!c.replace && !math_call(ce)) { c.fail("a call in the body"); return nullptr; }   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
 		std::vector<expression_ptr> args;
 		for (const auto& a : ce->arguments) { args.push_back(clone_expr(a, c)); }
 		auto callee = clone_expr(ce->callee, c);
@@ -225,7 +226,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		return n;
 	}
 	default:
-		c.fail(); return nullptr;
+		c.fail("an expression the graft does not take"); return nullptr;
 	}
 }
 
@@ -268,10 +269,11 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		auto* r = static_cast<const return_stmt*>(s.get());
 		std::vector<declaration_ptr> ds;
 		if (!c.result) {
-			if (r->value) { c.fail(); return nullptr; }
+			if (r->value) { c.fail("a value returned from a void callee"); return nullptr; }
 		} else {
-			if (!r->value || r->binds_reference) { c.fail(); return nullptr; }
-			if (c.in_loop && (r->static_return_proof != proof_same_type || !landable(r->value.get()))) { c.fail(); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
+			if (!r->value || r->binds_reference) { c.fail("a return without a value or by reference"); return nullptr; }
+			if (c.in_loop && r->static_return_proof != proof_same_type) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
+			if (c.in_loop && !landable(r->value.get())) { c.fail("a return the block cannot land"); return nullptr; }
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
 			auto rd = c.make<variable_decl>(r->location, c.result_type, c.result->name, c.result->symbol_id, v);   // `T __h = e;`: this path's definition of the result
@@ -289,14 +291,14 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 	}
 	case node_type::expression_stmt: {
 		auto* es = static_cast<const expression_stmt*>(s.get());
-		if (c.in_loop && !landable_stmt(es->expression.get())) { c.fail(); return nullptr; }
+		if (c.in_loop && !landable_stmt(es->expression.get())) { c.fail("a statement the block cannot land"); return nullptr; }
 		auto e = clone_expr(es->expression, c);
 		if (!c.ok) return nullptr;
 		std::vector<declaration_ptr> ds; ds.push_back(c.make<expression_decl>(es->location, e, false));
 		return c.make<block_stmt>(es->location, std::move(ds));
 	}
 	default:
-		c.fail(); return nullptr;
+		c.fail("a statement the graft does not take"); return nullptr;
 	}
 }
 
@@ -308,9 +310,9 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 		switch (d->get_type()) {
 		case node_type::variable_decl: {
 			auto* v = static_cast<const variable_decl*>(d.get());
-			if (v->slot_index == SIZE_MAX || v->is_static || v->ref_escaping || v->function_spelling) { c.fail(); return out; }
-			if (v->type && v->type->is_reference()) { c.fail(); return out; }
-			if (c.in_loop && v->initializer && !landable(v->initializer.get())) { c.fail(); return out; }   // a declaration the block cannot land: the call stays
+			if (v->slot_index == SIZE_MAX || v->is_static || v->ref_escaping || v->function_spelling) { c.fail("a declaration the graft does not take"); return out; }
+			if (v->type && v->type->is_reference()) { c.fail("a reference declaration"); return out; }
+			if (c.in_loop && v->initializer && !landable(v->initializer.get())) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
 			expression_ptr init = v->initializer ? clone_expr(v->initializer, c) : nullptr;
 			if (!c.ok) return out;
 			auto n = c.make<variable_decl>(v->location, v->type, v->name, v->name_id, init);
@@ -323,8 +325,8 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 		}
 		case node_type::expression_decl: {
 			auto* ed = static_cast<const expression_decl*>(d.get());
-			if (ed->implicit_return) { c.fail(); return out; }
-			if (c.in_loop && !landable_stmt(ed->expression.get())) { c.fail(); return out; }
+			if (ed->implicit_return) { c.fail("an implicit return"); return out; }
+			if (c.in_loop && !landable_stmt(ed->expression.get())) { c.fail("a statement the block cannot land"); return out; }
 			auto e = clone_expr(ed->expression, c);
 			if (!c.ok) return out;
 			out.push_back(c.make<expression_decl>(ed->location, e, false));
@@ -339,7 +341,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			break;
 		}
 		default:
-			c.fail(); return out;
+			c.fail("a declaration the graft does not take"); return out;
 		}
 	}
 	return out;
@@ -424,37 +426,39 @@ script_value_type spill_kind(const expression* e) {
 // the callee's shape and the site's arguments (the statement's position is the caller's business): one small body of the forms the
 // clone takes, every by-value parameter a scalar the checker proved or a `var` taking a scalar local or a literal, every reference
 // parameter a `var&` bound to a plain identifier or an element lvalue
-bool vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn) const {
-	if (!ir_passes_ || !typed_lowering_ || !callable_.active || !fn || !fn->body || fn->is_coroutine || fn->is_static) return false;
-	if (fn->body.get() == callable_body_) return false;   // no recursion
-	if (call->arguments.size() != fn->parameters.size()) return false;
+const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn) const {
+	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
+	if (!fn || !fn->body) return "a callee without a body";
+	if (fn->is_coroutine || fn->is_static) return "a coroutine or a static callee";
+	if (fn->body.get() == callable_body_) return "a recursive call";
+	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
-	if (!(void_type(rt) || scalar_type(rt))) return false;   // a string result declares through the general DECL_VAR, which opens the enclosing block
-	if (!void_type(rt) && !terminates(fn->body.get())) return false;   // the result is defined on every path or the callee is not a leaf the graft takes
+	if (!(void_type(rt) || scalar_type(rt))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
+	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression* a = call->arguments[i].get();
-		if (p.slot_index == SIZE_MAX || p.slot_index >= fn->local_count || p.default_value) return false;
+		if (p.slot_index == SIZE_MAX || p.slot_index >= fn->local_count || p.default_value) return "a parameter with a default or without a slot";
 		if (p.is_reference) {
-			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get())) || p.ref_escaping) return false;   // `var& p` (the parser keeps the referent's type and the reference flag apart)
-			if (a->get_type() == node_type::identifier_expr) { if (static_cast<const identifier_expr*>(a)->global_qualified) return false; continue; }
+			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get())) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
+			if (a->get_type() == node_type::identifier_expr) { if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name"; continue; }
 			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) continue;
-			return false;
+			return "a reference argument that is not a name or an element";
 		}
-		if (p.ref_escaping) return false;
+		if (p.ref_escaping) return "a parameter that escapes";
 		const bool proven = i < call->static_arg_proofs.size() && call->static_arg_proofs[i] == proof_same_type;
-		if (scalar_type(p.type.get())) { if (!proven) return false; continue; }   // an unproven argument would bind out of the call's order (every argument before the first binding)
+		if (scalar_type(p.type.get())) { if (!proven) return "an unproven argument"; continue; }   // an unproven argument would bind out of the call's order (every argument before the first binding)
 		if (any_type(p.type.get())) {
 			if (a->get_type() == node_type::literal_expr) continue;
 			if (a->get_type() == node_type::identifier_expr) {
 				auto* id = static_cast<const identifier_expr*>(a);
 				if (id->slot_index != SIZE_MAX && callable_.primitive_slots.count(static_cast<uint32_t>(id->slot_index))) continue;
 			}
-			return false;
+			return "a var parameter bound to more than a scalar local or a literal";
 		}
-		return false;
+		return "a parameter type the graft does not take";
 	}
-	return true;
+	return nullptr;
 }
 
 // the first call the statement runs is a leaf the graft takes, in an unconditional position, with every operand evaluated before
@@ -463,50 +467,53 @@ bool vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn
 bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out) {
 	std::vector<std::shared_ptr<call_expr>> events; bool unsupported = false;
 	call_events(root, events, unsupported);
-	if (unsupported || events.empty()) return false;
+	if (events.empty()) return false;
 	const std::shared_ptr<call_expr>& call = events.front();
-	if (!call->callee || call->callee->get_type() != node_type::identifier_expr || !call->proven_callee_decl) return false;
+	out.call = call;   // the call the plan is about, named with the rule that keeps it when the plan fails
+	if (unsupported) { out.why = "a statement the graft does not take"; return false; }
+	if (!call->callee || call->callee->get_type() != node_type::identifier_expr) { out.why = "a callee that is not a name"; return false; }
+	if (!call->proven_callee_decl) { out.why = "an unresolved callee"; return false; }
 	const function_decl* fn = call->proven_callee_decl;
-	if (!inline_eligible(call.get(), fn)) return false;
-	if (void_type(fn->return_type.get()) && !(statement_position && root.get() == call.get())) return false;   // a void result is a value nowhere but alone in a statement
+	if (const char* why = inline_eligible(call.get(), fn)) { out.why = why; return false; }
+	if (void_type(fn->return_type.get()) && !(statement_position && root.get() == call.get())) { out.why = "a void result used as a value"; return false; }   // a void result is a value nowhere but alone in a statement
 	// the body clones, and its writes decide what may stand before the call
 	bool in_loop = false;
 	for (const loop_context& lc : loops_) { if (lc.kind == region_kind::loop || lc.kind == region_kind::range_for) { in_loop = true; break; } }
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
-		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get())) return false; }
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get())) { out.why = "an argument the block cannot land"; return false; } }
 	}
 	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = fn->return_type; probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.ref_slots.assign(fn->local_count, 0);
 	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { probe.ref_slots[p.slot_index] = 1; } }
 	if (!void_type(fn->return_type.get())) { auto r = std::make_shared<identifier_expr>(fn->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 	(void)clone_body(fn->body->declarations, probe, true);
-	if (!probe.ok) return false;
+	if (!probe.ok) { out.why = probe.why ? probe.why : "a body the graft does not take"; return false; }
 	// the operands before the call: the left siblings along the path from the root
 	std::vector<expression_ptr> path;
-	if (!find_path(root, call.get(), path)) return false;
+	if (!find_path(root, call.get(), path)) { out.why = "a position the graft does not take"; return false; }
 	std::vector<expression_ptr> pre;
 	for (size_t k = 0; k + 1 < path.size(); ++k) {
 		const expression_ptr& a = path[k]; const expression* x = path[k + 1].get();
 		switch (a->get_type()) {
 		case node_type::binary_expr: {
 			auto* b = static_cast<const binary_expr*>(a.get());
-			if (x == b->right.get()) { if (logical_op(b->op.type)) return false; pre.push_back(b->left); }
+			if (x == b->right.get()) { if (logical_op(b->op.type)) { out.why = "an operand behind && or ||"; return false; } pre.push_back(b->left); }
 			break;
 		}
-		case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(a.get()); if (x != t->condition.get()) return false; break; }
-		case node_type::assignment_expr: { auto* s = static_cast<const assignment_expr*>(a.get()); if (x != s->value.get()) return false; break; }
+		case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(a.get()); if (x != t->condition.get()) { out.why = "a call in a ternary's arm"; return false; } break; }
+		case node_type::assignment_expr: { auto* s = static_cast<const assignment_expr*>(a.get()); if (x != s->value.get()) { out.why = "a call in a store's target"; return false; } break; }
 		case node_type::call_expr: {
 			auto* ce = static_cast<const call_expr*>(a.get());
 			if (x == ce->callee.get()) break;
-			if (!ce->callee) return false;
-			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) return false; }   // a method's receiver and lookup stand before its arguments
+			if (!ce->callee) { out.why = "a callee that is not a name"; return false; }
+			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
 			else if (ce->callee->get_type() == node_type::identifier_expr) { pre.push_back(ce->callee); }
-			else return false;
+			else { out.why = "an argument of a computed callee"; return false; }
 			for (const auto& arg : ce->arguments) { if (arg.get() == x) break; pre.push_back(arg); }
 			break;
 		}
 		case node_type::unary_expr: case node_type::cast_expr: case node_type::member_expr: break;
-		default: return false;
+		default: out.why = "a position the graft does not take"; return false;
 		}
 	}
 	out.spills.clear();
@@ -517,15 +524,15 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::identifier_expr: { free_identifier = true; if (static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX) { free_global = true; } break; }
 		default: {
 			const script_value_type kind = spill_kind(p.get());
-			if (kind == script_value_type::jai_null_type || !landable(p.get())) return false;   // a spill is a block instruction of a known kind
+			if (kind == script_value_type::jai_null_type || !landable(p.get())) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
 			out.spills.emplace_back(p, kind);
 			break;
 		}
 		}
 	}
-	if (free_identifier && probe.writes_ref) return false;   // an identifier before the call may be the referent
-	if (free_global && (probe.writes_global || probe.writes_member)) return false;
-	out.call = call; out.fn = fn; out.in_loop = in_loop;
+	if (free_identifier && probe.writes_ref) { out.why = "a name before the call the body may write through its reference"; return false; }   // an identifier before the call may be the referent
+	if (free_global && (probe.writes_global || probe.writes_member)) { out.why = "a global before the call the body writes"; return false; }
+	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
 	return true;
 }
 
@@ -653,7 +660,12 @@ expression_ptr vm_compiler::hoist_leaf_calls(const expression_ptr& e, bool state
 	expression_ptr cur = e;
 	for (size_t round = 0; round < k_inline_max_hoists && cur; ++round) {
 		hoist_plan plan;
-		if (!plan_hoist(cur, statement_position && round == 0, plan)) break;
+		if (!plan_hoist(cur, statement_position && round == 0, plan)) {
+			if (plan.why && plan.call && plan.call->callee && plan.call->callee->get_type() == node_type::identifier_expr) {   // the kept call, named for the listing and the profile
+				chunk_->inline_refusals.push_back({std::string(static_cast<const identifier_expr*>(plan.call->callee.get())->name), plan.why, static_cast<uint32_t>(plan.call->location.line)});
+			}
+			break;
+		}
 		cur = compile_hoist(plan, cur);
 		changed = true;
 	}

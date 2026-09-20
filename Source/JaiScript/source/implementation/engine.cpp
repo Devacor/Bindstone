@@ -654,6 +654,8 @@ struct engine::implementation {
         uint64_t checked_epoch = 0;
         check_report check_result;
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
+        bool proofs_deferred = false;        // the proof pass met a class the engine had not defined yet: re-stamp after an import defines one
+        std::vector<std::string> deferred_classes;   // those classes' names
         // Program closure (checked_report): gathered once per surface epoch, and again
         // whenever a unit's (mtime, size) stamp moves or the program is failing.
         uint64_t closure_epoch = UINT64_MAX;
@@ -709,6 +711,7 @@ struct engine::implementation {
     std::unordered_set<std::string> program_names_;
     detail::program_class_map program_classes_;
     detail::program_function_map program_functions_;   // the closure units' free functions (docs/static_checking.md "Programs"; the inliner's cross-unit leaves)
+    detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (docs/static_checking.md "Proofs")
     struct closure_unit {
         std::string path;   // resolved spelling: the key the unit later executes under
         std::string source;
@@ -794,6 +797,7 @@ struct engine::implementation {
             detail::collect_unit_names(unit.entry->declarations, program_names_);
             detail::collect_unit_classes(unit.entry->declarations, program_classes_);
             detail::collect_unit_functions(unit.entry->declarations, unit.path, program_functions_);
+            detail::collect_unit_globals(unit.entry->declarations, unit.path, program_globals_);
             std::string unit_path = unit.path;
             out.push_back(std::move(unit));
             collect_closure_units(self, nested, visited, out, stamps, unit_path);
@@ -819,6 +823,32 @@ struct engine::implementation {
         return false;
     }
 
+    // A proof-only walk over an entry (diagnostics off): the program's globals type here, and a class-typed one waits for its class
+    // (entry.proofs_deferred; restamp_deferred after an import completes)
+    void stamp_proofs(engine& self, script_cache_entry& entry) {
+        detail::check_options o;
+        o.diagnostics = false;
+        o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+        o.stats = &last_proof_stats_;
+        o.program_names = &program_names_;
+        o.program_classes = &program_classes_;
+        o.program_functions = &program_functions_;
+        o.program_globals = &program_globals_;
+        entry.deferred_classes.clear();
+        o.deferred_classes = &entry.deferred_classes;
+        detail::run_static_check(self, entry.declarations, nullptr, o);
+        entry.proofs_deferred = type_proofs_ && !entry.deferred_classes.empty();
+    }
+    bool class_defined_now(engine& self, const std::vector<std::string>& names) {
+        for (const auto& n : names) { if (self.get_class_definition(n) || self.get_class_registry().find_script_class(n)) { return true; } }
+        return false;
+    }
+    void restamp_deferred(engine& self) {
+        if (!type_proofs_) { return; }
+        for (auto& node : script_cache) { if (node.entry && node.entry->proofs_deferred && class_defined_now(self, node.entry->deferred_classes)) { stamp_proofs(self, *node.entry); } }
+        for (auto& [key, entry] : literal_script_cache) { if (entry && entry->proofs_deferred && class_defined_now(self, entry->deferred_classes)) { stamp_proofs(self, *entry); } }
+    }
+
     // One entry's check: diagnostics when wanted (and stale), proofs whenever the entry's
     // stamps disagree with the switch/surface epoch (stamp on, clear off). A trusted
     // jaibite entry (checked, epoch current) never re-collects diagnostics; its proofs
@@ -827,20 +857,20 @@ struct engine::implementation {
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
         const bool need_proofs = entry.proof_epoch != want_proof_epoch;
-        if (need_check || need_proofs) {
+        if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::check_options o;
-            o.diagnostics = need_check;
-            o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
-            o.stats = &last_proof_stats_;
+            o.diagnostics = true;
+            o.proofs = detail::check_options::proofs_t::leave;
             o.program_names = &program_names_;
             o.program_classes = &program_classes_;
             o.program_functions = &program_functions_;
-            check_report r = detail::run_static_check(self, entry.declarations, nullptr, o);
-            if (need_check) {
-                entry.check_result = std::move(r);
-                entry.checked = true;
-                entry.checked_epoch = check_surface_epoch_;
-            }
+            o.program_globals = &program_globals_;
+            entry.check_result = detail::run_static_check(self, entry.declarations, nullptr, o);
+            entry.checked = true;
+            entry.checked_epoch = check_surface_epoch_;
+        }
+        if (need_check || need_proofs) {
+            stamp_proofs(self, entry);
             entry.proof_epoch = want_proof_epoch;
         }
     }
@@ -864,6 +894,7 @@ struct engine::implementation {
                 detail::collect_unit_names(entry.declarations, program_names_);
                 detail::collect_unit_classes(entry.declarations, program_classes_);
                 detail::collect_unit_functions(entry.declarations, entry.source_path, program_functions_);
+                detail::collect_unit_globals(entry.declarations, entry.source_path, program_globals_);
                 std::unordered_set<std::string> visited;
                 collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path);
                 entry.checked = false;
@@ -923,6 +954,7 @@ struct engine::implementation {
         o.program_names = &program_names_;
         o.program_classes = &program_classes_;
         o.program_functions = &program_functions_;
+        o.program_globals = &program_globals_;
         return detail::run_static_check(self, entry.declarations, &extra, o);
     }
 
@@ -1890,11 +1922,13 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.program_names = &impl->program_names_;
         o.program_classes = &impl->program_classes_;
         o.program_functions = &impl->program_functions_;
+        o.program_globals = &impl->program_globals_;
         check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
         if (need_check) {
             bite.check_report_ = std::move(r);
             bite.check_state_ = bite.check_report_.has_errors()
                 ? jaibite::check_state::flagged : jaibite::check_state::clean;
+            if (impl->type_proofs_) { detail::check_options p = o; p.diagnostics = false; detail::run_static_check(*this, bite.declarations_, nullptr, p); }   // the proof pass alone reads the program's globals
         }
         bite.proof_epoch_ = want_proof_epoch;
     }
@@ -3737,6 +3771,7 @@ script_value engine::execute_import(const std::string& resolved_path) {
 
         // Attribute the imported unit to its resolved path (stack traces / debugger).
         auto result = execute_source(content, instance_variables{}, resolved_path);
+        impl->restamp_deferred(*this);   // the unit's classes exist now: the proofs that waited for them
 
         // Update import cache (zero stamp when the file can't be statted: the next
         // file_timestamp check then re-imports, matching the old epoch-time fallback)

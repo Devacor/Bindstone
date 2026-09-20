@@ -253,6 +253,8 @@ public:
         }
         program_classes_ = opts.program_classes;
         program_functions_ = opts.program_functions;
+        program_globals_ = opts.program_globals;
+        deferred_out_ = opts.deferred_classes;
     }
 
     check_report run() {
@@ -267,7 +269,7 @@ public:
         }
         scopes_.pop_back();
 
-        if (stats_out_) { *stats_out_ = counts_; }
+        if (stats_out_) { counts_.deferred = deferred_ ? 1 : 0; *stats_out_ = counts_; }
         check_report report;
         report.capped = capped_;
         report.diagnostics = std::move(diags_);
@@ -341,6 +343,9 @@ private:
     // always wins over its table entry).
     const program_class_map* program_classes_ = nullptr;
     const program_function_map* program_functions_ = nullptr;
+    const program_global_map* program_globals_ = nullptr;
+    bool deferred_ = false;   // a program-table class met before the engine defined it: the unit's proofs re-stamp after the next import
+    std::vector<std::string>* deferred_out_ = nullptr;   // their names, for the engine's re-stamp test
     std::unordered_map<std::string_view, sclass> program_sclasses_;
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
@@ -493,8 +498,25 @@ private:
         model_class(cd, c);
         c.foreign = true;
         c.provable = engine_class(cd->name) != nullptr;
+        if (!c.provable) { deferred_ = true; if (deferred_out_) { deferred_out_->push_back(std::string(cd->name)); } }
         if (unit_redefines(cd)) { open_classes_.insert(cd->name); }
         return &c;
+    }
+
+    // The proof pass alone (never a diagnostics walk) types a top-level global exactly one other unit declares once with a spelled
+    // non-reference type; a class-typed one needs its class defined, or the unit's proofs wait for the next import (deferred_)
+    const variable_decl* program_global(const std::string& name) {
+        if (collect_diagnostics_ || !stamping() || !program_globals_) { return nullptr; }
+        auto it = program_globals_->find(name);
+        if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return nullptr; }
+        const variable_decl* g = it->second.begin()->second.front().get();
+        if (!g || !g->type || g->type->is_reference() || g->function_spelling || g->is_static) { return nullptr; }
+        return g;
+    }
+    ctype program_global_type(const variable_decl* g) {
+        ctype t = ctype_from_type_info(g->type.get());
+        if (t.kind == ctype::object_k) { const sclass* c = find_sclass(t.cls); if (!c || !c->provable) { return {}; } }   // find_sclass noted a program class the engine lacks; a class outside the program types nothing
+        return t;
     }
 
     void collect_scope_decls(const std::vector<declaration_ptr>& decls) {
@@ -1981,6 +2003,7 @@ private:
 		if (enums_.count(id->name)) { return ctype{ctype::enum_ref_k, id->name}; }
 		if (namespaces_.count(id->name)) { return {}; }
 		std::string name(id->name);
+		if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
 		if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
 		if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
 			return ctype{ctype::class_ref_k, id->name};
@@ -3266,6 +3289,18 @@ void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std
         if (d && d->get_type() == node_type::function_decl) {
             auto fd = std::static_pointer_cast<const function_decl>(d);
             out[std::string(fd->name)][unit_path].push_back(std::move(fd));
+        }
+    }
+}
+
+void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out) {
+    for (const auto& d : decls) {   // a re-gather replaces the unit's own entries, never accumulates
+        if (d && d->get_type() == node_type::variable_decl) { out[std::string(static_cast<const variable_decl*>(d.get())->name)][unit_path].clear(); }
+    }
+    for (const auto& d : decls) {   // every spelling counts toward "declared once": the lookup asks the one declaration for its type
+        if (d && d->get_type() == node_type::variable_decl) {
+            auto vd = std::static_pointer_cast<const variable_decl>(d);
+            out[std::string(vd->name)][unit_path].push_back(std::move(vd));
         }
     }
 }

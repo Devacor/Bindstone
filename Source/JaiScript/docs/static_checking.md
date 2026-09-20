@@ -466,6 +466,14 @@ by-reference parameters, worker (parallel) frames, and `binary_expr::static_oper
 is consumed at the `return` statement itself on both backends (the in-region conversion op
 and every completion door alike), always behind the payload guard.
 
+**Program globals** — a top-level variable exactly one unit of the program declares, once, with a spelled non-reference
+type (`array<int> ND_X`, `shared_ptr<Game> G`) is typed by that declaration in every other unit's proof pass, the way a class
+from the program table is; the diagnostics never read the table (a diagnostics walk leaves the name dynamic, and the proofs
+come from a proof-only walk after it), so no load-time text changes. A class-typed global is typed once its class is defined,
+and a unit whose proofs waited for a class re-stamps after each import completes (`proof_stats::deferred`); a body compiled
+before that (a lambda compiles with its unit's top level; a named function compiles at its first call) keeps the proofs it had.
+Every such proof stays behind the runtime guards, so a declaration the runtime contradicts costs a guard, never a value.
+
 **Differential gate** — the contract is pinned four ways: `static_check_tests.cpp::
 proof_differential_gate` runs 200 generator seeds on {interpreter, vm} × {proofs on, off}
 (fresh engines, identical registrations) and requires identical segment results, printed

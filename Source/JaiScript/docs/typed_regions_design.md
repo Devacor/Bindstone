@@ -560,6 +560,15 @@ backends, so the store-value hoist is already in that order. A reference declara
 referent resolves slot-first, then through the chain the frame already runs in, so the body needs no per-call scope
 environment and its env-resident reads keep the two-compare fast head across calls.
 
+### The block loop's registers
+
+The block loop (`cells_run`) reads the run's registers once (`cell_regs`: the cells' payloads and kinds, the dirty mask, the chunk's
+constants, the copy's code and the loop) and every executor on its switch takes them by reference; before, each operation re-derived
+frame, cell state, vector and data pointer on its own, and the optimizer, unable to prove the stores kept those unchanged, reloaded
+them per operation. The vectors never move during a run (the entry sizes them), so the registers hold until the exit. The call
+door and the member sites (`cells_run_cold`) keep the frame form. Nothing else changes: the same memory, the same guards, the same
+misses.
+
 ### Fused cell pairs
 
 The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes

@@ -7229,10 +7229,10 @@ op_status vm_backend::exec_c_range(frame& f, const vm_instruction& ins) {
 	return {};
 }
 // the copy's back edge of a range-for block: the index steps, then the budget poll and the copy's head
-op_status vm_backend::exec_c_back_step(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_c_back_step(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	cell_state& cs = *f.cells;
 	cs.payload[ins.b] = static_cast<int64_t>(static_cast<script_int>(cs.payload[ins.b]) + 1);
-	return exec_c_back(f, ins);
+	return exec_c_back(f, ins, cr);
 }
 // after a call: each site's container, reached the way the entry reached it (its frame slot, or its environment binding while
 // the environment and epoch hold), still names the node resolved at entry; a site reached any other way (an element of a
@@ -7388,12 +7388,13 @@ static bool cells_miss_plain(opcode op) {
 // its status; the budget is polled at the cell back edge as before
 op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
+	const cell_regs regs{cs.payload.data(), cs.kind.data(), &cs.dirty, f.code->constants.data(), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 #ifdef JAISCRIPT_VM_PROFILE
 	size_t prof_prev_cell = 256;
 	if (profile_cell_pairs_.size() < 256 * 256) { profile_cell_pairs_.assign(256 * 256, 0); profile_fn_cell_pairs_.assign(256 * 256, 0); }
 #endif
 	for (;;) {
-		const vm_instruction& ci = f.code->code[f.ip];
+		const vm_instruction& ci = regs.code[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
 		const uint64_t prof_c0 = __rdtsc();
@@ -7407,43 +7408,43 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 #endif
 		op_status st = op_status::ok;
 		switch (ci.op) {
-		case opcode::op_c_cmp: st = exec_c_cmp(f, ci, true); break;
-		case opcode::op_c_arith: st = exec_c_arith(f, ci, true); break;
-		case opcode::op_c_arith_p: st = exec_c_arith(f, ci, false); break;
-		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ci, false); break;
-		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ci, false); break;
-		case opcode::op_c_load: st = exec_c_load(f, ci, false); break;
-		case opcode::op_c_load_any: st = exec_c_load(f, ci, true); break;
-		case opcode::op_c_index_store: st = exec_c_index_store(f, ci); break;
-		case opcode::op_c_back: st = exec_c_back(f, ci); break;
-		case opcode::op_c_back_step: st = exec_c_back_step(f, ci); break;
+		case opcode::op_c_cmp: st = exec_c_cmp(f, ci, regs, true); break;
+		case opcode::op_c_arith: st = exec_c_arith(f, ci, regs, true); break;
+		case opcode::op_c_arith_p: st = exec_c_arith(f, ci, regs, false); break;
+		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ci, regs, false); break;
+		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ci, regs, false); break;
+		case opcode::op_c_load: st = exec_c_load(f, ci, regs, false); break;
+		case opcode::op_c_load_any: st = exec_c_load(f, ci, regs, true); break;
+		case opcode::op_c_index_store: st = exec_c_index_store(f, ci, regs); break;
+		case opcode::op_c_back: st = exec_c_back(f, ci, regs); break;
+		case opcode::op_c_back_step: st = exec_c_back_step(f, ci, regs); break;
 		case opcode::op_c_range: st = exec_c_range(f, ci); break;
-		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, true); break;
-		case opcode::op_c_arith2: st = exec_c_arith2(f, ci); break;
-		case opcode::op_c_jcmp2: st = exec_c_jcmp2(f, ci); break;
-		case opcode::op_c_load2: st = exec_c_load2(f, ci); break;
-		case opcode::op_c_arith_load: st = exec_c_arith_load(f, ci); break;
-		case opcode::op_c_load_jcmp: st = exec_c_load_jcmp(f, ci); break;
-		case opcode::op_c_arith_jump: st = exec_c_arith_jump(f, ci); break;
+		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ci, regs, true); break;
+		case opcode::op_c_arith2: st = exec_c_arith2(f, ci, regs); break;
+		case opcode::op_c_jcmp2: st = exec_c_jcmp2(f, ci, regs); break;
+		case opcode::op_c_load2: st = exec_c_load2(f, ci, regs); break;
+		case opcode::op_c_arith_load: st = exec_c_arith_load(f, ci, regs); break;
+		case opcode::op_c_load_jcmp: st = exec_c_load_jcmp(f, ci, regs); break;
+		case opcode::op_c_arith_jump: st = exec_c_arith_jump(f, ci, regs); break;
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
 			// original back edge with materialized slots)
 			if (ci.c == 1 && execution_limit_exhausted()) [[unlikely]] { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); break; }
 			f.ip = ci.a;
 			break;
-		case opcode::op_c_guard: st = exec_c_guard(f, ci); break;
-		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci); break;
-		case opcode::op_c_mov: st = exec_c_mov(f, ci); break;
-		case opcode::op_c_math: st = exec_c_math(f, ci); break;
-		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ci); break;
-		case opcode::op_c_cmp_any: st = exec_c_cmp_any(f, ci, true); break;
-		case opcode::op_c_jcmp_any: st = exec_c_cmp_any(f, ci, false); break;
-		case opcode::op_c_neg: st = exec_c_neg(f, ci); break;
-		case opcode::op_c_bnot: st = exec_c_bnot(f, ci); break;
-		case opcode::op_c_lnot: st = exec_c_lnot(f, ci); break;
-		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci); break;
-		case opcode::op_c_append: st = exec_c_append(f, ci); break;
-		case opcode::op_c_push: st = exec_c_push(f, ci); break;
+		case opcode::op_c_guard: st = exec_c_guard(f, ci, regs); break;
+		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ci, regs); break;
+		case opcode::op_c_mov: st = exec_c_mov(f, ci, regs); break;
+		case opcode::op_c_math: st = exec_c_math(f, ci, regs); break;
+		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ci, regs); break;
+		case opcode::op_c_cmp_any: st = exec_c_cmp_any(f, ci, regs, true); break;
+		case opcode::op_c_jcmp_any: st = exec_c_cmp_any(f, ci, regs, false); break;
+		case opcode::op_c_neg: st = exec_c_neg(f, ci, regs); break;
+		case opcode::op_c_bnot: st = exec_c_bnot(f, ci, regs); break;
+		case opcode::op_c_lnot: st = exec_c_lnot(f, ci, regs); break;
+		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci, regs); break;
+		case opcode::op_c_append: st = exec_c_append(f, ci, regs); break;
+		case opcode::op_c_push: st = exec_c_push(f, ci, regs); break;
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7639,9 +7640,8 @@ op_status vm_backend::cells_resume(frame& f, const vm_instruction& ins) {
 }
 // a counted loop's cell back edge: the step on the var cell (an overflow misses onto the general back edge, which
 // raises its own text), the compare against the end cell or literal, then the body again or the exit
-JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, const vm_instruction& ins) {
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, const vm_instruction& ins, const cell_regs& cr) {
+	const chunk::cell_loop& loop = *cr.loop;
 	if (execution_limit_exhausted()) [[unlikely]] {
 		cells_flush(f, loop);   // the error and the debugger see materialized slots
 		f.ip = loop.back;
@@ -7651,21 +7651,21 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, const vm_instru
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	auto read = [&](uint32_t o, script_int& v) -> bool {
 		if (o & k_typed_const_bit) {
-			const script_value& rc = f.code->constants[o & ~k_typed_const_bit];
+			const script_value& rc = cr.consts[o & ~k_typed_const_bit];
 			if (rc.raw_storage_index() != script_value::TYPEID_INT) return false;
 			v = rc.unchecked_as_int();
 			return true;
 		}
-		if (cs.kind[o] != kint) return false;
-		v = static_cast<script_int>(cs.payload[o]);
+		if (cr.kinds[o] != kint) return false;
+		v = static_cast<script_int>(cr.payload[o]);
 		return true;
 	};
 	script_int step, end, next;
-	if (cs.kind[ins.a] != kint || !read(ins.c, step) || !read(ins.b, end)) { cells_miss(f, loop, loop.back, 0); return {}; }
-	const script_int i = static_cast<script_int>(cs.payload[ins.a]);
+	if (cr.kinds[ins.a] != kint || !read(ins.c, step) || !read(ins.b, end)) { cells_miss(f, loop, loop.back, 0); return {}; }
+	const script_int i = static_cast<script_int>(cr.payload[ins.a]);
 	if (!(p.step_subtract ? ints::try_sub(i, step, next) : ints::try_add(i, step, next))) { cells_miss(f, loop, loop.back, 0); return {}; }
-	cs.payload[ins.a] = static_cast<int64_t>(next);
-	cs.dirty.set(ins.a);
+	cr.payload[ins.a] = static_cast<int64_t>(next);
+	cr.dirty->set(ins.a);
 	if (cfor_compare(p.cmp, next, end)) {
 		JAI_CELLS_COUNT(2);
 		f.ip = loop.copy_head + 1;
@@ -7677,8 +7677,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, const vm_instru
 	f.ip = p.exit_ip;
 	return {};
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins) {
-	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, const vm_instruction& ins, const cell_regs& cr) {
+	const chunk::cell_loop& loop = *cr.loop;
 	if (execution_limit_exhausted()) [[unlikely]] {
 		cells_flush(f, loop);   // the error and the debugger see materialized slots
 		f.ip = loop.back;
@@ -7706,72 +7706,71 @@ bool vm_backend::cells_second_half_injected(frame& f) {
 // fused cell pairs (row 150): the first instruction's executor on its own word; when the block is still live and the ip fell
 // through to the next instruction (no jump taken, no miss: a miss leaves the block and puts the general form's ip in the frame),
 // the second's executor on the second's own word; the pair is one dispatch of the block loop and nothing else changes
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith2(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_arith(f, ins, false);
+	const op_status st = exec_c_arith(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
-	return exec_c_arith(f, f.code->code[next], false);
+	return exec_c_arith(f, cr.code[next], cr, false);
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp2(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_jcmp(f, ins, false);
+	const op_status st = exec_c_jcmp(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
-	return exec_c_jcmp(f, f.code->code[next], false);
+	return exec_c_jcmp(f, cr.code[next], cr, false);
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_load(f, ins, false);
+	const op_status st = exec_c_load(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
-	return exec_c_load(f, f.code->code[next], false);
+	return exec_c_load(f, cr.code[next], cr, false);
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_load(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_arith(f, ins, false);
+	const op_status st = exec_c_arith(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
-	return exec_c_load(f, f.code->code[next], false);
+	return exec_c_load(f, cr.code[next], cr, false);
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load_jcmp(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_load(f, ins, false);
+	const op_status st = exec_c_load(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next || cells_second_half_injected(f)) return st;
-	return exec_c_jcmp(f, f.code->code[next], false);
+	return exec_c_jcmp(f, cr.code[next], cr, false);
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = f.ip + 1;
-	const op_status st = exec_c_arith(f, ins, false);
+	const op_status st = exec_c_arith(f, ins, cr, false);
 	if (st != op_status::ok || f.ip != next) return st;
-	const vm_instruction& j = f.code->code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
+	const vm_instruction& j = cr.code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
 	if (j.c == 1 && execution_limit_exhausted()) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss(f, loop, loop.origin[next - loop.copy_head], 0); return {}; }
 	f.ip = j.a;
 	return {};
 }
 
-JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	bool truthy;
-	if (checked && cs.kind[lk] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+	if (checked && cr.kinds[lk] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 	if (ins.b & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
 		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-			const script_int a = static_cast<script_int>(cs.payload[lk]), b = rc.unchecked_as_int();
+			const script_int a = static_cast<script_int>(cr.payload[lk]), b = rc.unchecked_as_int();
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
 		} else {
-			const script_float a = cell_float_of_bits(cs.payload[lk]), b = rc.unchecked_as_float();
+			const script_float a = cell_float_of_bits(cr.payload[lk]), b = rc.unchecked_as_float();
 			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 		}
 	} else {
-		if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
+		if (checked && cr.kinds[ins.b] != kind) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-			const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(cs.payload[ins.b]);
+			const script_int a = static_cast<script_int>(cr.payload[lk]), b = static_cast<script_int>(cr.payload[ins.b]);
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
 		} else {
-			const script_float a = cell_float_of_bits(cs.payload[lk]), b = cell_float_of_bits(cs.payload[ins.b]);
+			const script_float a = cell_float_of_bits(cr.payload[lk]), b = cell_float_of_bits(cr.payload[ins.b]);
 			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 		}
 	}
@@ -7781,26 +7780,25 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, const vm_instruction&
 	f.ip = ins.c;
 	return {};
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
+	if (checked && cr.kinds[ins.b] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	int64_t right_bits;
 	if (ins.c & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.c & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.c & ~k_typed_const_bit];
 		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (checked && cs.kind[ins.c] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
-		right_bits = cs.payload[ins.c];
+		if (checked && cr.kinds[ins.c] != kind) { cells_miss(f, loop, original_ip(), 1); return {}; }
+		right_bits = cr.payload[ins.c];
 	}
 	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-		const script_int a = static_cast<script_int>(cs.payload[ins.b]), b = static_cast<script_int>(right_bits);
+		const script_int a = static_cast<script_int>(cr.payload[ins.b]), b = static_cast<script_int>(right_bits);
 		script_int r; bool ok = true;
 		switch (op) {
 		case opcode::op_t_add_ii: ok = ints::try_add(a, b, r); break;
@@ -7816,9 +7814,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 		default: ok = false; break;
 		}
 		if (!ok) { cells_miss(f, loop, original_ip(), 1); return {}; }
-		cs.payload[dk] = static_cast<int64_t>(r);
+		cr.payload[dk] = static_cast<int64_t>(r);
 	} else {
-		const script_float a = cell_float_of_bits(cs.payload[ins.b]), b = cell_float_of_bits(right_bits);
+		const script_float a = cell_float_of_bits(cr.payload[ins.b]), b = cell_float_of_bits(right_bits);
 		script_float r; bool ok = true;
 		switch (op) {
 		case opcode::op_t_add_ff: r = a + b; break;
@@ -7829,39 +7827,38 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, const vm_instructio
 		default: ok = false; break;
 		}
 		if (!ok) { cells_miss(f, loop, original_ip(), 1); return {}; }
-		cs.payload[dk] = cell_bits_of_float(r);
+		cr.payload[dk] = cell_bits_of_float(r);
 	}
-	cs.kind[dk] = kind;
-	cs.dirty.set(dk);
+	cr.kinds[dk] = kind;
+	cr.dirty->set(dk);
 	++f.ip;
 	return {};
 }
 
 // an interior typed compare-jump: the head's comparison, but a false result stays in the block (it skips the arm)
-JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction& ins, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (checked && cs.kind[lk] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
+	if (checked && cr.kinds[lk] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 	int64_t right_bits;
 	if (ins.b & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
 		if (checked && rc.raw_storage_index() != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
 		right_bits = kind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 	} else {
-		if (checked && cs.kind[ins.b] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
-		right_bits = cs.payload[ins.b];
+		if (checked && cr.kinds[ins.b] != kind) { cells_miss(f, loop, original_ip(), 3); return {}; }
+		right_bits = cr.payload[ins.b];
 	}
 	bool truthy;
 	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-		const script_int a = static_cast<script_int>(cs.payload[lk]), b = static_cast<script_int>(right_bits);
+		const script_int a = static_cast<script_int>(cr.payload[lk]), b = static_cast<script_int>(right_bits);
 		switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
 	} else {
-		const script_float a = cell_float_of_bits(cs.payload[lk]), b = cell_float_of_bits(right_bits);
+		const script_float a = cell_float_of_bits(cr.payload[lk]), b = cell_float_of_bits(right_bits);
 		switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 	}
 	// the sense: a plain compare-jump jumps when false; a comparison value followed by JUMP_IF_TRUE jumps when true
@@ -7872,16 +7869,16 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 // a container guard's place in the copy: the dead temp cell sharing the slot loses its dirty bit, and a pinned table
 // entry's snapshot is restored in the slot when another table sits there (two guarded sites in different statements
 // share one temp), so the general form after a later miss reads this site's handle as it would on its own
-JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	cell_state& cs = *f.cells;
 	const uint32_t alias = ins.b & 0xFFu, guarded = ins.b >> 8;
-	if (alias != 0xFFu) { cs.dirty.clear(alias); }
+	if (alias != 0xFFu) { cr.dirty->clear(alias); }
 	if (guarded != 0xFFFFFFu) {
 		const script_array* node = cs.site_node[guarded];
 		script_value* g = frame_slot(f, ins.a);
 		if (!(g && g->raw_storage_index() == script_value::TYPEID_ARRAY && g->unchecked_array_node() == node)) {   // the temp already holds this site's node in the steady state
 			// the plain-cell form (c = 1) restores a reference that is not a plain cell; the always form (c = 2) restores every container
-			const vm_instruction& orig = f.code->code[ins.c];
+			const vm_instruction& orig = cr.code[ins.c];
 			const fused_operand& src = f.code->fused_binary_protos[orig.a].left;
 			const script_value* s = orig.c == 2 ? fused_cmp_operand(f, src, static_cast<size_t>(ins.c) * 3) : direct_operand(f, src);
 			if (s && (orig.c == 2 || (s->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*s)))) { frame_slot_set(f, ins.a, script_value(s->deref())); }
@@ -7959,10 +7956,9 @@ bool vm_backend::cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy)
 }
 
 // the head form exits the block on false (flush, then the loop's exit); the interior form skips to its copy target
-JAI_FORCEINLINE op_status vm_backend::exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp_any(frame& f, const vm_instruction& ins, const cell_regs& cr, bool head) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
 	if (!cell_cmp_any(f, ins, truthy)) {
 		if (head) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 0); }
@@ -8029,10 +8025,10 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 // cell boxed with its landing's stamp, a constant, or an element of the source container read as a handle; the append is
 // typed_push_append's rows with the kernel's charge, and anything the kernel would decline or raise is a miss onto the general
 // push, whose texts stand
-JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop& loop = *cr.loop;
 	const uint32_t original_ip = ins.c;
 	const push_proto& p = f.code->push_protos[ins.a];
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
@@ -8051,13 +8047,13 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 	std::optional<script_value> boxed;
 	const script_value* pv = nullptr;
 	if (p.value.const_index != k_invalid_u32) {
-		pv = &f.code->constants[p.value.const_index];
+		pv = &cr.consts[p.value.const_index];
 	} else if (p.value_is_subscript) {
 		const script_array* src = cs.site_node2[f.ip - loop.copy_head];
 		const fused_subscript_index& si = p.value.subscript_chain[0];
 		script_int index;
 		if (si.kind == fused_subscript_index::index_literal) { index = si.literal; }
-		else { if (si.slot == k_invalid_u32 || cs.kind[si.slot] != kint) return miss(); index = static_cast<script_int>(cs.payload[si.slot]); }
+		else { if (si.slot == k_invalid_u32 || cr.kinds[si.slot] != kint) return miss(); index = static_cast<script_int>(cr.payload[si.slot]); }
 		if (!src || index < 0 || static_cast<size_t>(index) >= src->size()) return miss();
 		const size_t at = static_cast<size_t>(index);
 		switch (src->kind()) {
@@ -8072,14 +8068,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		}
 	} else {
 		const uint32_t k = p.value.slot;
-		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
-		const uint8_t vk = cs.kind[k];
-		if (vk == kint) { form = src_form::raw_int; raw_int = static_cast<script_int>(cs.payload[k]); }
-		else if (vk == kflt) { form = src_form::raw_float; raw_float = cell_float_of_bits(cs.payload[k]); }
+		if (k == k_invalid_u32 || cr.kinds[k] == 0) return miss();
+		const uint8_t vk = cr.kinds[k];
+		if (vk == kint) { form = src_form::raw_int; raw_int = static_cast<script_int>(cr.payload[k]); }
+		else if (vk == kflt) { form = src_form::raw_float; raw_float = cell_float_of_bits(cr.payload[k]); }
 		else if (vk != kbool) return miss();   // a string cell is a borrow, never pushed
 		if (vk == kbool || node->kind() == script_array::kind_t::hetero) {
 			// a hetero destination stores the value: boxed with the slot's declared stamp, as the general form pushes the slot's value
-			if (vk == kint) { boxed.emplace(raw_int, engine_); } else if (vk == kflt) { boxed.emplace(raw_float, engine_); } else { boxed.emplace(cs.payload[k] != 0, engine_); }
+			if (vk == kint) { boxed.emplace(raw_int, engine_); } else if (vk == kflt) { boxed.emplace(raw_float, engine_); } else { boxed.emplace(cr.payload[k] != 0, engine_); }
 			const chunk::cell_loop::cell& vc = loop.cells[k];
 			if (vc.landing == k_typed_dst_decl && vc.stamp) { boxed->set_type_info(type_info_ptr{vc.stamp}); }
 			pv = &*boxed; form = src_form::value;
@@ -8170,23 +8166,22 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 // node and hold it uniquely, and the memory cap must accept the bytes, as the general compound store's own path does;
 // anything else misses onto the general form, whose unshare, char-as-text and mismatch texts stand); numeric kinds are
 // the any-kind arithmetic
-JAI_FORCEINLINE op_status vm_backend::exec_c_append(frame& f, const vm_instruction& ins) {
-	cell_state& cs = *f.cells;
+JAI_FORCEINLINE op_status vm_backend::exec_c_append(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	const uint32_t lk = ins.b;
 	const uint8_t kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
 	const bool rconst = (ins.c & k_typed_const_bit) != 0;
-	const uint8_t rk = rconst ? static_cast<uint8_t>(f.code->constants[ins.c & ~k_typed_const_bit].raw_storage_index()) : cs.kind[ins.c];
-	if (cs.kind[lk] != kstr || rk != kstr) return exec_c_arith_any(f, ins);
+	const uint8_t rk = rconst ? static_cast<uint8_t>(cr.consts[ins.c & ~k_typed_const_bit].raw_storage_index()) : cr.kinds[ins.c];
+	if (cr.kinds[lk] != kstr || rk != kstr) return exec_c_arith_any(f, ins, cr);
 	JAI_CELLS_COUNT(7);
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
 	const chunk::cell_loop::cell& cl = loop.cells[lk];
 	if (cl.temp || cl.env_operand != k_invalid_u32) return miss();   // v1: a slot's string only
 	script_value* s = frame_slot(f, cl.slot);
 	if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return miss();
 	const strong_ptr<script_string>& h = s->unchecked_string_handle();
-	if (reinterpret_cast<int64_t>(h.get()) != cs.payload[lk] || !h.unique()) return miss();   // rebound, or shared: the general form unshares
-	const script_string* src = rconst ? f.code->constants[ins.c & ~k_typed_const_bit].unchecked_string_handle().get() : reinterpret_cast<const script_string*>(cs.payload[ins.c]);
+	if (reinterpret_cast<int64_t>(h.get()) != cr.payload[lk] || !h.unique()) return miss();   // rebound, or shared: the general form unshares
+	const script_string* src = rconst ? cr.consts[ins.c & ~k_typed_const_bit].unchecked_string_handle().get() : reinterpret_cast<const script_string*>(cr.payload[ins.c]);
 	if (!src || !limits_->memory_charge(src->size())) return miss();   // the cap: the general form raises its own text
 	s->unchecked_as_string_ref() += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
 	++f.ip;
@@ -8194,25 +8189,24 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_append(frame& f, const vm_instructi
 }
 // arithmetic whose kinds the cells decide: the general kernel's int rows, float rows and the int -> float promotion
 // of + - * /; an overflow, a zero divisor, a bitwise or modulo float or a kind the landing refuses is a miss
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	const token_type op = static_cast<token_type>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	auto read = [&](uint32_t o, uint8_t& k, int64_t& b) -> bool {
 		if (o & k_typed_const_bit) {
-			const script_value& rc = f.code->constants[o & ~k_typed_const_bit];
+			const script_value& rc = cr.consts[o & ~k_typed_const_bit];
 			k = static_cast<uint8_t>(rc.raw_storage_index());
 			if (k != kint && k != kflt) return false;
 			b = k == kint ? static_cast<int64_t>(rc.unchecked_as_int()) : cell_bits_of_float(rc.unchecked_as_float());
 			return true;
 		}
-		k = cs.kind[o];
+		k = cr.kinds[o];
 		if (k != kint && k != kflt) return false;
-		b = cs.payload[o];
+		b = cr.payload[o];
 		return true;
 	};
 	uint8_t lk, rk; int64_t lb, rb;
@@ -8255,19 +8249,18 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, const vm_instru
 
 // unary minus on a value: the general kernel's rows (an int negates through the checked negation, so INT64_MIN misses
 // onto the kernel's overflow text; a float keeps IEEE negation, so a zero's sign flips as the kernel's does)
-JAI_FORCEINLINE op_status vm_backend::exec_c_neg(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_neg(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
 	uint8_t sk; int64_t sb;
 	if (ins.b & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
 		sk = static_cast<uint8_t>(rc.raw_storage_index());
 		if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) { sb = static_cast<int64_t>(rc.unchecked_as_int()); }
 		else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { sb = cell_bits_of_float(rc.unchecked_as_float()); }
 		else return miss();
-	} else { sk = cs.kind[ins.b]; sb = cs.payload[ins.b]; }
+	} else { sk = cr.kinds[ins.b]; sb = cr.payload[ins.b]; }
 	if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 		script_int r;
 		if (!ints::try_neg(static_cast<script_int>(sb), r)) return miss();
@@ -8280,18 +8273,17 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_neg(frame& f, const vm_instruction&
 }
 
 // complement on an int value; anything else misses onto the general unary
-JAI_FORCEINLINE op_status vm_backend::exec_c_bnot(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_bnot(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	int64_t sb;
 	if (ins.b & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
 		if (rc.raw_storage_index() != script_value::TYPEID_INT) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
 		sb = static_cast<int64_t>(rc.unchecked_as_int());
 	} else {
-		if (cs.kind[ins.b] != static_cast<uint8_t>(script_value::TYPEID_INT)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
-		sb = cs.payload[ins.b];
+		if (cr.kinds[ins.b] != static_cast<uint8_t>(script_value::TYPEID_INT)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
+		sb = cr.payload[ins.b];
 	}
 	if (!cell_land(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_INT), ~sb)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
 	++f.ip;
@@ -8299,20 +8291,18 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_bnot(frame& f, const vm_instruction
 }
 
 // the truthiness of a value inverted, landing a bool (`var neg = !lt`)
-JAI_FORCEINLINE op_status vm_backend::exec_c_lnot(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_lnot(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
 	if (!cell_truthy(f, ins.b, truthy) || !cell_land(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 0 : 1)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; }
 	++f.ip;
 	return {};
 }
 // a comparison as a value (`bool lt = i < 2`): the general kernel's numeric rows on cells, landing a bool
-JAI_FORCEINLINE op_status vm_backend::exec_c_cmpval(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmpval(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
 	const vm_instruction cmp{opcode::op_c_cmp_any, (ins.a & ~k_cell_index_mask) | ins.b, ins.c, 0};   // the compare kernel reads left from a, right from b
 	if (!cell_cmp_any(f, cmp, truthy) || !cell_land(f, loop, ins.a & k_cell_index_mask, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 1 : 0)) { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 3); return {}; }
@@ -8321,23 +8311,22 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmpval(frame& f, const vm_instructi
 }
 
 // a typed move's copy: the source cell's or the constant's payload into the destination by the cell's kind
-JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	auto original_ip = [&]() -> uint32_t { return loop.origin[f.ip - loop.copy_head]; };   // read on a miss only
 	uint8_t kind; int64_t bits;
 	if (ins.b & k_typed_const_bit) {
-		const script_value& rc = f.code->constants[ins.b & ~k_typed_const_bit];
+		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
 		kind = static_cast<uint8_t>(rc.raw_storage_index());
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = static_cast<int64_t>(rc.unchecked_as_int()); }
 		else if (kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(rc.unchecked_as_float()); }
 		else if (kind == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { bits = rc.unchecked_as_bool() ? 1 : 0; }
 		else { cells_miss(f, loop, original_ip(), 1); return {}; }
 	} else {
-		kind = cs.kind[ins.b];
+		kind = cr.kinds[ins.b];
 		if (kind != static_cast<uint8_t>(script_value::TYPEID_INT) && kind != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) { cells_miss(f, loop, original_ip(), 1); return {}; }
-		bits = cs.payload[ins.b];
+		bits = cr.payload[ins.b];
 	}
 	if (!cell_land(f, loop, ins.a, kind, bits)) { cells_miss(f, loop, original_ip(), 1); return {}; }
 	++f.ip;
@@ -8348,18 +8337,17 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, const vm_instruction&
 // land an int through checked_float_to_integer (an int passes through), abs keeps the argument's kind (INT64_MIN
 // misses onto the kernel's overflow text), floor, ceil, sqrt, sin, cos, tan and the angle conversions land a float of
 // the promoted argument; any other kind or function is a miss
-JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
-	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[cs.loop];
+	const chunk::cell_loop& loop = *cr.loop;
 	const detail::math_fn fn = static_cast<detail::math_fn>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
-	const uint8_t sk = cs.kind[ins.b];
+	const uint8_t sk = cr.kinds[ins.b];
 	const bool is_int = sk == static_cast<uint8_t>(script_value::TYPEID_INT);
 	if (!is_int && sk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
-	const script_int xi = static_cast<script_int>(cs.payload[ins.b]);
-	const script_float xd = is_int ? static_cast<script_float>(xi) : cell_float_of_bits(cs.payload[ins.b]);
+	const script_int xi = static_cast<script_int>(cr.payload[ins.b]);
+	const script_float xd = is_int ? static_cast<script_float>(xi) : cell_float_of_bits(cr.payload[ins.b]);
 	uint8_t kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	int64_t bits;
 	switch (fn) {
@@ -8395,20 +8383,20 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
 // adopted: the destination's kind is decided at run time (a var, an inferred auto or an unproven local), so the landing
 // runs the declared-type rule on a kind change; a pinned or compiler-value destination lands in place unconditionally
-JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins, bool adopted) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction& ins, const cell_regs& cr, bool adopted) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop& loop = *cr.loop;
 	const uint32_t original_ip = ins.c;
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];   // the copy's own row: its operands name cells
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 2); return {}; };
 	const script_array* node = cs.site_node[f.ip - loop.copy_head];   // resolved at entry
 	if (!node) return miss();
 	auto read_int = [&](uint32_t o, script_int& out) -> bool {
-		if (o & k_typed_const_bit) { const script_value& v = f.code->constants[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (o & k_typed_const_bit) { const script_value& v = cr.consts[o & ~k_typed_const_bit]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
 		const uint32_t k = o;   // a cell position (the emission built the row, so it is in range)
-		if (cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
-		out = static_cast<script_int>(cs.payload[k]);
+		if (cr.kinds[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cr.payload[k]);
 		return true;
 	};
 	script_int index = 0, r = 0;
@@ -8464,7 +8452,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, const vm_instruction
 		break;
 	default: return miss();
 	}
-	if (!adopted || cs.kind[ins.a] == expect) { cs.payload[ins.a] = bits; cs.kind[ins.a] = expect; cs.dirty.set(ins.a); }
+	if (!adopted || cr.kinds[ins.a] == expect) { cr.payload[ins.a] = bits; cr.kinds[ins.a] = expect; cr.dirty->set(ins.a); }
 	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
 	++f.ip;
 	return {};
@@ -8520,25 +8508,25 @@ op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
 }
 
 // the typed index store lane with its index and value read from cells, every container guard kept
-JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
-	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	const chunk::cell_loop& loop = *cr.loop;
 	const uint32_t original_ip = ins.c;
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
 	auto cell_int = [&](const fused_operand& o, script_int& out) -> bool {
-		if (o.const_index != k_invalid_u32) { const script_value& v = f.code->constants[o.const_index]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
+		if (o.const_index != k_invalid_u32) { const script_value& v = cr.consts[o.const_index]; if (v.raw_storage_index() != script_value::TYPEID_INT) return false; out = v.unchecked_as_int(); return true; }
 		const uint32_t k = o.slot;   // the copy's proto names cells (an empty operand never reaches here)
-		if (k == k_invalid_u32 || cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
-		out = static_cast<script_int>(cs.payload[k]);
+		if (k == k_invalid_u32 || cr.kinds[k] != static_cast<uint8_t>(script_value::TYPEID_INT)) return false;
+		out = static_cast<script_int>(cr.payload[k]);
 		return true;
 	};
 	// the value: a cell of either kind, or a constant; its stamp and engine are what its landing gave it
 	// (a var element takes the value's stamp and engine, as typed_index_store does)
 	uint8_t vkind; int64_t vbits; type_info_ptr vstamp; auto* veng = engine_;
 	if (p.store_value.const_index != k_invalid_u32) {
-		const script_value& v = f.code->constants[p.store_value.const_index];
+		const script_value& v = cr.consts[p.store_value.const_index];
 		vkind = static_cast<uint8_t>(v.raw_storage_index());
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { vbits = v.unchecked_as_int(); }
 		else if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { vbits = cell_bits_of_float(v.unchecked_as_float()); }
@@ -8546,8 +8534,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		vstamp = v.get_type_info(); veng = v.get_engine();
 	} else {
 		const uint32_t k = p.store_value.slot;   // a cell position
-		if (k == k_invalid_u32 || cs.kind[k] == 0) return miss();
-		vkind = cs.kind[k]; vbits = cs.payload[k];
+		if (k == k_invalid_u32 || cr.kinds[k] == 0) return miss();
+		vkind = cr.kinds[k]; vbits = cr.payload[k];
 		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) && vkind != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();   // a bool value takes the general store's conversion
 		const chunk::cell_loop::cell& vc = loop.cells[k];
 		vstamp = type_info_ptr{vc.landing == k_typed_dst_decl && vc.stamp ? vc.stamp

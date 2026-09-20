@@ -1699,29 +1699,33 @@ namespace jai::vm {
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
         // fused cell pairs (row 150): the first instruction's executor on its own word, then the second's on the next word when the block is
         // still live and the ip fell through; out of line, so the block switch keeps its shape (the row 148.2 rule)
-        op_status exec_c_arith2(frame& f, const vm_instruction& ins);
-        op_status exec_c_jcmp2(frame& f, const vm_instruction& ins);
-        op_status exec_c_load2(frame& f, const vm_instruction& ins);
-        op_status exec_c_arith_load(frame& f, const vm_instruction& ins);
-        op_status exec_c_load_jcmp(frame& f, const vm_instruction& ins);
-        op_status exec_c_arith_jump(frame& f, const vm_instruction& ins);
+        struct cell_regs;   // the block loop's registers (row 155.3; defined with cells_run below)
+        op_status exec_c_arith2(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_jcmp2(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_load2(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_arith_load(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_load_jcmp(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_arith_jump(frame& f, const vm_instruction& ins, const cell_regs& cr);
         bool cells_second_half_injected(frame& f);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
         op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
+        // the block loop's registers (row 155.3): the cells' payloads and kinds, the dirty mask, the chunk's constants, the copy's code and
+        // the loop, read once per run; every executor on the hot switch reads through them instead of re-deriving frame -> cells -> vectors
+        struct cell_regs { int64_t* payload; uint8_t* kinds; chunk::cell_mask* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
         op_status cells_run_cold(frame& f, const chunk::cell_loop& loop, const vm_instruction& ci);   // the call door's instructions, off the block loop's hot switch
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
-        JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, bool head);
-        JAI_FORCEINLINE op_status exec_c_neg(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_bnot(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_lnot(frame& f, const vm_instruction& ins);     // the truthiness inverted, a bool
-        JAI_FORCEINLINE op_status exec_c_cmpval(frame& f, const vm_instruction& ins);   // a comparison as a value, a bool
+        JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, const vm_instruction& ins, const cell_regs& cr, bool head);
+        JAI_FORCEINLINE op_status exec_c_neg(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_bnot(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_lnot(frame& f, const vm_instruction& ins, const cell_regs& cr);     // the truthiness inverted, a bool
+        JAI_FORCEINLINE op_status exec_c_cmpval(frame& f, const vm_instruction& ins, const cell_regs& cr);   // a comparison as a value, a bool
         bool cell_truthy(frame& f, uint32_t operand, bool& truthy);                    // the language's truthiness of an int, a float or a bool cell or constant
         // a call inside the block: the probe, the pushes and the call run the general executors verbatim; the landing after the
         // return re-reads what the callee could have touched and lands the result by the declared-type rule
@@ -1732,7 +1736,7 @@ namespace jai::vm {
         bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);   // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
-        op_status exec_c_push(frame& f, const vm_instruction& ins);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
+        op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
         const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
@@ -1740,23 +1744,23 @@ namespace jai::vm {
         bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe);   // the alias's sites take the table's element at index, a plain array node, else false
         op_status exec_c_rebind(frame& f, const vm_instruction& ins);
         op_status exec_c_range(frame& f, const vm_instruction& ins);
-        op_status exec_c_back_step(frame& f, const vm_instruction& ins);   // after a call: every site's container is the node resolved at entry, reached the same way
+        op_status exec_c_back_step(frame& f, const vm_instruction& ins, const cell_regs& cr);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         // checked: the per-read kind checks; false for the pinned forms, whose operand cells the emission proved hold the kind
-        JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins, bool checked);
-        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins, bool checked);
-        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins, bool checked);
-        JAI_FORCEINLINE op_status exec_c_arith_any(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_mov(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_append(frame& f, const vm_instruction& ins);   // the compound plus with run-time kinds: strings in place
-        JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_arith(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked);
+        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked);
+        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, const vm_instruction& ins, const cell_regs& cr, bool checked);
+        JAI_FORCEINLINE op_status exec_c_arith_any(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_mov(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_append(frame& f, const vm_instruction& ins, const cell_regs& cr);   // the compound plus with run-time kinds: strings in place
+        JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
-        JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins, bool adopted);
-        JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins);
-        JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_c_load(frame& f, const vm_instruction& ins, const cell_regs& cr, bool adopted);
+        JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_back(frame& f, const vm_instruction& ins, const cell_regs& cr);
         void cells_flush(frame& f, const chunk::cell_loop& loop);          // dirty cells back to their slots, state cleared
         void cfor_state_push(frame& f, const counted_for_proto& p);   // the state a counted loop's general back edge expects, built as exec_cfor_prep builds it minus the initial test
         void refuse_container_site(frame& f, const chunk::cell_loop& loop);   // the refusal valve: mark the loop for the rest of the call

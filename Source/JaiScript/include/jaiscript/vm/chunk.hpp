@@ -409,6 +409,8 @@ namespace jai::vm {
             uint32_t iter_proto = k_invalid_u32, iter_index_cell = k_invalid_u32, iter_site = k_invalid_u32;
             std::vector<uint32_t> inner_counted;   // the counted_for_protos indices of the inner counted loops the block took, outermost first: a miss inside one pushes the general form's state (cells_miss)
             std::vector<cell> cells;
+            std::vector<uint32_t> env_cells;           // the cells with an environment operand: a landing after a call re-reads them (row 156.2)
+            std::vector<uint32_t> string_candidates;   // the slot cells whose kind may be a string at run time: a landing re-borrows them
             // indexed by frame slot (and the env cells' synthetic slots): the slot's FIRST cell, k_invalid_u32 = not a cell. A
             // compiler temp slot may carry several cells, one per definition of another kind; the emission advances the
             // binding as it passes each definition and the copy names cells directly, so this table is emission-time only

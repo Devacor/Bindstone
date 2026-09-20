@@ -7562,9 +7562,8 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 	}
 	// the environment and its epoch as at entry: the bindings recorded there still answer (the lookup cache's own rule)
 	const bool env_ok = environment_.get() == cs.env_of && env_symbolizer_->env_epoch() == cs.env_serial;
-	for (uint32_t k = 0; !loop.env_operands.empty() && k < loop.cells.size(); ++k) {
+	for (const uint32_t k : loop.env_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
-		if (cl.env_operand == k_invalid_u32) continue;
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
 		if (!(env_ok && cs.env_ptr[k]) && er.cache_slot < f.code->env_lookup_cache.size()) {
 			const env_lookup_cache_entry& e = f.code->env_lookup_cache[er.cache_slot];   // redeclared by the callee as a reference to a property or an element: the general form's business
@@ -7576,12 +7575,11 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k] || v->type_info_raw() != cs.stamp[k]) return false;
 		cs.payload[k] = cs.kind[k] == kint ? static_cast<int64_t>(v->unchecked_as_int()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(v->unchecked_as_float()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : (v->unchecked_as_bool() ? 1 : 0);
 	}
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+	for (const uint32_t k : loop.string_candidates) {
 		// a string cell backed by a slot borrows the slot's node: re-borrowed after a call or an observed callee getter (a callee may have rebound the slot
 		// through a reference parameter); another kind in the slot is the general form's business
 		if (cs.kind[k] != static_cast<uint8_t>(script_value::TYPEID_STRING)) continue;
 		const chunk::cell_loop::cell& cl = loop.cells[k];
-		if (cl.temp || cl.env_operand != k_invalid_u32) continue;
 		const script_value* s = frame_slot(f, cl.slot);
 		if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return false;
 		cs.payload[k] = reinterpret_cast<int64_t>(s->unchecked_string_handle().get());

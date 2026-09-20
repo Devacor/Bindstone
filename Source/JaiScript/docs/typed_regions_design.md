@@ -574,6 +574,10 @@ kind) and then its unboxing, in one pass; the four canonical stamps are cached w
 refusal leaves partial cell state behind, which nothing reads: the loop stays unentered. The site resolution and the inline guards
 follow the walk.
 
+A landing after a call re-reads the environment cells and re-borrows the string cells from the loop's own lists (`env_cells`,
+`string_candidates`, recorded when the block is built) instead of scanning every cell twice; a block of a hundred cells landing
+once per column paid the scan on every column.
+
 ### Fused cell pairs
 
 The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes

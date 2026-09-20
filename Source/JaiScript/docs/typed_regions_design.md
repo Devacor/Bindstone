@@ -606,7 +606,11 @@ statement, an `if`, `while` or `for` condition (the grafts precede the condition
 `for` update, and an argument of a leaf, a host function or a builtin method. The graft is compiled, never spliced into the
 caller's tree (the interpreter walks that tree). The checker stamps the resolved callee decl for any program, includes or not (the
 guard carries the identity), and an argument proof under includes when the argument's type an include cannot change (a literal, a
-typed local or parameter, arithmetic, a unary, a ternary, a cast or a math intrinsic over those; never a global or a member). The
+typed local or parameter, arithmetic, a unary, a ternary, a cast or a math intrinsic over those; never a global or a member). A callee another unit of the program
+declares resolves through the program's function table (the closure's cached units, the ones the imports execute; one unit
+declaring the name once), so a leaf grafts across a file boundary, and a reload of that unit fails the guard as any rebind does. In
+the statement's clone a replaced argument is the hoisted leaf's result temp, a slot of its return type, so the outer call's proof
+for it is the types' agreement, and `tile_solid(tile_at(x, y))` grafts both leaves under includes. The
 middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every effect
 point (`cell_loop::inline_sites`), the fallback's instructions are skips, the spills and the inlined body's instructions are the
 region's, and a return's jump is a forward edge to the join like an if's. A raise inside an inlined body names the callee in the

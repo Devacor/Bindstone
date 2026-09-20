@@ -208,6 +208,16 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
 		n->static_arg_proofs = ce->static_arg_proofs; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		// a replaced argument is the hoisted leaf's result temp, a slot of its return type: the outer call's proof for it is the types' agreement
+		if (c.replace && c.result && c.result_type && ce->proven_callee_decl) {
+			for (size_t i = 0; i < ce->arguments.size() && i < ce->proven_callee_decl->parameters.size(); ++i) {
+				if (ce->arguments[i].get() != c.replace) continue;
+				const parameter& p = ce->proven_callee_decl->parameters[i];
+				if (p.is_reference || !p.type || !scalar_type(p.type.get()) || p.type->base_type != c.result_type->base_type) continue;
+				if (n->static_arg_proofs.size() < ce->arguments.size()) { n->static_arg_proofs.resize(ce->arguments.size(), proof_none); }
+				n->static_arg_proofs[i] = proof_same_type;
+			}
+		}
 		return n;
 	}
 	default:
@@ -625,7 +635,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	for (size_t s = base; s < base + fn->local_count; ++s) { callable_.primitive_slots.erase(static_cast<uint32_t>(s)); }   // another graft may put anything in these slots
 	if (result) { callable_.primitive_slots.erase(static_cast<uint32_t>(result->slot_index)); }   // the fallback declares it as anything
 	inlining_off_ = was_off;
-	sc.replace = call.get(); sc.result = result;
+	sc.replace = call.get(); sc.result = result; sc.result_type = fn->return_type;   // a replaced argument's proof reads the type
 	expression_ptr replaced = clone_expr(root, sc);
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
 	return sc.ok ? replaced : nullptr;

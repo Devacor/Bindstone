@@ -3,6 +3,8 @@
 // written and after the first pixel store, late overflow with prior stores retained, a budget stop
 // inside the cell loop, proofs off, zero and one iteration, a loop that is not closed, chained index
 // stores, a float slot fed by int arithmetic, interleaved coroutines, the hoisted containers.
+#include <filesystem>
+#include <fstream>
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -3408,6 +3410,30 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(prelude + "run(4);");
 			check_true(l.find("-- inlined add1") == std::string::npos, "add1 behind the method call keeps its call: " + l);
 			check_true(l.find("-- inlined add2") != std::string::npos, "add2 ahead of the method call is inlined: " + l);
+		});
+		test("a_leaf_another_unit_declares_grafts", [this]() {
+			// row 153.1: tile_at lives in maps.jai and spot_free in sim.jai; a leaf a unit imports resolves through the program's function table
+			// (the closure's cached unit, the one the import executes), so it grafts in the importer's loop and the guard reads the live binding
+			namespace fs = std::filesystem;
+			fs::path dir = fs::temp_directory_path() / "jai_row1531";
+			fs::create_directories(dir);
+			std::ofstream(dir / "lib.jai") << "int add1(int a) { return a + 1; }\nclass Grid { int mw = 4; var cells = []; }\nshared_ptr<Grid> GR = null;\nint cell_at(int x, int y) { if (x < 0 || x >= GR.mw) { return 1; } return GR.cells[y * GR.mw + x]; }\n";
+			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nGR = new Grid(); for (int k = 0; k < 16; ++k) { GR.cells.push(k % 5 == 0 ? 1 : 0); }\n"
+			                                  "var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + add1(i); } return s; };\n"
+			                                  "var probe = function(int x) { if (cell_at(x, 1) != 0) { return 7; } return add1(x); };\n"
+			                                  "to_string(run(6)) + \"|\" + to_string(probe(0)) + \"|\" + to_string(probe(1));\n";
+			auto run_file = [&](bool vm, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				e->add_include_path(dir.string());
+				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			std::string l;
+			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
+			check_eq(iv, vv, "a leaf another unit declares: both backends");
+			check_eq(std::string("21|1|7"), vv, "the values");
+			check_true(l.find("-- inlined add1") != std::string::npos, "add1 from the imported unit is inlined: " + l);
+			check_true(l.find("-- inlined cell_at") != std::string::npos, "cell_at from the imported unit is inlined in a condition (its return converts at the result): " + l);
 		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the

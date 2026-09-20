@@ -99,6 +99,11 @@ grafts its function body today, with the callee's slots renamed into the caller'
 Evaluation order and observable copies hold because the graft happens on the AST the
 checker already ordered.
 
+The frame's window dies at the return by one truncation of the value stack, which skips the destructor of every value whose
+payload is trivial (null, int, float, char, bool) whatever its stamp: the type tag is a raw pointer wrapper and the engine a raw
+pointer, so a typed local's value pops as free as a tagless temp; only strings, containers, objects, functions, references and
+handles run theirs.
+
 ## Flat records (stage 3)
 
 A class is **flat** when every field is a declared scalar or a flat class, it has no user

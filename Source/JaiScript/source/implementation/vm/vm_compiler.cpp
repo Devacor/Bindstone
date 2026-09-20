@@ -3602,6 +3602,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (fused != opcode::op_halt) { code[ip2].op = fused; ++ip2; }
 			}
 		}
+		for (uint32_t k = 0; k < loop.cells.size(); ++k) {   // the landing's lists (row 156.2): the environment cells, and the slot cells a string may sit in
+			const chunk::cell_loop::cell& cl = loop.cells[k];
+			if (cl.env_operand != k_invalid_u32) { loop.env_cells.push_back(k); continue; }
+			if (!cl.temp && (cl.kind == 0 || cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING))) { loop.string_candidates.push_back(k); }
+		}
 		c.cell_loops.push_back(std::move(loop));
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }

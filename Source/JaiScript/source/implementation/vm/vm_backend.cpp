@@ -1,4 +1,11 @@
 #include <jaiscript/vm/vm_backend.hpp>
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+#include <intrin.h>
+namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coarse_scope(uint64_t& a, uint64_t& c) : acc(a), cnt(c), t0(__rdtsc()) {} ~coarse_scope() { acc += __rdtsc() - t0; ++cnt; } }; }
+#define JAI_COARSE(acc, cnt) coarse_scope coarse_guard_{acc, cnt};
+#else
+#define JAI_COARSE(acc, cnt)
+#endif
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
@@ -6745,6 +6752,7 @@ void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
 }
 
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
+	JAI_COARSE(coarse_flush_, coarse_flushes_)
 	cell_state& cs = *f.cells;
 	// a compiler value is flushed only where the general continuation reads it (its definition is live at this
 	// instruction): a temp slot carries one cell per definition kind, and a dead definition must not overwrite the live one
@@ -6844,6 +6852,7 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 }
 
 void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
+	JAI_COARSE(coarse_miss_, coarse_misses_)
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
@@ -6871,6 +6880,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 // a counted loop's back edge that is also a block entry: the general step and compare (the state's cached pointers,
 // the overflow text), then the next iteration runs as a block when the cells admit it
 op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
 	if (cfor_states_.empty()) {
@@ -6907,6 +6917,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 
 // the original back edge: budget poll, then the entry guards on the live-in slots and the unboxing
 op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
@@ -7249,6 +7260,7 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
 bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+	JAI_COARSE(coarse_enter_, coarse_enters_)
 #ifdef JAISCRIPT_MISS_INJECTION
 	miss_every_ = engine_ ? engine_->cells_miss_every() : 0;
 	if (miss_countdown_ == 0 || miss_countdown_ > miss_every_) { miss_countdown_ = miss_every_; }
@@ -7600,6 +7612,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
 // change misses at the consumer with the result on the stack, exactly the general form's state there
 op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
+	JAI_COARSE(coarse_land_, coarse_lands_)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
 	if (!cells_reland(f, loop, cc)) return miss();
@@ -7616,6 +7629,7 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 }
 // the dispatcher reaches the landing when a callee returned to the caller parked on the call's copy
 op_status vm_backend::cells_resume(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	if (!f.cells || f.cells->loop != ins.b) [[unlikely]] { f.ip = cc.consumer_ip; return {}; }   // no block is active here: the general consumer takes the result
@@ -10283,6 +10297,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_push_, coarse_pushes_)
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	pending_callee pc = std::move(pending_callees_.back());
@@ -12747,6 +12762,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_method_, coarse_methods_)
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t cm_entry = __rdtsc();
 #endif
@@ -15619,6 +15635,9 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 // them in exec_call at each recursion level); with no in-loop frames they rethrow
 // byte-identically. Kept separate so its EH funclets never touch run_dispatch's frame.
 checked_result<void> vm_backend::run(frame& entry) {
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+	struct coarse_total_scope { vm_backend& b; uint64_t t0; explicit coarse_total_scope(vm_backend& x) : b(x), t0(__rdtsc()) { ++b.coarse_depth_; } ~coarse_total_scope() { if (--b.coarse_depth_ == 0) { b.coarse_total_ += __rdtsc() - t0; } } } coarse_total_guard_{*this};
+#endif
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
 #ifdef JAISCRIPT_VM_PROFILE
@@ -15664,6 +15683,28 @@ checked_result<void> vm_backend::run(frame& entry) {
 		}
 	}
 }
+
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+void vm_backend::dump_coarse_profile() const {
+	if (!coarse_total_) return;
+	const double total = double(coarse_total_);
+	auto pct = [&](uint64_t v) { return 100.0 * double(v) / total; };
+	auto avg = [](uint64_t v, uint64_t n) { return n ? double(v) / double(n) : 0.0; };
+	const uint64_t named = coarse_blocks_ + coarse_push_ + coarse_pop_ + coarse_method_;
+	fprintf(stderr, "[vm-coarse] total %.0f Mtick | blocks %.1f%% (%llu runs, %.0f avg) | call push %.1f%% (%llu, %.0f avg) | frame pop %.1f%% (%llu, %.0f avg) | method calls %.1f%% (%llu, %.0f avg) | rest %.1f%%\n",
+		total / 1e6, pct(coarse_blocks_), (unsigned long long)coarse_block_runs_, avg(coarse_blocks_, coarse_block_runs_),
+		pct(coarse_push_), (unsigned long long)coarse_pushes_, avg(coarse_push_, coarse_pushes_),
+		pct(coarse_pop_), (unsigned long long)coarse_pops_, avg(coarse_pop_, coarse_pops_),
+		pct(coarse_method_), (unsigned long long)coarse_methods_, avg(coarse_method_, coarse_methods_),
+		named <= coarse_total_ ? pct(coarse_total_ - named) : 0.0);
+	fprintf(stderr, "[vm-coarse] of the blocks: entry %.1f%% (%llu, %.0f avg) | flush %.1f%% (%llu, %.0f avg) | miss %.1f%% (%llu, %.0f avg) | land %.1f%% (%llu, %.0f avg) | body %.1f%%\n",
+		pct(coarse_enter_), (unsigned long long)coarse_enters_, avg(coarse_enter_, coarse_enters_),
+		pct(coarse_flush_), (unsigned long long)coarse_flushes_, avg(coarse_flush_, coarse_flushes_),
+		pct(coarse_miss_), (unsigned long long)coarse_misses_, avg(coarse_miss_, coarse_misses_),
+		pct(coarse_land_), (unsigned long long)coarse_lands_, avg(coarse_land_, coarse_lands_),
+		coarse_blocks_ >= coarse_enter_ + coarse_flush_ + coarse_miss_ + coarse_land_ ? pct(coarse_blocks_ - coarse_enter_ - coarse_flush_ - coarse_miss_ - coarse_land_) : 0.0);
+}
+#endif
 
 #ifdef JAISCRIPT_VM_PROFILE
 // Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
@@ -17817,6 +17858,7 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 // + depth guard). Destroys the callee's script_value state NOW — deferring destruction
 // is observable.
 void vm_backend::pop_script_frame_core(call_record& rec) {
+	JAI_COARSE(coarse_pop_, coarse_pops_)
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_pc0 = __rdtsc();
 	++profile_pop_sub_count_;

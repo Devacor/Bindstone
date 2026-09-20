@@ -351,6 +351,7 @@ namespace jai::vm {
         std::vector<uint64_t> symbols;
         std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive
+        std::vector<std::unique_ptr<type_info>> owned_types;   // the inliner's spill temps' primitive types (the compiler has no engine to intern one)
         // Per ip (lazily sized, never longer than code): nodes index of the env-resolved
         // identifier_expr behind an op_load / op_store / op_binary_fused_store /
         // op_return_ident, read live for field proofs; k_invalid_u32 = none

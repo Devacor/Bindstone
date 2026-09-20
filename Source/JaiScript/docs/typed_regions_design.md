@@ -565,32 +565,53 @@ was. The fused executors are out of line (the block switch's shape rule).
 ### Inlined leaves
 
 A plain identifier call that the checker resolved to one free script function (`call_expr::proven_callee_decl`: exact arity, a
-body, not a coroutine, not a method) compiles at its call site as the callee's body when the callee is small (at most 12 statements
-and the clone's node budget) and made of the forms the graft takes: declarations, expression statements, ifs, returns; literals,
-identifiers, arithmetic, assignments, members, elements, ternaries, casts and math intrinsics. A loop, a try, a lambda, `this`, a
-nested script or host call or a method call leaves the call a call. The by-value parameters must be scalars or strings the checker
-proved (the same assignment table `bind_parameters` runs, so nothing converts) or `var` taking a scalar local or a literal; a
-reference parameter must be a `var&` bound to a plain identifier (the parameter's uses become the caller's variable) or to an element
-lvalue (an alias declaration, a rebind). The return type is void, a scalar or a string. The call sits in a position the graft may take:
-`f(...);`, `T v = f(...);`, `v = f(...);`, `return f(...);`, or an operand where every leaf the statement evaluates before the call is
-a local or a literal, or a global or a member when the body writes neither; a body that writes through a reference parameter (a
-store or an increment of the parameter's name) takes a call with no leaf before it; a call under a conditional operand (a ternary's
-arm, the right side of `&&` or `||`) runs on the paths that choose it and is never hoisted; a store or an increment the statement
-completes before the call keeps the call (the arguments and the body would run before it); a static member read is a member read.
-The call's own arguments run before the body in both forms and count as nothing before it.
+body, not a coroutine, not a method) compiles at its call site as the callee's body when the callee is small (the clone's node
+budget, 512 nodes for the body and the statement together) and made of the forms the graft takes: declarations, expression
+statements, blocks, ifs, returns; literals, identifiers, arithmetic, assignments, members, elements, ternaries, casts and math
+intrinsics. A loop, a switch, a try, a lambda, `this`, a nested script or host call or a method call in the body leaves the call a
+call. The by-value parameters must be scalars the checker proved (the same assignment table `bind_parameters` runs, so nothing
+converts; an unproven argument would bind out of the call's order, which evaluates every argument before it binds the first) or
+`var` taking a scalar local or a literal; a reference parameter must be a `var&` bound to a plain identifier (the parameter's uses
+become the caller's variable) or to an element lvalue (an alias declaration, a rebind). The return type is void or a scalar.
 
-The graft is compiled, never spliced into the caller's tree (the interpreter walks that tree): a guard (`op_inline_guard`, site,
-fallback ip) that reads the callee name's binding through the name's own cache row without running a getter and compares the bound
+The call becomes a temp. The operands the statement evaluates before the call go first, in program order: a literal or an
+identifier stays where it is (an identifier the body writes through a reference parameter, or a global when the body writes a
+global or a member, refuses the graft); an arithmetic, bitwise, comparison or logical subtree whose operand class the checker
+stamped, or an element read of a proven kind, is declared into a typed temp of its result's type (the spill: it runs before the
+body as it did, and a raise inside it comes first as it did); anything else before the call (a member read, a cast, a ternary, a
+store, a method's receiver) refuses the graft. Then the graft declares the result temp: a guard (`op_inline_guard`, site, fallback
+ip) that reads the callee name's binding through the name's own cache row without running a getter and compares the bound
 function's body with the decl's, one declaration per by-value parameter in slots above the caller's frame, the callee's body cloned
-with its slots offset and every `return e` converted to a store into the result slot by the structured rule (a statement after an if
-that returns nests into the arms that fall through), the caller's statement with the call replaced by the result, a jump, and behind
-it the original statement with its real call as the fallback, which a rebind or a reload of the callee, or an armed debugger, takes.
-The checker stamps the resolved callee decl for any program, includes or not (the guard carries the identity), and an argument
-proof under includes when the argument's type an include cannot change (a literal, a typed local or parameter, arithmetic, a
-unary, a ternary, a cast or a math intrinsic over those; never a global or a member). The middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every
-effect point (`cell_loop::inline_sites`), the fallback's instructions are skips, and the inlined body's instructions are the region's.
-A raise inside an inlined body names the callee in the trace (the range table on the chunk, `chunk::inline_sites`). The listing
-names each graft (`-- inlined light_band guard 12: 13..40 fallback 40..47`); the manifest lists the sites.
+with its slots offset, every `return e` a declaration of the result temp from `e` (the checker's proof, or the return site's
+conversion with the callee's text, `Cannot return string from 'f' (declared -> int)`) and a jump to the graft's join, a jump over
+the fallback, and the fallback: the real call declared into the same temp as whatever it returns, which a rebind or a reload of
+the callee, or an armed debugger, takes. After the join the statement runs once, with the call and the spilled operands replaced by
+their temps; it keeps every proof the checker stamped on it. The first call the statement runs is the one hoisted; when it is a
+leaf, the statement is scanned again for the next, so `tile_solid(tile_at(x, y))` hoists the inner leaf and then the outer, and
+`f(a) + g(b)` both. A call under a conditional operand (a ternary's arm, the right side of `&&` or `||`), or after a call that is
+no leaf (a method, a host function, a large function), stays a call: it would run behind a path or an effect the graft cannot
+order. A void leaf grafts alone in a statement, nowhere a value is read.
+
+Inside a loop the graft must be a block end to end, or the call stays: a spilled operand, every by-value parameter's argument, every
+declaration and statement of the body and every return value must land by a block instruction (a slot identifier or a literal;
+arithmetic, a comparison, a shift or a unary over those or over global reads, which the fused binary's environment rows take; an
+element read of a proven kind over a named container; a member read or store over a named instance; a math intrinsic; a store into
+a slot, a global, a field or an element; an increment of a slot), and every return must be proven. A declaration from a bare global, an
+unproven return's conversion, a cast, a ternary or an increment of a global lands on the general form, which the block does not run,
+and the call's own landing in the block converts what a declaration cannot, so there the call is the better form. Outside a loop
+the body may be anything the clone takes.
+
+The positions are then one position: `f(...);`, `T v = f(...);`, `v = f(...);`, `return f(...);`, any operand of an expression
+statement, an `if`, `while` or `for` condition (the grafts precede the condition's jumps; a `while` re-runs them at its head), a
+`for` update, and an argument of a leaf, a host function or a builtin method. The graft is compiled, never spliced into the
+caller's tree (the interpreter walks that tree). The checker stamps the resolved callee decl for any program, includes or not (the
+guard carries the identity), and an argument proof under includes when the argument's type an include cannot change (a literal, a
+typed local or parameter, arithmetic, a unary, a ternary, a cast or a math intrinsic over those; never a global or a member). The
+middle end's switch off compiles no graft. In a region the guard is a site: its identity holds at the entry and after every effect
+point (`cell_loop::inline_sites`), the fallback's instructions are skips, the spills and the inlined body's instructions are the
+region's, and a return's jump is a forward edge to the join like an if's. A raise inside an inlined body names the callee in the
+trace (the range table on the chunk, `chunk::inline_sites`). The listing names each graft (`-- inlined light_band guard 12: 13..40
+fallback 40..47`); the manifest lists the sites.
 
 ### Member read sites
 

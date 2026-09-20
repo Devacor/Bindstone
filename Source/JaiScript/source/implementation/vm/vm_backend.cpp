@@ -2902,8 +2902,19 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 
 // The one typed-slot table (detail::convert_for_typed_slot); this site owns the assignment
 // texts. KEEP BYTE-PARALLEL with interpreter::enforce_type_compatibility.
+namespace {
+// the site a declaration's rejection spells: a synthesized declaration stands for a parameter or a return (vm_inline.cpp)
+detail::slot_site decl_site(const variable_decl* decl) {
+	switch (decl->site_kind) {
+	case variable_decl::site_parameter: return detail::slot_site{detail::slot_kind::parameter, decl->name, decl->site_owner};
+	case variable_decl::site_return: return detail::slot_site{detail::slot_kind::return_value, {}, decl->site_owner};
+	default: return detail::slot_site{detail::slot_kind::declaration, decl->name, {}};
+	}
+}
+} // namespace
+
 checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type,
-                                                                    std::string_view var_name, detail::slot_kind kind) {
+                                                                    std::string_view var_name, detail::slot_kind kind, std::string_view owner) {
 	if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
 		return std::move(value);
 	}
@@ -2952,7 +2963,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 			}
 			[[fallthrough]];
 		default:
-			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, var_name, {}}, engine_);
+			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, var_name, owner}, engine_);
 	}
 }
 
@@ -9625,7 +9636,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 					auto actual_def = engine_->get_class_definition(actual_class);
 					if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
 						return raise_from(detail::typed_slot_rejection(value, *decl->type,
-							detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_));
+							decl_site(decl), engine_));
 					}
 				}
 			}
@@ -9638,7 +9649,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		// A value-semantic object or a primitive: family D's declaration shape
 		// (KEEP BYTE-PARALLEL with the interpreter's visit_var_decl)
 		return raise_from(detail::typed_slot_rejection(value, *decl->type,
-			detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_));
+			decl_site(decl), engine_));
 	}
 
 	if (is_shared_ptr) {
@@ -9806,7 +9817,8 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		// reference-semantics tag must survive the decl instead of flattening to 'any'
 		if (has_init && !(decl->static_init_proof == proof_same_type &&
 		                  detail::same_type_payload(value, effective_decl_type.get()))) {   // V-D1
-			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name, detail::slot_kind::declaration);
+			const detail::slot_site ds = decl_site(decl);
+			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, ds.name, ds.kind, ds.owner);
 			if (!enforced) {
 				return raise_from(enforced);
 			}

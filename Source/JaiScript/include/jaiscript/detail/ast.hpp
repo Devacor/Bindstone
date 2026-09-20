@@ -649,6 +649,8 @@ namespace jai {
         // value binds as a reference instead of evaluating to a copy. Stamped by the
         // parser's ref_escape_marker pass (innermost function, coroutines excluded).
         bool binds_reference = false;
+        // the VM's graft: a return that jumps to the inlined body's join (synthesized by the compiler, never parsed or serialized)
+        bool inline_exit = false;
         mutable uint8_t static_return_proof = proof_none;
         // Interpreter memo of detail::classify_return_operand (by-value return
         // materialization); derived at first visit, never serialized
@@ -747,6 +749,11 @@ namespace jai {
         static constexpr uint8_t decl_fast_slot_store = decl_fast_plain | decl_fast_scalar;
         uint8_t decl_fast_flags = 0;
         mutable uint8_t static_init_proof = proof_none;
+        // the VM's synthesized declarations: the typed-slot rejection spells the site the declaration stands for (a graft's
+        // result converts with the callee's return text); the parser leaves the declaration site
+        static constexpr uint8_t site_declaration = 0, site_parameter = 1, site_return = 2;
+        uint8_t site_kind = site_declaration;
+        std::string_view site_owner;
 
         static uint8_t classify_decl_fast(const type_info_ptr& t) {
             if (!t) {

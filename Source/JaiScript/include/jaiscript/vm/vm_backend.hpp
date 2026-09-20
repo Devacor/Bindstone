@@ -544,8 +544,10 @@ namespace jai::vm {
                 (1u << script_value::TYPEID_NULL) | (1u << script_value::TYPEID_INT) |
                 (1u << script_value::TYPEID_FLOAT) | (1u << script_value::TYPEID_CHAR) |
                 (1u << script_value::TYPEID_BOOL);
+            // a trivial payload destroys nothing whatever its stamp: the type tag is a raw pointer wrapper and the engine a raw
+            // pointer, so a typed local's int, float, bool, char or null pops as free as a tagless temp (row 155.1)
             static bool dtor_elidable(const script_value& s) noexcept {
-                return ((trivial_payload_mask >> s.raw_storage_index()) & 1u) != 0 && !s.has_type_tag();
+                return ((trivial_payload_mask >> s.raw_storage_index()) & 1u) != 0;
             }
 
             void push_back(const script_value& x) {

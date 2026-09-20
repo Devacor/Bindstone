@@ -10008,7 +10008,7 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
 	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
 	const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
-	return thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && !thunk->payload.fn->closure_env && thunk->payload.fn->body.get() == site.body;
+	return thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
 }
 op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
 	const chunk::inline_site& site = f.code->inline_sites[ins.a];

@@ -85,6 +85,10 @@ bool landable(const expression* e) {
 		return block_operand(b->left.get()) && block_operand(b->right.get());
 	}
 	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && block_operand(u->operand.get()); }
+	case node_type::ternary_expr: {   // the condition's jumps and one landing per arm: a declaration or a slot store from it is a block's
+		auto* x = static_cast<const ternary_expr*>(e);
+		return block_operand(x->condition.get()) && block_operand(x->then_expression.get()) && block_operand(x->else_expression.get());
+	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
 		if (!math_call(ce)) return false;

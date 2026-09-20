@@ -216,6 +216,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 	for (const auto& s : ch.inline_sites) {
 		out << "-- inlined " << (s.decl ? std::string(s.decl->name) : std::string("?")) << " guard " << s.guard_ip << ": " << s.begin_ip << ".." << s.fallback_ip << " fallback " << s.fallback_ip << ".." << s.join_ip << "\n";
 	}
+	for (const auto& r : ch.inline_refusals) {
+		out << "-- call kept " << r.callee << " line " << r.line << ": " << (r.reason ? r.reason : "?") << "\n";
+	}
 	for (const auto& r : ch.cell_refusals) {
 		out << "-- open loop " << r.head << ".." << r.back << ": " << chunk::cell_refusal_name(r.reason) << " at " << r.ip << " (" << opcode_name(static_cast<opcode>(r.op)) << ")\n";
 	}

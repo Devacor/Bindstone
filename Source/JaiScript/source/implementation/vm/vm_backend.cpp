@@ -16543,6 +16543,15 @@ void vm_backend::dump_opcode_profile() const {
 				(unsigned long long)profile_index_read_paths_[6], (unsigned long long)profile_index_read_paths_[7]);
 		}
 	}
+	{
+		// the calls the inliner kept, by callee and rule (sites, over the chunks that ran)
+		std::map<std::string, std::map<std::string, uint32_t>> kept;
+		for (const auto& [code, st] : profile_chunks_) { if (!code) continue; for (const auto& r : code->inline_refusals) { ++kept[r.callee][r.reason ? r.reason : "?"]; } }
+		if (!kept.empty()) {
+			fprintf(stderr, "\n[vm-profile] calls the inliner kept (callee: rule x sites):\n");
+			for (const auto& [callee, rules] : kept) { for (const auto& [rule, n] : rules) { fprintf(stderr, "  %-28s %s x %u\n", callee.c_str(), rule.c_str(), n); } }
+		}
+	}
 }
 #endif
 

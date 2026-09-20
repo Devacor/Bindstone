@@ -491,6 +491,8 @@ namespace jai::vm {
             uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
         };
         std::vector<inline_site> inline_sites;
+        struct inline_refusal { std::string callee; const char* reason = nullptr; uint32_t line = 0; };   // a call the inliner kept and the rule that kept it
+        std::vector<inline_refusal> inline_refusals;   // the listing and the profile build name them; no instruction reads the table
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.

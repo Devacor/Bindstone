@@ -145,8 +145,8 @@ namespace jai::vm {
         const block_stmt* callable_body_ = nullptr;
         bool inlining_off_ = false;
         uint64_t inline_symbol_ = 0;
-        struct hoist_plan { std::shared_ptr<call_expr> call; const function_decl* fn = nullptr; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; };
-        bool inline_eligible(const call_expr* call, const function_decl* fn) const;
+        struct hoist_plan { std::shared_ptr<call_expr> call; const function_decl* fn = nullptr; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
+        const char* inline_eligible(const call_expr* call, const function_decl* fn) const;   // nullptr: the graft takes the call; else the rule that keeps it
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
         type_info_ptr inline_type(script_value_type kind);
         std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);

@@ -776,6 +776,7 @@ namespace jai::vm {
         std::vector<std::shared_ptr<environment>> instance_scope_saved_;
         std::shared_ptr<environment> pending_instance_env_;
         engine* engine_ = nullptr;
+        type_info* ti_int_ = nullptr; type_info* ti_float_ = nullptr; type_info* ti_bool_ = nullptr; type_info* ti_string_ = nullptr;   // the engine's canonical stamps, cached with the engine (row 156.1)
 #ifdef JAISCRIPT_MISS_INJECTION
         uint32_t miss_every_ = 0;        // engine::cells_miss_every, read at every block entry
         uint32_t miss_countdown_ = 0;    // plain cell instructions until the next injected miss; runs across entries

@@ -569,6 +569,11 @@ them per operation. The vectors never move during a run (the entry sizes them), 
 door and the member sites (`cells_run_cold`) keep the frame form. Nothing else changes: the same memory, the same guards, the same
 misses.
 
+The entry walks the cells once: each cell's guard (the slot's kind, its canonical stamp and its engine, or the environment binding's
+kind) and then its unboxing, in one pass; the four canonical stamps are cached with the engine rather than asked of it per cell. A
+refusal leaves partial cell state behind, which nothing reads: the loop stays unentered. The site resolution and the inline guards
+follow the walk.
+
 ### Fused cell pairs
 
 The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes

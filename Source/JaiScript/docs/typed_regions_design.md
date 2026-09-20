@@ -595,9 +595,9 @@ order. A void leaf grafts alone in a statement, nowhere a value is read.
 Inside a loop the graft must be a block end to end, or the call stays: a spilled operand, every by-value parameter's argument, every
 declaration and statement of the body and every return value must land by a block instruction (a slot identifier or a literal;
 arithmetic, a comparison, a shift or a unary over those or over global reads, which the fused binary's environment rows take; an
-element read of a proven kind over a named container; a member read or store over a named instance; a math intrinsic; a store into
-a slot, a global, a field or an element; an increment of a slot), and every return must be proven. A declaration from a bare global, an
-unproven return's conversion, a cast, a ternary or an increment of a global lands on the general form, which the block does not run,
+element read of a proven kind over a named container; a member read or store over a named instance; a math intrinsic; a ternary of those, which lands as its condition's jumps and one
+landing per arm; a store into a slot, a global, a field or an element; an increment of a slot), and every return must be proven. A declaration from a bare global, an
+unproven return's conversion, a cast or an increment of a global lands on the general form, which the block does not run,
 and the call's own landing in the block converts what a declaration cannot, so there the call is the better form. Outside a loop
 the body may be anything the clone takes.
 

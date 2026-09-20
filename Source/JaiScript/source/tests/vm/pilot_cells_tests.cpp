@@ -3435,6 +3435,22 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined add1") != std::string::npos, "add1 from the imported unit is inlined: " + l);
 			check_true(l.find("-- inlined cell_at") != std::string::npos, "cell_at from the imported unit is inlined in a condition (its return converts at the result): " + l);
 		});
+		test("a_particle_step_through_an_alias_grafts_with_its_ternary", [this]() {
+			// row 153.2: gloom_particle_step's shape, a var& parameter bound to a range-for alias, member reads and stores through it and the
+			// ternary store `life = life < 4 ? life : 4`, which lands as the condition's jumps and one store per arm; the leaf grafts inside the
+			// range-for and the values hold on both backends, proofs on and off
+			const std::string prelude =
+				"class P { int kind = 1; float x = 0.0; float vx = 0.1; int life = 10; }\n"
+				"void step(var& p) { int kind = p.kind; if (kind == 0) { return; } float x = p.x; float vx = p.vx; int life = p.life; life = life - 1;\n"
+				"  if (life <= 0) { p.kind = 0; p.x = 0.0; p.life = 0; return; } if (kind == 1) { vx = vx * 0.9; } else { vx = vx * 0.5; } x = x + vx * 0.5;\n"
+				"  if (x > 2.0) { x = 2.0; if (kind == 1 || kind == 2) { life = life < 4 ? life : 4; } } p.x = x; p.vx = vx; p.life = life; }\n"
+				"var pool = []; for (int i = 0; i < 8; ++i) { auto q = P(); q.kind = i % 3; q.x = i * 0.3; pool.push(q); }\n"
+				"var tick = function(int n) { float acc = 0.0; for (int t = 0; t < n; ++t) { for (auto& p : pool) { step(p); } } for (auto& p : pool) { acc = acc + p.x + p.life; } return acc; };\n";
+			both(prelude + "to_string(tick(12));", "32.700000", "a particle step through an alias");
+			both(prelude + "to_string(tick(12));", "32.700000", "a particle step through an alias, proofs off", false);
+			const std::string l = listing_run(prelude + "tick(12);");
+			check_true(l.find("-- inlined step") != std::string::npos, "step grafts inside the range-for with its ternary store: " + l);
+		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the
 			// graft declared as an int; the graft declares no default for its result (a bare DECL_VAR is no block instruction, and inside the

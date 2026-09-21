@@ -3,7 +3,7 @@
 
 import "wad.jai";
 
-var MAP_NAME = "";
+string MAP_NAME = "";
 
 array<int> VX_X = [];
 array<int> VX_Y = [];
@@ -19,17 +19,17 @@ array<int> LD_SIDE1 = [];
 array<int> SD_XOFS = [];
 array<int> SD_YOFS = [];
 array<int> SD_SEC = [];
-var SD_TOP = [];              // texture names (strings; "-" = none)
-var SD_BOT = [];
-var SD_MID = [];
+array<string> SD_TOP = [];    // texture names (strings; "-" = none)
+array<string> SD_BOT = [];
+array<string> SD_MID = [];
 
 array<int> SE_FLOORH = [];
 array<int> SE_CEILH = [];
 array<int> SE_LIGHT = [];
 array<int> SE_SPECIAL = [];
 array<int> SE_TAG = [];
-var SE_FLOORPIC = [];
-var SE_CEILPIC = [];
+array<string> SE_FLOORPIC = [];
+array<string> SE_CEILPIC = [];
 
 array<int> SG_V1 = [];
 array<int> SG_V2 = [];
@@ -56,15 +56,15 @@ array<int> TH_TYPE = [];
 array<int> TH_FLAGS = [];
 
 array<int> BMAP = [];         // raw blockmap words (i16)
-var BMAP_ORGX = 0;
-var BMAP_ORGY = 0;
-var BMAP_W = 0;
-var BMAP_H = 0;
+int BMAP_ORGX = 0;
+int BMAP_ORGY = 0;
+int BMAP_W = 0;
+int BMAP_H = 0;
 
-var MAP_MINX = 0;
-var MAP_MINY = 0;
-var MAP_MAXX = 0;
-var MAP_MAXY = 0;
+int MAP_MINX = 0;
+int MAP_MINY = 0;
+int MAP_MAXX = 0;
+int MAP_MAXY = 0;
 
 function side_or_none(int v) -> int { return v == 65535 ? -1 : v; }
 

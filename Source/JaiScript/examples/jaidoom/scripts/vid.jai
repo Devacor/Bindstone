@@ -6,32 +6,32 @@
 
 import "wad.jai";
 
-var ESC = "";
-var RESET = "";
-var HALFG = "";
-var HOME = "";
-var CLEAR = "";
+string ESC = "";
+string RESET = "";
+string HALFG = "";
+string HOME = "";
+string CLEAR = "";
 
 array<int> PIX = [];
-var VW = 0;
-var VH = 0;
-var VIEWH = 0;                // rows the 3D view may touch (hud bar reserves the rest)
+int VW = 0;
+int VH = 0;
+int VIEWH = 0;                // rows the 3D view may touch (hud bar reserves the rest)
 // 0 = serial blit; nonzero = parallel_transform rows (GLOOM pattern).
 // Measured on the post-region-kill VM: 120x78 still favors serial on the
 // whole frame (blit is ~8% of it), 200x140 wins outright (blit 2.6 -> 1.1ms,
 // total ~21 -> ~20.7). play() auto-enables at >= 160 cols; gates and the
 // bench set this explicitly.
-var BLIT_WORKERS = 0;
+int BLIT_WORKERS = 0;
 array<int> ROWIDX = [];       // parallel_transform input, one element per glyph row
 
-var PAL_KEYS = {};
-var PAL_FG = [];
-var PAL_BG = [];
+map<int, int> PAL_KEYS = {};
+array<string> PAL_FG = [];
+array<string> PAL_BG = [];
 array<int> PAL_LUM = [];
 array<int> PAL_R = [];
 array<int> PAL_G = [];
 array<int> PAL_B = [];
-var PAL_BGR3 = [];            // 3-byte BGR string per index (BMP fast path)
+array<string> PAL_BGR3 = [];  // 3-byte BGR string per index (BMP fast path)
 
 function utf8(int cp) -> string {
 	if (cp < 128) { return "" + to_char(cp); }
@@ -89,16 +89,16 @@ function le32(int v) -> string {
 function bmp_write(string path) -> void {
 	int pad = (4 - (VW * 3) % 4) % 4;
 	int stride = VW * 3 + pad;
-	var out = "BM" + le32(54 + stride * VH) + le32(0) + le32(54);
+	string out = "BM" + le32(54 + stride * VH) + le32(0) + le32(54);
 	out += le32(40) + le32(VW) + le32(VH) + le16(1) + le16(24) + le32(0) + le32(stride * VH);
 	out += le32(2835) + le32(2835) + le32(0) + le32(0);
-	var padding = "";
+	string padding = "";
 	for (int p = 0; p < pad; ++p) { padding += to_char(0); }
 	var& pix = PIX;
 	var& bgr = PAL_BGR3;
 	for (int y = VH - 1; y >= 0; --y) {
 		int base = y * VW;
-		var row = "";
+		string row = "";
 		for (int x = 0; x < VW; ++x) { row += bgr[pix[base + x]]; }
 		out += row + padding;
 	}
@@ -116,10 +116,10 @@ function pix_clear(int color) -> void {
 // only — its own LCG (the face_rnd pattern) never touches math::random, whose
 // stream belongs to the sim (demos and netplay replay it), and nothing
 // consults WIPE_TICS except play()'s draw path.
-var WIPE_TICS = 0;            // 0 = inactive
+int WIPE_TICS = 0;            // 0 = inactive
 array<int> WIPE_COL = [];     // per-column offset: <0 waiting, then falling
 array<int> WIPE_OLD = [];     // snapshot of the departing frame
-var WIPE_SEED = 1;
+int WIPE_SEED = 1;
 
 function wipe_rnd(int n) -> int {
 	WIPE_SEED = (WIPE_SEED * 1103515245 + 12345) & 2147483647;
@@ -195,7 +195,7 @@ function draw_line(int x0, int y0, int x1, int y1, int c) -> void {
 // scalar copies. No var& aliases of captured names — subscript the globals
 // directly. The SAME function runs the serial loop when BLIT_WORKERS == 0.
 function vid_row_half(int cy) -> string {
-	var row = "";
+	string row = "";
 	int vw = VW;
 	int fg = -1;
 	int bg = -1;
@@ -216,7 +216,7 @@ function blit_half() -> string {
 		var rows = parallel_transform(ROWIDX, vid_row_half);
 		return rows.join("\n") + "\n";
 	}
-	var out = "";
+	string out = "";
 	int vrows = VH / 2;
 	for (int cy = 0; cy < vrows; ++cy) { out += vid_row_half(cy) + "\n"; }
 	return out;

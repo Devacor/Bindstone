@@ -9,18 +9,18 @@ import "tex.jai";
 import "render.jai";
 import "sound.jai";
 
-var SWPAIR = {};              // texture id <-> its pressed/released partner
-var BTN_LD = [];              // pressed repeatable switches awaiting pop-out
+map<int, int> SWPAIR = {};    // texture id <-> its pressed/released partner
+array<int> BTN_LD = [];       // pressed repeatable switches awaiting pop-out
 array<int> BTN_TICS = [];
-var ANIM_SLOTS = [];          // animated flat slots
-var ANIM_FRAMES = [];         // per slot: the flat-name cycle
-var ANIM_PHASE = 0;
-var ANIM_TICK = 0;
+array<int> ANIM_SLOTS = [];   // animated flat slots
+array<array<string>> ANIM_FRAMES = []; // per slot: the flat-name cycle
+int ANIM_PHASE = 0;
+int ANIM_TICK = 0;
 
 function anim_init() -> void {
 	SWPAIR = {};
 	for (var kv : TEX_NAMES) {
-		var nm = kv.first;
+		string nm = kv.first;
 		if (!nm.starts_with("SW1")) { continue; }
 		int other = tex_id("SW2" + nm.substr(3, nm.size() - 3));
 		if (other >= 0) {
@@ -42,7 +42,7 @@ function anim_init() -> void {
 		["BLOOD1", "BLOOD2", "BLOOD3"]
 	];
 	for (var set : sets) {
-		var have = [];
+		array<string> have = [];
 		for (var fn : set) {
 			if (lump_num(fn) >= 0) { have.push(fn); }
 		}

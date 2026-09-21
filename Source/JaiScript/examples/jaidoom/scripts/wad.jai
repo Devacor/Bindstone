@@ -4,15 +4,15 @@
 // comparisons promote the same way, and to_char / \xNN literals mint bytes.
 // The sort-bootstrap and base64-LUT eras are fully retired.
 
-var WAD = "";                 // raw file bytes
-var WAD_ID = "";              // "IWAD" | "PWAD"
-var WAD_BASE = "";            // file name without folder or extension: "doom1", "freedoom2"
-var WAD_FILES = [];           // every file merged into the directory, base first
-var NUM_LUMPS = 0;
+string WAD = "";              // raw file bytes
+string WAD_ID = "";           // "IWAD" | "PWAD"
+string WAD_BASE = "";         // file name without folder or extension: "doom1", "freedoom2"
+array<string> WAD_FILES = []; // every file merged into the directory, base first
+int NUM_LUMPS = 0;
 array<int> LUMP_POS = [];
 array<int> LUMP_SIZE = [];
-var LUMP_NAME = [];
-var LUMP_INDEX = {};          // name -> index, later lumps win (W_GetNumForName scans backward)
+array<string> LUMP_NAME = [];
+map<string, int> LUMP_INDEX = {}; // name -> index, later lumps win (W_GetNumForName scans backward)
 
 function u8(int ofs) -> int { return WAD[ofs] + 0; }
 function u16(int ofs) -> int { return (WAD[ofs] + 0) | (WAD[ofs + 1] << 8); }
@@ -40,8 +40,8 @@ function name8(int ofs) -> string {
 // copied game folder. Every path the game reads or writes starts from it (or from the
 // per-user data folder when it is not writable), never from the working directory, so a
 // script dropped onto jaiscript.exe runs the same as one started from a shell.
-var GAME_ROOT = "";
-var DATA_ROOT = "";
+string GAME_ROOT = "";
+string DATA_ROOT = "";
 function game_root() -> string {
 	if (GAME_ROOT == "") {
 		array<string> roots = [parent_dir(root_script_dir()), root_script_dir(), bin_dir(), parent_dir(bin_dir())];
@@ -95,7 +95,7 @@ function wad_add(string path) -> bool {
 		int e = dir + i * 16;
 		LUMP_POS.push(base + i32(e));
 		LUMP_SIZE.push(i32(e + 4));
-		var nm = name8(e + 8);
+		string nm = name8(e + 8);
 		LUMP_NAME.push(nm);
 		LUMP_INDEX[nm] = NUM_LUMPS + i;
 	}
@@ -142,7 +142,7 @@ function wad_load(string path) -> bool {
 		int e = dir + i * 16;
 		LUMP_POS.push(i32(e));
 		LUMP_SIZE.push(i32(e + 4));
-		var nm = name8(e + 8);
+		string nm = name8(e + 8);
 		LUMP_NAME.push(nm);
 		LUMP_INDEX[nm] = i;
 	}

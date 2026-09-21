@@ -46,16 +46,16 @@ import "demo.jai";
 import "netplay.jai";
 import "boot.jai";
 
-var TICK_MS = 1000.0 / 35.0;
-var RUN_TOGGLE = false;
-var MUS_POLL = 0;
+float TICK_MS = 1000.0 / 35.0;
+bool RUN_TOGGLE = false;
+int MUS_POLL = 0;
 
-var GSTATE = 0;               // 0 title, 1 menu, 2 game, 3 intermission, 4 episode end
-var MENU_MODE = 0;            // 0 main, 1 skill pick
-var MENU_SEL = 0;
-var MENU_ITEMS = [];
-var MID_GAME = false;
-var START_MAP = "E1M1";
+int GSTATE = 0;               // 0 title, 1 menu, 2 game, 3 intermission, 4 episode end
+int MENU_MODE = 0;            // 0 main, 1 skill pick
+int MENU_SEL = 0;
+array<string> MENU_ITEMS = [];
+bool MID_GAME = false;
+string START_MAP = "E1M1";
 // intermission tally, one record per finished level
 class Tally {
 	string mapname = "";              // "map" is the type keyword
@@ -70,14 +70,14 @@ class Tally {
 }
 var WI = null;
 
-var DEMO_ARM = "";            // -- record target path; new_game starts the tape
-var DEMO_QUEUE = false;       // -- playdemo armed; play() starts it instead of the title
-var NP_QUEUE_MODE = "";       // -- host/join armed; play() starts the netgame instead
-var NP_QUEUE_HOST = "";
-var NP_QUEUE_PORT = 28666;
-var NP_QUEUE_COOP = false;    // -- coop flag rides the host/join queue
-var MUS_TITLE = "D_INTRO";    // doom2 wads lack D_INTRO/D_INTER; main() picks the fallbacks
-var MUS_INTER = "D_INTER";
+string DEMO_ARM = "";         // -- record target path; new_game starts the tape
+bool DEMO_QUEUE = false;      // -- playdemo armed; play() starts it instead of the title
+string NP_QUEUE_MODE = "";    // -- host/join armed; play() starts the netgame instead
+string NP_QUEUE_HOST = "";
+int NP_QUEUE_PORT = 28666;
+bool NP_QUEUE_COOP = false;   // -- coop flag rides the host/join queue
+string MUS_TITLE = "D_INTRO"; // doom2 wads lack D_INTRO/D_INTER; main() picks the fallbacks
+string MUS_INTER = "D_INTER";
 
 function demo_finish() -> void {
 	if (!DEMO_REC) { return; }
@@ -256,12 +256,12 @@ function new_game(int mask, bool nightmare) -> void {
 	GSTATE = 2;
 }
 
-var NP_ADDR_EDIT = "";        // the JOIN GAME text field
-var NP_LAST_ADDR = "";        // prefill, persisted to jaidoom_net.json
-var NET_CFG = "jaidoom_net.json";
-var DEMO_NAME_EDIT = "";      // the PLAY DEMO text field
-var DEMO_LAST_NAME = "demo.json";   // record target + play prefill: zero-typing round trip
-var DEMO_MENU_ARMED = false;  // skill-pick esc disarms a DEMOS-armed tape
+string NP_ADDR_EDIT = "";     // the JOIN GAME text field
+string NP_LAST_ADDR = "";     // prefill, persisted to jaidoom_net.json
+string NET_CFG = "jaidoom_net.json";
+string DEMO_NAME_EDIT = "";   // the PLAY DEMO text field
+string DEMO_LAST_NAME = "demo.json"; // record target + play prefill: zero-typing round trip
+bool DEMO_MENU_ARMED = false; // skill-pick esc disarms a DEMOS-armed tape
 
 function cfg_save() -> void {
 	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME}));
@@ -401,7 +401,7 @@ function menu_key(string k) -> bool {
 // classic typed sequences: every letter/digit edge rolls into CHEAT_BUF and
 // the suffix decides (vanilla-faithful: idclev's digits also switch weapons)
 
-var CHEAT_BUF = "";
+string CHEAT_BUF = "";
 
 function cheat_ack(string m) -> void {
 	set_msg(m);
@@ -539,7 +539,7 @@ function np_wi_advance() -> void {
 	if (nxt == "") { GSTATE = 4; wipe_begin(); }
 	else { am_marks_reset(); GSTATE = 2; }
 }
-var NP_WI_HOLD = false;       // client intermission menu: quit yes, gameplay no
+bool NP_WI_HOLD = false;      // client intermission menu: quit yes, gameplay no
 
 function play(string mapname) -> int {
 	START_MAP = mapname;

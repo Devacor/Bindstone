@@ -22,72 +22,72 @@ extern function np_item_announce;
 extern function np_use_send;
 extern function np_switch_announce;
 
-var P_X = 0.0;
-var P_Y = 0.0;
-var P_ANG = 0.0;
-var P_MOMX = 0.0;
-var P_MOMY = 0.0;
-var P_FLOORZ = 0.0;
-var P_VIEWZ = 41.0;           // eases toward P_FLOORZ + 41 on stairs/lifts
-var P_RADIUS = 16.0;
-var P_HEIGHT = 56.0;
-var P_STEP = 24.0;
-var P_Z = 0.0;                // feet height; above P_FLOORZ = falling
-var P_MOMZ = 0.0;
-var P_AIR = false;            // in a gravity arc: no thrust, no friction, no step-up
-var P_AIRZ0 = 0.0;            // z where the ground was left (landing-thud height)
+float P_X = 0.0;
+float P_Y = 0.0;
+float P_ANG = 0.0;
+float P_MOMX = 0.0;
+float P_MOMY = 0.0;
+float P_FLOORZ = 0.0;
+float P_VIEWZ = 41.0;         // eases toward P_FLOORZ + 41 on stairs/lifts
+float P_RADIUS = 16.0;
+float P_HEIGHT = 56.0;
+float P_STEP = 24.0;
+float P_Z = 0.0;              // feet height; above P_FLOORZ = falling
+float P_MOMZ = 0.0;
+bool P_AIR = false;           // in a gravity arc: no thrust, no friction, no step-up
+float P_AIRZ0 = 0.0;          // z where the ground was left (landing-thud height)
 
-var CMD_FWD = 0.0;            // forwardmove units (walk 25 / run 50)
-var CMD_SIDE = 0.0;
-var CMD_TURN = 0.0;           // radians per tic
-var CMD_USE = false;
-var CMD_FIRE = false;
-var USE_LATCH = false;
+float CMD_FWD = 0.0;          // forwardmove units (walk 25 / run 50)
+float CMD_SIDE = 0.0;
+float CMD_TURN = 0.0;         // radians per tic
+bool CMD_USE = false;
+bool CMD_FIRE = false;
+bool USE_LATCH = false;
 
-var P_HP = 100;
-var P_ARMOR = 0;
-var P_KEYS = 0;               // 1 blue, 2 red, 4 yellow
-var AMMO_BULLETS = 50;
-var AMMO_SHELLS = 0;
-var AMMO_ROCKETS = 0;
-var AMMO_BULLETS_MAX = 200;   // a backpack doubles all three
-var AMMO_SHELLS_MAX = 50;
-var AMMO_ROCKETS_MAX = 50;
-var HAVE_SHOTGUN = false;
-var HAVE_CHAINGUN = false;
-var HAVE_LAUNCHER = false;
-var P_BERSERK = false;        // fists x10 for the rest of the level
-var BERSERK_TICS = 0;         // the pickup's red burst (palette only)
-var P_INVIS = 0;              // tics left; monsters aim with a wide wobble
-var P_SUIT = 0;               // tics left; sector damage suppressed, green tint
-var P_GOGGLES = 0;            // tics left; render fullbright
-var P_ALLMAP = false;         // automap shows all lines brighter
-var P_BACKPACK = false;
-var CUR_WEAPON = 2;           // 1 fist, 2 pistol, 3 shotgun, 4 chaingun, 5 rocket launcher
-var P_GOD = false;            // iddqd: damage no-ops, STFGOD0 face
-var P_NOCLIP = false;         // idclip: relative moves ignore walls (sectors still track)
-var W_COOL = 0;
-var FLASH_TICS = 0;
-var PAIN_TICS = 0;
-var BONUS_TICS = 0;
-var GRIN_TICS = 0;            // evil-grin window after a weapon pickup
-var FIRE_HELD = 0;            // consecutive tics with the trigger down (rampage face)
-var FACE_SIDE = 0;            // -1 hit from the left, 1 right, 0 frontal/unknown
-var FACE_PAIN_BIG = false;    // >=20 damage gapes (STFOUCH) instead of turning
+int P_HP = 100;
+int P_ARMOR = 0;
+int P_KEYS = 0;               // 1 blue, 2 red, 4 yellow
+int AMMO_BULLETS = 50;
+int AMMO_SHELLS = 0;
+int AMMO_ROCKETS = 0;
+int AMMO_BULLETS_MAX = 200;   // a backpack doubles all three
+int AMMO_SHELLS_MAX = 50;
+int AMMO_ROCKETS_MAX = 50;
+bool HAVE_SHOTGUN = false;
+bool HAVE_CHAINGUN = false;
+bool HAVE_LAUNCHER = false;
+bool P_BERSERK = false;       // fists x10 for the rest of the level
+int BERSERK_TICS = 0;         // the pickup's red burst (palette only)
+int P_INVIS = 0;              // tics left; monsters aim with a wide wobble
+int P_SUIT = 0;               // tics left; sector damage suppressed, green tint
+int P_GOGGLES = 0;            // tics left; render fullbright
+bool P_ALLMAP = false;        // automap shows all lines brighter
+bool P_BACKPACK = false;
+int CUR_WEAPON = 2;           // 1 fist, 2 pistol, 3 shotgun, 4 chaingun, 5 rocket launcher
+bool P_GOD = false;           // iddqd: damage no-ops, STFGOD0 face
+bool P_NOCLIP = false;        // idclip: relative moves ignore walls (sectors still track)
+int W_COOL = 0;
+int FLASH_TICS = 0;
+int PAIN_TICS = 0;
+int BONUS_TICS = 0;
+int GRIN_TICS = 0;            // evil-grin window after a weapon pickup
+int FIRE_HELD = 0;            // consecutive tics with the trigger down (rampage face)
+int FACE_SIDE = 0;            // -1 hit from the left, 1 right, 0 frontal/unknown
+bool FACE_PAIN_BIG = false;   // >=20 damage gapes (STFOUCH) instead of turning
 
-var NET_GAME = false;         // netplay.jai flips it; spawn rules + per-tic net hooks key on it
-var NP_COOP = false;          // netgame mode: false = deathmatch, true = co-op (netplay.jai sets)
-var NP_IS_HOST = false;       // co-op authority: host runs monsters/movers, client mirrors
-var NP_FORWARD = false;       // co-op client: own shots are cosmetic, the FIRE action carries the damage
+bool NET_GAME = false;        // netplay.jai flips it; spawn rules + per-tic net hooks key on it
+bool NP_COOP = false;         // netgame mode: false = deathmatch, true = co-op (netplay.jai sets)
+bool NP_IS_HOST = false;      // co-op authority: host runs monsters/movers, client mirrors
+bool NP_FORWARD = false;      // co-op client: own shots are cosmetic, the FIRE action carries the damage
 // declared here (not netplay.jai) so gates that import game.jai without the
 // net layer still parse the guards; netplay is the only writer
-var GAME_MAP = "";
-var GAME_TIC = 0;
-var LEVEL_START_TIC = 0;
-var LEVEL_DONE = false;
-var SECRET_EXIT = false;
-var GAME_MSG = "";
-var MSG_TIMER = 0;
+string GAME_MAP = "";
+int GAME_TIC = 0;
+int LEVEL_START_TIC = 0;
+bool LEVEL_DONE = false;
+bool SECRET_EXIT = false;
+string GAME_MSG = "";
+int MSG_TIMER = 0;
 
 // active doors: each Door drives its sector's ceiling in SE_CEILH
 var DOORS = [];
@@ -484,7 +484,7 @@ function line_blocks_from(int ld, float ox, float oy, float x, float y) -> bool 
 	return seg_dist2(ld, x, y) <= seg_dist2(ld, ox, oy);
 }
 
-var BLOCK_LINE = -1;          // the line that rejected the last relative scan
+int BLOCK_LINE = -1;          // the line that rejected the last relative scan
 
 function pos_ok_scan(float ox, float oy, float x, float y, bool relative) -> bool {
 	BLOCK_LINE = -1;

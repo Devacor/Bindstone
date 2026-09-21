@@ -21,13 +21,13 @@ extern array<float> NP_TGT_Y;
 extern array<int> NP_TGT_MOBJ;
 
 // sprite lump tables: key "XXXXFR" (4-char name + frame letter + rotation 0-8)
-var SPR_LUMP = {};
-var SPR_FLIP = {};
-var SPR_PIX = {};             // lump -> array<int> w*h column-major, -1 transparent
-var SPR_W = {};
-var SPR_H = {};
-var SPR_LO = {};              // left offset
-var SPR_TO = {};              // top offset
+map<string, int> SPR_LUMP = {};
+map<string, int> SPR_FLIP = {};
+map<int, array<int>> SPR_PIX = {}; // lump -> array<int> w*h column-major, -1 transparent
+map<int, int> SPR_W = {};
+map<int, int> SPR_H = {};
+map<int, int> SPR_LO = {};    // left offset
+map<int, int> SPR_TO = {};    // top offset
 
 function sprites_init() -> void {
 	SPR_LUMP = {};
@@ -38,12 +38,12 @@ function sprites_init() -> void {
 	int s1 = lump_num("S_END");
 	if (s0 < 0 || s1 < 0) { return; }
 	for (int i = s0 + 1; i < s1; ++i) {
-		var nm = LUMP_NAME[i];
+		string nm = LUMP_NAME[i];
 		if (nm.size() < 6) { continue; }
 		SPR_LUMP[nm.substr(0, 6)] = i;
 		SPR_FLIP[nm.substr(0, 6)] = 0;
 		if (nm.size() == 8) {
-			var mirror = nm.substr(0, 4) + nm.substr(6, 2);
+			string mirror = nm.substr(0, 4) + nm.substr(6, 2);
 			SPR_LUMP[mirror] = i;
 			SPR_FLIP[mirror] = 1;
 		}
@@ -81,9 +81,9 @@ function sprite_prepare(int lump) -> void {
 }
 
 // resolve sprite+frame+viewangle to a lump; SPR_LAST_FLIP reports mirroring
-var SPR_LAST_FLIP = 0;
+int SPR_LAST_FLIP = 0;
 function sprite_lookup(string spr4, string frame, int rot) -> int {
-	var key = spr4 + frame + to_string(rot + 1);
+	string key = spr4 + frame + to_string(rot + 1);
 	if (SPR_LUMP.has(key)) { SPR_LAST_FLIP = SPR_FLIP[key]; return SPR_LUMP[key]; }
 	key = spr4 + frame + "0";
 	if (SPR_LUMP.has(key)) { SPR_LAST_FLIP = SPR_FLIP[key]; return SPR_LUMP[key]; }
@@ -96,7 +96,7 @@ function sprite_lookup(string spr4, string frame, int rot) -> int {
 //          damage base, range]
 var MINFO = {};
 var MISSILE_SPR = {};         // monster type -> probed projectile sprite (BAL1 default)
-var TFOG_ANIM = "";           // teleport-fog letters probed from the WAD ("" = no art)
+string TFOG_ANIM = "";        // teleport-fog letters probed from the WAD ("" = no art)
 
 function anim_have(string spr, string anim) -> bool {
 	if (anim.size() == 0) { return false; }
@@ -233,16 +233,16 @@ array<int> MO_CNT = [];       // 1 = map-placed pickup, counts toward the items 
 array<int> MO_SHP = [];       // hp at spawn (the gib overkill threshold)
 array<int> MO_RESP = [];      // nightmare: corpse respawn countdown (0 = stays down)
 array<int> MO_NODMG = [];     // 1 = cosmetic projectile (co-op client rockets: host owns the damage)
-var MO_ANIM = [];             // current anim letters (string per mobj)
-var MO_SPR = [];              // 4-char sprite name per mobj
+array<string> MO_ANIM = [];   // current anim letters (string per mobj)
+array<string> MO_SPR = [];    // 4-char sprite name per mobj
 var MO_BRAIN = [];            // monster brain coroutine handle per mobj (null when interrupted)
-var KILLS = 0;
-var KILL_TOTAL = 0;
-var ITEMS_TAKEN = 0;
-var ITEM_TOTAL = 0;
-var SKILL_BIT = 2;            // THINGS spawn filter: 1 easy, 2 medium, 4 hard
-var NIGHTMARE = false;        // skill 5: corpses respawn after ~30s
-var FAST_MONSTERS = false;    // skill 5: speed x1.5 + halved attack cooldowns (use sites; MINFO untouched)
+int KILLS = 0;
+int KILL_TOTAL = 0;
+int ITEMS_TAKEN = 0;
+int ITEM_TOTAL = 0;
+int SKILL_BIT = 2;            // THINGS spawn filter: 1 easy, 2 medium, 4 hard
+bool NIGHTMARE = false;       // skill 5: corpses respawn after ~30s
+bool FAST_MONSTERS = false;   // skill 5: speed x1.5 + halved attack cooldowns (use sites; MINFO untouched)
 
 function mobj_spawn(float x, float y, int type, float ang, int state, string spr, string anim, int hp, float rad) -> int {
 	MO_X.push(x); MO_Y.push(y);
@@ -314,7 +314,7 @@ function things_spawn_map() -> void {
 // 2D ray vs map lines: nearest blocking t along p1->p2 (1e9 if clear).
 // A line blocks if one-sided or its vertical opening misses the ray's z
 // there; dzfull is the z rise across the whole ray (0 = flat trace).
-var TRACE_LINE = -1;          // the line behind the last trace's best t
+int TRACE_LINE = -1;          // the line behind the last trace's best t
 function trace_block_dz(float x1, float y1, float x2, float y2, float z, float dzfull) -> float {
 	TRACE_LINE = -1;
 	float best = 1000000000.0;
@@ -394,7 +394,7 @@ function shot_z_hit(float bz, float mz, float mh) -> bool {
 // the walls ALONG that slope (a ledge under a platform monster must not eat
 // the shot). attacker -1 = player (excluded from its own shot). Returns the
 // hit mobj, -2 when the player was hit, -1 for nothing.
-var AIM_SLOPE = 0.625;
+float AIM_SLOPE = 0.625;
 function shoot_hitscan(float x, float y, float z, float ang, int dmg, int attacker, float range) -> int {
 	float ex = x + math::cos(ang) * range;
 	float ey = y + math::sin(ang) * range;
@@ -719,10 +719,10 @@ function projectile_tic(int m) -> void {
 
 // resolves m's pursuit target (player or another mobj) into the TGT_ globals;
 // a dead mobj target reverts to the player
-var TGT_X = 0.0;
-var TGT_Y = 0.0;
-var TGT_MIDZ = 0.0;
-var TGT_LIVE = false;
+float TGT_X = 0.0;
+float TGT_Y = 0.0;
+float TGT_MIDZ = 0.0;
+bool TGT_LIVE = false;
 function target_info(int m) -> void {
 	int t = MO_TARGET[m];
 	if (t >= 0) {
@@ -1026,7 +1026,7 @@ function monster_attack(int m) -> void {
 			eyez, maim, m, TGT_MIDZ, dist, bspr, "AB", 10.0, "DSFIRSHT");
 	}
 }
-var ATK_AIM = 0.0;            // the last aim a monster attack used (gate hook)
+float ATK_AIM = 0.0;          // the last aim a monster attack used (gate hook)
 
 // nightmare corpse comes back where it fell: teleport-fog flash, walk anim,
 // full spawn hp; the kill tally can pass 100% exactly like vanilla

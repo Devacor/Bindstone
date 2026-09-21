@@ -1,6 +1,6 @@
 // Small helpers: math, hashing, the truecolor palette intern, text padding.
 
-var TICK = 1.0 / 30.0;   // fixed sim timestep; --smoke feeds exactly this dt
+float TICK = 1.0 / 30.0; // fixed sim timestep; --smoke feeds exactly this dt
 
 function iabs(int v) -> int { return v < 0 ? -v : v; }
 function imax(int a, int b) -> int { return a > b ? a : b; }
@@ -10,7 +10,7 @@ function fclamp(float v, float lo, float hi) -> float { return v < lo ? lo : (v 
 
 // FNV-1a, 32-bit lane inside an int64 (checked-overflow build: mask every round)
 function mix32(int h, int v) -> int {
-	var x = h ^ (v & 0xFFFFFFFF);
+	int x = h ^ (v & 0xFFFFFFFF);
 	x = x ^ ((v >> 32) & 0xFFFFFFFF);
 	return ((x & 0xFFFFFFFF) * 16777619) & 0xFFFFFFFF;
 }
@@ -21,7 +21,7 @@ function mix32(int h, int v) -> int {
 // the row builder emits prebuilt truecolor escapes, and PAL_LUM feeds the
 // quadrant/sextant bright/dark cell partition (the doom-cli trick: N pixels
 // per cell, two colors chosen by luminosity).
-var PAL_KEYS = {};    // r<<16|g<<8|b -> index
+map<int, int> PAL_KEYS = {}; // r<<16|g<<8|b -> index
 array<string> PAL_FG = [];      // ESC[38;2;r;g;bm per index
 array<string> PAL_BG = [];      // ESC[48;2;r;g;bm per index
 array<int> PAL_LUM = [];     // 2r+3g+b per index

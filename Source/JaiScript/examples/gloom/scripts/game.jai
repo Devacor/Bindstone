@@ -57,7 +57,7 @@ public:
 	int par = 0;
 	int mw = 0;
 	int mh = 0;
-	var tiles = [];
+	array<int> tiles = [];
 	array<int> mappack = [];      // 15 tiles per int64, 4-bit render kinds (raycast snapshot)
 	int mapgen = 0;        // bumps with every mappack rebuild (ray workspaces re-seed on it)
 
@@ -67,8 +67,8 @@ public:
 	float pang = 0.0;
 	int hp = 100;
 	int armor = 0;
-	var ammo = [48, 0, 0];
-	var have = [1, 0, 0];
+	array<int> ammo = [48, 0, 0];
+	array<int> have = [1, 0, 0];
 	int weapon = 0;
 	bool key_r = false;
 	bool key_b = false;
@@ -79,10 +79,10 @@ public:
 	string death_cause = "the gloom";
 
 	// world
-	var enemies = [];      // shared_ptr<Enemy> registry
-	var items = [];        // Item handles (defs.jai)
-	var shots = [];        // Shot handles (combat.jai)
-	var fx = null;         // ParticlePool handle
+	array<shared_ptr<Enemy>> enemies = [];
+	array<shared_ptr<Item>> items = [];
+	array<shared_ptr<Shot>> shots = [];
+	shared_ptr<ParticlePool> fx = null;
 	int noise = 0;
 	bool warden_down = false;
 
@@ -111,14 +111,14 @@ public:
 	// render scratch (allocated once; bg rebaked per map). The pixel grid itself
 	// is the GLOBAL `PIX` (render.jai) so the glyph-row parallel bodies can
 	// capture-borrow it.
-	var bg = [];
+	array<int> bg = [];
 	array<float> zbuf = [];
-	var rowparts = [];
-	var lutc = {};
+	array<string> rowparts = [];
+	map<string, array<int>> lutc = {};
 
 	// the autopilot: a coroutine handle living in a field
 	var pilot = null;
-	var input = null;      // Input handle for the current tick
+	shared_ptr<Input> input = null;   // the current tick's
 
 	Game(int w_, int h_) {
 		w = w_;
@@ -191,7 +191,7 @@ public:
 			if (pilot == null || pilot.done()) { pilot = pilot_brain(); }
 			return pilot.resume();
 		}
-		var fire_edge = frame_key == " " || frame_key == "enter";
+		bool fire_edge = frame_key == " " || frame_key == "enter";
 		return new Input(
 			key_down("w") || key_down("up"),
 			key_down("s") || key_down("down"),
@@ -267,7 +267,7 @@ public:
 	}
 
 	void accumulate_hash() {
-		var hh = hash;
+		int hh = hash;
 		hh = mix32(hh, tick);
 		hh = mix32(hh, mode * 31 + map_i);
 		hh = mix32(hh, math::itrunc(px * 256.0) * 4096 + math::itrunc(py * 256.0));
@@ -275,8 +275,8 @@ public:
 		hh = mix32(hh, hp * 512 + armor);
 		hh = mix32(hh, ammo[0] * 65536 + ammo[1] * 256 + ammo[2]);
 		hh = mix32(hh, weapon * 64 + (key_r ? 2 : 0) + (key_b ? 1 : 0));
-		var live = 0;
-		var acc = 0;
+		int live = 0;
+		int acc = 0;
 		for (auto& e : enemies) {
 			if (!e.alive) { continue; }
 			live = live + 1;
@@ -284,7 +284,7 @@ public:
 		}
 		hh = mix32(hh, live);
 		hh = mix32(hh, acc);
-		var pacc = 0;
+		int pacc = 0;
 		for (auto& p : fx.pool) {
 			int pk = p.kind;
 			if (pk == 0) { continue; }

@@ -15,7 +15,7 @@ import "render.jai";
 import "hud.jai";
 import "game.jai";
 
-var FORCE_PILOT = false;
+bool FORCE_PILOT = false;
 
 function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
 

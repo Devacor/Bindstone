@@ -34,7 +34,7 @@ function wall_dist(float ax, float ay, float dx, float dy) -> float {
 // chained calls on the registry itself.
 function hitscan(float ax, float ay, float dx, float dy, int lo, int hi, bool from_player) -> bool {
 	float wd = wall_dist(ax, ay, dx, dy);
-	var best = -1;
+	int best = -1;
 	float best_t = 999.0;
 	int i = 0;
 	for (auto& e : G.enemies) {
@@ -115,7 +115,7 @@ function spawn_shot_dir(int kind, float ax, float ay, float dx, float dy, float 
 }
 
 function update_shots() -> void {
-	var kept = [];
+	array<shared_ptr<Shot>> kept = [];
 	for (auto& s : G.shots) {
 		int kind = s.kind;
 		float x = s.x;

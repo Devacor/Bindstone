@@ -49,7 +49,7 @@ function player_move(var& input) -> void {
 function player_use() -> void {
 	float dirx = math::cos(G.pang);
 	float diry = math::sin(G.pang);
-	var probes = [0.5, 0.9, 1.3];
+	array<float> probes = [0.5, 0.9, 1.3];
 	for (auto p : probes) {
 		int tx = math::ifloor(G.px + dirx * p);
 		int ty = math::ifloor(G.py + diry * p);

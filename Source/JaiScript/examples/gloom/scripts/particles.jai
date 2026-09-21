@@ -4,7 +4,7 @@
 // barrier). The pool object owns slot recycling; access labels keep the
 // cursor honest.
 
-var PART_MAX = 288;
+int PART_MAX = 288;
 
 // kind 0 dead | 1 spark | 2 blood | 3 gib | 4 smoke | 5 flash | 6 hexmote
 class Particle {
@@ -143,7 +143,7 @@ function fx_secret_glitter(float x, float y) -> void {
 array<int> PART_COLS = [];
 
 function build_particle_colors() -> void {
-	var ramps = [
+	array<array<array<int>>> ramps = [
 		[[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],                          // 0 dead (unused)
 		[[255, 240, 160], [255, 200, 90], [230, 130, 50], [140, 70, 30]],      // 1 spark
 		[[210, 40, 30], [180, 34, 26], [140, 26, 20], [95, 18, 14]],           // 2 blood

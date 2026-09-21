@@ -184,10 +184,10 @@ function load_map(int mi) -> void {
 	G.secret_total = 0;
 	G.map_ticks = 0;
 	for (int y = 0; y < G.mh; ++y) {
-		var row = rows[y];
+		string row = rows[y];
 		for (int x = 0; x < G.mw; ++x) {
-			var ch = row.substr(x, 1);
-			var wk = wall_kind_for(ch);
+			string ch = row.substr(x, 1);
+			int wk = wall_kind_for(ch);
 			if (wk == 7) { G.secret_total = G.secret_total + 1; }
 			if (wk > 0) { G.tiles.push(wk); continue; }
 			G.tiles.push(0);
@@ -200,7 +200,7 @@ function load_map(int mi) -> void {
 			else if (ch == "t") { spawn_enemy(2, x, y); }
 			else if (ch == "W") { spawn_enemy(3, x, y); }
 			else {
-				var ik = item_kind_for(ch);
+				int ik = item_kind_for(ch);
 				if (ik >= 0) { G.items.push(new Item(ik, x + 0.5, y + 0.5)); }
 			}
 		}
@@ -212,17 +212,17 @@ function load_map(int mi) -> void {
 // raycast snapshot: render kinds packed 15-per-int64 (4 bits each), rebuilt
 // only when a tile changes. Kind 0 floor/open, 1-4 walls, 5 door, 6 exit,
 // 7 red, 8 blue; secrets render as wall kind 1 (that is the point of a secret).
-var TILE_TO_KIND = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8];
+array<int> TILE_TO_KIND = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8];
 
 function rebuild_mapstr() -> void {
 	G.mappack = mappack_from(G.tiles, G.mw * G.mh);
 	G.mapgen = G.mapgen + 1;
 }
 
-function mappack_from(var& tiles, int n) -> var {
-	var pack = [];
-	var acc = 0;
-	var slot = 0;
+function mappack_from(var& tiles, int n) -> array<int> {
+	array<int> pack = [];
+	int acc = 0;
+	int slot = 0;
 	for (int i = 0; i < n; ++i) {
 		acc = acc | (TILE_TO_KIND[tiles[i]] << (slot * 4));
 		slot = slot + 1;

@@ -10,8 +10,8 @@ var WEAPONS = [
 	{"name": "SCATTERGUN","ammo": 1, "cd": 28, "pellets": 6, "spread": 0.11,  "lo": 3,  "hi": 7,  "kind": 0},
 	{"name": "HEXCASTER", "ammo": 2, "cd": 22, "pellets": 1, "spread": 0.0,   "lo": 24, "hi": 40, "kind": 1}
 ];
-var AMMO_NAMES = ["BULLET", "SHELL", "CELL"];
-var AMMO_MAX = [200, 50, 120];
+array<string> AMMO_NAMES = ["BULLET", "SHELL", "CELL"];
+array<int> AMMO_MAX = [200, 50, 120];
 
 // ---------------------------------------------------------------- bestiary --
 // kind indexes: 0 grunt (melee rusher), 1 spitter (ranged), 2 turret, 3 warden (boss)
@@ -563,19 +563,19 @@ var ARTS = {};
 function parse_arts() -> void {
 	ARTS = {};
 	for (auto kv : ART_SRC) {
-		var name = kv.first;
+		string name = kv.first;
 		var rows = ART_SRC[name]["rows"];
 		var pal = ART_SRC[name]["pal"];
-		var codes = {};    // char string -> code
+		map<string, int> codes = {}; // char string -> code
 		var rgb = [[0, 0, 0]];
-		var next_code = 1;
-		var h = rows.size();
-		var w = rows[0].size();
-		var pix = [];
+		int next_code = 1;
+		int h = rows.size();
+		int w = rows[0].size();
+		array<int> pix = [];
 		for (int y = 0; y < h; ++y) {
-			var row = rows[y];
+			string row = rows[y];
 			for (int x = 0; x < w; ++x) {
-				var ch = row.substr(x, 1);
+				string ch = row.substr(x, 1);
 				if (ch == ".") { pix.push(0); continue; }
 				if (!codes.has(ch)) {
 					codes[ch] = next_code;

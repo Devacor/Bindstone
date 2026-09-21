@@ -19,7 +19,7 @@
 // verbatim. The game files themselves are untouched.
 
 // ------------------------------------------------------- host API: globals --
-var ESC = "\x1b";
+string ESC = "\x1b";
 int HOST_SEED = 666;
 bool HOST_SMOKE = false;
 int HOST_TICKS = 2000;
@@ -120,7 +120,7 @@ import "scripts/hud.jai";
 import "scripts/game.jai";
 
 // scripts/main.jai's entry glue, replicated verbatim
-var FORCE_PILOT = false;
+bool FORCE_PILOT = false;
 
 function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
 

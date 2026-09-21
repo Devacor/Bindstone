@@ -10,16 +10,16 @@
 // ordinary serial painting, demoreel discipline throughout: locals for hot
 // scalars, var& for every hot array.
 
-var PIXW = 2;        // pixels per cell horizontally (set by gloom_boot)
-var PIXH = 2;        // pixels per cell vertically
+int PIXW = 2;        // pixels per cell horizontally (set by gloom_boot)
+int PIXH = 2;        // pixels per cell vertically
 // The pixel grid + its geometry live at GLOBAL scope (not Game fields) so the
 // glyph-row parallel bodies can read them as CAPTURED state: PIX is a flat
 // all-primitive int array consumed only by subscript reads, so the region
 // borrows it - zero copies, raw element reads. VW/VH capture as scalars;
 // ROWIDX is the parallel_transform input (one element per glyph row).
 array<int> PIX = [];
-var VW = 0;
-var VH = 0;
+int VW = 0;
+int VH = 0;
 array<int> ROWIDX = [];
 // Persistent ray-chunk workspaces (parallel_for v1): typed-field class records
 // — pose header + map snapshot + preallocated typed out columns. Rebuilt only
@@ -58,7 +58,7 @@ public:
 	}
 }
 array<WallChunk> WALL_WS = [];
-var WS_MAPGEN = -1;
+int WS_MAPGEN = -1;
 
 function build_wall_ws(int ncols) -> void {
 	WALL_WS = [];
@@ -72,19 +72,19 @@ function build_wall_ws(int ncols) -> void {
 		bx0 = bx1;
 	}
 }
-var RESET = "";
+string RESET = "";
 array<string> QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
 array<string> SEXTG = [];      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
-var HALFG = "";      // upper half block
+string HALFG = "";   // upper half block
 array<int> AM_COLS = [];    // automap tile colors (built at boot)
-var AM_FLOOR = 0;
-var AM_BLINK = 0;
-var AM_ITEM = 0;
-var AM_ENEMY = 0;
-var AM_SELF = 0;
-var AM_HEAD = 0;
-var HURT_RED = 0;
-var STRIPS = [];      // lazy 33-tall wall texture strips by (kind,side,shade,tx)
+int AM_FLOOR = 0;
+int AM_BLINK = 0;
+int AM_ITEM = 0;
+int AM_ENEMY = 0;
+int AM_SELF = 0;
+int AM_HEAD = 0;
+int HURT_RED = 0;
+array<array<int>> STRIPS = []; // lazy 33-tall wall texture strips by (kind,side,shade,tx)
 array<int> STRIP_SET = [];
 
 function init_render() -> void {
@@ -92,7 +92,7 @@ function init_render() -> void {
 	rgb_idx(0, 0, 0);                 // palette index 0 is black (grid clear value)
 	HALFG = utf8(0x2580);
 	QUADG = [" "];
-	var quad_cps = [0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
+	array<int> quad_cps = [0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
 		0x2597, 0x259A, 0x2590, 0x259C, 0x2584, 0x2599, 0x259F, 0x2588];
 	for (auto cp : quad_cps) { QUADG.push(utf8(cp)); }
 	SEXTG = [];
@@ -145,7 +145,7 @@ function build_render_tables(int mi) -> void {
 	var theme = MAPS[mi]["theme"];
 	WALLT = [];
 	// kind 0 (never rendered): flat dark
-	var zero = [10.0, 10.0, 12.0];
+	array<float> zero = [10.0, 10.0, 12.0];
 	push_wall_tones(zero, zero);
 	// kinds 1..4 from the theme
 	for (int k = 0; k < 4; ++k) {
@@ -153,17 +153,17 @@ function build_render_tables(int mi) -> void {
 		push_wall_tones(base, base);
 	}
 	// kind 5 door, 6 exit, 7 red door, 8 blue door (episode constants)
-	var door_b = [138.0, 116.0, 94.0];
-	var door_a = [188.0, 164.0, 132.0];
+	array<float> door_b = [138.0, 116.0, 94.0];
+	array<float> door_a = [188.0, 164.0, 132.0];
 	push_wall_tones(door_b, door_a);
-	var exit_b = [64.0, 160.0, 84.0];
-	var exit_a = [220.0, 235.0, 120.0];
+	array<float> exit_b = [64.0, 160.0, 84.0];
+	array<float> exit_a = [220.0, 235.0, 120.0];
 	push_wall_tones(exit_b, exit_a);
-	var red_b = [176.0, 50.0, 42.0];
-	var red_a = [245.0, 130.0, 96.0];
+	array<float> red_b = [176.0, 50.0, 42.0];
+	array<float> red_a = [245.0, 130.0, 96.0];
 	push_wall_tones(red_b, red_a);
-	var blue_b = [62.0, 94.0, 198.0];
-	var blue_a = [136.0, 176.0, 255.0];
+	array<float> blue_b = [62.0, 94.0, 198.0];
+	array<float> blue_a = [136.0, 176.0, 255.0];
 	push_wall_tones(blue_b, blue_a);
 
 	// ceiling / floor gradients (dark at the horizon), quantized to CELL rows
@@ -204,7 +204,7 @@ function build_render_tables(int mi) -> void {
 	STRIP_SET = [];
 	int nstrips = 10 * 2 * 16 * 32;
 	for (int i2 = 0; i2 < nstrips; ++i2) {
-		STRIPS.push(0);
+		STRIPS.push([]);
 		STRIP_SET.push(0);
 	}
 	G.lutc = {};
@@ -244,9 +244,9 @@ function tex_tone(int kind, int tx, int ty) -> int {
 	return 0;
 }
 
-function build_strip(int kind, int side, int shade, int tx) -> var {
+function build_strip(int kind, int side, int shade, int tx) -> array<int> {
 	int tbase = ((kind * 2 + side) * 16 + shade) * 3;
-	var s = [];
+	array<int> s = [];
 	for (int ty = 0; ty < 32; ++ty) {
 		s.push(WALLT[tbase + tex_tone(kind, tx, ty)]);
 	}
@@ -256,15 +256,15 @@ function build_strip(int kind, int side, int shade, int tx) -> var {
 
 // ---------------------------------------------------------- sprite LUTs -----
 // per (art, shade band 0..7, flash) palette-code -> palette-index table, cached
-var BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
+array<float> BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
 
-function sprite_lut(string name, int band, int flash) -> var {
+function sprite_lut(string name, int band, int flash) -> array<int> {
 	string key = `${name}:${band}:${flash}`;
 	if (G.lutc.has(key)) { return G.lutc[key]; }
 	var art = ARTS[name];
 	var rgb = art["rgb"];
 	float lum = BAND_LUM[band];
-	var lut = [0];
+	array<int> lut = [0];
 	for (int c = 1; c < rgb.size(); ++c) {
 		int r = rgb[c][0];
 		int g = rgb[c][1];
@@ -385,7 +385,7 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	float det = planex * diry - dirx * planey;
 	if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
 	float inv = 1.0 / det;
-	var sp = [];
+	array<shared_ptr<Billboard>> sp = [];
 	for (auto& e : G.enemies) {
 		collect_billboard(sp, e.x, e.y, enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
 			e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
@@ -396,17 +396,17 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		collect_billboard(sp, it.x, it.y, ITEM_DEFS[ik]["art"],
 			ITEM_DEFS[ik]["size"], 0.0, 0, inv, dirx, diry, planex, planey);
 	}
-	var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
+	array<string> shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
 	for (auto& s : G.shots) {
 		collect_billboard(sp, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
 	}
 	// insertion sort, far first
 	for (int i3 = 1; i3 < sp.size(); ++i3) {
-		var rec = sp[i3];
+		shared_ptr<Billboard> rec = sp[i3];
 		float di = rec.depth;
 		int j = i3 - 1;
 		while (j >= 0) {
-			var cmp = sp[j];
+			shared_ptr<Billboard> cmp = sp[j];
 			if (cmp.depth >= di) { break; }
 			sp[j + 1] = cmp;
 			j = j - 1;
@@ -485,7 +485,7 @@ function rows_half(var& pix, var& parts) -> var {
 	var& fgs = PAL_FG;
 	var& bgs = PAL_BG;
 	string hb = HALFG;
-	var rows = [];
+	array<string> rows = [];
 	int vrows = G.vh / 2;
 	for (int ry = 0; ry < vrows; ++ry) {
 		parts.clear();
@@ -516,7 +516,7 @@ function rows_half(var& pix, var& parts) -> var {
 // (aliases are rejected by admission) - subscript the globals directly. The
 // SAME function runs in a plain serial loop when HOST_WORKERS <= 0.
 function gloom_row_quad(int ry) -> string {
-	var parts = [];
+	array<string> parts = [];
 	int vw = VW;
 	int cells = vw / 2;
 	int pfg = -1;
@@ -579,7 +579,7 @@ function gloom_row_quad(int ry) -> string {
 
 function rows_quad() -> var {
 	if (HOST_WORKERS <= 0) {
-		var rows = [];
+		array<string> rows = [];
 		int vrows = VH / 2;
 		for (int ry = 0; ry < vrows; ++ry) { rows.push(gloom_row_quad(ry)); }
 		return rows;
@@ -594,7 +594,7 @@ function rows_sext(var& pix, var& parts) -> var {
 	var& bgs = PAL_BG;
 	var& lums = PAL_LUM;
 	var& sg = SEXTG;
-	var rows = [];
+	array<string> rows = [];
 	int vrows = G.vh / 3;
 	int cells = vw / 2;
 	for (int ry = 0; ry < vrows; ++ry) {
@@ -709,7 +709,7 @@ function draw_billboard(var& rec, var& pix, var& zbuf) -> void {
 	if (pw < 2) { pw = 2; }
 	int band = math::itrunc(depth * 0.85) - (G.muzzle > 0 ? 1 : 0);
 	band = band < 0 ? 0 : (band > 7 ? 7 : band);
-	var lut = sprite_lut(name, band, flash);
+	array<int> lut = sprite_lut(name, band, flash);
 	int bottom = vh / 2 + span * 0.5 - zlift * span;
 	int top = bottom - ph;
 	int x0 = scx - pw / 2;

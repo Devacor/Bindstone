@@ -92,14 +92,14 @@ function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 		? WGFX_FIRE[G.weapon] : WGFX_IDLE[G.weapon];
 	int bob_shift = 1 + math::itrunc((math::sin(G.bob) + 1.0) * 1.4);
 
-	var left = [
+	array<string> left = [
 		` HP  [${meter(G.hp, 100, 12)}] ${G.hp}`,
 		` ARM [${meter(G.armor, 100, 12)}] ${G.armor}`,
 		` `,
 		` ${G.key_r ? "[R]" : " . "} ${G.key_b ? "[B]" : " . "}  ${w["name"]}`,
 		` ${G.autopilot ? "AUTOPILOT" : ""}`
 	];
-	var mid = [
+	array<string> mid = [
 		`BUL ${G.ammo[0]}/${AMMO_MAX[0]}`,
 		`SHL ${G.ammo[1]}/${AMMO_MAX[1]}`,
 		`CEL ${G.ammo[2]}/${AMMO_MAX[2]}`,
@@ -107,7 +107,7 @@ function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 		fps > 0.0 ? `${fps:.0f}fps ${ms_sim + ms_draw:.1f}ms` : ""
 	];
 
-	var rows = [];
+	array<string> rows = [];
 	int left_w = 34;
 	int mid_w = 18;
 	int face_w = 11;
@@ -129,7 +129,7 @@ function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 }
 
 // ------------------------------------------------------- full-screen modes --
-var LOGO = [
+array<string> LOGO = [
 	"  ..|'''.|  '||'       ..|''||    ..|''||   '||    ||' ",
 	" .|'     '   ||       .|'    ||  .|'    ||   |||  |||  ",
 	" ||    ....  ||       ||      || ||      ||  |'|..'||  ",
@@ -139,7 +139,7 @@ var LOGO = [
 
 function screen_rows(var& lines, string tint) -> var {
 	// center the payload block on a dark field, pad every row to full width
-	var rows = [];
+	array<string> rows = [];
 	int total = G.h;
 	int top = imax(0, (total - lines.size()) / 2);
 	for (int y = 0; y < total; ++y) {
@@ -153,7 +153,7 @@ function screen_rows(var& lines, string tint) -> var {
 }
 
 function render_title() -> string {
-	var lines = [];
+	array<string> lines = [];
 	for (auto l : LOGO) { lines.push(l); }
 	lines.push("");
 	lines.push("a  t e r m i n a l  r a y c a s t e r ,  a l l  J a i S c r i p t");
@@ -172,7 +172,7 @@ function render_tally() -> string {
 	int sp = G.secret_total > 0 ? G.secrets * 100 / G.secret_total : 100;
 	int secs = G.map_ticks / 30;
 	int par_secs = G.par / 30;
-	var lines = [
+	array<string> lines = [
 		G.map_name,
 		"",
 		"=== FLOOR CLEARED ===",
@@ -187,7 +187,7 @@ function render_tally() -> string {
 }
 
 function render_dead() -> string {
-	var lines = [
+	array<string> lines = [
 		"Y O U   D I E D",
 		"",
 		`slain by ${G.death_cause}`,
@@ -203,7 +203,7 @@ function render_dead() -> string {
 function render_victory() -> string {
 	int mins = G.ep_ticks / 1800;
 	int secs = (G.ep_ticks / 30) % 60;
-	var lines = [];
+	array<string> lines = [];
 	for (auto l : LOGO) { lines.push(l); }
 	lines.push("");
 	lines.push("T H E   W A R D E N   I S   D O W N");

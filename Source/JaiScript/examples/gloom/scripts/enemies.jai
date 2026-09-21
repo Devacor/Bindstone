@@ -4,11 +4,11 @@
 // mint the handle, the handle pins the instance, and per-tick resume() drives
 // multi-phase behavior with all phase state living in the coroutine frame.
 
-var ENEMY_STATE_DORMANT = 0;
-var ENEMY_STATE_HUNT = 1;
-var ENEMY_STATE_ATTACK = 2;
-var ENEMY_STATE_DYING = 3;
-var ENEMY_STATE_DEAD = 4;
+int ENEMY_STATE_DORMANT = 0;
+int ENEMY_STATE_HUNT = 1;
+int ENEMY_STATE_ATTACK = 2;
+int ENEMY_STATE_DYING = 3;
+int ENEMY_STATE_DEAD = 4;
 
 class Enemy {
 public:
@@ -294,7 +294,7 @@ function spawn_enemy(int kind, int tx, int ty) -> void {
 // warden's reinforcements: grunts at the nearest free tiles around him.
 // They count toward the map total (an honest 100% asks for the whole family).
 function summon_adds(float wx, float wy) -> void {
-	var offs = [[2, 0], [-2, 0], [0, 2], [0, -2]];
+	array<array<int>> offs = [[2, 0], [-2, 0], [0, 2], [0, -2]];
 	int placed = 0;
 	for (auto& o : offs) {
 		if (placed >= 2) { break; }
@@ -309,8 +309,8 @@ function summon_adds(float wx, float wy) -> void {
 
 // which art a body renders as, given its state machinery
 function enemy_art(var& e) -> string {
-	var base = ["grunt", "spit", "tur", "war"];
-	var name = base[e.kind];
+	array<string> base = ["grunt", "spit", "tur", "war"];
+	string name = base[e.kind];
 	if (e.kind == 2) {
 		// turret has its own frame set
 		if (e.alive) {

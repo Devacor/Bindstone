@@ -11,14 +11,14 @@
 import "map.jai";
 import "things.jai";
 
-var DEMO_REC = false;
-var DEMO_PLAY = false;
+bool DEMO_REC = false;
+bool DEMO_PLAY = false;
 array<int> DEMO_TICS = [];
-var DEMO_POS = 0;
-var DEMO_SEED = 0;
-var DEMO_MAP = "";
-var DEMO_SKILL = 2;
-var DEMO_NM = false;
+int DEMO_POS = 0;
+int DEMO_SEED = 0;
+string DEMO_MAP = "";
+int DEMO_SKILL = 2;
+bool DEMO_NM = false;
 
 function demo_q(float v) -> int {
 	return math::itrunc(v * 10000.0 + (v < 0.0 ? -0.5 : 0.5));
@@ -95,7 +95,7 @@ function demo_load(string path) -> bool {
 
 // mix32-style fold over the sim fingerprint: tic, player, every mobj, sector
 // heights — two runs of the same demo must agree exactly
-var HASH_H = 0;
+int HASH_H = 0;
 
 function hfold(int v) -> void {
 	HASH_H = ((HASH_H ^ (v & 4294967295)) * 16777619) & 4294967295;

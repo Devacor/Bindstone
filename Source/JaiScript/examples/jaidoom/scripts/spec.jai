@@ -11,11 +11,11 @@ import "map.jai";
 // netplay.jai hook behind NET_GAME: extern-declared so programs that never import netplay.jai still check
 extern function np_cross_send;
 
-var SECRETS_FOUND = 0;
-var SECRET_TOTAL = 0;
-var BOSS_PEND = 0;            // living tag-666 barons on E1M8, 0 = fired/none
-var SPEC_TIC0 = 0;
-var CROSS_SIDE = 0;           // side the last crossing came from (0 = front)
+int SECRETS_FOUND = 0;
+int SECRET_TOTAL = 0;
+int BOSS_PEND = 0;            // living tag-666 barons on E1M8, 0 = fired/none
+int SPEC_TIC0 = 0;
+int CROSS_SIDE = 0;           // side the last crossing came from (0 = front)
 array<int> CLOSE30_SECS = [];
 array<int> OPEN300_SECS = [];
 
@@ -49,7 +49,7 @@ var SPEC_IMPL = {};
 var SPEC_COSMETIC = {};
 var SECSPEC_IMPL = {};
 var SECSPEC_COSMETIC = {};
-var TABLES_BUILT = false;
+bool TABLES_BUILT = false;
 
 function spec_tables() -> void {
 	if (TABLES_BUILT) { return; }

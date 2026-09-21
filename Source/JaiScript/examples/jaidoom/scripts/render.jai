@@ -9,21 +9,21 @@ import "vid.jai";
 import "tex.jai";
 import "things.jai";
 
-var VIEW_X = 0.0;
-var VIEW_Y = 0.0;
-var VIEW_Z = 0.0;
-var VIEW_ANG = 0.0;           // radians, 0 = east, CCW
-var VSIN = 0.0;
-var VCOS = 0.0;
-var FOCAL = 0.0;
-var FOCALY = 0.0;
-var CENTERX = 0;
-var CENTERY = 0;
-var PXASPECT = 1.2;           // doom's 320x200-on-4:3 vertical stretch
-var EYE_Z = -100000.0;        // explicit view height; sentinel = derive from sector
-var EXTRA_LIGHT = 0;          // brighter bands while the muzzle flashes
-var WBOB_X = 0.0;             // weapon bob, 320-space pixels (game_tic drives it)
-var WBOB_Y = 0.0;
+float VIEW_X = 0.0;
+float VIEW_Y = 0.0;
+float VIEW_Z = 0.0;
+float VIEW_ANG = 0.0;         // radians, 0 = east, CCW
+float VSIN = 0.0;
+float VCOS = 0.0;
+float FOCAL = 0.0;
+float FOCALY = 0.0;
+int CENTERX = 0;
+int CENTERY = 0;
+float PXASPECT = 1.2;         // doom's 320x200-on-4:3 vertical stretch
+float EYE_Z = -100000.0;      // explicit view height; sentinel = derive from sector
+int EXTRA_LIGHT = 0;          // brighter bands while the muzzle flashes
+float WBOB_X = 0.0;           // weapon bob, 320-space pixels (game_tic drives it)
+float WBOB_Y = 0.0;
 
 array<int> SEG_FSEC = [];
 array<int> SEG_BSEC = [];
@@ -36,8 +36,8 @@ array<int> SEG_PEGT = [];     // ML_DONTPEGTOP (upper unpegged)
 array<int> SEG_PEGB = [];     // ML_DONTPEGBOTTOM (lower unpegged)
 array<float> SEG_LEN = [];
 
-var FLAT_SLOT = {};           // flat name -> FLATS index
-var FLATS = [];               // arrays of 4096 palette bytes
+map<string, int> FLAT_SLOT = {}; // flat name -> FLATS index
+array<array<int>> FLATS = []; // arrays of 4096 palette bytes
 array<int> SEC_FFLAT = [];    // per sector: FLATS index of floor
 array<int> SEC_CFLAT = [];
 array<int> SEC_SKY = [];      // per sector: 1 = F_SKY1 ceiling
@@ -56,11 +56,11 @@ array<int> CLIPS_N = [];      // per column: snapshots recorded
 array<float> CLIPS_D = [];    // [x*4+i] narrowing seg depth
 array<int> CLIPS_T = [];      // window top after it
 array<int> CLIPS_B = [];      // window bottom after it
-var REMAIN = 0;
+int REMAIN = 0;
 
 array<int> MSEG = [];         // two-sided segs with a mid texture (grates/meshes):
 array<float> MSEG_D = [];     // deferred past the solid pass, drawn with the sprites
-var MASKED_DRAWN = 0;
+int MASKED_DRAWN = 0;
 
 function flat_slot(string name) -> int {
 	if (FLAT_SLOT.has(name)) { return FLAT_SLOT[name]; }
@@ -137,7 +137,7 @@ function tex_warm_note(int tid, var& tids, var& seen) -> void {
 // composite spikes move into load time
 function tex_warm_map() -> void {
 	array<int> tids = [];
-	var seen = {};
+	map<int, int> seen = {};
 	tex_warm_note(SKY_TEX, tids, seen);
 	int nsegs = SEG_MIDT.size();
 	for (int i = 0; i < nsegs; ++i) {
@@ -550,15 +550,15 @@ function render_view(float px, float py, float ang) -> void {
 
 // ---------------------------------------------------------------- sprites ---
 
-var SPRITES_DRAWN = 0;
-var SPR_DBG_M = -1;           // gate hook: track the lowest row drawn for this mobj
-var SPR_DBG_YMAX = -1;
+int SPRITES_DRAWN = 0;
+int SPR_DBG_M = -1;           // gate hook: track the lowest row drawn for this mobj
+int SPR_DBG_YMAX = -1;
 
 // far-to-near painter's order over sprites AND deferred masked walls
 // (mobj entries are the index, masked entries are -(k+1) into MSEG)
 function draw_things() -> void {
 	SPRITES_DRAWN = 0;
-	var order = [];
+	array<int> order = [];
 	array<float> depth = [];
 	int n = MO_X.size();
 	for (int m = 0; m < n; ++m) {
@@ -716,7 +716,7 @@ function draw_sprite(int m) -> void {
 
 	int fi = MO_FRAME[m];
 	if (fi >= MO_ANIM[m].size()) { fi = MO_ANIM[m].size() - 1; }
-	var frame = MO_ANIM[m].substr(fi, 1);
+	string frame = MO_ANIM[m].substr(fi, 1);
 	float rel = math::atan2(VIEW_Y - MO_Y[m], VIEW_X - MO_X[m]) - MO_ANG[m];
 	while (rel < 0.0) { rel = rel + TAU; }
 	int rot = math::itrunc((rel + PI / 8.0) / (PI / 4.0)) & 7;
@@ -806,8 +806,8 @@ function draw_sprite(int m) -> void {
 
 // interned color -> its half-bright twin, built lazily (a couple light bands
 // down reads as the spectre's smoke)
-var DARK_MAP = {};
-var FUZZ_T = 0;               // parity flip per frame so the checkerboard crawls
+map<int, int> DARK_MAP = {};
+int FUZZ_T = 0;               // parity flip per frame so the checkerboard crawls
 
 function fuzz_dark(int c) -> int {
 	if (DARK_MAP.has(c)) { return DARK_MAP[c]; }
@@ -819,8 +819,8 @@ function fuzz_dark(int c) -> int {
 // first-person weapon overlay: the base gun is bottom-anchored and centered;
 // overlays (muzzle flash) place themselves via the lumps' own offset deltas
 // relative to the base — the WAD's flash art is authored to line up that way
-var PSP_X0 = 0.0;
-var PSP_Y0 = 0.0;
+float PSP_X0 = 0.0;
+float PSP_Y0 = 0.0;
 
 function draw_psprite(int lump, float x0f, float y0f, float scale) -> void {
 	int w = SPR_W[lump];

@@ -8,7 +8,12 @@
 import "wad.jai";
 import "vid.jai";
 
-var SND_ON = false;           // play() flips it on; gates and benches stay silent
+// game.jai's player position (importing it here would cycle): extern-declared so programs that never import game.jai still check
+extern float P_X;
+extern float P_Y;
+extern float P_ANG;
+
+bool SND_ON = false;          // play() flips it on; gates and benches stay silent
 var SND_READY = {};           // lump name -> wav path ("" = missing/undecodable)
 
 function snd_wav_bytes(string name) -> string {
@@ -49,8 +54,8 @@ function snd_play(string name) -> void {
 // at generation time. ~25 sounds x at most 9 variants, lazily created.
 
 var SND_POS_READY = {};       // "NAME_tN_pP" -> wav path ("" = missing/undecodable)
-var SPA_TIER = 0;             // 0 full <320, 1 mid <704, 2 far <1200
-var SPA_PAN = 0;              // 0 center, 1 left, 2 right (bearing beyond ±0.5 rad)
+int SPA_TIER = 0;             // 0 full <320, 1 mid <704, 2 far <1200
+int SPA_PAN = 0;              // 0 center, 1 left, 2 right (bearing beyond ±0.5 rad)
 
 function snd_pos_pick(float dist, float rel) -> bool {
 	if (dist >= 1200.0) { return false; }

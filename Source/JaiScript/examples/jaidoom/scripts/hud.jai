@@ -13,15 +13,15 @@ import "things.jai";
 // netplay.jai mirror behind NET_GAME: extern-declared so programs that never import netplay.jai still check
 extern NET_FRAGS_MINE;
 
-var BAR_H = 0;
-var BSX = 1.0;                // bar space (320x32) -> screen scale
-var BSY = 1.0;
-var HUD_AMMO_DRAWN = -1;      // what the bar last rendered (gate hooks)
-var HUD_HEALTH_DRAWN = -1;
-var HUD_ARMOR_DRAWN = -1;
-var HUD_FACE = "";
-var AM_ON = false;
-var AM_ZOOM = 1.0;
+int BAR_H = 0;
+float BSX = 1.0;              // bar space (320x32) -> screen scale
+float BSY = 1.0;
+int HUD_AMMO_DRAWN = -1;      // what the bar last rendered (gate hooks)
+int HUD_HEALTH_DRAWN = -1;
+int HUD_ARMOR_DRAWN = -1;
+string HUD_FACE = "";
+bool AM_ON = false;
+float AM_ZOOM = 1.0;
 
 function hud_init() -> void {
 	gfx_init();                                      // title/menu draw before any map loads PALCM
@@ -81,7 +81,7 @@ function bar_patch(string name, int bx, int by) -> void {
 function bar_num(string pfx, int val, int rx, int by) -> void {
 	if (val < 0) { val = 0; }
 	while (true) {
-		var nm = `${pfx}${val % 10}`;
+		string nm = `${pfx}${val % 10}`;
 		int lu = lump_num(nm);
 		if (lu < 0) { return; }
 		sprite_prepare(lu);
@@ -96,9 +96,9 @@ function bar_num(string pfx, int val, int rx, int by) -> void {
 // the face performs: dead > evil grin (weapon pickup) > pain (big hits gape,
 // small hits turn TOWARD the attacker, frontal hits grimace) > rampage
 // (trigger held 2s) > idle glances left/center/right
-var FACE_LOOK = 0;
-var FACE_NEXT = -1;           // GAME_TIC of the next glance re-roll
-var FACE_SEED = 4321;
+int FACE_LOOK = 0;
+int FACE_NEXT = -1;           // GAME_TIC of the next glance re-roll
+int FACE_SEED = 4321;
 
 // hud-only LCG: the face glance must never touch math::random — that stream
 // is the sim's, and demos replay it (demo.jai pins the seed)
@@ -147,11 +147,11 @@ function face_draw(string name) -> void {
 	draw_patch(lu, x, y, w, h);
 }
 
-var HUD_ARMS_DRAWN = 0;       // owned-slot bitmask the arms panel last showed (gate hook)
+int HUD_ARMS_DRAWN = 0;       // owned-slot bitmask the arms panel last showed (gate hook)
 
 // arms panel: STARMS backdrop, then slots 2-7 — yellow digit owned, gray
 // unowned. Deathmatch swaps the panel for the FRAG count (the classic bar).
-var HUD_FRAGS_DRAWN = -1;
+int HUD_FRAGS_DRAWN = -1;
 
 function arms_draw() -> void {
 	if (NET_GAME && !NP_COOP) {                      // frags are a deathmatch thing
@@ -263,7 +263,7 @@ function msg_draw() -> void {
 }
 
 // frame-time EMA -> FPS in the top-right corner
-var FPS_EMA = 0.0;
+float FPS_EMA = 0.0;
 
 function fps_note(int dtms) -> void {
 	if (dtms < 1) { dtms = 1; }
@@ -467,9 +467,9 @@ function menu_draw(var& entries, int sel, string title) -> void {
 		y = y + step;
 	}
 }
-var MENU_X = 0;
+int MENU_X = 0;
 
-var PARS = {"E1M1": 30, "E1M2": 75, "E1M3": 120, "E1M4": 90, "E1M5": 165,
+map<string, int> PARS = {"E1M1": 30, "E1M2": 75, "E1M3": 120, "E1M4": 90, "E1M5": 165,
 	"E1M6": 180, "E1M7": 180, "E1M8": 30, "E1M9": 165};
 
 function par_secs(string mapname) -> int {
@@ -506,7 +506,7 @@ function wi_draw(string mapname, string nextmap, int kp, int ip, int sp, int tse
 	if (nextmap != "") { draw_text_center(`ENTERING ${nextmap}`, y1 + dy * 4, sc); }
 	draw_text_center(WI_FOOT != "" ? WI_FOOT : "PRESS ANY KEY", VH - 10 * sc, sc);
 }
-var WI_FOOT = "";             // netgame footer (WAITING FOR HOST / N/M READY); "" = solo default
+string WI_FOOT = "";          // netgame footer (WAITING FOR HOST / N/M READY); "" = solo default
 
 function end_draw() -> void {
 	pix_clear(0);
@@ -539,8 +539,8 @@ function end_draw() -> void {
 
 // ----------------------------------------------------------------- automap ---
 
-var AM_CHEAT = 0;             // iddt: 0 normal, 1 all lines bright, 2 + things
-var AM_MARKS = [];            // [x, y] map-space pairs, numbered from 1
+int AM_CHEAT = 0;             // iddt: 0 normal, 1 all lines bright, 2 + things
+array<array<float>> AM_MARKS = []; // [x, y] map-space pairs, numbered from 1
 
 function am_mark_add() -> void {
 	if (AM_MARKS.size() >= 10) { set_msg("no more marks"); return; }
@@ -566,8 +566,8 @@ function am_px(int x, int y, int c, int hlim) -> void {
 }
 
 // Liang-Barsky clip state for am_line
-var AM_T0 = 0.0;
-var AM_T1 = 0.0;
+float AM_T0 = 0.0;
+float AM_T1 = 0.0;
 function am_clip(float p, float q) -> bool {
 	if (p == 0.0) { return q >= 0.0; }
 	float r = q / p;

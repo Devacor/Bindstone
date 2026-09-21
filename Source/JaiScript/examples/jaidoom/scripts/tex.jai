@@ -9,20 +9,20 @@ array<int> DPAL = [];         // doom palette idx -> interned vid idx (bank 0)
 array<int> CMAP = [];         // 34 x 256 colormap bytes
 array<int> PALCM = [];        // band*256+palidx -> interned vid idx (prefolded)
 
-var TEX_NAMES = {};           // texture name -> id
-var TEX_W = [];               // per id
-var TEX_H = [];
-var TEX_READY = [];           // 0 = not composited yet
-var TEX_PIX = [];             // per id: array<int> w*h column-major (col*h+row)
-var TEX_DEFOFS = [];          // per id: offset of the texture def in TEXTURE1 data
-var PNAME_LUMP = [];          // patch index -> lump index
+map<string, int> TEX_NAMES = {}; // texture name -> id
+array<int> TEX_W = [];        // per id
+array<int> TEX_H = [];
+array<int> TEX_READY = [];    // 0 = not composited yet
+array<array<int>> TEX_PIX = []; // per id: array<int> w*h column-major (col*h+row)
+array<int> TEX_DEFOFS = [];   // per id: offset of the texture def in TEXTURE1 data
+array<int> PNAME_LUMP = [];   // patch index -> lump index
 
-var FLAT_CACHE = {};          // flat name -> array<int> 4096
-var SKY_TEX = -1;
+map<string, array<int>> FLAT_CACHE = {}; // flat name -> array<int> 4096
+int SKY_TEX = -1;
 
-var CUR_BANK = -1;
+int CUR_BANK = -1;
 
-var TEX_WORKERS = 1;          // 0 = serial map-start texture warm; nonzero = parallel_transform
+int TEX_WORKERS = 1;          // 0 = serial map-start texture warm; nonzero = parallel_transform
 
 // PLAYPAL bank switch (pain reds 1-8, pickup golds 9-12, radsuit 13):
 // re-intern the 256 colors and refold PALCM — only on actual change
@@ -53,7 +53,7 @@ function gfx_init() -> void {
 	int npatch = i32(pn);
 	PNAME_LUMP = [];
 	for (int p = 0; p < npatch; ++p) {
-		var nm = name8(pn + 4 + p * 8).to_upper();
+		string nm = name8(pn + 4 + p * 8).to_upper();
 		PNAME_LUMP.push(lump_num(nm));
 	}
 
@@ -64,7 +64,7 @@ function gfx_init() -> void {
 	TEX_W = []; TEX_H = []; TEX_READY = []; TEX_PIX = []; TEX_DEFOFS = [];
 	for (int t = 0; t < ntex; ++t) {
 		int dof = t1 + i32(t1 + 4 + t * 4);
-		var tname = name8(dof);
+		string tname = name8(dof);
 		TEX_NAMES[tname] = t;
 		TEX_W.push(i16(dof + 12));
 		TEX_H.push(i16(dof + 14));
@@ -133,7 +133,7 @@ function tex_prepare(int id) -> void {
 
 // masked variant for two-sided mid textures (grates/meshes): -1 where no
 // post covered a texel, so holes stay transparent like sprites
-var MTEX_PIX = {};
+map<int, array<int>> MTEX_PIX = {};
 
 function tex_masked(int id) -> void {
 	if (MTEX_PIX.has(id)) { return; }

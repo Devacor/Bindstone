@@ -466,6 +466,11 @@ by-reference parameters, worker (parallel) frames, and `binary_expr::static_oper
 is consumed at the `return` statement itself on both backends (the in-region conversion op
 and every completion door alike), always behind the payload guard.
 
+**Typed references prove their elements.** An element read through a reference declared as a typed container (a parameter
+`array<int>& tp` or a local `array<int>& row = rows[i];`) is a proof source for the element kind, as the alias of a typed global
+is: the typed rows that consume the proof guard the container's kind at run time and fall back to the general instruction.
+Diagnostics keep reading such a receiver as tentative.
+
 **Program globals** — a top-level variable exactly one unit of the program declares, once, with a spelled non-reference
 type (`array<int> ND_X`, `shared_ptr<Game> G`) is typed by that declaration in every other unit's proof pass, the way a class
 from the program table is; the diagnostics never read the table (a diagnostics walk leaves the name dynamic, and the proofs

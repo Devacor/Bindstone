@@ -7850,9 +7850,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, const vm_instruction
 // share one temp), so the general form after a later miss reads this site's handle as it would on its own
 JAI_FORCEINLINE op_status vm_backend::exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	cell_state& cs = *f.cells;
-	const uint32_t alias = ins.b & 0xFFu, guarded = ins.b >> 8;
-	if (alias != 0xFFu) { cr.dirty->clear(alias); }
-	if (guarded != 0xFFFFFFu) {
+	const uint32_t alias = ins.b & 0x1FFu, guarded = ins.b >> 9;
+	if (alias != 0x1FFu) { cr.dirty->clear(alias); }
+	if (guarded != 0x7FFFFFu) {
 		const script_array* node = cs.site_node[guarded];
 		script_value* g = frame_slot(f, ins.a);
 		if (!(g && g->raw_storage_index() == script_value::TYPEID_ARRAY && g->unchecked_array_node() == node)) {   // the temp already holds this site's node in the steady state

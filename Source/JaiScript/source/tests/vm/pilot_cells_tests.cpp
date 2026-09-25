@@ -1591,9 +1591,10 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(6), closed, "every loop over bools closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
-		test("a_block_holds_up_to_128_cells", [this]() {
-			// draw_seg's column loop holds more than 64 cells (its locals, the outer locals it reads, its compiler values, its
-			// argument values and its environment values); a loop over 80 locals closes and lands the same, one over 140 stays open
+		test("a_block_holds_up_to_256_cells", [this]() {
+			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
+			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close
+			// and land the same, the boundary sits at 256 cells
 			auto wide = [](int n) {
 				std::string s = "var f = function(int n) { ";
 				for (int i = 0; i < n; ++i) { s += "int a" + std::to_string(i) + " = " + std::to_string(i) + "; "; }
@@ -1604,15 +1605,9 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				s += "return acc; };";
 				return s;
 			};
-			// the limit's boundary: n locals and the counter are n + 1 cells; 127 locals close, 128 stay open
-			for (int n : {63, 64, 65, 127}) { both(wide(n) + " to_string(f(3));", std::to_string(n * (n - 1) / 2 + n * 3), (std::to_string(n) + " locals").c_str()); check(listing_of(wide(n)).find("-- cell loop ") != std::string::npos, std::to_string(n) + " locals close"); }
-			both(wide(128) + " to_string(f(3));", std::to_string(128 * 127 / 2 + 128 * 3), "128 locals"); check(listing_of(wide(128)).find("too many cells") != std::string::npos, "128 locals stay open");
-			const std::string w80 = wide(80), w140 = wide(140);
-			both(w80 + " to_string(f(3));", std::to_string(80 * 79 / 2 + 80 * 3), "80 cells");   // each local: its index plus 0 + 1 + 2
-			both(w140 + " to_string(f(3));", std::to_string(140 * 139 / 2 + 140 * 3), "140 cells");
-			const std::string l80 = listing_of(w80), l140 = listing_of(w140);
-			check(l80.find("-- cell loop ") != std::string::npos, "80 cells close: " + l80.substr(l80.find("-- open") == std::string::npos ? l80.size() : l80.find("-- open"), 200));
-			check(l140.find("too many cells") != std::string::npos, "140 cells stay open: " + l140.substr(l140.find("-- ") == std::string::npos ? l140.size() : l140.find("-- "), 200));
+			// the limit's boundary: n locals and the counter are n + 1 cells; 255 locals close, 256 stay open
+			for (int n : {63, 64, 65, 80, 127, 128, 140, 255}) { both(wide(n) + " to_string(f(3));", std::to_string(n * (n - 1) / 2 + n * 3), (std::to_string(n) + " locals").c_str()); const std::string l = listing_of(wide(n)); check(l.find("-- cell loop ") != std::string::npos, std::to_string(n) + " locals close: " + l.substr(l.find("-- ") == std::string::npos ? l.size() : l.find("-- "), 200)); }
+			both(wide(256) + " to_string(f(3));", std::to_string(256 * 255 / 2 + 256 * 3), "256 locals"); check(listing_of(wide(256)).find("too many cells") != std::string::npos, "256 locals stay open");
 		});
 		test("body_declared_locals_enter_empty", [this]() {
 			// draw_seg's column loop declares locals inside branches the first iterations never take, so their slots held
@@ -3505,6 +3500,71 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined light_band") != std::string::npos, "light_band is inlined: " + l);
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes: " + l);
 			check_true(l.find("bail->") == std::string::npos && l.find("C_BAIL") == std::string::npos, "no bail inside the loop: " + l);
+		});
+		test("a_callee_with_a_loop_grafts_into_a_column_loop", [this]() {
+			// row 159: draw_seg's column shape, a callee whose body is a loop with a continue and a break, taking its texture and the frame
+			// buffer as typed references bound to the caller's aliases: both calls graft, the grafted loops and the column loop close
+			const std::string prelude =
+				"array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"array<array<int>> TEX = [[1, 2, 3, 4], [5, 6, 7, 8]];\n"
+				"void col(int x, int y0, int y1, array<int>& tp, int k, array<int>& pix) {\n"
+				"\tif (y0 < 0) { y0 = 0; }\n"
+				"\tfor (int y = y0; y <= y1; ++y) {\n"
+				"\t\tif (y == 2) { continue; }\n"
+				"\t\tif (y > 5) { break; }\n"
+				"\t\tpix[y * 2 + x] = tp[(y + k) & 3] + x;\n"
+				"\t}\n"
+				"}\n"
+				"int run() {\n"
+				"\tarray<int>& pix = PIX;\n"
+				"\tarray<int>& t0 = TEX[0];\n"
+				"\tarray<int>& t1 = TEX[1];\n"
+				"\tint s = 0;\n"
+				"\tfor (int x = 0; x < 2; ++x) {\n"
+				"\t\tif (x == 0) { col(x, -1, 7, t0, 1, pix); } else { col(x, 0, 7, t1, 2, pix); }\n"
+				"\t\ts = s + x;\n"
+				"\t}\n"
+				"\tfor (int i = 0; i < 16; ++i) { s = s * 3 + PIX[i]; s = s & 1048575; }\n"
+				"\treturn s;\n"
+				"}\n";
+			both(prelude + "to_string(run());", "113835", "a callee with a loop grafted into a column loop");
+			const std::string l = listing_run(prelude + "run();");
+			size_t grafts = 0; for (size_t at = l.find("-- inlined col"); at != std::string::npos; at = l.find("-- inlined col", at + 1)) { ++grafts; }
+			size_t loops = 0; for (size_t at = l.find("-- cell loop"); at != std::string::npos; at = l.find("-- cell loop", at + 1)) { ++loops; }
+			check_eq(size_t(2), grafts, "both calls graft: " + l);
+			check_eq(size_t(4), loops, "the grafted loops, the column loop and the fold loop close: " + l);
+		});
+		test("a_return_inside_a_callee_loop_keeps_the_call", [this]() {
+			// row 159: a return from inside the callee's own loop would leave the loop's state behind the graft's join, so the call stays
+			const std::string prelude =
+				"int find(array<int>& a, int v) { for (int i = 0; i < 4; ++i) { if (a[i] == v) { return i; } } return -1; }\n"
+				"int run() { array<int> a = [4, 5, 6, 7]; int s = 0; for (int k = 0; k < 8; ++k) { s = s + find(a, k); } return s; }\n";
+			both(prelude + "to_string(run());", "2", "a return inside a callee loop");
+			const std::string l = listing_run(prelude + "run();");
+			check_true(l.find("-- call kept find line 2: a return inside a loop") != std::string::npos, "the call stays with its rule: " + l);
+		});
+		test("a_typed_reference_parameter_grafts_as_the_callers_variable", [this]() {
+			// row 159: a reference parameter's declared type binds nothing and converts nothing at run time (a store through it follows the
+			// referent), so an int& bound to a float local is that local: 3.7 lands as a float on both backends, grafted or not
+			const std::string prelude =
+				"void set37(int& a) { a = 3.7; }\n"
+				"float run() { float u = 1.5; for (int k = 0; k < 2; ++k) { set37(u); } return u; }\n";
+			both(prelude + "to_string(run());", "3.700000", "a store through a typed reference parameter");
+			const std::string l = listing_run(prelude + "run();");
+			check_true(l.find("-- inlined set37") != std::string::npos, "the typed reference parameter grafts: " + l);
+		});
+		test("a_loop_of_more_than_128_cells_closes", [this]() {
+			// row 159: the cell mask holds 256 cells; a loop over 140 locals runs as one block
+			std::string src = "int run() { ";
+			for (int i = 0; i < 140; ++i) { src += "int v" + std::to_string(i) + " = " + std::to_string(i) + "; "; }
+			src += "\n\tfor (int k = 0; k < 3; ++k) { ";
+			for (int i = 0; i < 140; ++i) { src += "v" + std::to_string(i) + " = v" + std::to_string(i) + " + " + std::to_string(i % 5 + 1) + "; "; }
+			src += "}\n\treturn ";
+			for (int i = 0; i < 140; ++i) { src += (i ? " + v" : "v") + std::to_string(i); }
+			src += "; }\n";
+			both(src + "to_string(run());", "10990", "a loop of 140 cells");
+			const std::string l = listing_run(src + "run();");
+			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes: " + l.substr(0, 400));
 		});
 	}
 };

@@ -366,23 +366,24 @@ namespace jai::vm {
         // a miss returns to (ip mapped by offset). Each cell records its slot, its expected kind, whether
         // the loop reads it before writing it (live-in: unboxed at entry), whether the body defines it
         // (flushed on exit or miss) and the landing that defines it (a decl carries its stamp).
-        // a set of cells, up to 128: the dirty cells of a running block, the compiler values, the environment values,
+        // a set of cells, up to 256: the dirty cells of a running block, the compiler values, the environment values,
         // the values live at a copy instruction
         struct cell_mask {
-            uint64_t w[2] = {0, 0};
+            static constexpr uint32_t words = 4;
+            uint64_t w[words] = {0, 0, 0, 0};
             void set(uint32_t k) noexcept { w[k >> 6] |= uint64_t(1) << (k & 63); }
             void clear(uint32_t k) noexcept { w[k >> 6] &= ~(uint64_t(1) << (k & 63)); }
             bool test(uint32_t k) const noexcept { return ((w[k >> 6] >> (k & 63)) & 1) != 0; }
-            bool any() const noexcept { return (w[0] | w[1]) != 0; }
-            void reset() noexcept { w[0] = 0; w[1] = 0; }
-            cell_mask operator~() const noexcept { cell_mask r; r.w[0] = ~w[0]; r.w[1] = ~w[1]; return r; }
-            cell_mask operator&(const cell_mask& o) const noexcept { cell_mask r; r.w[0] = w[0] & o.w[0]; r.w[1] = w[1] & o.w[1]; return r; }
-            cell_mask operator|(const cell_mask& o) const noexcept { cell_mask r; r.w[0] = w[0] | o.w[0]; r.w[1] = w[1] | o.w[1]; return r; }
-            cell_mask& operator|=(const cell_mask& o) noexcept { w[0] |= o.w[0]; w[1] |= o.w[1]; return *this; }
-            cell_mask& operator&=(const cell_mask& o) noexcept { w[0] &= o.w[0]; w[1] &= o.w[1]; return *this; }
-            static cell_mask all() noexcept { cell_mask r; r.w[0] = ~uint64_t(0); r.w[1] = ~uint64_t(0); return r; }
+            bool any() const noexcept { return (w[0] | w[1] | w[2] | w[3]) != 0; }
+            void reset() noexcept { for (uint32_t i = 0; i < words; ++i) { w[i] = 0; } }
+            cell_mask operator~() const noexcept { cell_mask r; for (uint32_t i = 0; i < words; ++i) { r.w[i] = ~w[i]; } return r; }
+            cell_mask operator&(const cell_mask& o) const noexcept { cell_mask r; for (uint32_t i = 0; i < words; ++i) { r.w[i] = w[i] & o.w[i]; } return r; }
+            cell_mask operator|(const cell_mask& o) const noexcept { cell_mask r; for (uint32_t i = 0; i < words; ++i) { r.w[i] = w[i] | o.w[i]; } return r; }
+            cell_mask& operator|=(const cell_mask& o) noexcept { for (uint32_t i = 0; i < words; ++i) { w[i] |= o.w[i]; } return *this; }
+            cell_mask& operator&=(const cell_mask& o) noexcept { for (uint32_t i = 0; i < words; ++i) { w[i] &= o.w[i]; } return *this; }
+            static cell_mask all() noexcept { cell_mask r; for (uint32_t i = 0; i < words; ++i) { r.w[i] = ~uint64_t(0); } return r; }
         };
-        static constexpr uint32_t k_cell_limit = 128;
+        static constexpr uint32_t k_cell_limit = 64 * cell_mask::words;
         struct cell_loop {
             // env_operand: the environment scalar this cell holds (index into env_operands; k_invalid_u32 = a frame
             // slot); such a cell has a synthetic slot above the frame's, is resolved once at entry and never written

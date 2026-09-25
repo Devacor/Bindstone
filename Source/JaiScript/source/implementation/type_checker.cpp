@@ -1367,6 +1367,7 @@ private:
 		ctype result = ctype_from_type_info(local->declared);
 		if (result.kind != ctype::array_k && result.kind != ctype::map_k) { return inferred; }
 		result.tentative = true;
+		result.alias_proof = true;   // a typed reference: the binder holds it to its type, the typed rows guard the kind
 		return result;
 	}
 

@@ -65,7 +65,7 @@ namespace {
 			}
 			return r + "}";
 		}
-		std::string mask(const chunk::cell_mask& m) const { return hex64(m.w[0]) + ":" + hex64(m.w[1]); }
+		std::string mask(const chunk::cell_mask& m) const { std::string s; for (uint32_t i = 0; i < chunk::cell_mask::words; ++i) { if (i) { s += ":"; } s += hex64(m.w[i]); } return s; }
 
 		void write(const chunk& ch, const std::string& label, int depth) {
 			const std::string pre(static_cast<size_t>(depth) * 2, ' ');

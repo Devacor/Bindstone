@@ -3435,7 +3435,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::jump: fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, op.tok}, ip); break;   // c = 1: an inner loop's back edge
 			case ir::guard: {
 				const uint32_t alias = op.a < current.size() ? current[op.a] : k_invalid_u32;
-				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 2, static_cast<uint32_t>(head + op.guarded), alias == k_invalid_u32 ? 0xFFu : alias });   // the guarded read's copy offset
+				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 2, static_cast<uint32_t>(head + op.guarded), alias == k_invalid_u32 ? 0x1FFu : alias });   // the guarded read's copy offset
 				append(vm_instruction{opcode::op_c_guard, op.a, 0, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
@@ -3580,7 +3580,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const uint32_t to = fx.target > back ? exit_at(fx.target) : copy_at[fx.target - head];   // a target without a copy instruction lands on the next one; one past the back edge exits
 			if (fx.field == 0) { code[fx.at].a = to; }
 			else if (fx.field == 1) { code[fx.at].c = to | fx.bits; }
-			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 8); }
+			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 9); }
 		}
 		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size());   // liveness of compiler values per copy instruction (region_ir.hpp)
 		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a

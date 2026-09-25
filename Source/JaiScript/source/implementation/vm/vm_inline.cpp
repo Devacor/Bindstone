@@ -38,6 +38,7 @@ struct inline_context {
 	std::vector<uint64_t> declared_names;                          // the callee's locals: declared in the caller for the graft's compile
 	const call_expr* replace = nullptr;                            // the statement's clone: this call becomes the result temp
 	bool in_loop = false;                                          // the graft sits inside a loop: every landing must be a block instruction
+	int loop_depth = 0;                                            // loops of the callee's own the clone is inside (a break or continue binds there)
 	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> spills;   // the statement's clone: a spilled operand becomes its temp
 	template <class T, class... A> std::shared_ptr<T> make(A&&... a) {
 		auto n = std::make_shared<T>(std::forward<A>(a)...);
@@ -267,6 +268,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 	}
 	case node_type::return_stmt: {
 		auto* r = static_cast<const return_stmt*>(s.get());
+		if (c.loop_depth > 0) { c.fail("a return inside a loop"); return nullptr; }
 		std::vector<declaration_ptr> ds;
 		if (!c.result) {
 			if (r->value) { c.fail("a value returned from a void callee"); return nullptr; }
@@ -297,6 +299,39 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		std::vector<declaration_ptr> ds; ds.push_back(c.make<expression_decl>(es->location, e, false));
 		return c.make<block_stmt>(es->location, std::move(ds));
 	}
+	case node_type::for_stmt: {
+		auto* fs = static_cast<const for_stmt*>(s.get());
+		declaration_ptr init;
+		if (fs->initializer) {
+			std::vector<declaration_ptr> one = clone_body({fs->initializer}, c, false);
+			if (!c.ok) return nullptr;
+			if (one.size() != 1) { c.fail("a loop the graft does not take"); return nullptr; }
+			init = one[0];
+		}
+		if (c.in_loop && fs->condition && !landable(fs->condition.get())) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && fs->update && !landable_stmt(fs->update.get())) { c.fail("a loop the block cannot land"); return nullptr; }
+		auto cond = fs->condition ? clone_expr(fs->condition, c) : nullptr;
+		auto upd = fs->update ? clone_expr(fs->update, c) : nullptr;
+		++c.loop_depth;
+		statement_ptr body = clone_stmt(fs->body, c, false);
+		--c.loop_depth;
+		if (!c.ok) return nullptr;
+		return c.make<for_stmt>(fs->location, init, cond, upd, body);
+	}
+	case node_type::while_stmt: {
+		auto* ws = static_cast<const while_stmt*>(s.get());
+		if (c.in_loop && !landable(ws->condition.get())) { c.fail("a loop the block cannot land"); return nullptr; }
+		auto cond = clone_expr(ws->condition, c);
+		++c.loop_depth;
+		statement_ptr body = clone_stmt(ws->body, c, false);
+		--c.loop_depth;
+		if (!c.ok) return nullptr;
+		return c.make<while_stmt>(ws->location, cond, body);
+	}
+	case node_type::break_stmt:
+	case node_type::continue_stmt:
+		if (c.loop_depth == 0) { c.fail("a statement the graft does not take"); return nullptr; }
+		return s;   // no state: shared as it is
 	default:
 		c.fail("a statement the graft does not take"); return nullptr;
 	}
@@ -440,7 +475,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 		const expression* a = call->arguments[i].get();
 		if (p.slot_index == SIZE_MAX || p.slot_index >= fn->local_count || p.default_value) return "a parameter with a default or without a slot";
 		if (p.is_reference) {
-			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get())) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
+			const bool typed_to_name = a->get_type() == node_type::identifier_expr;   // a typed one is the caller's variable too: the declared type is the checker's (no bind or store checks it)
+			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get()) || typed_to_name) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
 			if (a->get_type() == node_type::identifier_expr) { if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name"; continue; }
 			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) continue;
 			return "a reference argument that is not a name or an element";

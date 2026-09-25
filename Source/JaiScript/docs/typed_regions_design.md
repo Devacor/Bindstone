@@ -393,8 +393,9 @@ An element store's value binary is a value like a unary or a math call there: `a
 compiler temp (its fused binary rewritten to land there) and the store takes the temp as a direct operand, so the
 typed store lane's shape holds and the block reads the value as a cell.
 
-A block holds up to 128 cells: the dirty set, the compiler-value set, the environment-value set and the live sets
-are two-word masks (`cell_mask`), and a loop with more cells stays on the general form (`too many cells`).
+A block holds up to 256 cells: the dirty set, the compiler-value set, the environment-value set and the live sets
+are four-word masks (`cell_mask`), and a loop with more cells stays on the general form (`too many cells`). A column loop that
+grafts its column bodies (draw_seg with draw_flat_col and draw_tex_col inlined) holds about 140.
 
 A local the body declares enters empty: its cell needs no entry kind and no unbox (its slot may hold a placeholder
 until the declaration runs, in a branch the general form has not taken), its declaration is the first write and
@@ -594,12 +595,15 @@ was. The fused executors are out of line (the block switch's shape rule).
 A plain identifier call that the checker resolved to one free script function (`call_expr::proven_callee_decl`: exact arity, a
 body, not a coroutine, not a method) compiles at its call site as the callee's body when the callee is small (the clone's node
 budget, 512 nodes for the body and the statement together) and made of the forms the graft takes: declarations, expression
-statements, blocks, ifs, returns; literals, identifiers, arithmetic, assignments, members, elements, ternaries, casts and math
-intrinsics. A loop, a switch, a try, a lambda, `this`, a nested script or host call or a method call in the body leaves the call a
-call. The by-value parameters must be scalars the checker proved (the same assignment table `bind_parameters` runs, so nothing
+statements, blocks, ifs, returns, C-style `for` and `while` loops with `break` and `continue` inside them; literals, identifiers,
+arithmetic, assignments, members, elements, ternaries, casts and math intrinsics. A `return` inside the callee's own loop, a switch,
+a try, a lambda, `this`, a reference declaration, a nested script or host call or a method call in the body leaves the call a call.
+A cloned loop compiles as any nested loop of the caller, so inside a caller's loop it closes into the caller's block. The by-value parameters must be scalars the checker proved (the same assignment table `bind_parameters` runs, so nothing
 converts; an unproven argument would bind out of the call's order, which evaluates every argument before it binds the first) or
-`var` taking a scalar local or a literal; a reference parameter must be a `var&` bound to a plain identifier (the parameter's uses
-become the caller's variable) or to an element lvalue (an alias declaration, a rebind). The return type is void or a scalar.
+`var` taking a scalar local or a literal; a reference parameter bound to a plain identifier becomes the caller's variable, a typed
+one (`array<int>& tp`) as much as a `var&` one (a reference parameter's declared type is the checker's: neither backend checks it at
+the bind, which shares the caller's storage, or on a store through it, which follows the referent), and a `var&` bound to an element
+lvalue is an alias declaration (a rebind). The return type is void or a scalar.
 
 The call becomes a temp. The operands the statement evaluates before the call go first, in program order: a literal or an
 identifier stays where it is (an identifier the body writes through a reference parameter, or a global when the body writes a

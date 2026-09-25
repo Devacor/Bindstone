@@ -185,15 +185,13 @@ function sector_at(float x, float y) -> int {
 	return SEG_FSEC[SS_FIRST[n & 0x7FFF]];
 }
 
-function draw_tex_col(int x, int y0, int y1, var& tp, int tw, int th, int ucol, int vfx, int dvfx, int band) -> void {
+function draw_tex_col(int x, int y0, int y1, array<int>& tp, int tw, int th, int ucol, int vfx, int dvfx, int band, array<int>& pix, array<int>& palcm) -> void {
 	if (y0 < 0) { int skip = -y0; vfx = vfx + dvfx * skip; y0 = 0; }
 	if (y1 >= VIEWH) { y1 = VIEWH - 1; }
 	int tc = ucol % tw;
 	if (tc < 0) { tc = tc + tw; }
 	int base = tc * th;
 	int pcm = band * 256;
-	var& pix = PIX;
-	var& palcm = PALCM;
 	for (int y = y0; y <= y1; ++y) {
 		int iv = (vfx >> 16) % th;
 		if (iv < 0) { iv = iv + th; }
@@ -202,13 +200,11 @@ function draw_tex_col(int x, int y0, int y1, var& tp, int tw, int th, int ucol, 
 	}
 }
 
-function draw_flat_col(int x, int y0, int y1, var& flat, float planeh, float raydx, float raydy, int light) -> void {
+function draw_flat_col(int x, int y0, int y1, array<int>& flat, float planeh, float raydx, float raydy, int light, array<int>& pix, array<int>& palcm) -> void {
 	if (y0 < 0) { y0 = 0; }
 	if (y1 >= VIEWH) { y1 = VIEWH - 1; }
 	float dz = (VIEW_Z - planeh) * FOCALY;
 	int bandbase = ((255 - light) >> 3) - EXTRA_LIGHT;
-	var& pix = PIX;
-	var& palcm = PALCM;
 	for (int y = y0; y <= y1; ++y) {
 		int dy = y - CENTERY;
 		if (dy == 0) { continue; }
@@ -349,19 +345,21 @@ function draw_seg(int sg) -> void {
 	var& clipsd = CLIPS_D;
 	var& clipst = CLIPS_T;
 	var& clipsb = CLIPS_B;
+	array<int>& pix = PIX;
+	array<int>& palcm = PALCM;
 	// seg-invariant handles: the column loop re-fetched these per drawn part
 	int cslot = SEC_CFLAT[fsec];
 	int fslot = SEC_FFLAT[fsec];
-	var& cflat = FLATS[cslot];
-	var& fflat = FLATS[fslot];
-	var& flat0 = FLATS[0];
-	var& ftp = TEX_PIX[facet >= 0 ? facet : 0];
+	array<int>& cflat = FLATS[cslot];
+	array<int>& fflat = FLATS[fslot];
+	array<int>& flat0 = FLATS[0];
+	array<int>& ftp = TEX_PIX[facet >= 0 ? facet : 0];
 	int ftw = facet >= 0 ? TEX_W[facet] : 64;
 	int fth = facet >= 0 ? TEX_H[facet] : 64;
-	var& ttp = TEX_PIX[topt >= 0 ? topt : 0];
+	array<int>& ttp = TEX_PIX[topt >= 0 ? topt : 0];
 	int ttw = topt >= 0 ? TEX_W[topt] : 64;
 	int tth = topt >= 0 ? TEX_H[topt] : 64;
-	var& btp = TEX_PIX[bott >= 0 ? bott : 0];
+	array<int>& btp = TEX_PIX[bott >= 0 ? bott : 0];
 	int btw = bott >= 0 ? TEX_W[bott] : 64;
 	int bth = bott >= 0 ? TEX_H[bott] : 64;
 	for (int x = xa; x <= xb; ++x) {
@@ -388,14 +386,14 @@ function draw_seg(int sg) -> void {
 		if (ct + 1 <= c1) {
 			if (fsky) { draw_sky_col(x, ct + 1, c1); }
 			else {
-				draw_flat_col(x, ct + 1, c1, cflat, fceil, raydx, raydy, light);
+				draw_flat_col(x, ct + 1, c1, cflat, fceil, raydx, raydy, light, pix, palcm);
 			}
 		}
 		// floor plane below the wall bottom
 		int f0 = yf + 1;
 		if (f0 < ct + 1) { f0 = ct + 1; }
 		if (f0 <= cb - 1) {
-			draw_flat_col(x, f0, cb - 1, fflat, ffloor, raydx, raydy, light);
+			draw_flat_col(x, f0, cb - 1, fflat, ffloor, raydx, raydy, light, pix, palcm);
 		}
 
 		if (solid) {
@@ -404,9 +402,9 @@ function draw_seg(int sg) -> void {
 			if (w0 <= w1) {
 				if (facet >= 0) {
 					int vfx = math::itrunc(((aface - VIEW_Z + yofs) - (CENTERY - w0) / sc) * 65536.0);
-					draw_tex_col(x, w0, w1, ftp, ftw, fth, ucol, vfx, dvfx, band);
+					draw_tex_col(x, w0, w1, ftp, ftw, fth, ucol, vfx, dvfx, band, pix, palcm);
 				} else {
-					draw_tex_col(x, w0, w1, flat0, 64, 64, ucol, 0, dvfx, band);
+					draw_tex_col(x, w0, w1, flat0, 64, 64, ucol, 0, dvfx, band, pix, palcm);
 				}
 			}
 			done[x] = 1;
@@ -424,7 +422,7 @@ function draw_seg(int sg) -> void {
 				if (fsky && bsky) { draw_sky_col(x, u0, u1i); }
 				else if (topt >= 0) {
 					int vfxu = math::itrunc(((atop - VIEW_Z + yofs) - (CENTERY - u0) / sc) * 65536.0);
-					draw_tex_col(x, u0, u1i, ttp, ttw, tth, ucol, vfxu, dvfx, band);
+					draw_tex_col(x, u0, u1i, ttp, ttw, tth, ucol, vfxu, dvfx, band, pix, palcm);
 				}
 			}
 			if (ybc - 1 > newct) { newct = ybc - 1; }
@@ -438,7 +436,7 @@ function draw_seg(int sg) -> void {
 			int l1 = yf; if (l1 > cb - 1) { l1 = cb - 1; }
 			if (l0 <= l1 && bott >= 0) {
 				int vfxl = math::itrunc(((abot - VIEW_Z + yofs) - (CENTERY - l0) / sc) * 65536.0);
-				draw_tex_col(x, l0, l1, btp, btw, bth, ucol, vfxl, dvfx, band);
+				draw_tex_col(x, l0, l1, btp, btw, bth, ucol, vfxl, dvfx, band, pix, palcm);
 			}
 			if (ybf < newcb) { newcb = ybf; }
 		} else {

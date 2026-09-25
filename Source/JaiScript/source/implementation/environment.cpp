@@ -130,6 +130,15 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
         cacheable = local_ids_.count(id) > 0;
+        if (!cacheable) {
+            // a memo of a parent's cell: cacheable when it is the cell of the nearest environment holding the name locally
+            for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+                if (p->local_ids_.count(id) == 0) { continue; }
+                auto owner = p->flat_lookup_.find(id);
+                cacheable = owner != p->flat_lookup_.end() && owner->second == it->second;
+                break;
+            }
+        }
         return it->second;
     }
     for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {

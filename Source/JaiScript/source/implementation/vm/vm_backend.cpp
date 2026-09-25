@@ -10008,6 +10008,22 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 #endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
+	if (cached_global_env_ && site.ic_fn && argc == site.ic_argc && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+		bool plain_frame = !f.locals || f.top_level;
+		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+		const auto& cache = f.code->env_lookup_cache;
+		const size_t slot = f.ip * 3;
+		if (plain_frame && slot < cache.size()) {
+			const env_lookup_cache_entry& e = cache[slot];
+			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
+			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
+				pending_callee& pc = pending_callees_.emplace_back();
+				pc.fn = site.ic_fn;
+				pc.pin = site.ic_pin;
+				return {};
+			}
+		}
+	}
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
 	if (!resolved) return op_status::failed;

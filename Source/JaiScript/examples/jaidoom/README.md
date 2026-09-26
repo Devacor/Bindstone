@@ -28,7 +28,11 @@ move: W/S or up/down     strafe: A/D      turn: left/right arrows
 run: hold shift (Windows) or R to toggle  use: E or space   fire: ctrl or F
 weapons: 1-5   automap: tab or M (zoom -/=, B mark, C clear)   quicksave Z  quickload X
 menu: esc      cheats: iddqd idkfa idfa idclip idclev## idbehold iddt
+frame rate: U toggles uncapped (the game still ticks at 35 Hz; the camera eases between tics)
 ```
+
+Start uncapped with `jaiscript jaidoom.jai -- uncapped`; the FPS counter in the top-right corner shows what your
+machine and terminal sustain.
 
 ## Levels and your own WADs
 

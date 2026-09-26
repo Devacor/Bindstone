@@ -475,9 +475,13 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 		const expression* a = call->arguments[i].get();
 		if (p.slot_index == SIZE_MAX || p.slot_index >= fn->local_count || p.default_value) return "a parameter with a default or without a slot";
 		if (p.is_reference) {
-			const bool typed_to_name = a->get_type() == node_type::identifier_expr;   // a typed one is the caller's variable too: the declared type is the checker's (no bind or store checks it)
+			const bool typed_to_name = a->get_type() == node_type::identifier_expr;   // a typed one bound to a caller's local is that local: the declared type is the checker's (no bind or store checks it)
 			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get()) || typed_to_name) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
-			if (a->get_type() == node_type::identifier_expr) { if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name"; continue; }
+			if (a->get_type() == node_type::identifier_expr) {
+				if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name";
+				if (static_cast<const identifier_expr*>(a)->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
+				continue;
+			}
 			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) continue;
 			return "a reference argument that is not a name or an element";
 		}

@@ -3883,6 +3883,22 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(src + "run();");
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes: " + l.substr(0, 400));
 		});
+		test("a_miss_inside_the_argument_zone_rebuilds_every_argument", [this]() {
+			// an element argument the block landed, then a later element argument the cells decline (a string): the general form re-runs the
+			// argument zone from its first instruction, since argument values are never flushed
+			const std::string prelude =
+				"var OUT = \"\";\n"
+				"function g2(int a, string g) -> void { OUT = OUT + to_string(a) + g + \";\"; }\n"
+				"function g3(int a, int b, string g) -> void { OUT = OUT + to_string(a + b) + g + \";\"; }\n"
+				"var LM = [[26, \"a\"], [22, \"b\"], [7, \"c\"]];\n"
+				"var LN = [[26, 5, \"a\"], [22, 6, \"b\"], [1, 2, \"c\"]];\n"
+				"var A = [26, \"a\", 22, \"b\", 3, \"c\"];\n"
+				"function by_ref() -> void { for (auto& lm : LM) { g2(lm[0], lm[1]); } }\n"
+				"function three() -> void { for (auto& ln : LN) { g3(ln[0], ln[1], ln[2]); } }\n"
+				"function flat() -> void { for (int i = 0; i < 6; i += 2) { g2(A[i], A[i + 1]); } }\n";
+			both(prelude + "by_ref(); three(); flat(); OUT;", "26a;22b;7c;31a;28b;3c;26a;22b;3c;", "element arguments with a declined second read");
+			both(prelude + "by_ref(); three(); flat(); OUT;", "26a;22b;7c;31a;28b;3c;26a;22b;3c;", "element arguments, proofs off", false);
+		});
 	}
 };
 

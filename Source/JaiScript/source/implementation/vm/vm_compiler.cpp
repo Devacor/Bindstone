@@ -3495,7 +3495,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
 				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
-				const uint32_t miss_ip = op.container == chunk::k_iter_container && op.origin != k_invalid_u32 ? op.origin : static_cast<uint32_t>(ip);   // a range landing misses onto the general ITER_NEXT
+				const uint32_t miss_ip = op.origin != k_invalid_u32 ? op.origin : static_cast<uint32_t>(ip);   // a range landing misses onto the general ITER_NEXT, an argument's read onto the first argument instruction (argument values are never flushed)
 				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, miss_ip}, ip);
 				break;
 			}

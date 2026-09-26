@@ -713,6 +713,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.back().scope_depth = scope_depth_;
 	for (const auto& d : params) { compile_variable_decl(d); }
 	for (const auto& d : body) { compile_declaration(d, false); }
+	current_stmt_ = site.call_stmt;   // the fallback and the rest of the statement are the caller's
 	std::vector<size_t> exits = std::move(loops_.back().break_patches);
 	loops_.pop_back();
 	for (const uint64_t id : added) { callable_.declared.erase(id); }

@@ -2673,6 +2673,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// translation state is snapshotted at every statement start and restored, and the copy resumes at the end of the innermost arm
 		// holding the bail (nothing between a bail and the arm's end is reachable inside the block, so none of it leaves a cell)
 		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
+		auto caller_stmt_of = [&](size_t at) -> const ast_node* {   // a graft's statements are the caller's statement's
+			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip) return s.call_stmt; }
+			return stmt_of(at);
+		};
+		// a bail inside a caller's statement (a graft's statement, or the rest of the statement after a graft's join): the compiler values the
+		// statement defined before it (its spills, the grafts' parameters and results) are the general continuation's, so the bail flushes them
+		std::vector<std::pair<uint32_t, std::vector<uint32_t>>> bail_held;
 		auto arm_end_of = [&](size_t at) -> uint32_t {   // the nearest target after `at` of a forward branch before it: the end of the innermost arm holding `at`, invalid on the main path
 			if (counted == k_invalid_u32 && at <= cmp_ip) return k_invalid_u32;   // the head span and the head compare are the loop's own
 			uint32_t end = k_invalid_u32;
@@ -3333,6 +3340,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {
 				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg; alias_slots.resize(snap_alias);
 				ops.resize(snap_ip - first);
+				size_t stmt_start = snap_ip;
+				while (stmt_start > first && caller_stmt_of(stmt_start - 1) == caller_stmt_of(snap_ip)) { --stmt_start; }
+				std::vector<uint32_t> held;
+				for (const auto& [dip, dk] : defs) {
+					if (dip < stmt_start || dip >= snap_ip || cells[dk].slot >= static_cast<uint32_t>(c.local_count)) continue;   // an argument's synthetic slot is never flushed
+					std::erase_if(held, [&](uint32_t h) { return cells[h].slot == cells[dk].slot; });
+					held.push_back(dk);
+				}
+				if (!held.empty()) { bail_held.emplace_back(static_cast<uint32_t>(snap_ip), std::move(held)); }
 				ir_op bail; bail.kind = ir::bail; bail.target = static_cast<uint32_t>(snap_ip);
 				ops.push_back(bail);
 				for (size_t k = snap_ip + 1; k < arm_end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
@@ -3684,6 +3700,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a
 		// miss), never a statement's value: live from its rebind to the end of the copy, so every flush after the rebind materializes it
 		for (const chunk::cell_loop::rebind& rb : loop.rebinds) { for (size_t m = rb.copy_ip - loop.copy_head; m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(rb.cell); } }
+		for (const auto& [bip, held] : bail_held) {
+			const size_t m = copy_at[bip - head] - loop.copy_head;
+			if (m < loop.live_temps.size()) { for (const uint32_t k : held) { loop.live_temps[m].set(k); } }
+		}
 		// fused pairs (row 150): the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are

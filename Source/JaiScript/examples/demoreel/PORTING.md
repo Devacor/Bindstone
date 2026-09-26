@@ -108,6 +108,7 @@ Bind all of these in `make_session`:
 | option | target | runtime |
 |---|---|---|
 | `-DDEMOREEL_PORT_LUA=ON` | `demoreel_lua` | `Source/JaiScript/lua` + `sol2` (both git-ignored checkouts; `DEMOREEL_LUA_ROOT` / `DEMOREEL_SOL2_ROOT` override) |
+| `-DDEMOREEL_PORT_SQUIRREL=ON` | `demoreel_squirrel` | `Source/JaiScript/squirrel` (Squirrel 3.2, `_SQ64` + `SQUSEDOUBLE`; `DEMOREEL_SQUIRREL_ROOT` overrides the path) |
 
 ## 6. Measurement
 

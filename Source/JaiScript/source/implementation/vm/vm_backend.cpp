@@ -11856,6 +11856,9 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	auto [class_var_id, class_var_view] = symbolizer_->get_class_var_id_with_view(name_id);
 	auto class_var_result = environment_->get(class_var_id);
 	if (!class_var_result) {
+		if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
+			return raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
+		}
 		return raise_from(class_var_result);
 	}
 	script_value class_var = std::move(class_var_result.value());

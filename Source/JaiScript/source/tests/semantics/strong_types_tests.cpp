@@ -2185,7 +2185,7 @@ public:
             check_quad("class P { int a = 1; } class C : P { int c = 2; } C x = C(); class P { int a = 50; } C y = C(); to_string(x.a) + \",\" + to_string(y.a)", "1,50", "a PARENT reload invalidates the child's plan");
             check_quad("class V { float x = 0; float y = 0; V(float px, float py) { x = px; y = py; } } float s = 0.0; for (int i = 0; i < 100; ++i) { auto v = V(1.0, 2.0); s += v.x + v.y; } to_string(s)", "300.0", "the hot ctor shape across many constructions");
             check_quad("class K { int a = 1; shared_ptr<K> next; } K x = K(); to_string(x.a) + \",\" + to_string(x.next == null)", "1,true", "handle-typed field defaults to a typed null");
-            check_quad("class E { int a = 1; int b; } E x = E(); to_string(x.a) + \",\" + to_string(x.b == null)", "1,true", "an uninitialized typed field is a typed null");
+            check_quad("class E { int a = 1; int b; } E x = E(); to_string(x.a) + \",\" + to_string(x.b)", "1,0", "an uninitialized typed field is its type's zero");
             check_quad("class M { var m = [1, 2]; } M x = M(); M y = M(); x.m.push(3); to_string(x.m.size()) + \",\" + to_string(y.m.size())", "3,2", "container defaults are per-instance copies");
             check_quad("class S { string name = \"n\"; int hp = 3; } S a = S(); S b = S(); a.name = \"q\"; a.name + b.name + to_string(a.hp + b.hp)", "qn6", "string defaults are independent");
         });
@@ -2224,7 +2224,7 @@ public:
             // exact pre-lane output of both backends. The vm branch lane answers a null
             // operand from storage (handle_equal's verdict); weak_ptr, cpp-bound and
             // operator-overloaded engines keep the general path
-            const std::string P = "class N { int a = 1; shared_ptr<N> next; N other; } class E { int v = 0; bool operator==(E o) { return true; } bool operator!=(E o) { return true; } } class L { shared_ptr<L> left; int f() { if (left == null) { return 1; } return 2; } int g() { if (left != null) { return 1; } return 2; } } auto n = N(); auto e = E(); auto l = L(); var v; int i = 5; float fl = 1.5; string s = \"s\"; char c = 'c'; bool b = true; array<var> arr = [1]; map<string,int> m = {\"a\": 1}; function fn() { return 1; } auto sp = shared_ptr<N>(); weak_ptr<N> w = sp; ";
+            const std::string P = "class N { int a = 1; shared_ptr<N> next; N other = null; } class E { int v = 0; bool operator==(E o) { return true; } bool operator!=(E o) { return true; } } class L { shared_ptr<L> left; int f() { if (left == null) { return 1; } return 2; } int g() { if (left != null) { return 1; } return 2; } } auto n = N(); auto e = E(); auto l = L(); var v; int i = 5; float fl = 1.5; string s = \"s\"; char c = 'c'; bool b = true; array<var> arr = [1]; map<string,int> m = {\"a\": 1}; function fn() { return 1; } auto sp = shared_ptr<N>(); weak_ptr<N> w = sp; ";
             auto q = [&](const char* tail) { return P + tail; };
             check_quad(q("n == null").c_str(), "false", "object vs null");
             check_quad(q("n != null").c_str(), "true", "object != null");
@@ -2312,7 +2312,7 @@ public:
             // shape) on both backends: rows are the exact pre-lane outputs. The vm's store-side
             // this-field cache lands typed enforcement + the store on the cell directly;
             // texts, conversions and value semantics must not move
-            const std::string P = "class F { int i = 1; float f = 1.5; string s = \"a\"; bool b = false; auto a = 10; var v = 0; array<int> arr = [1, 2]; F other; shared_ptr<F> sp; static int st = 5; string setInt(var x) { string r = \"ok\"; try { i = x; } catch (err) { r = err; } return r; } string setFloat(var x) { string r = \"ok\"; try { f = x; } catch (err) { r = err; } return r; } string setStr(var x) { string r = \"ok\"; try { s = x; } catch (err) { r = err; } return r; } string setBool(var x) { string r = \"ok\"; try { b = x; } catch (err) { r = err; } return r; } string setAuto(var x) { string r = \"ok\"; try { a = x; } catch (err) { r = err; } return r; } string setVar(var x) { string r = \"ok\"; try { v = x; } catch (err) { r = err; } return r; } string setArr(var x) { string r = \"ok\"; try { arr = x; } catch (err) { r = err; } return r; } string setOther(var x) { string r = \"ok\"; try { other = x; } catch (err) { r = err; } return r; } string setSp(var x) { string r = \"ok\"; try { sp = x; } catch (err) { r = err; } return r; } int loopStore(int n) { for (int k = 0; k < n; ++k) { i = k; f = k; } return i; } int chainStore() { i = 7; int t = i; i = t + 1; return i; } int storeResult() { int r = (i = 42); return r; } float storeResultConv() { float r = (i = 3.9); return r; } string setStatic(var x) { string r = \"ok\"; try { st = x; } catch (err) { r = err; } return r; } string dump() { return to_string(i) + \"|\" + to_string(f) + \"|\" + s + \"|\" + to_string(b) + \"|\" + to_string(a) + \"|\" + to_string(v) + \"|\" + to_string(arr.size()) + \"|\" + to_string(other == null) + \"|\" + to_string(sp == null); } } class G : F { int g = 2; string setInherited(var x) { string r = \"ok\"; try { i = x; } catch (err) { r = err; } return r; } string setG(var x) { string r = \"ok\"; try { g = x; } catch (err) { r = err; } return r; } } auto o = F(); ";
+            const std::string P = "class F { int i = 1; float f = 1.5; string s = \"a\"; bool b = false; auto a = 10; var v = 0; array<int> arr = [1, 2]; F other = null; shared_ptr<F> sp; static int st = 5; string setInt(var x) { string r = \"ok\"; try { i = x; } catch (err) { r = err; } return r; } string setFloat(var x) { string r = \"ok\"; try { f = x; } catch (err) { r = err; } return r; } string setStr(var x) { string r = \"ok\"; try { s = x; } catch (err) { r = err; } return r; } string setBool(var x) { string r = \"ok\"; try { b = x; } catch (err) { r = err; } return r; } string setAuto(var x) { string r = \"ok\"; try { a = x; } catch (err) { r = err; } return r; } string setVar(var x) { string r = \"ok\"; try { v = x; } catch (err) { r = err; } return r; } string setArr(var x) { string r = \"ok\"; try { arr = x; } catch (err) { r = err; } return r; } string setOther(var x) { string r = \"ok\"; try { other = x; } catch (err) { r = err; } return r; } string setSp(var x) { string r = \"ok\"; try { sp = x; } catch (err) { r = err; } return r; } int loopStore(int n) { for (int k = 0; k < n; ++k) { i = k; f = k; } return i; } int chainStore() { i = 7; int t = i; i = t + 1; return i; } int storeResult() { int r = (i = 42); return r; } float storeResultConv() { float r = (i = 3.9); return r; } string setStatic(var x) { string r = \"ok\"; try { st = x; } catch (err) { r = err; } return r; } string dump() { return to_string(i) + \"|\" + to_string(f) + \"|\" + s + \"|\" + to_string(b) + \"|\" + to_string(a) + \"|\" + to_string(v) + \"|\" + to_string(arr.size()) + \"|\" + to_string(other == null) + \"|\" + to_string(sp == null); } } class G : F { int g = 2; string setInherited(var x) { string r = \"ok\"; try { i = x; } catch (err) { r = err; } return r; } string setG(var x) { string r = \"ok\"; try { g = x; } catch (err) { r = err; } return r; } } auto o = F(); ";
             auto q = [&](const char* tail) { return P + tail; };
             check_quad(q("o.setInt(5) + \" \" + o.dump()").c_str(), "ok 5|1.5|a|false|10|0|2|true|true", "typed int field, int");
             check_quad(q("o.setInt(2.7) + \" \" + o.dump()").c_str(), "ok 2|1.5|a|false|10|0|2|true|true", "typed int field, float truncates");
@@ -2372,7 +2372,7 @@ public:
             // Every supported static-store spelling (C::s anywhere; bare s in instance methods,
             // constructors and static methods) runs the instance-field store table on both
             // backends: same conversions, same text, the static untouched on a miss
-            const std::string P = "class C { static int i = 1; static float f = 1.5; static string s = \"a\"; static bool b = false; static auto a = 10; static var v = 0; static array<int> arr = [1, 2]; static C other; static shared_ptr<C> sp; static weak_ptr<C> w; int x = 0; C() {} C(var val) { i = val; } string setQ(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } static string setS(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } string dump() { return to_string(i) + \"|\" + to_string(f) + \"|\" + s + \"|\" + to_string(b) + \"|\" + to_string(a) + \"|\" + to_string(v) + \"|\" + to_string(arr.size()) + \"|\" + to_string(other == null) + \"|\" + to_string(sp == null) + \"|\" + to_string(w == null); } } function setI(var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; } function setF(var val) { string r = \"ok\"; try { C::f = val; } catch (err) { r = err; } return r; } function setStr(var val) { string r = \"ok\"; try { C::s = val; } catch (err) { r = err; } return r; } function setB(var val) { string r = \"ok\"; try { C::b = val; } catch (err) { r = err; } return r; } function setA(var val) { string r = \"ok\"; try { C::a = val; } catch (err) { r = err; } return r; } function setV(var val) { string r = \"ok\"; try { C::v = val; } catch (err) { r = err; } return r; } function setArr(var val) { string r = \"ok\"; try { C::arr = val; } catch (err) { r = err; } return r; } function setOther(var val) { string r = \"ok\"; try { C::other = val; } catch (err) { r = err; } return r; } function setSp(var val) { string r = \"ok\"; try { C::sp = val; } catch (err) { r = err; } return r; } function setW(var val) { string r = \"ok\"; try { C::w = val; } catch (err) { r = err; } return r; } auto o = C(); ";
+            const std::string P = "class C { static int i = 1; static float f = 1.5; static string s = \"a\"; static bool b = false; static auto a = 10; static var v = 0; static array<int> arr = [1, 2]; static C other = null; static shared_ptr<C> sp; static weak_ptr<C> w; int x = 0; C() {} C(var val) { i = val; } string setQ(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } static string setS(var val) { string r = \"ok\"; try { i = val; } catch (err) { r = err; } return r; } string dump() { return to_string(i) + \"|\" + to_string(f) + \"|\" + s + \"|\" + to_string(b) + \"|\" + to_string(a) + \"|\" + to_string(v) + \"|\" + to_string(arr.size()) + \"|\" + to_string(other == null) + \"|\" + to_string(sp == null) + \"|\" + to_string(w == null); } } function setI(var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; } function setF(var val) { string r = \"ok\"; try { C::f = val; } catch (err) { r = err; } return r; } function setStr(var val) { string r = \"ok\"; try { C::s = val; } catch (err) { r = err; } return r; } function setB(var val) { string r = \"ok\"; try { C::b = val; } catch (err) { r = err; } return r; } function setA(var val) { string r = \"ok\"; try { C::a = val; } catch (err) { r = err; } return r; } function setV(var val) { string r = \"ok\"; try { C::v = val; } catch (err) { r = err; } return r; } function setArr(var val) { string r = \"ok\"; try { C::arr = val; } catch (err) { r = err; } return r; } function setOther(var val) { string r = \"ok\"; try { C::other = val; } catch (err) { r = err; } return r; } function setSp(var val) { string r = \"ok\"; try { C::sp = val; } catch (err) { r = err; } return r; } function setW(var val) { string r = \"ok\"; try { C::w = val; } catch (err) { r = err; } return r; } auto o = C(); ";
             auto q = [&](const char* tail) { return P + tail; };
             const std::string base = "1|1.5|a|false|10|0|2|true|true|true";
             check_quad(q("setI(5) + \" \" + o.dump()").c_str(), "ok 5|1.5|a|false|10|0|2|true|true|true", "C::i, int");
@@ -2439,10 +2439,10 @@ public:
             check_quad("class C { static int n = true; } to_string(C::n) + \"|\" + type_of(C::n)", "1|int", "static int from a bool initializer");
             check_quad_error("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "an unconvertible static initializer raises at definition");
             check_quad_error_text("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "Cannot assign string to static 's' of C (declared int)", "the definition raises the store text");
-            check_quad("class C { static int s; } to_string(C::s == null)", "true", "typed static without an initializer reads null");
+            check_quad("class C { static int s; } to_string(C::s)", "0", "a typed static without an initializer is its type's zero");
             check_quad("class C { static var v = null; } to_string(C::v == null)", "true", "null var static reads");
             check_quad("class P { int a = 0; } class C { static shared_ptr<P> p; } to_string(C::p == null)", "true", "null shared_ptr static reads");
-            check_quad("class P { int a = 0; } class C { static P obj; } to_string(C::obj == null)", "true", "null object static reads");
+            check_quad("class P { int a = 0; } class C { static P obj; static P none = null; } to_string(C::obj.a) + \",\" + to_string(C::none == null)", "0,true", "a class-typed static default-constructs; = null spells a null one");
             check_quad("function L(var x) { return x; } class C { static int s; } C::s = L(4); string r = \"ok\"; try { C::s = L(\"x\"); } catch (err) { r = err; } to_string(C::s) + \" \" + r", "4 Cannot assign string to static 's' of C (declared int)", "a null-initialized static still enforces its declared type");
             check_quad("function L(var x) { return x; } class C { static auto a = 2; } C::a = L(2.5); string r = \"ok\"; try { C::a = L(\"str\"); } catch (err) { r = err; } to_string(C::a) + \" \" + r", "2 Cannot assign string to static 'a' of C (declared int)", "auto static enforces the inferred int");
         });
@@ -3366,10 +3366,10 @@ public:
         test("typed_slot_no_chained_conversion_anywhere", [check_both]() {
             check_both(R"JAI(
                 class TA { int v = 1; } class TB { int v = 0; TB(TA a) { v = a.v * 2; } } class TC { int v = 0; TC(TB b) { v = b.v * 3; } }
-                class H { TC t; } class X { int to_int() { return 7; } } class C { int a = 0; C() {} C(int v) { a = v; } }
+                class H { TC t = null; } class X { int to_int() { return 7; } } class C { int a = 0; C() {} C(int v) { a = v; } }
                 var ta = TA(); var xs = X();
                 string r1 = ""; try { TC c = ta; r1 = "ok"; } catch (e) { r1 = e; }
-                string r2 = ""; try { TC c2; c2 = ta; r2 = "ok"; } catch (e) { r2 = e; }
+                string r2 = ""; try { TC c2 = null; c2 = ta; r2 = "ok"; } catch (e) { r2 = e; }
                 string r3 = ""; try { auto h = H(); h.t = ta; r3 = "ok"; } catch (e) { r3 = e; }
                 int pc(TC c) { return c.v; }
                 string r4 = ""; try { pc(ta); r4 = "ok"; } catch (e) { r4 = e; }
@@ -3381,9 +3381,9 @@ public:
                 "TA->TB->TC and X->to_int->C are never implicit");
             check_both(R"JAI(
                 class TA { int v = 1; } class TB { int v = 0; TB(TA a) { v = a.v * 2; } }
-                class HB { TB t; }
+                class HB { TB t = null; }
                 var ta = TA();
-                TB b = ta; TB b2; b2 = ta; auto hb = HB(); hb.t = ta;
+                TB b = ta; TB b2 = null; b2 = ta; auto hb = HB(); hb.t = ta;
                 int pb(TB b) { return b.v; } TB rb() { return ta; }
                 to_string(b.v) + to_string(b2.v) + to_string(hb.t.v) + to_string(pb(ta)) + to_string(rb().v)
             )JAI", "22222", "exactly one user conversion works on every path");
@@ -3414,7 +3414,7 @@ public:
                 check_eq(std::string("5"), e->execute("h.s").as<std::string>(), "set_field: to_string row still converts");
                 e->execute("class R { int f = 0; } R r = R(); r.f = 5; class X { int to_int() { return 7; } } class R2 { X f = X(); } R2 r2 = R2();");
                 e->execute("class R { C f; }");
-                check_eq(std::string("true"), e->execute("r.f == null").to_string(), "reload int->C: ctor-only conversion adopts the default");
+                check_eq(std::string("0"), e->execute("r.f.a").to_string(), "reload int->C: ctor-only conversion adopts the default (a default-constructed C)");
                 e->execute("class R2 { int f = 3; }");
                 check_eq(std::string("3"), e->execute("r2.f").to_string(), "reload X->int: to_int-only conversion adopts the default");
             }
@@ -3528,8 +3528,8 @@ public:
                 class T { int v = 0; T(int x) { throw "boom"; } }
                 var five = 5;
                 string r1 = ""; try { T t = five; } catch (e) { r1 = e; }
-                string r2 = ""; try { T t2; t2 = five; } catch (e) { r2 = e; }
-                class H { T t; } string r3 = ""; try { auto h = H(); h.t = five; } catch (e) { r3 = e; }
+                string r2 = ""; try { T t2 = null; t2 = five; } catch (e) { r2 = e; }
+                class H { T t = null; } string r3 = ""; try { auto h = H(); h.t = five; } catch (e) { r3 = e; }
                 void p(T t) {} string r4 = ""; try { p(five); } catch (e) { r4 = e; }
                 T g() { return five; } string r5 = ""; try { g(); } catch (e) { r5 = e; }
                 r1 + "|" + r2 + "|" + r3 + "|" + r4 + "|" + r5

@@ -13118,6 +13118,12 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 				}
 				break;
 			}
+		} else if (inline_op == 11) {
+			script_array& node = *const_cast<script_value&>(recv).unchecked_get_array_storage();
+			if (!node.empty()) {
+				result.emplace(node.get(node.size() - 1, engine_));
+				node.pop_back();
+			}
 		} else {
 			const script_map& map = recv.unchecked_as_map();
 			auto it = map.find(stack_[base].deref());

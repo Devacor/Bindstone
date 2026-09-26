@@ -261,7 +261,7 @@ namespace jai::vm {
         op_c_append,        // a = plus << 24 | dst cell, b = dst cell, c = src cell or const: the compound plus with run-time kinds (strings append in place, numbers add)
         op_c_push,          // a = push proto (the copy's, its value or index naming a cell), b = cell loop index, c = the original ip: recv.push(v) onto a frame-slot array by the push kernel's rows
                             // C_JUMP's c = 1 marks an inner loop's back edge (the budget polls there)
-        op_call_builtin,    // a = argc, b = call site, c = receiver kind (1 string, 2 array, 3 map) | inline << 4 (1 size/length, 2 empty, 3 find, 4 contains, 5 starts_with, 6 ends_with, 7 substr, 8 at, 9 map has, 10 map get); stack [object, args...]: a method the checker proved builtin, guarded on the kind, else op_call_method
+        op_call_builtin,    // a = argc, b = call site, c = receiver kind (1 string, 2 array, 3 map) | inline << 4 (1 size/length, 2 empty, 3 find, 4 contains, 5 starts_with, 6 ends_with, 7 substr, 8 at, 9 map has, 10 map get, 11 array pop); stack [object, args...]: a method the checker proved builtin, guarded on the kind, else op_call_method
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
         op_halt,
     };

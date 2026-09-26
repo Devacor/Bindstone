@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 namespace jai::foundry::tests {
 
@@ -196,6 +197,68 @@ public:
             // ...and the C++ style really does cover the negative-key case
             auto neg = eng->execute(R"(var m = {{-1, "neg"}}; m.has(-1);)");
             check_eq(neg.as<bool>(), true);
+        });
+
+        test("hashed_maps_iterate_in_key_order", [this]() {
+            // lookups are hashed; every observation of order (iteration, keys(), values(), to_json-free printing through a loop,
+            // structural equality) sees key order, whatever the insertion order
+            auto eng = make_engine(); stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                function run() -> string {
+                    map<var, int> m = {};
+                    m["b"] = 1; m[3] = 2; m["a"] = 3; m[1] = 4; m[2.5] = 5; m[true] = 6; m[-7] = 7;
+                    string out = "";
+                    for (auto kv : m) { out = out + kv.first + "=" + kv.second + ","; }
+                    array<var> ks = m.keys();
+                    out = out + "|" + ks.size() + ":" + ks[0] + ":" + ks[ks.size() - 1];
+                    map<int, int> x = {}; map<int, int> y = {};
+                    for (int i = 0; i < 50; ++i) { x[(i * 37) % 50] = i; }
+                    for (int i = 49; i >= 0; --i) { y[(i * 37) % 50] = i; }
+                    out = out + "|" + (x == y);
+                    int prev = -1; bool sorted = true;
+                    for (auto kv : x) { if (kv.first <= prev) { sorted = false; } prev = kv.first; }
+                    out = out + "|" + sorted;
+                    return out;
+                }
+                run();
+            )");
+            check_eq(std::string("-7=7,1=4,3=2,2.5=5,a=3,b=1,true=6,|7:-7:true|true|true"), r.as<std::string>());
+        });
+
+        test("hashed_map_iteration_survives_mutation", [this]() {
+            // a range-for whose body inserts or erases continues with the next greater key, as a std::map walk does
+            auto eng = make_engine(); stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                function run() -> string {
+                    map<int, int> m = {1: 1, 3: 3, 5: 5};
+                    string out = "";
+                    for (auto kv : m) {
+                        out = out + kv.first + ",";
+                        if (kv.first == 1) { m[4] = 4; m[0] = 0; }   // 4 is ahead (visited), 0 is behind (not)
+                        if (kv.first == 3) { m.remove(3); }           // erasing the current entry
+                    }
+                    out = out + "|" + m.size();
+                    map<int, int> e = {1: 1, 2: 2, 3: 3};
+                    string seen = "";
+                    for (auto kv : e) { seen = seen + kv.first; if (kv.first == 1) { e.remove(2); } }
+                    return out + "|" + seen;
+                }
+                run();
+            )");
+            check_eq(std::string("1,3,4,5,|4|13"), r.as<std::string>());
+        });
+
+        test("hashed_map_keys_keep_their_kinds_and_float_identity", [this]() {
+            auto eng = make_engine(); stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                function run() -> string {
+                    map<var, int> m = {};
+                    m[0.0] = 1; m[-0.0] = 2; m[1] = 3; m[1.0] = 4; m["1"] = 5; m['1'] = 6;
+                    return "" + m.size() + "," + m[0.0] + "," + m[-0.0] + "," + m[1] + "," + m[1.0] + "," + m.has("1") + "," + m.has(2);
+                }
+                run();
+            )");
+            check_eq(std::string("6,1,2,3,4,true,false"), r.as<std::string>());
         });
 
         test("scalar_map_lanes_keep_the_general_semantics", [this]() {

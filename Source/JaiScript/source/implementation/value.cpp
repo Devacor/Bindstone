@@ -1053,6 +1053,7 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
     } else if (v.raw_storage_index() == TYPEID_MAP) {
         const auto& handle = v.storage_.get<strong_ptr<script_map>>();
+        handle->prepare_order();   // workers read the borrow concurrently: its order view is built here, serially
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get())) | parallel_borrow_tag::k_map_bit;
     } else {
         throw runtime_error("make_parallel_borrow: source must be an array or map");
@@ -1517,5 +1518,47 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
     }
 }
 
+
+// The map-key hash (core/script_map.hpp): keys operator<=> calls equivalent hash alike. The type rank seeds it, then the payload
+// operator<=> compares: ints and chars by value, floats by value with every NaN and both zeros hashing alike (equality stays
+// operator<=>'s), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
+size_t script_value::map_string_key_hash(std::string_view text) noexcept {
+    return std::hash<std::string_view>{}(text) ^ (static_cast<size_t>(script_value_type::jai_string_type) * 0x9E3779B97F4A7C15ull);
+}
+
+size_t script_value::map_key_hash() const noexcept {
+    const script_value_type t = type();
+    const size_t seed = static_cast<size_t>(t) * 0x9E3779B97F4A7C15ull;
+    auto mix = [t](uint64_t x) { return map_key_mix(t, x); };
+    switch (t) {
+        case script_value_type::jai_null_type: return mix(0);
+        case script_value_type::jai_int_type: return mix(static_cast<uint64_t>(unchecked_as_int()));
+        case script_value_type::jai_float_type: {
+            double d = unchecked_as_float();
+            if (d != d) { return mix(0x7ff8000000000000ull); }
+            if (d == 0.0) { return mix(0); }
+            uint64_t bits; std::memcpy(&bits, &d, sizeof(bits));
+            return mix(bits);
+        }
+        case script_value_type::jai_string_type: return map_string_key_hash(unchecked_as_string());
+        case script_value_type::jai_utf8_string_type: return std::hash<std::string_view>{}(unchecked_as_utf8().bytes) ^ seed;
+        case script_value_type::jai_char_type: return mix(static_cast<unsigned char>(unchecked_as_char()));
+        case script_value_type::jai_bool_type: return mix(unchecked_as_bool() ? 1 : 0);
+        default: {
+            const void* identity = nullptr;   // KEEP IN STEP with operator<=>'s identity rows
+            switch (raw_storage_index()) {
+                case TYPEID_ARRAY:      identity = storage_.get_if<TYPEID_ARRAY>()->get(); break;
+                case TYPEID_MAP:        identity = storage_.get_if<TYPEID_MAP>()->get(); break;
+                case TYPEID_OBJECT:     identity = storage_.get_if<TYPEID_OBJECT>()->get(); break;
+                case TYPEID_FUNCTION:   identity = storage_.get_if<TYPEID_FUNCTION>()->get(); break;
+                case TYPEID_SHARED_PTR: identity = storage_.get_if<TYPEID_SHARED_PTR>()->get(); break;
+                case TYPEID_REFERENCE:  identity = storage_.get_if<TYPEID_REFERENCE>()->get(); break;
+                case TYPEID_PARALLEL_BORROW: identity = storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer(); break;
+                default: break;
+            }
+            return mix(reinterpret_cast<uintptr_t>(identity));
+        }
+    }
+}
 
 } // namespace jai

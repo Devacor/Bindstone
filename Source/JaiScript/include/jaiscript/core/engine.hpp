@@ -1202,7 +1202,7 @@ namespace jai {
             } else if constexpr (is_specialization_v<decay_t, bound_array>) {
                 // bound_array is a zero-copy wrapper for arrays
                 return script_value_type::jai_array_type;
-            } else if constexpr (is_specialization_v<decay_t, std::map>) {
+            } else if constexpr (is_script_map_like_v<decay_t>) {
                 return script_value_type::jai_map_type;
             } else if constexpr (is_specialization_v<decay_t, bound_map>) {
                 // bound_map is a zero-copy wrapper for maps
@@ -1253,7 +1253,7 @@ namespace jai {
                 return param_type_info(script_value_type::jai_array_type);
             } else if constexpr (is_specialization_v<decay_t, bound_array>) {
                 return param_type_info(script_value_type::jai_array_type);
-            } else if constexpr (is_specialization_v<decay_t, std::map>) {
+            } else if constexpr (is_script_map_like_v<decay_t>) {
                 return param_type_info(script_value_type::jai_map_type);
             } else if constexpr (is_specialization_v<decay_t, bound_map>) {
                 return param_type_info(script_value_type::jai_map_type);

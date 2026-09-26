@@ -78,6 +78,9 @@ namespace jai {
     
     template<typename T, template<typename...> class Template>
     inline constexpr bool is_specialization_v = is_specialization<T, Template>::value;
+    // a map a C++ binding treats as a script map: a std::map, or script_map itself
+    template <typename T>
+    inline constexpr bool is_script_map_like_v = is_specialization_v<T, std::map> || std::is_same_v<T, script_map>;
 
     // Convert a double to script_int (int64) with DEFINED behavior for NaN, +/-inf,
     // and out-of-range values. A plain static_cast of those to a 64-bit integer is
@@ -1486,7 +1489,7 @@ namespace jai {
                 return checked_result<T>(std::move(result));
             }
             // Map types
-            else if constexpr (is_specialization_v<T, std::map>) {
+            else if constexpr (is_script_map_like_v<T>) {
                 // Use engine's conversion registry first
                 if (engine_) {
                     auto registry = get_engine_conversion_registry(engine_);
@@ -1680,7 +1683,7 @@ namespace jai {
             else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
+                             !is_script_map_like_v<T>) {
                 // Check custom converter first
                 if (engine_) {
                     auto registry = get_engine_conversion_registry(engine_);
@@ -1776,6 +1779,9 @@ namespace jai {
         
         // Operators
         bool operator==(const script_value& other) const;
+        // the map-key hash: equal for keys operator<=> calls equivalent (core/script_map.hpp)
+        size_t map_key_hash() const noexcept;
+        static size_t map_string_key_hash(std::string_view text) noexcept;
         bool operator!=(const script_value& other) const { return !(*this == other); }
         
         // C++20 spaceship operator for complete ordering
@@ -2848,5 +2854,7 @@ namespace jai {
     }
 
 } // namespace jai
+
+#include "script_map.hpp"
 
 #endif // __JAISCRIPT_CORE_VALUE_HPP__

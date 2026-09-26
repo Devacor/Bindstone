@@ -9257,8 +9257,9 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		       k == script_value::TYPEID_BOOL || k == script_value::TYPEID_CHAR;
 	};
 	if (!scalar(key_in.raw_storage_index()) || !scalar(value.raw_storage_index()) || !container.has_valid_engine()) return {};
-	type_info_ptr map_tag = container.get_type_info();
-	type_info_ptr value_type = map_tag ? map_tag->value_type() : nullptr;
+	const type_info* map_tag = container.type_info_raw();   // borrowed: the stamps are engine-owned
+	static const type_info_ptr no_type;
+	const type_info_ptr& value_type = map_tag && map_tag->type_params.size() >= 2 ? map_tag->type_params[1] : no_type;
 	if (value_type) {
 		switch (value_type->base_type) {
 			case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_string_type:
@@ -9270,7 +9271,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	script_value key = key_in;
 	if (!key.has_valid_engine()) { key.set_engine(container.get_engine()); }
 	if (map_tag) {
-		if (type_info_ptr key_type = map_tag->key_type();
+		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
 		    key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
 			uint64_t got_id = symbolizer_->intern(vm_value_type_name(key));
 			uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
@@ -9285,7 +9286,20 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
 	}
 	if (!value_ref.has_valid_engine()) { value_ref.set_engine(container.get_engine()); }
-	if (value_type) {
+	const size_t vk = value.raw_storage_index();
+	auto exact_row = [&]() {   // the value already has the element's kind: the kernel's row is its copy (clone_element of a scalar)
+		switch (value_type->base_type) {
+			case script_value_type::jai_int_type: return vk == script_value::TYPEID_INT;
+			case script_value_type::jai_float_type: return vk == script_value::TYPEID_FLOAT;
+			case script_value_type::jai_string_type: return vk == script_value::TYPEID_STRING;
+			case script_value_type::jai_bool_type: return vk == script_value::TYPEID_BOOL;
+			case script_value_type::jai_char_type: return vk == script_value::TYPEID_CHAR;
+			default: return false;
+		}
+	};
+	if (value_type && exact_row() && !(value.get_type_info() && value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type)) {
+		value_ref = value;
+	} else if (value_type) {
 		if (!vm_is_element_type_compatible(value, value_type, value_ref)) {
 			std::string value_type_name = vm_value_type_name(value);
 			std::string expected_type = vm_type_info_name(value_type);

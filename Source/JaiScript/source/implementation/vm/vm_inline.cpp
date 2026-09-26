@@ -41,6 +41,7 @@ struct inline_context {
 	int loop_depth = 0;                                            // loops of the callee's own the clone is inside (a break or continue binds there)
 	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> spills;   // the statement's clone: a spilled operand becomes its temp
 	std::shared_ptr<identifier_expr> receiver;                     // a method graft: `this` and the bare fields read through the caller's receiver
+	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
 	const class_definition* field_class = nullptr;
 	std::vector<uint64_t> field_ids;
 	template <class T, class... A> std::shared_ptr<T> make(A&&... a) {
@@ -292,13 +293,14 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (r->value) { c.fail("a value returned from a void callee"); return nullptr; }
 		} else {
 			if (!r->value || r->binds_reference) { c.fail("a return without a value or by reference"); return nullptr; }
-			if (c.in_loop && r->static_return_proof != proof_same_type) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
+			const bool proven_return = r->static_return_proof == proof_same_type || c.returns_proven;
+			if (c.in_loop && !proven_return) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
 			if (c.in_loop && !landable(v.get())) { c.fail("a return the block cannot land"); return nullptr; }
 			auto rd = c.make<variable_decl>(r->location, c.result_type, c.result->name, c.result->symbol_id, v);   // `T __h = e;`: this path's definition of the result
 			rd->slot_index = c.result->slot_index;
-			if (r->static_return_proof == proof_same_type) { rd->static_init_proof = proof_same_type; }
+			if (proven_return) { rd->static_init_proof = proof_same_type; }
 			else { rd->site_kind = variable_decl::site_return; rd->site_owner = c.callee_name; }   // the callee's return converted here, with the return's text
 			ds.push_back(rd);
 		}
@@ -486,7 +488,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (fn->body.get() == callable_body_) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
-	if (!(void_type(rt) || scalar_type(rt))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
+	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
@@ -551,7 +553,8 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
 		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get())) { out.why = "an argument the block cannot land"; return false; } }
 	}
-	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = fn->return_type; probe.callee_name = fn->name; probe.in_loop = in_loop;
+	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn); probe.callee_name = fn->name; probe.in_loop = in_loop;
+	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
 	probe.ref_slots.assign(fn->local_count, 0);
 	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { probe.ref_slots[p.slot_index] = 1; } }
@@ -605,6 +608,12 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (out.receiver && free_identifier && probe.writes_member) { out.why = "a name before the call a method may write"; return false; }   // an identifier before the call may alias the receiver's instance
 	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
 	return true;
+}
+
+// the graft's result type: the declared one, or for an untyped lambda the kind the checker proved its returns yield
+type_info_ptr vm_compiler::graft_result_type(const function_decl* fn) {
+	if (fn->return_type || fn->graft_return_kind == 0) return fn->return_type;
+	return inline_type(fn->graft_return_kind == 1 ? script_value_type::jai_int_type : fn->graft_return_kind == 2 ? script_value_type::jai_float_type : script_value_type::jai_bool_type);
 }
 
 type_info_ptr vm_compiler::inline_type(script_value_type kind) {
@@ -670,7 +679,8 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	ctx.renames.assign(fn->local_count, nullptr);
 	ctx.ref_slots.assign(fn->local_count, 0);
 	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { ctx.ref_slots[p.slot_index] = 1; } }
-	ctx.result = result; ctx.result_type = fn->return_type; ctx.callee_name = fn->name; ctx.in_loop = plan.in_loop;
+	ctx.result = result; ctx.result_type = graft_result_type(fn); ctx.callee_name = fn->name; ctx.in_loop = plan.in_loop;
+	ctx.returns_proven = fn->graft_return_kind != 0;
 	ctx.receiver = plan.receiver;
 	// the parameters: a by-value parameter is a declaration of the callee's type from the argument (the assignment table
 	// bind_parameters runs; the checker proved the type, so nothing converts); a reference parameter bound to an identifier is a
@@ -728,7 +738,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	for (size_t s = base; s < base + fn->local_count; ++s) { callable_.primitive_slots.erase(static_cast<uint32_t>(s)); }   // another graft may put anything in these slots
 	if (result) { callable_.primitive_slots.erase(static_cast<uint32_t>(result->slot_index)); }   // the fallback declares it as anything
 	inlining_off_ = was_off;
-	sc.replace = call.get(); sc.result = result; sc.result_type = fn->return_type;   // a replaced argument's proof reads the type
+	sc.replace = call.get(); sc.result = result; sc.result_type = graft_result_type(fn);   // a replaced argument's proof reads the type
 	expression_ptr replaced = clone_expr(root, sc);
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
 	return sc.ok ? replaced : nullptr;

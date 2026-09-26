@@ -220,6 +220,10 @@ namespace {
 					for (const auto& a : c.args) { out << "(" << static_cast<int>(a.kind) << " " << a.v << " " << a.ip << ")"; }
 					out << "])";
 				}
+				if (!l.math_alias_sites.empty()) {
+					out << "\n" << pre << "  math_alias_sites";
+					for (const auto& m : l.math_alias_sites) { out << " (" << m.site << " f" << static_cast<int>(m.fn) << " @" << m.cache_slot << ")"; }
+				}
 				out << "\n" << pre << "  ir " << esc(l.ir_text) << "\n";
 			}
 			out << pre << "cell_refusals " << ch.cell_refusals.size() << "\n";

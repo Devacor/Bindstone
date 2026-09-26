@@ -4045,6 +4045,38 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(interp, vm, "a host that registers sqrt again");
 			check_eq(std::string("4.0 4.0,4.0 4.0 3.0"), vm, "the overload set answers");
 		});
+		// row 188: a loop whose body evaluates a stdlib alias closes; the name holds at the entry and after each call's landing
+		test("stdlib_math_alias_loops_close_as_cell_blocks", [this]() {
+			const std::string src = "array<float> XS = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float x = XS[i & 7]; float d = sqrt(x * x + 1.0) - 0.5; s += d + sin(x) + floor(x); } return s; }\n"
+				"to_string(run(64)) + \",\" + to_string(run(3));";
+			both(src, "", "an alias loop");
+			both(src, "", "an alias loop, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("C_MATH") != std::string::npos, "the loop closes over the aliases: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every) + " re-runs the alias from its guard's mark");
+			}
+		});
+		test("stdlib_math_alias_loop_follows_a_rebinding_by_a_call", [this]() {
+			// a call in the body rebinds the name: the landing's check misses and the general form makes the real call from then on;
+			// a call between an alias's guard and its op keeps the loop open
+			const std::string src = "var SQRT0 = sqrt;\n"
+				"function rb(int i) -> int { if (i == 5) { sqrt = function(float v) { return -v; }; } return i; }\n"
+				"function run() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 1.5; s += sqrt(x * x + 1.0); int k = rb(i); s += k; } return s; }\n"
+				"function ab(float x) -> float { return x * 2.0; }\n"
+				"function run2() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 0.25; s += sqrt(ab(x) + 1.0); } return s; }\n"
+				"string a = to_string(run()); sqrt = SQRT0; a += \",\" + to_string(run2()); sqrt = function(float v) { return v * 10.0; }; a + \",\" + to_string(run2());";
+			both(src, "", "a rebinding call inside the loop");
+			both(src, "", "a rebinding call inside the loop, proofs off", false);
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

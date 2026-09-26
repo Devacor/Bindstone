@@ -2537,6 +2537,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::vector<chunk::cell_loop::env_operand_ref> env_ops;
 		std::vector<chunk::cell_loop::cell_call> calls;
 		std::vector<uint32_t> loop_inline_sites;   // the inlined leaves inside the region: their guards are sites of the entry and the landings
+		std::vector<chunk::cell_loop::math_alias_site> loop_alias_sites;   // the stdlib aliases the block evaluates: sites of the entry and the landings
 		auto inline_fallback_of = [&](size_t ip) -> size_t { for (const chunk::inline_site& s : c.inline_sites) { if (s.fallback_ip == ip && s.join_ip > ip) return s.join_ip; } return SIZE_MAX; };
 		// a declaration landing on a compiler slot (a graft's parameters, locals and result; a hoisted call's temps) is a compiler value, not one of the
 		// body's locals: a later temp may take the slot with another kind, and it is flushed while live like any temp
@@ -2731,6 +2732,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				continue;
 			}
 			if (ip < inner_skip_until) { op.kind = ir::skip; ops.push_back(op); continue; }   // an inner counted loop's generic cond or update code, its loop back or its pop: dead in the block
+			if (st.op == opcode::op_math_guard) {   // a stdlib alias's guard: its name holds at the entry and after every effect point, no copy instruction
+				loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ st.a, static_cast<uint8_t>(st.c), static_cast<uint32_t>(ip * 3) });
+				op.kind = ir::skip; ops.push_back(op); continue;
+			}
 			if (st.op == opcode::op_inline_guard) {   // an inlined leaf's guard: checked at the entry and after every effect point, no copy instruction
 				if (std::find(loop_inline_sites.begin(), loop_inline_sites.end(), st.a) == loop_inline_sites.end()) { loop_inline_sites.push_back(st.a); }
 				op.kind = ir::skip; ops.push_back(op); continue;
@@ -2974,9 +2979,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = tk == token_type::minus ? ir::neg : tk == token_type::tilde ? ir::bnot : ir::lnot; op.a = st.b; op.writes = st.b;
 			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {
 				// math: a pure one-argument intrinsic of a value into a compiler value (the kernel's rows run in the block): itrunc
-				// and ifloor land an int, abs the argument's kind, the float family a float
-				const detail::math_fn fn = static_cast<detail::math_fn>(st.c);
+				// and ifloor land an int, abs the argument's kind, the float family a float; a stdlib alias is the kernel while its
+				// name holds (a site of the entry and the landings) and its real call's landing has no copy
+				const bool alias = st.c > 0xFF;
+				const detail::math_fn fn = static_cast<detail::math_fn>(alias ? st.c & 0x3F : st.c);
 				const fused_operand& src = c.fused_binary_protos[st.a].left;
+				if (alias && !(ip + 1 < back && code[ip + 1].op == opcode::op_call_temp && code[ip + 1].a == st.b && detail::math_alias_kernel(fn))) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint8_t rk = kflt;
 				switch (fn) {
 				case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
@@ -2989,7 +2997,22 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!direct_slot(src)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(src.slot, 0, false, 0, nullptr, ip);
 				use_slot(st.b, rk, true, k_typed_dst_temp, nullptr, ip);
-				op.kind = ir::math; op.tok = st.c; op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
+				op.kind = ir::math; op.tok = static_cast<uint8_t>(fn); op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
+				if (alias) {
+					if (!(st.c & 0x80)) { loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ (st.c >> 8) - 1, static_cast<uint8_t>(fn), static_cast<uint32_t>(ip * 3 + 1) }); }
+					else {
+						// a call between the guard and the op could rebind the name after the guard resolved it: its landing's miss would reach
+						// this op with no mark in the temp
+						size_t guard_ip = SIZE_MAX;
+						for (const auto& ms : loop_alias_sites) { if (ms.site == (st.c >> 8) - 1) { guard_ip = ms.cache_slot / 3; } }
+						bool crossed = guard_ip == SIZE_MAX;
+						for (const auto& cc : calls) { if (cc.probe_ip > guard_ip && cc.probe_ip < ip) { crossed = true; } }
+						if (crossed) { refuse(chunk::cell_refusal_effect, ip); break; }
+					}
+					ops.push_back(op);
+					op = ir_op{}; op.kind = ir::skip;
+					++ip;
+				}
 			} else if (st.op >= opcode::op_t_jlt_ii && st.op <= opcode::op_t_jne_ff) {
 				// cmp + test inside the body: the false edge stays inside the loop (or reaches its back edge)
 				if (!(st.c > ip)) { refuse(chunk::cell_refusal_effect, ip); break; }   // an edge past the back edge exits the block
@@ -3441,6 +3464,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::vector<fixup> fixups;
 		loop.calls = calls;
 		loop.inline_sites = loop_inline_sites;
+		loop.math_alias_sites = loop_alias_sites;
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
 		auto append = [&](vm_instruction ins, size_t from_ip) {
 			if (origin_override != SIZE_MAX) { from_ip = origin_override; }

@@ -1719,6 +1719,7 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);
+        bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell

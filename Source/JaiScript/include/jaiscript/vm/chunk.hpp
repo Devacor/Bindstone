@@ -405,6 +405,8 @@ namespace jai::vm {
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
             std::vector<uint32_t> inline_sites;   // the inlined leaves inside the region (chunk::inline_sites indexes): their guards hold at the entry and after every effect point
+            struct math_alias_site { uint32_t site; uint8_t fn; uint32_t cache_slot; };   // a stdlib alias the block evaluates as its kernel: the name binds the builtin at the entry and after every effect point
+            std::vector<math_alias_site> math_alias_sites;
             // a range-for head (`for (auto& p : pool)`): the iter_protos index (the loop variable's slot and binding), the index cell (the
             // iteration state's index at entry, stepped by the back edge, synced on a miss and at the exit) and the head's site (the state's container)
             uint32_t iter_proto = k_invalid_u32, iter_index_cell = k_invalid_u32, iter_site = k_invalid_u32;

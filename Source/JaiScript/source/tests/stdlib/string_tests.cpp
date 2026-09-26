@@ -719,10 +719,10 @@ public:
             };
             expect_lex_error(R"(var x = 1; `${x:q}`;)", "Unsupported format spec ':q' in template string");
             expect_lex_error(R"(var x = 1; `${x:}`;)", "Unsupported format spec ':' in template string");
-            expect_lex_error(R"(var x = 1; `${x:06}`;)", "Unsupported format spec ':06' in template string");  // no zero-pad flag
+            expect_lex_error(R"(var x = 1; `${x:#x}`;)", "Unsupported format spec ':#x' in template string");  // no alternate form
             expect_lex_error(R"(var x = 1; `${x:.f}`;)", "Unsupported format spec ':.f' in template string");
             expect_lex_error(R"(var x = 1; `${x:5.}`;)", "Unsupported format spec ':5.' in template string");
-            expect_lex_error(R"(var x = 1; `${x: 5}`;)", "Unsupported format spec ': 5' in template string");  // spec is raw text after ':'
+            expect_lex_error(R"(var x = 1; `${x:-5}`;)", "Unsupported format spec ':-5' in template string");  // '+' and ' ' are the signs
         });
 
         test("template_spec_type_mismatch_is_runtime_error", [this]() {
@@ -765,6 +765,63 @@ public:
                 s.starts_with(["the", "a"][0]);
             )");
             check_eq(result.as<bool>(), true);
+        });
+
+        // ============================================================
+        // UTF-8 characters, everyday operations, the string:: namespace, format pieces
+        // ============================================================
+
+        // each helper reads the result while its engine is alive (a value holds its engine)
+        auto eval = [this](const char* src) { auto engine = make_engine(); stdlib::register_all(*engine); engine->execute(src); };
+        auto es = [this](const char* src) { auto engine = make_engine(); stdlib::register_all(*engine); return engine->execute(src).as<std::string>(); };
+        auto ei = [this](const char* src) { auto engine = make_engine(); stdlib::register_all(*engine); return engine->execute(src).as<script_int>(); };
+        auto eb = [this](const char* src) { auto engine = make_engine(); stdlib::register_all(*engine); return engine->execute(src).as<bool>(); };
+
+        test("utf8_chars_walk_characters_and_keep_bad_bytes", [this, es, ei]() {
+            check_eq(std::string("[h][\xC3\xA9][\xF0\x9F\x99\x82]"), es("string acc = \"\"; for (string ch : \"h\xC3\xA9\xF0\x9F\x99\x82\".utf8_chars()) { acc += \"[\" + ch + \"]\"; } acc;"));
+            check_eq(script_int(3), ei("(\"a\" + \"\\xff\" + \"b\").utf8_chars().size();"));   // an invalid byte is its own element
+            check_eq(script_int(3), ei("\"h\xC3\xA9\xF0\x9F\x99\x82\".utf8_length();"));
+            check_eq(script_int(7), ei("\"h\xC3\xA9\xF0\x9F\x99\x82\".size();"));   // size stays bytes
+            check_eq(script_int(7), ei("\"h\xC3\xA9\xF0\x9F\x99\x82\".byte_size();"));
+        });
+
+        test("utf8_validity_code_and_from_code", [this, eval, es, ei, eb]() {
+            check_eq(true, eb("\"h\xC3\xA9\".is_valid_utf8();"));
+            check_eq(false, eb("(\"a\" + \"\\xff\").is_valid_utf8();"));
+            check_eq(false, eb("string::is_valid_utf8(\"\\xc3\");"));   // a truncated sequence
+            check_eq(script_int(233), ei("\"\xC3\xA9\".code();"));
+            check_eq(std::string("\xC3\xA9\xF0\x9F\x99\x82"), es("string::from_code(233) + string::from_code(128578);"));
+            check_throws([&]() { eval("\"ab\".code();"); });
+            check_throws([&]() { eval("string::from_code(55296);"); });   // a surrogate
+        });
+
+        test("lines_partition_compare_and_classes", [this, es, ei, eb]() {
+            check_eq(std::string("a|b|c"), es("\"a\\nb\\r\\nc\\n\".lines().join(\"|\");"));
+            check_eq(std::string("key|=|val=x"), es("\"key=val=x\".partition(\"=\").join(\"|\");"));
+            check_eq(std::string("nope||"), es("\"nope\".partition(\"=\").join(\"|\");"));
+            check_eq(script_int(-1), ei("\"abc\".compare(\"abd\");"));
+            check_eq(script_int(0), ei("\"x\".compare(\"x\");"));
+            check_eq(true, eb("\"123\".is_digit() && \"Ab\".is_alpha() && \"a1\".is_alnum() && \" \\t\".is_space() && \"AB\".is_upper() && \"ab\".is_lower();"));
+            check_eq(false, eb("\"\".is_digit() || \"1a\".is_digit();"));
+            check_eq(std::string("a|b|c,d"), es("\"a,b,c,d\".split(\",\", 2).join(\"|\");"));
+        });
+
+        test("string_namespace_free_functions", [this, eval, es]() {
+            check_eq(std::string("a-b-c"), es("string::join([\"a\", \"b\", \"c\"], \"-\");"));
+            check_eq(std::string("[hi][  hi  ]"), es("string t = \"  hi  \"; \"[\" + string::trim(t) + \"][\" + t + \"]\";"));   // the argument is untouched
+            check_eq(std::string("a+b+c"), es("string::replace_all(\"a-b-c\", \"-\", \"+\");"));
+            check_eq(std::string("ababab"), es("string::repeat(\"ab\", 3);"));
+            check_eq(std::string("007x.."), es("string::pad_left(\"7\", 3, \"0\") + string::pad_right(\"x\", 3, '.');"));
+            check_eq(std::string("HI!"), es("namespace string { function shout(string s) -> string { return string::to_upper(s) + \"!\"; } } string::shout(\"hi\");"));   // the namespace stays script-extensible
+            check_throws([&]() { eval("string::nope(\"x\");"); });
+        });
+
+        test("format_sign_zero_and_float_types", [this, eval, es]() {
+            check_eq(std::string("[00042] [-0042] [+7] [+3.5] [1.234500e+03] [0.00012] [255] [ 42] [0003.142]"),
+                es("`[${42:05}] [${-42:05}] [${7:+}] [${3.5:+.1f}] [${1234.5:e}] [${0.00012:g}] [${255:d}] [${42: }] [${3.14159:08.3f}]`;"));
+            check_eq(std::string("    ab|003.14|+5"), es("format(\"{0:>6}|{1:06.2f}|{2:+d}\", \"ab\", 3.14159, 5);"));
+            check_eq(std::string("  x00"), es("`${\"x00\":>5}`;"));   // an explicit align on a string keeps its fill
+            check_throws([&]() { eval("`${\"s\":05}`;"); });   // zero padding is numeric only
         });
     }
 };

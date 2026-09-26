@@ -113,12 +113,15 @@ error, so they have no line-ending sensitivity.
 A splice may end in a format spec — a deliberate subset of C++ `std::format`:
 
 ```ebnf
-format_spec = [[fill] align] [width] ["." precision] [type]
+format_spec = [[fill] align] [sign] ["0"] [width] ["." precision] [type]
 align       = "<" | ">" | "^"                  // left / right / center
 fill        = any char except "{" and "}"      // default " "; only valid before an align
-width       = [1-9][0-9]*                      // max 1024; no "0" zero-pad flag (use "0>N")
+sign        = "+" | " "                        // numbers only: "+" marks non-negatives, " " leaves them a space
+"0"         = zero padding after the sign      // numbers only; an explicit align wins (as in std::format)
+width       = [1-9][0-9]*                      // max 1024
 precision   = "." [0-9]+                       // numeric values only; max 1024
-type        = "f" | "x" | "X" | "b"            // fixed float; lower/upper hex int; binary int
+type        = "d" | "x" | "X" | "b"            // integers: decimal, lower/upper hex, binary
+            | "f" | "e" | "g"                  // numbers: fixed, scientific, general (shortest of the two)
 ```
 
 ```cpp
@@ -128,6 +131,9 @@ type        = "f" | "x" | "X" | "b"            // fixed float; lower/upper hex i
 `${gold:*>8}`    // "****1234" fill char + align
 `${n:x}` `${n:X}` `${n:b}`   // hex / HEX / binary (ints only; negatives keep the "-")
 `${hp:>6.1f}`    // "  73.5"  combos: fill+align+width+precision+type
+`${id:05}`       // "00042"   zero padding (after the sign: `${-42:05}` is "-0042")
+`${delta:+}`     // "+7"      a sign on non-negatives
+`${big:e}` `${x:g}`          // "1.234500e+03", "0.00012"
 ```
 
 - `:f` with no precision means 6 decimals (like `std::format`); `.N` without a type is also
@@ -135,9 +141,9 @@ type        = "f" | "x" | "X" | "b"            // fixed float; lower/upper hex i
 - `^` centering puts the odd fill char on the right (like `std::format`).
 - The desugar produces a call to the engine-core builtin `format_value(value, "spec")`
   (registered on every engine, no stdlib needed; callable directly). Don't shadow the name.
-- **Errors**: a spec outside this subset (`${x:q}`, `${x:06}`, `${x:}`, …) is rejected **at lex
+- **Errors**: a spec outside this subset (`${x:q}`, `${x:#x}`, `${x:-5}`, `${x:}`, …) is rejected **at lex
   time** — `Unsupported format spec ':q' in template string` with the source position. A spec
-  that doesn't fit the value's type (`${str:.2f}`, `${flt:x}`) is a catchable **runtime** error:
+  that doesn't fit the value's type (`${str:.2f}`, `${flt:x}`, `${str:05}`) is a catchable **runtime** error:
   `format spec ':.2f' does not apply to string value`. Both backends produce identical text.
 
 **Ambiguity rule (as implemented):** while lexing a splice, a `:` at top level (outside any

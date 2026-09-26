@@ -30,6 +30,7 @@
 #include <unordered_set>
 #include <functional>
 #include <filesystem>
+#include <jaiscript/detail/string_methods_more.hpp>
 #include <fstream>
 
 namespace jai {
@@ -1798,8 +1799,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // ============================================================
 
         {symbolizer->intern("split"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "split() takes 0 to 2 arguments (delimiter, [max_splits])");
+            }
+            script_int max_splits = -1;   // -1: no limit; the last element keeps the rest
             if (args.size() > 1) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "split() takes 0 or 1 argument (delimiter)");
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "split() second argument must be an integer");
+                }
+                max_splits = args[1].unchecked_as_int();
             }
 
             std::string delim = "";
@@ -1829,9 +1837,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else {
                 size_t start = 0;
                 size_t end;
-                while ((end = str.find(delim, start)) != std::string::npos) {
+                script_int splits = 0;
+                while ((max_splits < 0 || splits < max_splits) && (end = str.find(delim, start)) != std::string::npos) {
                     result.push(ctx.make_value(str.substr(start, end - start)));
                     start = end + delim.size();
+                    ++splits;
                 }
                 result.push(ctx.make_value(str.substr(start)));
             }
@@ -2091,6 +2101,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             by_index.push_back(&methods.at(id));
         }
     };
+    detail::add_more_string_methods(out.string_methods, symbolizer);
     build_index(out.array_methods, out.array_by_index, out.array_index);
     build_index(out.map_methods, out.map_by_index, out.map_index);
     build_index(out.string_methods, out.string_by_index, out.string_index);
@@ -7852,7 +7863,9 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         auto [class_var_id, class_var_view] = string_symbolizer_->get_class_var_id_with_view(name_id);
         auto class_var_result = environment_->get(class_var_id);
         if (!class_var_result) {
-            // Class not found
+            if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
+            }
             return class_var_result.error_value();
         }
         script_value class_var = std::move(class_var_result.value());

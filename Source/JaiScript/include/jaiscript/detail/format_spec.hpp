@@ -14,20 +14,24 @@ namespace detail {
 // std::format subset — full grammar documented in docs/grammar.md "Template
 // Strings":
 //
-//   spec      = [[fill] align] [width] ["." precision] [type]
+//   spec      = [[fill] align] [sign] ["0"] [width] ["." precision] [type]
 //   align     = "<" | ">" | "^"
 //   fill      = any char except "{" and "}" (default " "; requires align)
-//   width     = [1-9][0-9]*          (max 1024; no zero-padding flag)
+//   sign      = "+" | " "            (numeric values only: "+" marks non-negatives, " " leaves them a space)
+//   "0"       = zero padding after the sign (numeric values only; ignored with an explicit align, as std::format does)
+//   width     = [1-9][0-9]*          (max 1024)
 //   precision = "." [0-9]+           (numeric values only; max 1024)
-//   type      = "f" | "x" | "X" | "b"
+//   type      = "d" | "x" | "X" | "b" (integers) | "f" | "e" | "g" (numbers)
 //
-// Everything else (sign chars, '#', '0' pad, 'e'/'g', braces) is rejected.
+// Everything else ('#', '-' sign, 'o', '%', 'c', 's', nested braces) is rejected.
 struct format_spec {
     char fill = ' ';
     char align = 0;      // 0 = default: '>' for int/float, '<' for everything else
+    char sign = 0;       // 0, '+', ' '
+    bool zero = false;
     int width = 0;
     int precision = -1;  // -1 = unset
-    char type = 0;       // 0, 'f', 'x', 'X', 'b'
+    char type = 0;       // 0, 'd', 'x', 'X', 'b', 'f', 'e', 'g'
 };
 
 inline constexpr int format_spec_max_width = 1024;
@@ -46,8 +50,15 @@ inline bool parse_format_spec(std::string_view s, format_spec& out) {
         out.align = s[0];
         i = 1;
     }
+    if (i < s.size() && (s[i] == '+' || s[i] == ' ')) {
+        out.sign = s[i];
+        ++i;
+    }
+    if (i < s.size() && s[i] == '0') {
+        out.zero = true;
+        ++i;
+    }
     if (i < s.size() && is_digit(s[i])) {
-        if (s[i] == '0') return false;   // zero-padding flag unsupported
         long w = 0;
         while (i < s.size() && is_digit(s[i])) {
             w = w * 10 + (s[i] - '0');
@@ -69,7 +80,7 @@ inline bool parse_format_spec(std::string_view s, format_spec& out) {
     }
     if (i < s.size()) {
         char t = s[i];
-        if (t != 'f' && t != 'x' && t != 'X' && t != 'b') return false;
+        if (t != 'f' && t != 'x' && t != 'X' && t != 'b' && t != 'd' && t != 'e' && t != 'g') return false;
         out.type = t;
         ++i;
     }

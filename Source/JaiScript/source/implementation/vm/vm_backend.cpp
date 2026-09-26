@@ -7600,6 +7600,9 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ip, ci, regs); break;
 		case opcode::op_c_append: st = exec_c_append(f, ip, ci, regs); break;
 		case opcode::op_c_push: f.ip = ip; st = exec_c_push(f, ci, regs); ip = f.ip; break;
+		case opcode::op_c_rebind: f.ip = ip; st = exec_c_rebind(f, ci); ip = f.ip; break;   // element aliases and member sites: out of line, dispatched here
+		case opcode::op_c_mload: f.ip = ip; st = exec_c_mload(f, ci); ip = f.ip; break;
+		case opcode::op_c_mstore: f.ip = ip; st = exec_c_mstore(f, ci); ip = f.ip; break;
 		case opcode::op_c_size: {
 			const script_array* node = cs.site_node[ip - loop.copy_head];
 			const uint32_t dk = ci.a & k_cell_index_mask;

@@ -1,11 +1,11 @@
 // demoreel.jai — drag-drop shim: runs the demoreel on the standalone jaiscript
 // runner with zero C++ beyond the runner itself. Recreates the C++ host contract
-// from main.cpp in pure script — the ESC global, itrunc/ifloor casts, host_log,
+// from the C++ host (demoreel_host.cpp) in pure script — the ESC global, itrunc/ifloor casts, host_log,
 // and the seeded xorshift64* Rng class (bit-exact, checked-int64-safe: 16-bit-limb
 // mul, mask-after-shift logical shifts) — then imports the scene files in the
 // host's load order and pumps demo_frame at 30 fps.
 //
-// Deliberately NOT ported from main.cpp: the VT escape filter, xterm-256 rewrite,
+// Deliberately NOT ported from the C++ host: the VT escape filter, xterm-256 rewrite,
 // and row-diff redraw (frames are presented whole; the scripts' own run-length
 // escape elision still applies), the TAB dual-engine backend swap (one engine
 // here — TAB is swallowed), and 'r' hot reload (no script-side eval; swallowed).
@@ -34,7 +34,7 @@ function itrunc(float v) -> int { return math::itrunc(v); }
 function ifloor(float v) -> int { return math::ifloor(v); }
 function host_log(string line) -> void { print(line); }
 
-// xorshift64* — bit-exact port of main.cpp's demo_rng under checked int64:
+// xorshift64* — bit-exact port of the host's demo_rng under checked int64:
 // shifts wrap mod 2^64 (masked after >> for the logical form), the 64x64 low
 // multiply runs in 16-bit limbs so no intermediate exceeds int64.
 function u64_mul(int a, int b) -> int {
@@ -84,7 +84,7 @@ class Rng {
 }
 
 // ------------------------------------------------------------------ scenes ---
-// main.cpp's kSceneFiles order: base classes before derived, main.jai last
+// the jai adapter's kSceneFiles order: base classes before derived, main.jai last
 // (it reads ESC at import time, so the host API above must already exist).
 
 import "scenes/util.jai";
@@ -144,7 +144,7 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 }
 
 // ---------------------------------------------------------------- headless ---
-// Mirrors main.cpp run_smoke: 100x40, fixed dt 1/30, smoke=true, hud off,
+// Mirrors the host's run_smoke: 100x40, fixed dt 1/30, smoke=true, hud off,
 // key "" and zeroed timing args every frame. The rolling hash makes runs
 // comparable across runner backends (vm vs interp) without keeping frames.
 
@@ -385,7 +385,7 @@ function write_soundtrack() -> string {
 }
 
 // -------------------------------------------------------------------- pump ---
-// main.cpp's interactive loop: clock dt (clamped 0.1s) + fps EMA, poll one key
+// the host's interactive loop: clock dt (clamped 0.1s) + fps EMA, poll one key
 // edge, run demo_frame, present with a home escape, sleep off the fps budget.
 
 function run_interactive() -> int {

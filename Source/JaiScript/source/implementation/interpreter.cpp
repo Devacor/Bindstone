@@ -13282,9 +13282,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // instead of creating a new script_value (which would be a duplicate reference)
     initializer_depth.reset();
     auto result = execute_method_ast(matching_ctor, method_env.get(), args);
-
-    // Constructor executed and returned 'this'
-    return result;
+    if (!result) { return result; }
+    return this_value;   // a constructor call yields its instance (a bare `return;` ends the body early)
 }
 
 checked_result<script_value> interpreter::construct_default_instance(std::shared_ptr<script_class_definition> class_def,

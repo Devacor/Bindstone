@@ -18617,7 +18617,9 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		if (result.is_reference()) [[unlikely]] {
 			copy_reference_result(result);   // a reference result copies its target
 		}
-		if (rec.method_result_anchor && !rec.ctor_frame) {
+		if (rec.ctor_frame) [[unlikely]] {
+			result = rec.locals.get_this();   // a constructor call yields its instance (a bare `return;` ends the body early)
+		} else if (rec.method_result_anchor) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
 		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
@@ -18645,6 +18647,9 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 	}
 	if (rec.method_result_anchor) {
 		anchor_method_result(conv.value(), rec.locals.get_this());
+	}
+	if (rec.ctor_frame) [[unlikely]] {
+		conv.value() = rec.locals.get_this();
 	}
 	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
 		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});

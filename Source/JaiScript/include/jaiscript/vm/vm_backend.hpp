@@ -718,7 +718,7 @@ namespace jai::vm {
             // is AST-pinned. Applied at both completion doors (return_with_result +
             // fall_off_script_frame), never on unwind paths.
             type_info* ctor_result_stamp = nullptr;
-            bool ctor_frame = false;   // a constructor body run through the method door: falling off its end yields the frame's `this`
+            bool ctor_frame = false;   // a constructor body run through the method door: every return yields the frame's `this`
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;

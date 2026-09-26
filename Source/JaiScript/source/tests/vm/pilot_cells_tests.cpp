@@ -1591,6 +1591,39 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(6), closed, "every loop over bools closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
+		test("member_reads_of_slot_instances_close_loops", [this]() {
+			// a member read in a truth test, a compound operand and a declaration lands in a member temp: the loop closes, and every
+			// kernel fact holds (a user accessor runs per read, a call in the body that changes a field is seen, a null receiver raises)
+			const std::string script = R"(
+				class En { bool alive = true; float x = 0.0; En(float a) { x = a; alive = a > 3.0; } }
+				class Acc { int n = 0; int reads = 0; function _get_n() -> int { reads += 1; return n; } }
+				function bump(En& e) -> void { e.x = e.x + 100.0; }
+				function run() -> string {
+					array<En> ens = []; for (int i = 0; i < 8; ++i) { ens.push(En(i * 1.0)); }
+					float s = 0.0; float t = 0.0;
+					for (int r = 0; r < 3; ++r) {
+						for (auto& e : ens) { if (!e.alive) { continue; } s += e.x; float v = e.x; t = t + v; }
+					}
+					En p = En(5.0); float u = 0.0;
+					for (int i = 0; i < 4; ++i) { if (p.alive) { u += p.x; } if (i == 1) { bump(p); } }
+					Acc a = Acc(); a.n = 2; int w = 0;
+					for (int i = 0; i < 5; ++i) { w += a.n; }
+					string err = "";
+					En q = null;
+					try { for (int i = 0; i < 2; ++i) { u += q.x; } } catch (ex) { err = ex; }
+					return "" + s + "," + t + "," + u + "," + w + "," + a.reads + "|" + err;
+				}
+				run();
+			)";
+			both(script, "66.0,66.0,220.0,10,5|Cannot access 'x' on null ('q' is null)", "member temps");
+			const std::string listing = listing_run(R"(
+				class En { bool alive = true; float x = 0.0; }
+				function f(array<En> ens) -> float { float s = 0.0; for (auto& e : ens) { if (!e.alive) { continue; } s += e.x; } return s; }
+				array<En> xs = [En(), En()]; f(xs);
+			)");
+			check_true(listing.find("-- cell loop") != std::string::npos, "the range-for over instances closes");
+		});
+
 		test("a_block_holds_up_to_256_cells", [this]() {
 			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
 			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close

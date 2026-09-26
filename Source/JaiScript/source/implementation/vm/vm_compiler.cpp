@@ -512,6 +512,16 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 				fuse = true;
 			}
 			break;
+		case node_type::member_expr:
+			member_tail_into_temp(rhs);
+			if (code.back().op == opcode::op_load && code.size() >= 2 && code[code.size() - 2].op == opcode::op_member_temp) {
+				cp.rhs_proto = k_invalid_u32;
+				cp.rhs.slot = code.back().a;
+				cp.rhs.symbol = code.back().b;
+				cp.rhs.direct = true;
+				fuse = true;
+			}
+			break;
 		case node_type::identifier_expr:
 			if (code.back().op == opcode::op_load) {
 				cp.rhs_proto = k_invalid_u32;
@@ -1102,6 +1112,7 @@ void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vect
 		}
 	}
 	compile_expression(cond);
+	if (cond->get_type() == node_type::member_expr) { member_tail_into_temp(cond.get()); }
 	false_jumps.push_back(emit_cond_jump_false(cond.get()));
 }
 
@@ -1126,6 +1137,7 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 		}
 	}
 	compile_expression(cond);
+	if (cond->get_type() == node_type::member_expr) { member_tail_into_temp(cond.get()); }
 	true_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32, expression_returns_bool(cond.get()) ? 1u : 0u));
 }
 
@@ -5076,6 +5088,25 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	}
 }
 
+// A member read of a frame-slot instance that just compiled as LOAD base + GET_MEMBER becomes MEMBER_TEMP (op_get_member's
+// kernel, the value into a fresh temp) + LOAD temp: the same two dispatches, rewritten in place (no jump lands between them),
+// and a shape the cell translation takes (a truth test, a compound operand, a declaration's move)
+void vm_compiler::member_tail_into_temp(const expression* e) {
+	if (!e || !member_temp_operand(e)) return;
+	auto& code = chunk_->code;
+	const size_t n = code.size();
+	if (n < 2 || code[n - 1].op != opcode::op_get_member || code[n - 2].op != opcode::op_load) return;
+	const uint32_t base = member_base_slot(e);
+	if (code[n - 2].a != base || code[n - 2].c != 0) return;
+	const uint32_t node = code[n - 1].a;
+	if (node >= chunk_->nodes.size() || chunk_->nodes[node].get() != e) return;
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	code[n - 2] = vm_instruction{opcode::op_member_temp, node, t, base};
+	code[n - 1] = vm_instruction{opcode::op_load, t, temp_symbol_index(), 0};
+}
+
 void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 	if (expr->is_static) {
 		emit(opcode::op_get_static, add_node(expr));
@@ -5321,6 +5352,7 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 		}
 		return;
 	}
+	if (init->get_type() == node_type::member_expr) { member_tail_into_temp(init.get()); }
 	emit(opcode::op_decl_var, add_node(decl), 1, lvalue_init);
 }
 

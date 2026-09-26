@@ -5000,6 +5000,8 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					else if (name == "ends_with" && n == 1) inline_op = 6;
 					else if (name == "substr" && (n == 1 || n == 2)) inline_op = 7;
 					else if (name == "at" && n == 1) inline_op = 8;
+				} else if (builtin_kind == 2) {
+					if (name == "pop" && n == 0) inline_op = 11;
 				} else if (builtin_kind == 3) {
 					if (name == "has" && n == 1) inline_op = 9;
 					else if (name == "get" && n == 2) inline_op = 10;

@@ -360,6 +360,10 @@ engine stays usable", not by `check_throws`.
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,
   field-init in **declaration order**, static members/methods, hot reload with instance migration.
+- **Constructor exits** (Dev ruling 2026-09-26): a bare `return;` ends a constructor body early and the call
+  yields the instance; `return expr;` in a constructor's own body is a parse error (a lambda or nested function
+  inside it returns freely); a `throw` propagates, the assignment target keeps its value and the half-built
+  instance runs no destructor.
 - Coroutines: `coroutine`/`yield`, drivable by range-`for`; `coroutine` prefixes every function
   spelling (`coroutine name(...) [-> T]`, `coroutine function name(...) [-> T]`, `coroutine T name(...)`),
   free, method or static method, and produces the same declaration node.

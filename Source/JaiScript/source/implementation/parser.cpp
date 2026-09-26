@@ -2759,6 +2759,8 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
     // Parse body (never a coroutine body: `yield` inside a lambda is the ordinary parse error)
     struct coroutine_scope { bool& flag; bool saved; ~coroutine_scope() { flag = saved; } } body_scope{in_coroutine_, in_coroutine_};
     in_coroutine_ = false;
+    coroutine_scope ctor_scope{in_constructor_, in_constructor_};
+    in_constructor_ = false;
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error
         report_error("Expected '{' for lambda body", peek());
@@ -3236,6 +3238,10 @@ checked_result<statement_ptr> parser::return_statement() {
 
     expression_ptr value = nullptr;
     if (!check(token_type::semicolon)) {
+        if (in_constructor_) {
+            report_error("A constructor cannot return a value (a bare 'return;' ends it early and the call yields the instance)", returnToken);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(value, expression());
     }
 
@@ -3318,6 +3324,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     // Parse class members
     class_decl::member_visibility visibility = class_decl::Public;
     const bool class_entry_in_coroutine = in_coroutine_;
+    struct constructor_scope { bool& flag; bool saved; ~constructor_scope() { flag = saved; } } class_ctor_scope{in_constructor_, in_constructor_};
+    in_constructor_ = false;   // a class declared inside a constructor body: its members are their own bodies
     nesting_guard nesting(nesting_depth_);
 
     while (!check(token_type::right_brace) && !is_at_end()) {
@@ -4250,6 +4258,8 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     struct coroutine_scope { bool& flag; bool saved; ~coroutine_scope() { flag = saved; } } body_scope{in_coroutine_, in_coroutine_};
     in_coroutine_ = coroutine_body_pending_;
     coroutine_body_pending_ = false;
+    coroutine_scope ctor_scope{in_constructor_, in_constructor_};
+    in_constructor_ = allow_ctor_initializers;
 
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());

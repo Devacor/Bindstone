@@ -184,6 +184,7 @@ namespace jai {
         // Context tracking for context-sensitive parsing
         bool in_switch_case_ = false;  // Track if we're inside a switch case
         bool in_coroutine_ = false;
+        bool in_constructor_ = false;   // the body being parsed is a constructor's own (a value return is an error)
         // Armed by a coroutine head; parse_function_body consumes it for exactly the next
         // body, so nested functions and lambdas never inherit yield permission
         bool coroutine_body_pending_ = false;

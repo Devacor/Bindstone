@@ -4321,22 +4321,41 @@ public:
             auto e = make_engine();
             check_eq((int64_t)5, e->execute("class A { int x = 1; A() { x = 5; } } auto a = A(); a.x").as_int());
         });
-        test("ctor_explicit_valued_return_wins", [this]() {
+        test("ctor_valued_return_is_a_parse_error", [this]() {
+            // Dev ruling 2026-09-26: a constructor cannot return a value; a lambda or nested function inside it can
             auto e = make_engine();
             jai::stdlib::register_all(e);
-            // Pinned by probe before the in-loop entry existed: `return 99` in a ctor
-            // yields 99 (an int) to the call site, not the instance.
-            check_eq(std::string("int"), e->execute(
-                "class B { int x = 2; B() { x = 7; return 99; } } type_of(B())").as_string());
-            check_eq((int64_t)99, e->execute(
-                "class B { int x = 2; B() { x = 7; return 99; } } B() + 0").as_int());
+            std::string err;
+            try { e->execute("class B { int x = 2; B() { x = 7; return 99; } }"); } catch (const std::exception& ex) { err = ex.what(); }
+            check_true(err.find("A constructor cannot return a value") != std::string::npos, err);
+            check_eq((int64_t)12, e->execute(
+                "class C { int x = 0; C() { var f = [](int a) { return a * 2; }; function g(int b) -> int { return b + 1; } x = f(5) + g(1); } } C().x").as_int());
         });
-        test("ctor_bare_return_yields_null", [this]() {
+        test("ctor_bare_return_yields_the_instance", [this]() {
+            // Dev ruling 2026-09-26: a bare `return;` ends the constructor body early; the call yields the instance
             auto e = make_engine();
             jai::stdlib::register_all(e);
-            // Also pinned by probe: bare `return;` yields null (errors at typed use)
-            check_eq(std::string("null"), e->execute(
+            check_eq(std::string("A"), e->execute(
                 "class A { int x = 1; A() { return; } } type_of(A())").as_string());
+            check_eq((int64_t)4, e->execute(
+                "class G { int x = 1; G(int v) { x = 4; if (v > 0) { return; } x = 9; } } G(1).x").as_int());
+            check_eq((int64_t)9, e->execute("G(0).x").as_int());
+        });
+        test("ctor_throw_leaks_no_instance", [this]() {
+            // Dev ruling 2026-09-26: a throw propagates, the target keeps its value, and the half-built instance runs no destructor
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check_eq(std::string("3|null|bad|bad|[]"), e->execute(R"(
+                var LOG = [];
+                class Bad { int x = 1; Bad(int v) { x = 5; if (v == 0) { throw "bad"; } x = v; } ~Bad() { LOG.push(x); } }
+                function run() -> string {
+                    Bad keep = Bad(3); string err = ""; var fresh = null;
+                    try { keep = Bad(0); } catch (ex) { err = ex; }
+                    try { fresh = Bad(0); } catch (ex) { err = err + "|" + ex; }
+                    return "" + keep.x + "|" + type_of(fresh) + "|" + err + "|" + to_json(LOG);
+                }
+                run();
+            )").as_string());
         });
         test("shared_ptr_mint_stamps_type", [this]() {
             auto e = make_engine();

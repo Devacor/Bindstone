@@ -2896,6 +2896,22 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				ops.push_back(op);
 				op = ir_op{}; op.kind = ir::skip;   // the declaration is the pair's second instruction
 				++ip;
+			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_call_temp
+			           && code[ip + 1].a >= static_cast<uint32_t>(c.first_temp_slot) && code[ip + 1].a < k_typed_slot_mask) {
+				// `a[i].m`: the element into an alias temp (row 173) is an element alias's rebind, the member temp over the temp its dependent
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				if (fp.index_chain_ext.size() > 2 || !container_operand(fp.container) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const uint32_t aslot = code[ip + 1].a;
+				bool taken = find_cell(aslot) >= 0 || is_alias(aslot);
+				for (const ir_op& prior : ops) { if (prior.container == aslot) { taken = true; } }
+				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				if (taken || (op.container != k_invalid_u32 && is_alias(op.container))) { refuse(chunk::cell_refusal_translation, ip); break; }
+				use_slot(aslot, static_cast<uint8_t>(script_value::TYPEID_REFERENCE), true, k_typed_dst_temp, nullptr, ip);
+				alias_slots.push_back(aslot);
+				op.kind = ir::rebind; op.a = aslot; op.proto = st.a; op.writes = aslot;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the landing is the pair's second instruction
+				++ip;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && ip + 1 < back && code[ip + 1].op == opcode::op_compound_store
 			           && (code[ip + 1].c & compound_kind_mask) == compound_plus && (code[ip + 1].c & compound_flag_no_result) && !(code[ip + 1].c & (compound_flag_global_only | compound_flag_old_result))
 			           && code[ip + 1].b != k_invalid_u32 && code[ip + 1].b < k_typed_slot_mask) {
@@ -4070,7 +4086,29 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
 }
-bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e); }
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || elem_member_operand(e); }
+// `a[i].m` inside a loop over an array the checker proved holds class instances, `a` a frame slot: the element lands in an alias temp
+// and the member read in a member temp over it (a block takes the pair as an element alias's rebind)
+// the alias temp of an element member read: above every temp the function has used so far, so no earlier temp of the loop (a head's
+// size, another statement's value) holds a cell in its slot (a block takes one alias per slot)
+uint32_t vm_compiler::elem_alias_temp() {
+	const uint32_t at = static_cast<uint32_t>(std::max(temp_next_, temp_high_));
+	temp_next_ = at + 1;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	return at;
+}
+bool vm_compiler::elem_member_operand(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body || loops_.empty()) return false;
+	if (!e || e->get_type() != node_type::member_expr) return false;
+	const auto* m = static_cast<const member_expr*>(e);
+	if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::binary_expr) return false;
+	const auto* b = static_cast<const binary_expr*>(m->object.get());
+	if (b->op.type != token_type::left_bracket || b->static_operand_class != operand_class_object_element || !b->left || b->left->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<identifier_expr*>(b->left.get());
+	if (id->global_qualified) return false;
+	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
+	return slot != k_invalid_u32 && slot < k_typed_slot_mask;
+}
 // s.size() / s.length() on a receiver the checker proved (a string, an array or a map) held in a frame slot: a value that lands in a temp
 bool vm_compiler::size_temp_operand(const expression* e) const {
 	if (!builtins_ || !typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
@@ -4111,6 +4149,20 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 		++temp_next_;
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 		emit(opcode::op_size_temp, t, static_cast<uint32_t>(chunk_->call_sites.size() - 1), call->builtin_receiver);
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
+	}
+	if (elem_member_operand(e.get())) {
+		// the subscript as the member read evaluates it, the element into the alias temp, the member read over the alias
+		compile_expression(std::static_pointer_cast<member_expr>(e)->object);
+		const uint32_t at = elem_alias_temp();
+		const uint32_t t = static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		emit(opcode::op_call_temp, at);
+		emit(opcode::op_member_temp, add_node(e), t, at);
 		out = fused_operand{};
 		out.slot = t;
 		out.symbol = temp_symbol_index();
@@ -5204,6 +5256,19 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 	if (!e || !member_temp_operand(e)) return;
 	auto& code = chunk_->code;
 	const size_t n = code.size();
+	if (elem_member_operand(e)) {
+		// the subscript's code stays; its GET_MEMBER becomes the alias temp's landing, then the member temp over the alias and its load
+		if (n < 1 || code[n - 1].op != opcode::op_get_member) return;
+		const uint32_t node = code[n - 1].a;
+		if (node >= chunk_->nodes.size() || chunk_->nodes[node].get() != e) return;
+		const uint32_t at = elem_alias_temp();
+		const uint32_t t = static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		code[n - 1] = vm_instruction{opcode::op_call_temp, at, 0, 0};
+		emit(opcode::op_member_temp, node, t, at);
+		emit(opcode::op_load, t, temp_symbol_index(), 0);
+		return;
+	}
 	if (n < 2 || code[n - 1].op != opcode::op_get_member || code[n - 2].op != opcode::op_load) return;
 	const uint32_t base = member_base_slot(e);
 	if (code[n - 2].a != base || code[n - 2].c != 0) return;

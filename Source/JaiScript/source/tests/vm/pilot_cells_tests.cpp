@@ -3909,6 +3909,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "1;7.5;1;1;7.5;1;true;3.0;1;2.5;-3;true;3.0;1;2.5;-3;", "range-for kinds");
 			both(src, "1;7.5;1;1;7.5;1;true;3.0;1;2.5;-3;true;3.0;1;2.5;-3;", "range-for kinds, proofs off", false);
 		});
+		test("a_constant_stored_into_a_var_element_belongs_to_the_engine", [this]() {
+			// the stored element copies deep afterwards (slice clones each element), which needs its engine
+			const std::string src =
+				"var v7 = [4, 5, 12]; v7[1] = 11;\n"
+				"function f() -> string { var v = [4, 5, 12]; v[1] = 11; return to_json(v.slice(0, 2)); }\n"
+				"function g() -> string { var v = [0, 0, 0, 0]; for (int i = 0; i < 4; ++i) { v[i] = 7; v[i] = 2.5; } return to_json(v.slice(1, 3)); }\n"
+				"to_json(v7.slice(0, 2)) + f() + g();";
+			both(src, "[4,11][4,11][2.5,2.5]", "constant element stores");
+			both(src, "[4,11][4,11][2.5,2.5]", "constant element stores, proofs off", false);
+		});
 		test("a_computed_index_beside_a_lifted_partner_compiles_without_typed_lowering", [this]() {
 			const std::string src = "var A = [1, 2, 3, 4];\nfunction d() -> int { int i = 0; return (i + A[i]) + A[i + 2]; }\nto_string(d());";
 			both(src, "4", "computed index, proofs off", false);

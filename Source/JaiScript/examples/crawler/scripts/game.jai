@@ -485,6 +485,7 @@ function game_loop() -> void {
 	while (!G.over) {
 		compute_fov();
 		if (!G.smoke) { render_game(); }
+		else if (VIEW_PROBE != null) { VIEW_PROBE(); }
 		if (G.level_pending) {
 			level_up_screen();
 			if (G.over) { break; }

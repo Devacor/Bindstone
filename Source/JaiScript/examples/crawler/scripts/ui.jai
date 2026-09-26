@@ -7,9 +7,13 @@ var PANEL_W = 15;
 
 function eol() -> string { return ESC + "[K"; }
 
-function present(var lines) -> string {
+function frame_join(var lines) -> string {
 	var line_end = eol() + "\n";
-	var frame = lines.join(line_end) + line_end + ESC + "[J";
+	return lines.join(line_end) + line_end + ESC + "[J";
+}
+
+function present(var lines) -> string {
+	var frame = frame_join(lines);
 	draw(frame);
 	return frame;
 }
@@ -30,7 +34,7 @@ function title_line() -> string {
 		+ `  Floor ${G.floor}/10  Turn ${G.turn}  ` + col("90", `~ ${theme_name(G.floor)} ~`) + god_tag;
 }
 
-function compose_frame(var view_lines) -> void {
+function frame_lines(var view_lines) -> var {
 	var lines = [];
 	lines.push(title_line());
 	var panel = build_panel();
@@ -42,16 +46,19 @@ function compose_frame(var view_lines) -> void {
 	for (int i = start; i < G.msgs.size(); ++i) {
 		lines.push(" " + G.msgs[i]);
 	}
-	present(lines);
+	return lines;
+}
+
+function compose_frame(var view_lines) -> void { present(frame_lines(view_lines)); }
+
+function game_view_lines() -> var {
+	if (G.show_map) { return minimap_lines(); }
+	return render_view(FACE_DX[G.facing], FACE_DY[G.facing]);
 }
 
 function render_game() -> void {
 	frame_mark();   // --time probe: turn logic ends here, frame build begins
-	if (G.show_map) {
-		compose_frame(minimap_lines());
-	} else {
-		compose_frame(render_view(FACE_DX[G.facing], FACE_DY[G.facing]));
-	}
+	compose_frame(game_view_lines());
 }
 
 // A fast 3-frame sweep between cardinals: the cheap trick that makes 90-degree
@@ -115,8 +122,9 @@ function minimap_lines() -> var {
 				row = row + CELL_UNSEEN;
 			}
 		}
-		lines.push(row);
+		lines.push(row + " ".repeat(imax(0, VIEW_W - MAP_W)));
 	}
+	while (lines.size() < VIEW_H) { lines.push(" ".repeat(imax(VIEW_W, MAP_W))); }
 	return lines;
 }
 

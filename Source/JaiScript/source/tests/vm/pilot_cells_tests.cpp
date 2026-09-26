@@ -3405,6 +3405,40 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "constructor field stores");
 			both(script, "", "constructor field stores, proofs off", false);
 		});
+		test("lambda_locals_graft_at_their_calls", [this]() {
+			// row 175: a local declared with a lambda literal grafts at its calls; a local rebound to another lambda, a capturing lambda
+			// and an untyped result keep the call; the values hold on both backends, proofs off and the middle end off
+			const std::string script = R"(
+				int K = 3;
+				function run() -> string {
+					auto add = [](int a, int b) -> int { return a + b; };
+					auto scale = [](float v) -> float { return v * 2.5; };
+					int s = 0; float g = 0.0;
+					for (int i = 0; i < 10; ++i) { s = add(s, i); g += scale(i * 1.0); }
+					auto f = [](int a) -> int { return a + 1; };
+					int t = 0;
+					for (int i = 0; i < 4; ++i) { t = f(t); if (i == 1) { f = [](int a) -> int { return a * 10; }; } }
+					int base = 7;
+					auto cap = [=](int a) -> int { return a + base; };
+					int u = 0;
+					for (int i = 0; i < 3; ++i) { u = cap(u); }
+					auto untyped = [](int a) { return a + K; };
+					int w = 0;
+					for (int i = 0; i < 3; ++i) { w = untyped(w); }
+					return "" + s + "," + g + "," + t + "," + u + "," + w;
+				}
+				run();
+			)";
+			both(script, "45,112.5,200,21,9", "lambda grafts");
+			both(script, "45,112.5,200,21,9", "lambda grafts, proofs off", false);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(std::string("45,112.5,200,21,9"), off, "the middle end's switch off agrees");
+			}
+			const std::string l = listing_run(script);
+			check_true(l.find("-- inlined <lambda>") != std::string::npos, "the lambda calls are inlined: " + l);
+		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
 			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without

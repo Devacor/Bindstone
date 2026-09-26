@@ -412,6 +412,10 @@ namespace jai {
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
 
+        // the lambda as a declaration for a call of the local it initializes (the checker's proofs, the inliner's leaf graft)
+        mutable std::shared_ptr<class function_decl> graft_decl;
+        mutable std::vector<const class function_decl*> graft_overloads;
+
         // Chain captures resolved by the parser for NESTED lambdas: enclosing-frame
         // locals that only a nested lambda uses (this lambda captures the slot), and
         // names a nested lambda needs this lambda's default capture to carry

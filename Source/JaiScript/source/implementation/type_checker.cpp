@@ -397,6 +397,7 @@ private:
         const type_info* declared = nullptr;   // for message text; null for auto-inferred
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
+        const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
     };
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
 
@@ -2121,7 +2122,24 @@ private:
                 if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
             }
         }
-        stamp_call_proofs(c, program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty());
+        // a local declared with a lambda literal: the lambda as a one-overload declaration (the guard checks the binding at run time)
+        const std::vector<const function_decl*>* lambda_ov = nullptr;
+        if (!ov && program_ov.empty() && c->callee && c->callee->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<identifier_expr*>(c->callee.get());
+            const var_entry* local = id->slot_index != SIZE_MAX && !id->global_qualified ? find_local(id->name) : nullptr;
+            if (local && local->lambda) {
+                auto* lam = const_cast<lambda_expr*>(local->lambda);
+                if (!lam->graft_decl && lam->body && lam->body->get_type() == node_type::block_stmt) {
+                    auto d = std::make_shared<function_decl>(lam->location, std::string_view("<lambda>"));
+                    d->parameters = lam->parameters; d->return_type = lam->return_type;
+                    d->body = std::static_pointer_cast<block_stmt>(lam->body); d->local_count = lam->local_count;
+                    lam->graft_decl = d;
+                    lam->graft_overloads.assign(1, d.get());
+                }
+                if (lam->graft_decl) { lambda_ov = &lam->graft_overloads; }
+            }
+        }
+        stamp_call_proofs(c, lambda_ov ? lambda_ov : program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty() || lambda_ov != nullptr);
         {
             const function_decl* md = nullptr;
             if (stamping() && ov && ov->size() == 1 && c->callee && c->callee->get_type() == node_type::member_expr) {
@@ -2819,6 +2837,9 @@ private:
 		}
 		stamp(decl->static_init_proof, init_proof, proof_none);
 		if (init_proof != proof_none && stamping()) { ++counts_.decls; }
+		if (has_init && decl->slot_index != SIZE_MAX && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
+			entry.lambda = static_cast<const lambda_expr*>(decl->initializer.get());
+		}
 		warn_shadow("local", decl->name, decl->location);
 		scopes_.back().emplace(decl->name, std::move(entry));
 	}

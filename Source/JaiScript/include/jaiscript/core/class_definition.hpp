@@ -1064,7 +1064,7 @@ public:
 
         instance->set_class_definition(shared_from_this());
 
-        register_instance(std::weak_ptr<class_instance>(instance));
+        register_instance(std::weak_ptr<class_instance>(instance), instance.get());
 
         if (const auto& plan = instance_plan(); !plan.empty()) {
             instance->seed_fields_from_plan(plan, field_slot_count());
@@ -1979,7 +1979,7 @@ public:
                                                             : std::unique_lock<std::mutex>();
     }
 
-    void register_instance(std::weak_ptr<class_instance> instance) {
+    void register_instance(std::weak_ptr<class_instance> instance, class_instance* live = nullptr) {
         if (engine_ && engine_->parallel_region_active()) {
             // A pool worker parks the registration (no lock; the join registers survivors);
             // main's own chunk registers under the lock a worker's rare registered-instance
@@ -1990,18 +1990,19 @@ public:
             }
         }
         auto lock = registry_lock();
-        register_instance_after_region(std::move(instance));
+        register_instance_after_region(std::move(instance), nullptr, live);
     }
 
     // The join (main thread, region over: the plain unlocked path): a worker's surviving instance
     void register_instance_after_region(std::weak_ptr<class_instance> instance,
-                                        const detail::fault_injection* faults = nullptr) {
+                                        const detail::fault_injection* faults = nullptr, class_instance* live_hint = nullptr) {
         const size_t index = instances_.size();
         if (faults) { faults->checkpoint("registry.instance_append", index); }
         instances_.push_back(std::move(instance));
         // Publish the index only after the vector owns the entry. A failed append
         // must leave the instance unregistered, not pointing at a later survivor.
-        if (auto live = instances_.back().lock()) { live->registry_slot_ = index; }
+        if (live_hint) { live_hint->registry_slot_ = index; }   // the caller owns it: no lock round trip
+        else if (auto live = instances_.back().lock()) { live->registry_slot_ = index; }
     }
 
     // O(1) swap-remove by the instance's remembered index. Called from ~class_instance.

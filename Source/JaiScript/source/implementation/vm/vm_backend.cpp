@@ -14878,6 +14878,9 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	std::shared_ptr<function_decl> arity_match_ctor;
 	size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
 
+	if (ctor_asts.size() == 1) {   // one constructor: the tiers all pick it once its arity accepts the call
+		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { arity_match_ctor = ctor_asts[0]; }
+	} else
 	for (const auto& ctor_ast : ctor_asts) {
 		if (!arity_accepts(ctor_ast->parameters, args.size())) {
 			continue;

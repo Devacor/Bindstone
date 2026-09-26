@@ -3,11 +3,11 @@
 // sand and water pour in, plants drink and grow, embers burn them back down.
 
 class Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) {}
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) {}
 }
 
 class SandEl : Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) override {
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) override {
 		if (y + 1 >= h) { return; }
 		int b = i + w;
 		int t = c[b];
@@ -22,7 +22,7 @@ class SandEl : Element {
 }
 
 class WaterEl : Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) override {
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) override {
 		if (y + 1 < h) {
 			int b = i + w;
 			if (c[b] == 0) { c[b] = 3; c[i] = 0; return; }
@@ -46,7 +46,7 @@ class WaterEl : Element {
 }
 
 class EmberEl : Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) override {
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) override {
 		a[i] = a[i] + 1;
 		// ignite any neighboring plant
 		if (x > 0 && c[i - 1] == 5) { c[i - 1] = 4; a[i - 1] = 0; }
@@ -62,7 +62,7 @@ class EmberEl : Element {
 }
 
 class PlantEl : Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) override {
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) override {
 		if (a[i] > 30) { return; }             // generation cap: stop creeping forever
 		if (r.next(100) >= 6) { return; }
 		// drink an adjacent water cell, then sprout into an empty neighbor
@@ -87,7 +87,7 @@ class PlantEl : Element {
 }
 
 class SmokeEl : Element {
-	void step(var& c, var& a, int w, int h, int i, int x, int y, var r, int fr) override {
+	void step(var& c, var& a, int w, int h, int i, int x, int y, var& r, int fr) override {
 		a[i] = a[i] + 1;
 		if (a[i] > 26) { c[i] = 0; a[i] = 0; return; }
 		if (y == 0) { c[i] = 0; a[i] = 0; return; }

@@ -70,18 +70,6 @@ SQInteger rng_nextf(HSQUIRRELVM v) {
 	return 1;
 }
 
-// JaiScript copies a bound Rng passed by value (sand.jai's `var r`); Squirrel's
-// clone does not copy class user data, so the port copies explicitly
-SQInteger rng_copy(HSQUIRRELVM v) {
-	demoreel::demo_rng state = *rng_self(v);
-	sq_getclass(v, 1);
-	if (SQ_FAILED(sq_createinstance(v, -1))) { return sq_throwerror(v, "Rng.copy: cannot create"); }
-	SQUserPointer up = nullptr;
-	sq_getinstanceup(v, -1, &up, rng_tag(), SQTrue);
-	new (up) demoreel::demo_rng(state);
-	return 1;
-}
-
 SQInteger native_itrunc(HSQUIRRELVM v) {
 	SQFloat f = 0;
 	sq_getfloat(v, 2, &f);
@@ -155,7 +143,6 @@ public:
 		bind_closure(vm_, "roll", rng_roll, 3, "xnn");
 		bind_closure(vm_, "chance", rng_chance, 2, "xn");
 		bind_closure(vm_, "nextf", rng_nextf, 1, "x");
-		bind_closure(vm_, "copy", rng_copy, 1, "x");
 		sq_newslot(vm_, -3, SQFalse);
 		sq_pop(vm_, 1);
 	}

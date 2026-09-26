@@ -1,9 +1,7 @@
 -- POWDER: falling-sand mini toy: sand, water, ember, plant, smoke, each a class
 -- owning its behavior. Spawners keep it evolving unattended. Cell arrays are
 -- 1-based (cell i lives at c[i + 1]); coordinates stay 0-based.
--- The reference's step(..., var r, ...) takes the scene Rng BY VALUE, so every
--- draw comes from a fresh copy of the scene rng (which do_fall/do_smoke never
--- advance): r:copy():next(n) reproduces that.
+-- Elements draw from the scene Rng itself (the reference's step takes it as var& r).
 
 Element = class()
 function Element:init() end
@@ -55,7 +53,7 @@ function EmberEl:step(c, a, w, h, i, x, y, r, fr)
 	if x < w - 1 and c[j + 1] == 5 then c[j + 1] = 4; a[j + 1] = 0 end
 	if y > 0 and c[j - w] == 5 then c[j - w] = 4; a[j - w] = 0 end
 	if y < h - 1 and c[j + w] == 5 then c[j + w] = 4; a[j + w] = 0 end
-	if a[j] > 22 + r:copy():next(26) then c[j] = 6; a[j] = 0; return end   -- burn out to smoke
+	if a[j] > 22 + r:next(26) then c[j] = 6; a[j] = 0; return end   -- burn out to smoke
 	if y + 1 >= h then return end
 	local b = j + w
 	if c[b] == 3 then c[j] = 6; a[j] = 0; return end   -- doused
@@ -66,7 +64,7 @@ PlantEl = class(Element)
 function PlantEl:step(c, a, w, h, i, x, y, r, fr)
 	local j = i + 1
 	if a[j] > 30 then return end             -- generation cap: stop creeping forever
-	if r:copy():next(100) >= 6 then return end
+	if r:next(100) >= 6 then return end
 	-- drink an adjacent water cell, then sprout into an empty neighbor
 	local drink = -1
 	if x > 0 and c[j - 1] == 3 then drink = j - 1

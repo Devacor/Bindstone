@@ -93,8 +93,7 @@ class SmokeEl extends Element {
 	}
 }
 
-// The reference passes the scene Rng as `var r`, which copies the bound object:
-// each element step draws from a fresh copy (rng.copy()), never advancing it.
+// Elements draw from the scene Rng itself (the reference's step takes it as var& r).
 
 class SandBox extends Scene {
 	cells = null;
@@ -184,19 +183,19 @@ class SandBox extends Scene {
 				for (local x = 0; x < w; ++x) {
 					local i = row + x;
 					local t2 = cells[i];
-					if (t2 == 2) { el_sand.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 3) { el_water.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 4) { el_ember.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 5) { el_plant.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
+					if (t2 == 2) { el_sand.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 3) { el_water.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 4) { el_ember.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 5) { el_plant.step(cells, aux, w, h, i, x, y, rng, fr); }
 				}
 			} else {
 				for (local x = w - 1; x >= 0; --x) {
 					local i = row + x;
 					local t2 = cells[i];
-					if (t2 == 2) { el_sand.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 3) { el_water.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 4) { el_ember.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
-					else if (t2 == 5) { el_plant.step(cells, aux, w, h, i, x, y, rng.copy(), fr); }
+					if (t2 == 2) { el_sand.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 3) { el_water.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 4) { el_ember.step(cells, aux, w, h, i, x, y, rng, fr); }
+					else if (t2 == 5) { el_plant.step(cells, aux, w, h, i, x, y, rng, fr); }
 				}
 			}
 		}
@@ -207,7 +206,7 @@ class SandBox extends Scene {
 		local n = w * h;
 		for (local i = 0; i < n; ++i) {
 			if (cells[i] == 6) {
-				el_smoke.step(cells, aux, w, h, i, i % w, i / w, rng.copy(), fr);
+				el_smoke.step(cells, aux, w, h, i, i % w, i / w, rng, fr);
 			}
 		}
 	}

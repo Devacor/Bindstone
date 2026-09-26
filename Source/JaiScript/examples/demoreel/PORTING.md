@@ -69,13 +69,9 @@ Errors: script failures surface as `std::exception` throws; the host prints
 Bind all of these in `make_session`:
 
 - **`Rng`**: the shared `demoreel::demo_rng`, exactly: constructor `(int seed)`,
-  methods `next(n) roll(lo, hi) chance(p) nextf()`, plus `copy()` (the C++ copy
-  constructor) in ports. Never reimplement it with your language's RNG; every
-  scene seeds one (`seed + idx * 7919`). `copy()` exists because POWDER's
-  element `step(..., var r, ...)` takes the scene Rng BY VALUE: JaiScript copies
-  a bound object into a by-value parameter, so the ember/plant draws come from a
-  fresh copy of a scene rng that `do_fall`/`do_smoke` never advance. A port
-  reproduces it with `r.copy().next(n)` at those two draws.
+  methods `next(n) roll(lo, hi) chance(p) nextf()`. Never reimplement it with
+  your language's RNG; every scene seeds one (`seed + idx * 7919`), and the
+  draws must happen in the reference's order.
 - **`host_log(string)`**: forward to `services.log` (stdout, never hashed).
 - **`itrunc(float) -> int`** (C cast: truncation toward zero) and
   **`ifloor(float) -> int`**. Plain script-language helpers are fine when the

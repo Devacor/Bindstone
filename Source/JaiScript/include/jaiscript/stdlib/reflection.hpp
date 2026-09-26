@@ -132,7 +132,7 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
     } else {
         door.engine_def = holder->type_id != UINT64_MAX
             ? eng->get_class_definition(holder->type_id)
-            : eng->get_class_definition(holder->type_name);
+            : eng->get_class_definition(std::string(holder->type_name));
         door.def = door.engine_def.get();
     }
     return door;

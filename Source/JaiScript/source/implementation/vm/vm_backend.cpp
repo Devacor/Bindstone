@@ -1225,7 +1225,7 @@ const script_value& vm_backend::member_target::get_field(uint64_t id) const {
 	return instance->get_field(id);
 }
 
-const std::string& vm_backend::member_target::class_name() const {
+std::string_view vm_backend::member_target::class_name() const {
 	if (class_def) {
 		return class_def->get_name();
 	}
@@ -1263,7 +1263,7 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 	} else if (engine_) {
 		target.engine_def = holder->type_id != UINT64_MAX
 			? engine_->get_class_definition(holder->type_id)
-			: engine_->get_class_definition(holder->type_name);
+			: engine_->get_class_definition(std::string(holder->type_name));
 		target.class_def = target.engine_def.get();
 	}
 	return target;
@@ -10603,8 +10603,8 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		}
 	}
 	{
-		const std::string& cls = target.class_name();
-		raise_script_exception((cls.empty() ? "object" : cls) + " has no member '" + std::string(member->member) + "'", member->location);
+		const std::string_view cls = target.class_name();
+		raise_script_exception((cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member->member) + "'", member->location);
 	}
 	return {};
 }
@@ -12004,8 +12004,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	}
 
 	{
-		const std::string& cls = target.class_name();
-		raise_script_exception((cls.empty() ? "object" : cls) + " has no member '" + std::string(expr->member) + "'", expr->location);
+		const std::string_view cls = target.class_name();
+		raise_script_exception((cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(expr->member) + "'", expr->location);
 	}
 	out = make_null();
 	return {};
@@ -12480,8 +12480,8 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		}
 		target.instance->set_field_unchecked(member_id, enforced.value());
 	} else {
-		const std::string& cls = target.class_name();
-		raise_script_exception("Cannot assign to '" + std::string(member->member) + "': " + (cls.empty() ? "object" : cls) + " has no such member", member->location);
+		const std::string_view cls = target.class_name();
+		raise_script_exception("Cannot assign to '" + std::string(member->member) + "': " + (cls.empty() ? std::string("object") : std::string(cls)) + " has no such member", member->location);
 		return {};
 	}
 	return {};

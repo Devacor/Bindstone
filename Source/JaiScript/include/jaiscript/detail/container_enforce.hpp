@@ -65,7 +65,7 @@ namespace jai::detail {
 			return info->type_name;
 		}
 		if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) {
-			return holder->type_name;
+			return std::string(holder->type_name);
 		}
 		return container_base_type_name(v.current_type());
 	}

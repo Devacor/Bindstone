@@ -44,6 +44,9 @@
 #endif
 
 namespace jai {
+// the engine's classes by name: transparent lookups, so a type name held as an interned view finds its class without a copy
+struct class_name_hash { using is_transparent = void; size_t operator()(std::string_view s) const noexcept { return std::hash<std::string_view>{}(s); } };
+using class_name_map = std::unordered_map<std::string, std::shared_ptr<class_definition>, class_name_hash, std::equal_to<>>;
 
 // Factory defined by the VM backend TU (source/implementation/vm/vm_backend.cpp)
 std::unique_ptr<execution_backend> create_vm_backend();
@@ -211,7 +214,7 @@ static int compute_param_match_cost(
         const std::vector<param_type_info>& paramTypes,
         const conversions::conversion_registry* convReg,
         const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type,
-        const std::unordered_map<std::string, std::shared_ptr<class_definition>>* classes_by_name) {
+        const class_name_map* classes_by_name) {
     int totalCost = 0;
     for (size_t i = 0; i < paramTypes.size(); ++i) {
         const auto& paramInfo = paramTypes[i];
@@ -237,15 +240,15 @@ static int compute_param_match_cost(
                     std::string expectedClassName = paramClassIt->second->get_name();
                     auto instance = const_cast<script_value&>(arg).get_class_instance();
                     class_definition* argClassDef = nullptr;
-                    const std::string* argClassName = nullptr;
+                    std::optional<std::string_view> argClassName;
                     if (instance) {
                         argClassDef = instance->get_class_definition();
-                        argClassName = &instance->get_class_name();
+                        argClassName = instance->get_class_name();
                     } else {
                         // cpp_bound / raw C++ holders carry the registered name on the holder
                         auto holder = arg.get_object_holder();
                         if (holder && !holder->type_name.empty()) {
-                            argClassName = &holder->type_name;
+                            argClassName = holder->type_name;
                             if (classes_by_name) {
                                 auto argClassIt = classes_by_name->find(holder->type_name);
                                 if (argClassIt != classes_by_name->end()) {
@@ -377,7 +380,7 @@ struct engine::implementation {
         // Reference to the conversion registry and class lookups
         std::shared_ptr<const conversions::conversion_registry> conversions;
         std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type = nullptr;
-        std::unordered_map<std::string, std::shared_ptr<class_definition>>* classes_by_name = nullptr;
+        class_name_map* classes_by_name = nullptr;
 
         OverloadSet() : conversions() {}
 
@@ -386,7 +389,7 @@ struct engine::implementation {
         }
 
         void set_class_lookup(std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* lookup,
-                              std::unordered_map<std::string, std::shared_ptr<class_definition>>* name_lookup) {
+                              class_name_map* name_lookup) {
             classes_by_type = lookup;
             classes_by_name = name_lookup;
         }
@@ -495,7 +498,7 @@ struct engine::implementation {
     std::unordered_map<std::string, OverloadSet> overloadedFunctions;
     
     // Registered classes
-    std::unordered_map<std::string, std::shared_ptr<class_definition>> classes;
+    class_name_map classes;
 
     // Type ID to class definition mapping for fast lookups (type_id is interned string)
     std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classesByTypeId;
@@ -1497,7 +1500,7 @@ void engine::initialize_engine_reference() {
     auto engine_weak = this;
     
     // Set up custom extractor for class_instance objects in the conversion registry
-    impl->conversions->set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
+    impl->conversions->set_custom_extractor([this](std::string_view type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
         // dynamic_binder creates objects with type_name matching the class name
         auto classIt = impl->classes.find(type_name);
         if (classIt != impl->classes.end()) {

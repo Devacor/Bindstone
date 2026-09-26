@@ -1153,7 +1153,7 @@ namespace jai {
             script_value user_accessor(uint64_t id) const; // nearest user _get_/_set_ (synthesized skipped); invalid when absent
             bool has_field(uint64_t id) const;
             const script_value& get_field(uint64_t id) const;
-            const std::string& class_name() const;         // empty when unknown
+            std::string_view class_name() const;           // empty when unknown
         };
         member_target resolve_member_target(const script_value& objectValue) const;
 

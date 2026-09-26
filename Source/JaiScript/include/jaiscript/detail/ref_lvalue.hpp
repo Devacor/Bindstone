@@ -568,7 +568,7 @@ namespace jai::detail {
 			class_def = instance->get_class_definition();
 		} else if (eng) {
 			engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
-			                                           : eng->get_class_definition(holder->type_name);
+			                                           : eng->get_class_definition(std::string(holder->type_name));
 			class_def = engine_def.get();
 		}
 		if (class_def && class_def->is_subtype_of(constraint->type_name)) {

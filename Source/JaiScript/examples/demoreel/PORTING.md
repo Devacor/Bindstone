@@ -69,8 +69,13 @@ Errors: script failures surface as `std::exception` throws; the host prints
 Bind all of these in `make_session`:
 
 - **`Rng`**: the shared `demoreel::demo_rng`, exactly: constructor `(int seed)`,
-  methods `next(n) roll(lo, hi) chance(p) nextf()`. Never reimplement it with
-  your language's RNG; every scene seeds one (`seed + idx * 7919`).
+  methods `next(n) roll(lo, hi) chance(p) nextf()`, plus `copy()` (the C++ copy
+  constructor) in ports. Never reimplement it with your language's RNG; every
+  scene seeds one (`seed + idx * 7919`). `copy()` exists because POWDER's
+  element `step(..., var r, ...)` takes the scene Rng BY VALUE: JaiScript copies
+  a bound object into a by-value parameter, so the ember/plant draws come from a
+  fresh copy of a scene rng that `do_fall`/`do_smoke` never advance. A port
+  reproduces it with `r.copy().next(n)` at those two draws.
 - **`host_log(string)`**: forward to `services.log` (stdout, never hashed).
 - **`itrunc(float) -> int`** (C cast: truncation toward zero) and
   **`ifloor(float) -> int`**. Plain script-language helpers are fine when the
@@ -86,8 +91,12 @@ Bind all of these in `make_session`:
   float stored into it. Lua's `//` and `%` floor and its `>>` is logical, so a
   possibly-negative operand needs the truncating form.
 - Ints print as digits; the reel never stringifies a float.
-- `parallel_transform` bodies (the presenter, donut/julia/lava/sponge/chrome/skull
-  rows) are pure functions of their inputs: run them as serial loops.
+- `parallel_transform` bodies (donut/julia/lava/sponge/chrome/skull rows) are
+  pure functions of their inputs: run them as serial loops, writing the grid
+  directly (the row arrays exist for the parallel contract, not the picture).
+- A class-typed or array-typed value copies on assignment and by-value
+  parameters (C++ semantics); Lua/Squirrel tables alias. The reel only relies on
+  this in POWDER's Rng parameter (above); everything else is read-only or `var&`.
 - The presenter emits a color escape only when the palette index changes along a
   row and collapses uniform cells to a space or a full block (`util.jai hb_row`).
 
@@ -98,7 +107,7 @@ Bind all of these in `make_session`:
 
 | option | target | runtime |
 |---|---|---|
-| `-DDEMOREEL_PORT_LUA=ON` | `demoreel_lua` | `Source/JaiScript/lua` + `sol2` |
+| `-DDEMOREEL_PORT_LUA=ON` | `demoreel_lua` | `Source/JaiScript/lua` + `sol2` (both git-ignored checkouts; `DEMOREEL_LUA_ROOT` / `DEMOREEL_SOL2_ROOT` override) |
 
 ## 6. Measurement
 

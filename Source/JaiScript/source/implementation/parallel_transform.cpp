@@ -1476,7 +1476,9 @@ namespace {
 			                                                          &slot.limits, budget);
 		}
 		for (const auto& [name_id, name] : slot.host_functions) {
-			slot.root_env->define(name_id, eng.make_parallel_host_function_copy(name));
+			script_value copy = eng.make_parallel_host_function_copy(name);
+			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
+			slot.root_env->define(name_id, std::move(copy));
 		}
 		slot.error.reset();
 	}
@@ -1905,7 +1907,9 @@ namespace {
 			}
 		}
 		for (const auto& [name_id, name] : adm.host_functions) {
-			ctx->root_env->define(name_id, eng.make_parallel_host_function_copy(name));
+			script_value copy = eng.make_parallel_host_function_copy(name);
+			if (ctx->vm) { ctx->vm->adopt_math_alias(name_id, copy); }
+			ctx->root_env->define(name_id, std::move(copy));
 		}
 		if (chunk_wrapper && *chunk_wrapper) {
 			const std::shared_ptr<function_decl>& wrapper = *chunk_wrapper;

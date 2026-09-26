@@ -12,6 +12,7 @@
 
 namespace jai {
     struct builtin_method_registries;
+    class engine;
 }
 
 namespace jai::detail { enum class math_fn : uint8_t; }
@@ -31,6 +32,8 @@ namespace jai::vm {
         void ir_listing(bool on) { ir_listing_ = on; }
         // the middle end's switch (engine::ir_passes): off, no proof-based elision and no pass; the regions run their checked forms
         void ir_passes(bool on) { ir_passes_ = on; }
+        // the stdlib math aliases a bare call may lower to (engine::register_math_alias)
+        void math_aliases(const engine* e) { engine_ = e; }
 
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
@@ -78,6 +81,7 @@ namespace jai::vm {
 
         string_symbolizer* symbolizer_;
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
+        const engine* engine_ = nullptr;
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
         bool ir_passes_ = true;
@@ -104,6 +108,8 @@ namespace jai::vm {
         bool hoist_in(const expression* e);            // a subtree holding a hoisted read, intrinsic or unary, quiet or not
         // a call to a one-argument math:: intrinsic whose result a compiler temp can carry (none = not one)
         detail::math_fn math_temp_operand(const expression* e) const;
+        detail::math_fn math_alias_operand(const call_expr* call) const;   // a bare call to a stdlib math alias (none = not one)
+        static bool math_alias_call(const expression* e);                  // a math temp spelled as a bare call: its callee resolves at run time
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
         bool unary_temp_operand(const expression* e);
         void compile_unary_into_temp(const expression_ptr& e, fused_operand& out);

@@ -452,6 +452,19 @@ namespace jai {
         detail::parallel_engine_state& parallel_state();
         script_value make_parallel_host_function_copy(const std::string& name);
 
+        // Stdlib math builtins the VM evaluates through the math:: kernel while the name still binds the function registered
+        // here (compared per call; any rebinding or re-registration takes the real call). The name must hold exactly one
+        // registration and `intrinsic` must name a kernel whose result equals it for int and float arguments
+        // (detail::math_alias_kernel); anything else registers nothing.
+        struct math_alias_row {
+            const void* identity = nullptr;   // &value.unchecked_as_function()
+            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
+        };
+        static constexpr size_t k_math_alias_rows = 64;
+        void register_math_alias(std::string_view name, std::string_view intrinsic);
+        uint8_t math_alias_fn(uint64_t symbol) const;   // 0xFF: not an alias
+        const math_alias_row* math_alias_rows() const;
+
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
         std::string format_stack_trace() const;

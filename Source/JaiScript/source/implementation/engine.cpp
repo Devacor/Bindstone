@@ -318,6 +318,9 @@ struct engine::implementation {
     // Engine-owned deterministic RNG for the math:: intrinsics (fixed default seed)
     detail::math_rng_state math_rng_;
 
+    std::array<engine::math_alias_row, engine::k_math_alias_rows> math_alias_rows_{};
+    std::unordered_map<uint64_t, uint8_t> math_alias_symbols_;
+
     // Current parameter storage for function calls (replaces thread_local)
     detail::parameter_storage* current_parameter_storage = nullptr;
 
@@ -3402,6 +3405,30 @@ const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& engine::l
 // engine's stored values share, so the inner std::function is copied into fresh function
 // values, and overload sets dispatch over a per-copy snapshot (findBestMatch returns a
 // copy of the stored overload value — the snapshot makes those copies worker-private).
+void engine::register_math_alias(std::string_view name, std::string_view intrinsic) {
+    static_assert(static_cast<size_t>(detail::math_fn::count) <= k_math_alias_rows);
+    const detail::math_fn fn = detail::math_intrinsic_from_name(intrinsic);
+    if (fn == detail::math_fn::none || !detail::math_alias_kernel(fn)) { return; }
+    const std::string key(name);
+    auto set = impl->overloadedFunctions.find(key);
+    if (set != impl->overloadedFunctions.end() && set->second.overloads.size() != 1) { return; }
+    script_value* global = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
+    if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+    math_alias_row& row = impl->math_alias_rows_[static_cast<size_t>(fn)];
+    row.value = *global;
+    row.identity = &row.value.unchecked_as_function();
+    impl->math_alias_symbols_[impl->string_symbolizer_.intern(name)] = static_cast<uint8_t>(fn);
+}
+
+uint8_t engine::math_alias_fn(uint64_t symbol) const {
+    auto it = impl->math_alias_symbols_.find(symbol);
+    return it == impl->math_alias_symbols_.end() ? 0xFF : it->second;
+}
+
+const engine::math_alias_row* engine::math_alias_rows() const {
+    return impl->math_alias_rows_.data();
+}
+
 script_value engine::make_parallel_host_function_copy(const std::string& name) {
     auto setIt = impl->overloadedFunctions.find(name);
     if (setIt != impl->overloadedFunctions.end()) {

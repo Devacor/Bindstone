@@ -375,6 +375,7 @@ namespace jai::vm {
             pending_site_ctx_ = {};
             external_site_stack_.clear();
             execution_budget_ = budget;
+            if (worker_math_alias_rows_) { worker_math_alias_rows_->fill(engine::math_alias_row{}); }
             parallel_worker_ = true;
             arm_execution_deadline();
         }
@@ -795,6 +796,13 @@ namespace jai::vm {
         // source for get_current_frame_locals while the script thread is parked.
         frame* debug_paused_frame_ = nullptr;
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
+        // stdlib math aliases (engine::register_math_alias): the engine's rows, or on a worker its own copies' rows
+        const engine::math_alias_row* math_alias_rows_ = nullptr;
+        std::unique_ptr<std::array<engine::math_alias_row, engine::k_math_alias_rows>> worker_math_alias_rows_;
+    public:
+        // a worker's provisioned copy of a host function: an alias still bound to the registered builtin compares against the copy
+        void adopt_math_alias(uint64_t symbol, const script_value& copy);
+    private:
 
         vm_compiler compiler_;
         // a chunk belongs to one unit (docs/global_shadowing.md): every cache of compiled bodies is keyed by the node AND the
@@ -1650,6 +1658,10 @@ namespace jai::vm {
         op_status exec_member_temp(frame& f, const vm_instruction& ins);
         op_status exec_set_member_fused(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
+        op_status exec_math_alias(frame& f, const vm_instruction& ins);
+        op_status exec_math_guard(frame& f, const vm_instruction& ins);
+        int math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot);   // 1 builtin, 0 parked, -1 raised
+        op_status park_callee(frame& f, const call_site& site, size_t argc, const script_value& callee_value);
         op_status exec_unary_temp(frame& f, const vm_instruction& ins);
         // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
         // addressing): op_binary_fused pushes, the _decl/_store variants land the

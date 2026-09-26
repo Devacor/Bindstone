@@ -341,6 +341,8 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 			cached_global_env_ = global.get();   // stable for the engine's lifetime
 		}
 		compiler_ = vm_compiler(symbolizer_, &builtins_);   // filled below; address stable
+		compiler_.math_aliases(engine_);
+		math_alias_rows_ = engine_->math_alias_rows();
 
 		op_plus_id_ = symbolizer_->intern("+");
 		op_minus_id_ = symbolizer_->intern("-");
@@ -4893,6 +4895,7 @@ op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 // (the kernel's own conversion), every other case runs the shared kernel and lands its value; the
 // argument is a fused operand or, for a computed argument, the stack's top (KEEP the kernel: parity)
 op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
+	if (ins.c > 0xFF) return exec_math_alias(f, ins);
 	const detail::math_fn fn = static_cast<detail::math_fn>(ins.c);
 	std::optional<script_value> scratch;
 	script_value popped(std::monostate{}, engine_);
@@ -4927,6 +4930,104 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 	}
 	frame_slot_set(f, ins.b, std::move(result.value()));
 	return {};
+}
+
+// A stdlib alias's callee, resolved as the probe resolves it (the same ladder and texts): the registered builtin is 1, anything
+// else takes the probe's outcome (0 parked for the real call, -1 raised)
+int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot) {
+	const void* identity = math_alias_rows_ ? math_alias_rows_[fn].identity : nullptr;
+	if (identity && cached_global_env_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+		bool plain_frame = !f.locals || f.top_level;
+		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+		const auto& cache = f.code->env_lookup_cache;
+		if (plain_frame && cache_slot < cache.size()) {
+			const env_lookup_cache_entry& e = cache[cache_slot];
+			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
+			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == identity) {
+				return 1;
+			}
+		}
+	}
+	std::optional<script_value> scratch;
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, cache_slot);
+	if (!resolved) return -1;
+	if (identity && resolved->raw_storage_index() == script_value::TYPEID_FUNCTION && &resolved->unchecked_as_function() == identity) return 1;
+	return park_callee(f, site, 1, *resolved) == op_status::failed ? -1 : 0;
+}
+
+op_status vm_backend::exec_math_guard(frame& f, const vm_instruction& ins) {
+	const int verdict = math_alias_verdict(f, f.code->call_sites[ins.a], static_cast<uint8_t>(ins.c), f.ip * 3);
+	if (verdict < 0) return op_status::failed;
+	if (verdict > 0) { typed_land_float(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), 0.0); }
+	else { typed_land_int(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), 0); }
+	return {};
+}
+
+// A stdlib alias (op_math_temp, c above 0xFF): the callee's verdict (the guard's mark in the temp, or resolved here ahead of an
+// operand argument), then the argument; the builtin over an int or float runs the kernel into the temp and steps past the
+// op_call_temp that follows, anything else makes the real call through the site (the probe's pending callee, the argument
+// pushed as its LOAD pushes it) and that op_call_temp lands its result
+op_status vm_backend::exec_math_alias(frame& f, const vm_instruction& ins) {
+	const uint8_t fn = static_cast<uint8_t>(ins.c & 0x3F);
+	const uint32_t site_index = (ins.c >> 8) - 1;
+	int verdict;
+	if (ins.c & 0x80) {
+		const script_value* mark = frame_slot(f, ins.b);
+		verdict = mark && mark->raw_storage_index() == script_value::TYPEID_FLOAT ? 1 : 0;
+	} else {
+		verdict = math_alias_verdict(f, f.code->call_sites[site_index], fn, f.ip * 3 + 1);
+		if (verdict < 0) return op_status::failed;
+	}
+	std::optional<script_value> scratch;
+	script_value arg(std::monostate{}, engine_);
+	const script_value* v;
+	if (ins.a != k_invalid_u32) {
+		const fused_operand& operand = f.code->fused_binary_protos[ins.a].left;
+		if (operand.const_index != k_invalid_u32) {
+			v = &f.code->constants[operand.const_index];
+		} else {
+			v = fused_subscript_value(f, operand, scratch, f.ip * 3);
+			if (!v) return op_status::failed;
+		}
+		v = &v->deref();
+	} else {
+		if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "math alias without an argument (internal)"); }
+		arg = std::move(stack_.back());
+		stack_.pop_back();
+		v = &arg;
+	}
+	if (verdict > 0) {
+		const script_value& x = v->deref();
+		const size_t k = x.raw_storage_index();
+		if (k == script_value::TYPEID_FLOAT || k == script_value::TYPEID_INT) {
+			const script_float d = k == script_value::TYPEID_FLOAT ? x.unchecked_as_float() : static_cast<script_float>(x.unchecked_as_int());
+			typed_land_float(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), detail::eval_math_alias(static_cast<detail::math_fn>(fn), d));
+			++f.ip;
+			return {};
+		}
+		pending_callee& pc = pending_callees_.emplace_back();
+		pc.value = math_alias_rows_[fn].value;
+	}
+	if (ins.a != k_invalid_u32) {
+		if (f.code->fused_binary_protos[ins.a].left.const_index != k_invalid_u32) { arg = materialize_constant(*f.code, f.code->fused_binary_protos[ins.a].left.const_index); }
+		else { arg = *v; }
+	}
+	stack_.push_back(std::move(arg));
+	return exec_call_from_scratch(f, vm_instruction{opcode::op_call_from_scratch, 1, site_index, 0});
+}
+
+void vm_backend::adopt_math_alias(uint64_t symbol, const script_value& copy) {
+	if (!engine_ || copy.raw_storage_index() != script_value::TYPEID_FUNCTION) return;
+	const uint8_t fn = engine_->math_alias_fn(symbol);
+	if (fn >= engine::k_math_alias_rows) return;
+	const script_value* global = engine_->get_global_environment()->get_value_ptr(symbol);
+	if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION ||
+	    &global->unchecked_as_function() != engine_->math_alias_rows()[fn].identity) return;
+	if (!worker_math_alias_rows_) { worker_math_alias_rows_ = std::make_unique<std::array<engine::math_alias_row, engine::k_math_alias_rows>>(); }
+	engine::math_alias_row& row = (*worker_math_alias_rows_)[fn];
+	row.value = copy;
+	row.identity = &row.value.unchecked_as_function();
+	math_alias_rows_ = worker_math_alias_rows_->data();
 }
 
 // a unary over an operand into a compiler temp: the operand lands on the stack and the general unary runs verbatim
@@ -10350,7 +10451,16 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
 	if (!resolved) return op_status::failed;
-	const script_value& calleeVal = *resolved;
+	JAI_PROBE_SECTION(0);
+	const op_status parked = park_callee(f, site, argc, *resolved);
+	JAI_PROBE_SECTION(1);
+#undef JAI_PROBE_SECTION
+	return parked;
+}
+
+// the probe's outcome for a resolved callee: not callable raises, else the pending register takes it (the direct pair for
+// a script function of matching arity, the value otherwise)
+op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, const script_value& calleeVal) {
 	if (!calleeVal.is_function()) {
 		uint64_t name_id = site.callee.symbol != k_invalid_u32 ? f.code->symbols[site.callee.symbol] : 0;
 		if (name_id == 0 && site.call_node != k_invalid_u32) {
@@ -10358,7 +10468,6 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 		}
 		return raise_not_callable(name_id, calleeVal);
 	}
-	JAI_PROBE_SECTION(0);
 	pending_callee pc;
 	if (cached_global_env_ &&
 	    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
@@ -10391,8 +10500,6 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 		}
 	}
 	pending_callees_.push_back(std::move(pc));
-	JAI_PROBE_SECTION(1);
-#undef JAI_PROBE_SECTION
 	return {};
 }
 
@@ -17341,7 +17448,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
 			case opcode::op_call_temp: VM_TRY_OP_SHARED(exec_call_temp(f, ins)); break;
-			case opcode::op_math_temp: VM_TRY_OP_SHARED(exec_math_temp(f, ins)); break;
+			case opcode::op_math_temp:
+				VM_TRY_OP_SHARED(exec_math_temp(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }   // a stdlib alias's real call entered a script frame
+				break;
+			case opcode::op_math_guard: VM_TRY_OP_SHARED(exec_math_guard(f, ins)); break;
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip

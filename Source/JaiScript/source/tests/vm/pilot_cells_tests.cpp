@@ -517,7 +517,7 @@ public:
 				int a = copy(A, B, 4); int b = copy(V, W, 4);
 				to_string(a) + to_string(b) + "|" + to_string(A[3]) + "," + to_string(V[1]) + "," + to_string(V[2]);
 			)";
-			both(script, "44|10,two,3.500000", "element-to-element copies, typed and var");
+			both(script, "44|10,two,3.5", "element-to-element copies, typed and var");
 		});
 		test("a_nested_index_read_lands_the_same", [this]() {
 			const std::string script = R"(
@@ -825,7 +825,7 @@ public:
 			both(values, "", "increments");
 			both(values, "", "increments, proofs off", false);
 			const std::string vm = run_on(true, values);
-			check_true(vm.rfind("90,203,2.500000,22,throw:", 0) == 0, "typed, postfix, float and reference shapes: " + vm);
+			check_true(vm.rfind("90,203,2.5,22,throw:", 0) == 0, "typed, postfix, float and reference shapes: " + vm);
 			check_true(vm.find("Integer overflow in '++'") != std::string::npos && vm.find("Integer overflow in '--'") != std::string::npos, "the general op's overflow texts: " + vm);
 			check_true(vm.size() >= 4 && vm.compare(vm.size() - 4, 4, ",2,7") == 0, "the shared cell and the var slot: " + vm);
 			auto e = engine::make();
@@ -1309,7 +1309,7 @@ public:
 			both(script, "", "declared-type landings");
 			both(script, "", "declared-type landings, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("31,11.000000,62,", 0) == 0, "the var, the float sum and the auto: " + vm);
+			check_true(vm.rfind("31,11.0,62,", 0) == 0, "the var, the float sum and the auto: " + vm);
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			// v5's widening store from a local (`acc = t`) and v6's assignment from an element read (`last = h[i]`) are move
@@ -1438,7 +1438,7 @@ public:
 				" var e2 = function(var& bm) { int acc = 0; int i = 0; while (bm[i] != -1) { int other = -1; acc = acc + bm[i] + other; i = i + 1; } return acc; };"
 				" var e3 = function(int x) { float f = -1.5; int m = -(-1); int lo = -9223372036854775807 - 1; return to_string(f) + \",\" + to_string(m) + \",\" + to_string(lo) + \",\" + to_string(-x) + \",\" + type_of(-1) + \",\" + to_string(-0.0); };";
 			const std::string script = std::string(defs) + " to_string(e1()) + \",\" + to_string(e2(BM)) + \",\" + e3(7);";
-			both(script, "15,16,-1.500000,1,-9223372036854775808,-7,int,-0.000000", "negative literals and environment bounds");
+			both(script, "15,16,-1.5,1,-9223372036854775808,-7,int,-0.0", "negative literals and environment bounds");
 			both(script, "", "proofs off", false);
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
@@ -1484,7 +1484,7 @@ var values = function(int n) { int acc = 0; float r = 2.5; for (int i = 0; i < n
 			struct probe { const char* call; const char* expected; };
 			const probe probes[] = {
 				{ "to_string(seg(6, DONE));", "184" }, { "to_string(globals(3));", "15" }, { "to_string(arrays(3));", "30" }, { "to_string(escape(3));", "306" },
-				{ "to_string(narrow(3));", "6" }, { "rejects(3);", "" }, { "thrown(4);", "1 2.000000 boom at 2" }, { "to_string(recursive(5));", "34" },
+				{ "to_string(narrow(3));", "6" }, { "rejects(3);", "" }, { "thrown(4);", "1 2.0 boom at 2" }, { "to_string(recursive(5));", "34" },
 				{ "to_string(zero(3));", "21" }, { "strings(3);", "n0n1n2" }, { "to_string(values(3));", "27" },
 			};
 			for (const probe& p : probes) {
@@ -1522,7 +1522,7 @@ var from_call = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REM
 			struct probe { const char* call; const char* expected; };
 			const probe probes[] = {
 				{ "to_string(count_down(3));", "24" }, { "to_string(compound(2));", "11" }, { "to_string(head());", "10" }, { "to_string(seen_by_callee(3));", "36" },
-				{ "to_string(written_by_callee(3));", "300" }, { "var_kind(2);", "2.250000 float" }, { "narrow(2);", "" }, { "widen(3);", "3.000000" },
+				{ "to_string(written_by_callee(3));", "300" }, { "var_kind(2);", "2.25 float" }, { "narrow(2);", "" }, { "widen(3);", "3.0" },
 				{ "thrown(3);", "30 boom" }, { "to_string(mov(3));", "24" }, { "to_string(from_call(2));", "20" },
 				{ "count_down(2); to_string(REMAIN);", "8" }, { "head(); to_string(REMAIN);", "0" },
 			};
@@ -1729,7 +1729,7 @@ var across = function(int n) { string s = ""; try { s = to_string(looping(n)); }
 			const probe probes[] = {
 				{ "to_string(calls_f(6, 3));", "1203" }, { "to_string(calls_f(6, 0));", "1500" }, { "to_string(calls_f(6, 9));", "15" },
 				{ "to_string(reads_g(6, 2));", "183" }, { "to_string(reads_alias(6, 2));", "183" }, { "to_string(reads_g(6, 0));", "210" },
-				{ "armed(6, 3);", "30 15.500000" }, { "armed(6, 0);", "30 15.500000" }, { "across(6);", "caught boom 3|10" }, { "across(2);", "10|10" },
+				{ "armed(6, 3);", "30 15.5" }, { "armed(6, 0);", "30 15.5" }, { "across(6);", "caught boom 3|10" }, { "across(2);", "10|10" },
 			};
 			for (const probe& p : probes) {
 				for (bool proofs : { true, false }) {
@@ -2528,7 +2528,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "body-declared landings");
 			both(script, "", "body-declared landings, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("27|27|0,1.500000,2,3.500000,4,|5|caught:", 0) == 0 && vm.find("|1|10000000000") != std::string::npos, "the declaration's kernel on every iteration, the var re-kinded, the out-of-range text after one kept store: " + vm);
+			check_true(vm.rfind("27|27|0,1.5,2,3.5,4,|5|caught:", 0) == 0 && vm.find("|1|10000000000") != std::string::npos, "the declaration's kernel on every iteration, the var re-kinded, the out-of-range text after one kept store: " + vm);
 			const std::string l = listing_of("var f = function(var& xs, int n) { int acc = 0; float f = 0.5; int i = 0; while (i < n) { f = f + 1.25; int m = f; acc = acc + m; xs[i] = m; i = i + 1; } return acc; };");
 			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the narrowing loop closes: " + l);
 		});
@@ -2759,7 +2759,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "range-for blocks");
 			both(script, "", "range-for blocks, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("30|18|floatfloat|66|8|12|3|12|3.000000|12|", 0) == 0 && vm.size() > 2 && vm.substr(vm.size() - 2) == "|6", "the shapes: " + vm);
+			check_true(vm.rfind("30|18|floatfloat|66|8|12|3|12|3.0|12|", 0) == 0 && vm.size() > 2 && vm.substr(vm.size() - 2) == "|6", "the shapes: " + vm);
 			const std::string l = listing_of("var f = function(var& a) { int s = 0; for (int v : a) { s = s + v; } return s; };");
 			check_true(l.find("C_RANGE") != std::string::npos && l.find("C_BACK_STEP") != std::string::npos && l.find("C_LOAD") != std::string::npos && l.find("-- open loop") == std::string::npos, "a by-value range closes with the range head and the stepping back edge: " + l);
 			const std::string m = listing_of("var f = function(var& g) { int s = 0; for (auto& r : g) { r[0] = r[0] + 1; s = s + r[1]; } return s; };");
@@ -2932,7 +2932,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function from_slot(var g) -> float { float acc = 0.0; for (int i = 0; i < 3; i++) { var f = g; ++f; acc = acc + f; } return acc; }\n"
 				"function int_var() -> int { int acc = 0; for (int i = 0; i < 40; i++) { var n = 0; n++; ++n; acc = acc + n; } return acc; }\n"
 				"span_shape() + \"|\" + to_string(loop_shape()) + \"|\" + to_string(any_shape()) + \"|\" + to_string(from_slot(2.5)) + \"|\" + to_string(from_slot(2)) + \"|\" + to_string(int_var());";
-			both(script, "2.500000|7.500000|9.750000|10.500000|9.000000|80", "a var local under a typed use");
+			both(script, "2.5|7.5|9.75|10.5|9.0|80", "a var local under a typed use");
 			both(script, "", "a var local under a typed use, proofs off", false);
 			const std::string l = listing_of("var f = function() -> int { int acc = 0; for (int i = 0; i < 40; i++) { var n = 0; n++; ++n; acc = acc + n; } return acc; };");
 			check_true(l.find("-- cell loop") != std::string::npos, "an int var under the typed rows still closes: " + l);
@@ -3452,7 +3452,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			std::string l;
 			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
 			check_eq(iv, vv, "a global another unit declares: both backends");
-			check_eq(std::string("31|-4.000000|8"), vv, "the values (and `int bad = ND` in a body never run is no load error: the diagnostics never read the table)");
+			check_eq(std::string("31|-4.0|8"), vv, "the values (and `int bad = ND` in a body never run is no load error: the diagnostics never read the table)");
 			check_true(l.find("-- inlined at") != std::string::npos, "at grafts in the loop: its return reads the typed global's element: " + l);
 			check_true(l.find("-- inlined span") != std::string::npos, "span grafts in the loop: its return reads the class-typed global's field after the re-stamp: " + l);
 			check_true(l.find("-- call kept at ") == std::string::npos, "no kept call for at: " + l);
@@ -3468,8 +3468,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"  if (x > 2.0) { x = 2.0; if (kind == 1 || kind == 2) { life = life < 4 ? life : 4; } } p.x = x; p.vx = vx; p.life = life; }\n"
 				"var pool = []; for (int i = 0; i < 8; ++i) { auto q = P(); q.kind = i % 3; q.x = i * 0.3; pool.push(q); }\n"
 				"var tick = function(int n) { float acc = 0.0; for (int t = 0; t < n; ++t) { for (auto& p : pool) { step(p); } } for (auto& p : pool) { acc = acc + p.x + p.life; } return acc; };\n";
-			both(prelude + "to_string(tick(12));", "32.700000", "a particle step through an alias");
-			both(prelude + "to_string(tick(12));", "32.700000", "a particle step through an alias, proofs off", false);
+			both(prelude + "to_string(tick(12));", "32.7", "a particle step through an alias");
+			both(prelude + "to_string(tick(12));", "32.7", "a particle step through an alias, proofs off", false);
 			const std::string l = listing_run(prelude + "tick(12);");
 			check_true(l.find("-- inlined step") != std::string::npos, "step grafts inside the range-for with its ternary store: " + l);
 		});
@@ -3549,7 +3549,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string prelude =
 				"void set37(int& a) { a = 3.7; }\n"
 				"float run() { float u = 1.5; for (int k = 0; k < 2; ++k) { set37(u); } return u; }\n";
-			both(prelude + "to_string(run());", "3.700000", "a store through a typed reference parameter");
+			both(prelude + "to_string(run());", "3.7", "a store through a typed reference parameter");
 			const std::string l = listing_run(prelude + "run();");
 			check_true(l.find("-- inlined set37") != std::string::npos, "the typed reference parameter grafts: " + l);
 		});

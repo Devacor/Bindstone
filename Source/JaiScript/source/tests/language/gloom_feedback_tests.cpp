@@ -66,7 +66,7 @@ public:
 					int nested = c ? (c ? a[0] : a[1]) : b[0];
 					to_string(f) + " " + to_string(mixed) + " " + to_string(mk) + " " + to_string(nested);
 				)");
-				check_eq(std::string("2.000000 2 7 1"), r.as<std::string>(), backend_tag(use_vm) + "float/mixed/map/nested ternary element reads");
+				check_eq(std::string("2.0 2 7 1"), r.as<std::string>(), backend_tag(use_vm) + "float/mixed/map/nested ternary element reads");
 			}
 		});
 

@@ -488,7 +488,7 @@ public:
 					const auto& out = r.as_array();
 					const std::string label = std::string(proofs ? "proofs" : "no-proofs") + " workers=" + std::to_string(workers);
 					check_true(out[0].as<bool>(), label + ": the region matches the serial body");
-					check_eq(std::string("20,30,1.500000,20.000000,1,2.500000,true,c,s,b,40"), out[1].as_string(), label + ": row 1");
+					check_eq(std::string("20,30,1.5,20.0,1,2.5,true,c,s,b,40"), out[1].as_string(), label + ": row 1");
 					check_true(out[2].as_string().find("reading a captured array in a parallel body") != std::string::npos, label + ": captured out-of-range text: " + out[2].as_string());
 					check_eq(std::string("Cannot initialize 'a' (declared int) with string"), out[4].as_string(), label + ": the serial mismatch text");
 					// a worker never interns the slot's name, so it raises the slot-less shape of the same text

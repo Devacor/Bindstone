@@ -1,3 +1,4 @@
+#include <charconv>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
@@ -1094,6 +1095,14 @@ script_value script_value::try_unwrap_transparent_wrapper() const {
     return *this;
 }
 
+std::string script_value::float_text(double v) {
+    char buf[64];
+    auto res = std::to_chars(buf, buf + sizeof(buf), v);   // shortest round-trip
+    std::string s(buf, res.ptr);
+    if (s.find_first_of(".en") == std::string::npos) { s += ".0"; }   // a whole number stays a float ("inf" and "nan" carry an 'n')
+    return s;
+}
+
 std::string script_value::to_string() const {
     // Special handling for references to show what they point to
     if (current_type() == script_value_type::jai_reference_type) {
@@ -1106,7 +1115,7 @@ std::string script_value::to_string() const {
         case script_value_type::jai_int_type:
             return std::to_string(as_int());
         case script_value_type::jai_float_type:
-            return std::to_string(as_float());
+            return float_text(as_float());
         case script_value_type::jai_string_type:
             return as_string();
         case script_value_type::jai_char_type:

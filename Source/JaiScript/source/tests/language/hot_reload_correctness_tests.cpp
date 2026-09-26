@@ -580,7 +580,7 @@ public:
             step(t, v2_var, "reload int -> var");
             check_eq(std::string("VALUE 9:9:int"), step(t, "r.show()", "value kept"));
             check_eq(std::string("VALUE s:s:string"), step(t, "r.set(\"s\"); r.show()", "var field takes a string"));
-            check_eq(std::string("VALUE 2.500000:2.500000:float"), step(t, "r.f = 2.5; r.show()", "var field takes a float"));
+            check_eq(std::string("VALUE 2.5:2.5:float"), step(t, "r.f = 2.5; r.show()", "var field takes a float"));
             check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "the armed use source"));
         });
 
@@ -739,7 +739,7 @@ public:
             run("class R { static int s = 0; }");
             check_eq(std::string("4"), run("to_string(R::s)"), "identical redefinition keeps the value");
             run("class R { static int s = 0; static float g = 3; }");
-            check_eq(std::string("float:3.000000"), run("type_of(R::g) + \":\" + to_string(R::g)"), "a static new in the reload converts its initializer");
+            check_eq(std::string("float:3.0"), run("type_of(R::g) + \":\" + to_string(R::g)"), "a static new in the reload converts its initializer");
             check_eq(std::string("4"), run("to_string(R::s)"), "the existing static kept its value");
             run("class R { static float g = 3; }");
             check_true(run("R::s").find("ERROR") == 0, "a dropped static is gone");

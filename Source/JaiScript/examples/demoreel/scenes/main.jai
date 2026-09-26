@@ -18,3 +18,5 @@ function demo_scene_index() -> int { return reel.cur_idx; }
 function demo_scene_time() -> float { return reel.scene_t; }
 function demo_jump(int idx, float at_t) -> void { reel.jump(idx, at_t); }
 function demo_reload() -> void { reel.reload_current(); }
+function demo_scene_count() -> int { return reel.nscenes; }
+function demo_scene_name() -> string { return reel.cur.name; }

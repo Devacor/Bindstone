@@ -6,7 +6,7 @@ rainbow fire — every effect coded in `scenes/*.jai`, every frame drawn at
 **double vertical resolution** with half-block pixels. A ray tracer, a sphere
 tracer, a Menger-sponge raymarcher, a textured Wolfenstein raycaster, a
 VoxelSpace terrain flight, Verlet cloth, metaballs, a falling-sand toy, a
-murmuration, a texture tunnel and the classics. The C++ host (`main.cpp`) is a
+murmuration, a texture tunnel and the classics. The C++ host (`demoreel_host.cpp`, shared with the ports; see PORTING.md) is a
 thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
 class, and the frame pump. Everything you see is script.
 
@@ -191,7 +191,7 @@ Half-block frames carry two colors per cell, so a frame is bigger than the old
 one-pixel-per-cell stream (52 KB on average, 139 KB for PLASMA, whose 256-entry
 palette changes nearly every pixel; KINSTEIN and CANYONRUN stay near 20-30 KB).
 Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
-host's post-processing in `main.cpp` is for (scenes and the `--smoke` stream
+host's post-processing in `demoreel_host.cpp` is for (scenes and the `--smoke` stream
 are untouched by it, so parity hashes don't move):
 
 - **Escape trimming.** Scripts already emit a color escape only when a palette
@@ -233,9 +233,9 @@ FNV-1a-hashing every returned frame; the hashes must match. All scene randomness
 goes through the host's seeded xorshift `Rng` class (the presentation-only hashes
 are integer arithmetic on pixel coordinates), and `parallel_transform` returns
 rows in order, so a one-pixel divergence between backends fails the run. Env
-helpers: `JAI_DEMOREEL_SMOKE_FULLDUR=1` (full interactive scene durations),
-`JAI_DEMOREEL_DUMP_FRAME=N` (write frame N of each backend to a file for
-diffing), `JAI_DEMOREEL_TRACE=1` (per-frame progress for crash localization).
+helpers: `DEMOREEL_SMOKE_FULLDUR=1` (full interactive scene durations),
+`DEMOREEL_DUMP_FRAME=N` (write frame N of each backend to a file for
+diffing), `DEMOREEL_TRACE=1` (per-frame progress for crash localization).
 Deliberately NOT part of the main test suite.
 
 ## --precompiled

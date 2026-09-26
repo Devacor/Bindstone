@@ -391,6 +391,18 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     return v;
 }
 
+script_value script_value::make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng) {
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = cd.get_type_info();
+    auto obj = make_strong<object_holder>();
+    obj->type_name = cd.get_name();
+    obj->type_id = cd.get_type_id();
+    obj->data = std::move(data);
+    obj->is_class_instance_wrapper = true;
+    v.storage_ = obj;
+    return v;
+}
+
 script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng) {
     script_value v(std::monostate{}, eng);
     auto obj = make_strong<object_holder>();

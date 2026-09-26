@@ -14844,7 +14844,7 @@ void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>&
                                           const std::shared_ptr<class_definition>& class_def) {
 	auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
 	if (!script_def || !instance) { return; }
-	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 	auto init_env = std::make_shared<environment>(engine_ ? engine_->get_global_environment() : environment_, symbolizer_);
 	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
@@ -14950,7 +14950,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 #endif
 	auto instance = class_def->create_instance();
 
-	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
 	// (binding evaluates trailing defaults for omitted args; omitted params are simply
 	// absent here, like C++ field-inits that can't see ctor params)
@@ -15360,7 +15360,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 
 	auto instance = class_def->create_instance();
 
-	auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
 	if (class_def->chain_initializers_all_literal()) {
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(instance, class_def, false); }

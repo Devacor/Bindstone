@@ -12762,7 +12762,7 @@ void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>
                                            const std::shared_ptr<class_definition>& class_def) {
     auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
     if (!script_def || !instance) { return; }
-    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+    auto this_value = script_value::make_class_object(*class_def, instance, engine_);
     auto init_env = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
     init_env->define("this", this_value);
     init_env->set_access_context(class_def.get());
@@ -12908,7 +12908,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // Create 'this' value using the class_def's registered name and type_id
     // This ensures we use the exact name/id that was registered (e.g., with namespace)
     // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+    auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
     // Create a regular environment for field initializers and constructor initializer arguments
     // Use the captured definition environment as the parent
@@ -13308,7 +13308,7 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     // Create 'this' value for field initializer evaluation
     // Use class_def's registered name and type_id to handle namespaces correctly
     // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+    auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
     // Find the root (global) environment with cycle detection
     std::unordered_set<environment*> visited;

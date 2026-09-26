@@ -256,6 +256,7 @@ namespace jai {
         static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, engine* eng);
         // Optimized version with cached type_id
         static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class = true);
+        static script_value make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng);   // an instance of the class in hand (no registry lookup)
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
         static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
         // Non-owning C++ object holder that still knows its owner weakly (an extended object's

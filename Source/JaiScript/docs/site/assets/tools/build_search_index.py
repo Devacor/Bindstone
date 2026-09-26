@@ -19,7 +19,7 @@ import sys
 SITE = pathlib.Path(__file__).resolve().parents[2]
 
 PAGES = (
-    ["index.html", "guide/index.html"]
+    ["index.html", "tour/index.html", "guide/index.html"]
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "guide").glob("[0-9]*.html"))
     + ["embedding/index.html"]
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "embedding").glob("[0-9]*.html"))

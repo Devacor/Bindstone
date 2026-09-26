@@ -19,7 +19,7 @@ SITE = pathlib.Path(__file__).resolve().parents[2]
 
 VERSION = "0.1.0"
 REPO = "https://github.com/Devacor/JaiScript"
-BUILD_DATE = "2026-09-04"
+BUILD_DATE = "2026-09-26"
 
 THEME_BOOTSTRAP = (
     '<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}\n'
@@ -88,6 +88,8 @@ EMBEDDING = [
 ]
 
 SECTION_INDEX_DESC = {
+    "tour/index.html":
+        "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
     "guide/index.html":
         "Thirteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
     "embedding/index.html":
@@ -100,7 +102,7 @@ SECTION_INDEX_DESC = {
         "An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.",
 }
 
-SECTION_TITLE = {"guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
+SECTION_TITLE = {"tour": "The Ten-Minute Tour", "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
                  "examples": "The Example Games", "reference": "Reference"}
 
 # ---------------------------------------------------------------- chrome parts
@@ -142,7 +144,7 @@ def header(section, root):
         '<a class="brand" href="%sindex.html"><span class="rainbow">JaiScript</span>'
         '<span class="brand-sub">docs</span></a>' % root,
         '<nav class="site-nav" aria-label="Sections">'
-        + nav("guide", "Guide") + nav("embedding", "Embedding")
+        + nav("tour", "Tour") + nav("guide", "Guide") + nav("embedding", "Embedding")
         + nav("examples", "Examples") + nav("reference", "Reference") + "</nav>",
         '<div class="header-tools">',
         '<div class="search" role="search"><input id="search-box" type="search" '
@@ -216,6 +218,9 @@ def build_pages():
     pages = []
 
     pages.append(("index.html", None, "", SECTION_INDEX_DESC["index.html"], "", ""))
+
+    pages.append(("tour/index.html", "tour", "../", SECTION_INDEX_DESC["tour/index.html"], page_sidebar(True),
+                  prevnext(None, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
 
     guide_index = ("../guide/index.html", "guide", SECTION_TITLE["guide"])
     embed_index = ("../embedding/index.html", "embedding", SECTION_TITLE["embedding"])

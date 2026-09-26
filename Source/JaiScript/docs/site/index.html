@@ -22,7 +22,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav" aria-label="Sections"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="tour/index.html">Tour</a><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
 <button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
@@ -33,14 +33,14 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1">
 <div class="hero">
   <h1 class="rainbow">JaiScript</h1>
-  <p class="tagline">An embedded scripting language for C++ engines: C++-flavored syntax, script classes with
-  hot reload, coroutines, a three-rung type ladder (<code>int</code> / <code>auto</code> / <code>var</code>)
-  with a checker that is strict by default, and <strong>two interchangeable backends</strong> (a
-  tree-walking interpreter and a bytecode VM) kept at byte-for-byte parity by 2,400+ tests and a
-  differential fuzzer.</p>
+  <p class="tagline">An embedded scripting language for C++ engines. It reads like the C++ you already write,
+  copies the way C++ copies, stops typed mistakes before the program runs, reloads classes without losing the
+  world, and spreads a loop across every core. Underneath, <strong>two independent backends</strong> (a
+  tree-walking interpreter and a bytecode VM) must agree on every result, byte for byte.</p>
   <p class="sub">every example on this site was executed on both backends before it was written down</p>
   <div class="hero-ctas">
-    <a class="btn btn-primary" href="guide/01-hello.html">Read the guide</a>
+    <a class="btn btn-primary" href="tour/index.html">Take the ten-minute tour</a>
+    <a class="btn" href="guide/01-hello.html">Read the guide</a>
     <a class="btn" href="embedding/01-embedding-quickstart.html">Embed it</a>
     <a class="btn" href="examples/index.html">Play the examples</a>
   </div>
@@ -101,7 +101,7 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
     <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
   <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one executable spec</h3>
     <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte (including error text),
-    enforced by 2,400+ tests run against both, plus a differential fuzzer that files a bug whenever they
+    enforced by more than 3,000 tests run against both, plus a differential fuzzer that files a bug whenever they
     disagree. Semantics cannot rot silently.</p>
     <p><a href="embedding/03-backends.html">Backends →</a></p></div>
   <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
@@ -133,7 +133,7 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
 <div class="home-section">
 <h2 id="the-receipts">The receipts</h2>
 <div class="receipts">
-  <div class="receipt"><span class="big">2,400+</span><span class="what">tests green on both backends, every commit, plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
+  <div class="receipt"><span class="big">3,000+</span><span class="what">tests green on both backends, every commit, plus differential fuzzing (10,000 generated programs, zero crashes)</span></div>
   <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated (two per cache line)</span></div>
   <div class="receipt"><span class="big">3 games</span><span class="what">ship in the repository: a <a href="examples/index.html#gloom">raycast shooter</a>, a <a href="examples/index.html#grubwell">dungeon crawler</a> and a 13-scene <a href="examples/index.html#demoreel">demoreel</a>, plus one demo we can describe but not ship: over 8,000 lines of pure JaiScript reimplementing <a href="examples/index.html#jaidoom">DOOM</a>, WAD parser to BSP renderer, 16-player netplay with the wire protocol in script, inside the original's 35 Hz budget (its assets are not ours to distribute)</span></div>
   <div class="receipt"><span class="big">5 languages</span><span class="what">the raycast shooter reimplemented in Squirrel, Lua, ChaiScript and Python to one spec and one seeded RNG, each held to the JaiScript state hashes bit-exactly, so the <a href="examples/index.html#gloom">comparison</a> measures the runtimes and nothing else; the report is in the repository</span></div>
@@ -149,11 +149,11 @@ alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every s
   The idiom is <code>&amp;</code> parameters for anything heavy, cheap by design. If you write Python-shaped
   code expecting reference semantics, your first hour will surprise you; read
   <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
-  <li><strong>Lua is faster where it counts for some workloads.</strong> The VM wins or ties statements,
-  containers, range-for, null checks and method dispatch; Lua keeps hot loops (~4&times;), call-dense
-  recursion (~4.5&times; on fib(15)) and per-pixel software rendering (GLOOM runs ~6&times; behind on the
-  reference machine). JaiScript's VM does reuse the frame for a bare self tail call, so tail recursion runs
-  at loop speed to any depth. The head-to-head numbers, one machine, one protocol:
+  <li><strong>Lua is still faster in places.</strong> Typed arithmetic loops, range-for, and calls to small
+  functions, methods and lambdas (which the VM compiles into their callers) run at Lua 5.4's speed. Lua keeps
+  object creation (several times faster), field reads through arrays of objects, calls it cannot inline such as
+  deep recursion, and fully dynamic <code>var</code> code. JaiScript's VM does reuse the frame for a bare self tail
+  call, so tail recursion runs at loop speed to any depth. The head-to-head numbers, one machine, one protocol:
   <a href="embedding/11-performance.html">Performance</a>.</li>
   <li><strong>Two backends cost maintenance.</strong> That's the price of the executable spec, and shared
   semantic kernels keep the duplicated surface small.</li>
@@ -175,7 +175,7 @@ is MIT-licensed.</p>
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-04</p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-26</p>
 </footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>

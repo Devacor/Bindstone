@@ -3464,6 +3464,33 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(interp, run_on(true, script), "constructors: interpreter and vm agree");
 			check_true(interp.find("5,-1,12,7,3,41,42,1225|") == 0, interp.c_str());
 		});
+		test("untyped_lambdas_graft_with_their_proven_return_kind", [this]() {
+			// row 180: an untyped lambda whose returns all yield one certain scalar kind grafts with that result type; a lambda with mixed
+			// returns, an uncertain return and a void body keep the call; values agree on both backends, proofs off and the middle end off
+			const std::string script = R"(
+				function run() -> string {
+					auto add = [](int a, int b) { return a + b; };
+					auto half = [](float v) { if (v > 10.0) { return v * 0.5; } return v; };
+					auto pos = [](int a) { return a > 0; };
+					auto mixed = [](int a) { if (a > 2) { return a; } return 0.5; };
+					var box = [0];
+					auto grab = [](var b) { return b[0]; };
+					int s = 0; float h = 0.0; int p = 0; float m = 0.0; int g = 0;
+					for (int i = 0; i < 8; ++i) { s = add(s, i); h += half(i * 3.0); if (pos(i - 3)) { p += 1; } m += mixed(i); g += grab(box); }
+					return "" + s + "," + h + "," + p + "," + m + "," + g;
+				}
+				run();
+			)";
+			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts");
+			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts, proofs off", false);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(std::string("28,51.0,4,26.5,0"), off, "the middle end's switch off agrees");
+			}
+			const std::string l = listing_run(script);
+			check_true(l.find("-- inlined <lambda>") != std::string::npos, "the untyped lambdas are inlined: " + l);
+		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
 			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without

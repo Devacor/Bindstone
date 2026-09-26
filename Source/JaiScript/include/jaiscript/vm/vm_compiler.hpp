@@ -149,6 +149,7 @@ namespace jai::vm {
         const char* inline_eligible(const call_expr* call, const function_decl* fn) const;   // nullptr: the graft takes the call; else the rule that keeps it
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
         type_info_ptr inline_type(script_value_type kind);
+        type_info_ptr graft_result_type(const function_decl* fn);
         std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);
         expression_ptr compile_hoist(const hoist_plan& plan, const expression_ptr& root);
         expression_ptr hoist_leaf_calls(const expression_ptr& e, bool statement_position, bool& changed);

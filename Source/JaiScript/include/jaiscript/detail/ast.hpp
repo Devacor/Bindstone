@@ -415,6 +415,7 @@ namespace jai {
         // the lambda as a declaration for a call of the local it initializes (the checker's proofs, the inliner's leaf graft)
         mutable std::shared_ptr<class function_decl> graft_decl;
         mutable std::vector<const class function_decl*> graft_overloads;
+        mutable uint8_t inferred_return_kind = 0;   // no declared return type, every return the same certain kind: 1 int, 2 float, 3 bool (the checker's)
 
         // Chain captures resolved by the parser for NESTED lambdas: enclosing-frame
         // locals that only a nested lambda uses (this lambda captures the slot), and
@@ -862,6 +863,8 @@ namespace jai {
         // derives it from return_type alone, engine-independent). 0 = uncomputed. Same
         // benign-idempotent write pattern as script_defined_function::backend_return_conv.
         mutable uint8_t backend_return_conv = 0;
+        // a lambda's graft declaration without a declared return type: the kind its returns certainly yield (1 int, 2 float, 3 bool)
+        mutable uint8_t graft_return_kind = 0;
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
             : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), is_coroutine(false), local_count(0) {}

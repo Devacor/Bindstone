@@ -425,6 +425,8 @@ private:
         // Names this body resolved through the global tier so far (shadow shape D:
         // "declaration shadows a global used earlier in the same scope chain").
         std::unordered_set<std::string_view> globals_used;
+        uint8_t inferred_return = 0;      // auto: the kind every return so far certainly yields (1 int, 2 float, 3 bool)
+        bool inferred_mixed = false;      // auto: a return of another kind, of an uncertain kind, or without a value
     };
     std::vector<fn_ctx> fn_stack_;
     sclass* class_ctx_ = nullptr;
@@ -2136,7 +2138,14 @@ private:
                     lam->graft_decl = d;
                     lam->graft_overloads.assign(1, d.get());
                 }
-                if (lam->graft_decl) { lambda_ov = &lam->graft_overloads; }
+                if (lam->graft_decl) {
+                    // an untyped lambda whose returns are one certain kind declares that kind with the engine's canonical stamp
+                    const uint8_t k = lam->return_type ? 0 : lam->inferred_return_kind;
+                    lam->graft_decl->graft_return_kind = k;
+                    lam->graft_decl->return_type = k == 1 ? type_info_ptr{eng_.get_type_info_int()} : k == 2 ? type_info_ptr{eng_.get_type_info_float()}
+                                                 : k == 3 ? type_info_ptr{eng_.get_type_info_bool()} : lam->return_type;
+                    lambda_ov = &lam->graft_overloads;
+                }
             }
         }
         stamp_call_proofs(c, lambda_ov ? lambda_ov : program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty() || lambda_ov != nullptr);
@@ -2607,6 +2616,13 @@ private:
 		if (r->value && value.const_key && (r->binds_reference || handle_type(fn.ret))) {
 			map_key_alias(r->location, r->value.get());
 		}
+		if (!fn.is_coroutine && !fn.ret) {
+			fn_ctx& open = fn_stack_.back();
+			const uint8_t k = !r->value || r->binds_reference || value.tentative ? 0
+			                : value.kind == ctype::int_k ? 1 : value.kind == ctype::float_k ? 2 : value.kind == ctype::bool_k ? 3 : 0;
+			if (k == 0 || (open.inferred_return != 0 && open.inferred_return != k)) { open.inferred_mixed = true; }
+			else { open.inferred_return = k; }
+		}
 		if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
 		ctype ret = ctype_from_type_info(fn.ret);
 		if (ret.is_unknown()) { return; }
@@ -2995,6 +3011,11 @@ private:
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         define_params(l->parameters, l->location);
         walk_stmt(l->body.get());
+        {
+            const fn_ctx& done = fn_stack_.back();
+            const uint8_t kind = !l->return_type && !done.inferred_mixed && !has_includes_ ? done.inferred_return : uint8_t(0);
+            stamp(l->inferred_return_kind, kind, uint8_t(0));
+        }
         fn_stack_.pop_back();
         scopes_.pop_back();
         capture_stack_.pop_back();

@@ -3553,6 +3553,19 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(prelude + "run();");
 			check_true(l.find("-- inlined set37") != std::string::npos, "the typed reference parameter grafts: " + l);
 		});
+		test("a_reference_argument_that_is_not_a_local_keeps_the_call", [this]() {
+			// row 159: a var& or typed reference parameter bound to a field or a method name binds through the caller's member rules;
+			// the call stays, so a method name raises the binder's text on both backends
+			const std::string prelude =
+				"void by_ref(var& p) { p = 1; }\n"
+				"void by_int(int& p) { p = 2; }\n"
+				"class W { int fld = 5; int f() { return 1; } int fields() { by_ref(fld); int a = fld; by_int(fld); return a * 10 + fld; } void named() { by_ref(f); } }\n"
+				"W w = W();\n";
+			both(prelude + "to_string(w.fields());", "12", "a field bound by reference");
+			both(prelude + "var r = \"\"; try { w.named(); } catch (e) { r = e; } r;", "Cannot take reference of undefined variable", "a method name bound by reference");
+			const std::string l = listing_run(prelude + "w.fields();");
+			check_true(l.find("-- call kept by_ref line 3: a reference argument that is not a local") != std::string::npos, "the call stays with its rule: " + l);
+		});
 		test("a_loop_of_more_than_128_cells_closes", [this]() {
 			// row 159: the cell mask holds 256 cells; a loop over 140 locals runs as one block
 			std::string src = "int run() { ";

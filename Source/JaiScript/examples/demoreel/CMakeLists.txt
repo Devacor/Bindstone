@@ -73,3 +73,34 @@ if(DEMOREEL_PORT_LUA)
     )
     message(STATUS "demoreel: demoreel_lua enabled (${DEMOREEL_LUA_ROOT} + ${DEMOREEL_SOL2_ROOT})")
 endif()
+
+# --- demoreel_squirrel: Squirrel 3.2 port (opt-in; builds the runtime from source) ---
+option(DEMOREEL_PORT_SQUIRREL "Build demoreel_squirrel, the Squirrel port of the demoreel" OFF)
+set(DEMOREEL_SQUIRREL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../squirrel" CACHE PATH "Squirrel 3.2 source root")
+if(DEMOREEL_PORT_SQUIRREL)
+    if(NOT EXISTS "${DEMOREEL_SQUIRREL_ROOT}/include/squirrel.h")
+        message(FATAL_ERROR "DEMOREEL_PORT_SQUIRREL=ON but Squirrel not found at ${DEMOREEL_SQUIRREL_ROOT}")
+    endif()
+    file(GLOB demoreel_sq_sources "${DEMOREEL_SQUIRREL_ROOT}/squirrel/*.cpp" "${DEMOREEL_SQUIRREL_ROOT}/sqstdlib/*.cpp")
+    add_library(demoreel_squirrel_runtime STATIC ${demoreel_sq_sources})
+    target_include_directories(demoreel_squirrel_runtime PUBLIC "${DEMOREEL_SQUIRREL_ROOT}/include")
+    # double SQFloat for IEEE parity; _SQ64 self-selects on x64 (the adapter static_asserts both)
+    target_compile_definitions(demoreel_squirrel_runtime PUBLIC SQUSEDOUBLE)
+    if(MSVC)
+        target_compile_options(demoreel_squirrel_runtime PRIVATE /W2)
+        set_property(TARGET demoreel_squirrel_runtime PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    endif()
+    add_executable(demoreel_squirrel demoreel_adapter_squirrel.cpp)
+    target_link_libraries(demoreel_squirrel PRIVATE demoreel_host demoreel_squirrel_runtime)
+    target_compile_definitions(demoreel_squirrel PRIVATE
+        DEMOREEL_SQUIRREL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel"
+    )
+    demoreel_msvc_settings(demoreel_squirrel)
+    add_custom_command(TARGET demoreel_squirrel POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel
+            $<TARGET_FILE_DIR:demoreel_squirrel>/demoreel_squirrel_scenes
+    )
+endif()

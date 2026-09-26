@@ -422,6 +422,8 @@ namespace jai::vm {
         // builders read the same palette cells thousands of times per region, and each read
         // allocated a string. Bounded; cleared when it grows past the cap.
         std::unordered_map<uint64_t, script_value> worker_borrowed_strings_;
+        struct ctor_dispatch_entry { std::optional<script_value> method; const class_definition* cls = nullptr; const environment* env = nullptr; };
+        std::unordered_map<const function_decl*, ctor_dispatch_entry> ctor_dispatch_;   // a constructor's method-door dispatcher (its body chunk cached on it)
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
         // A worker-minted string node can be published into the parent's output by the region
         // that minted it; from then on the main thread copies it, so the worker must hold no
@@ -716,6 +718,7 @@ namespace jai::vm {
             // is AST-pinned. Applied at both completion doors (return_with_result +
             // fall_off_script_frame), never on unwind paths.
             type_info* ctor_result_stamp = nullptr;
+            bool ctor_frame = false;   // a constructor body run through the method door: falling off its end yields the frame's `this`
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;

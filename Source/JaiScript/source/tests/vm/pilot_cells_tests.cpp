@@ -3439,6 +3439,31 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(script);
 			check_true(l.find("-- inlined <lambda>") != std::string::npos, "the lambda calls are inlined: " + l);
 		});
+		test("constructor_bodies_run_as_method_frames", [this]() {
+			// row 176: constructor bodies through the method door: falling off the end yields the instance, private members (the eager
+			// environment), defaults, super chains, a raise inside the body, methods and lambdas that see `this`; both backends agree
+			const std::string script = R"(
+				class A { int x = 0; A(int v) { if (v > 0) { x = v; } else { x = -1; } } }
+				class P { private: int secret = 3; public: int shown = 0; P(int k) { shown = secret * k; } function get() -> int { return shown; } }
+				class D { int a = 0; int b = 0; D(int x, int y = 7) { a = x; b = y; } }
+				class Base { int n = 1; Base(int k) { n = k * 10; } }
+				class Kid : Base { int m = 0; Kid(int k) : super(k) { m = n + 1; } }
+				class Bad { int x = 0; Bad(int v) { x = 10 / v; } }
+				class Cb { int v = 0; var f = null; Cb(int k) { v = k; f = [this]() -> int { return v * 2; }; } }
+				function run() -> string {
+					A a = A(5); A b = A(-2);
+					P p = P(4); D d = D(1); D e = D(2, 3); Kid k = Kid(4); Cb c = Cb(21);
+					string err = "";
+					try { Bad z = Bad(0); } catch (ex) { err = ex; }
+					int s = 0; for (int i = 1; i < 50; ++i) { A t = A(i); s += t.x; }
+					return "" + a.x + "," + b.x + "," + p.get() + "," + d.b + "," + e.b + "," + k.m + "," + c.f() + "," + s + "|" + err;
+				}
+				run();
+			)";
+			const std::string interp = run_on(false, script);
+			check_eq(interp, run_on(true, script), "constructors: interpreter and vm agree");
+			check_true(interp.find("5,-1,12,7,3,41,42,1225|") == 0, interp.c_str());
+		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
 			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without

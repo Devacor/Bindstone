@@ -15304,6 +15304,43 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		stack_.push_back(std::move(value));
 		return {};
 	}
+	// The body runs through the method door (the lazy environment when the chain is public, `this` in the record); the dispatcher
+	// is one per constructor declaration, kept by the backend and checked against the class and the definition environment
+	{
+		ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
+		if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method) {
+			entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
+			entry.cls = class_def.get();
+			entry.env = definition_env.get();
+		}
+		const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
+		script_value method = *entry.method;
+		op_status pushed;
+		try {
+			pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, nullptr);
+		} catch (const script_exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = e;
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		} catch (const std::exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = script_exception(e.what());
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		}
+		if (pushed == op_status::failed) {
+			return pushed;
+		}
+		if (switch_to_) {
+			call_record& rec = *call_records_[call_records_top_ - 1];
+			rec.ctor_frame = true;
+			rec.ctor_result_stamp = result_stamp;
+		}
+		return {};
+	}
 	// Transient function object: push_script_frame copies/derives everything the frame
 	// needs (name into the record, chunk from the body-keyed cache, env installed during
 	// setup) and the parameter vector is the decl-owned shared instance - nothing points
@@ -18481,6 +18518,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	// deferred memory release bounded by pool depth (same argument as direct_pin).
 	rec.method_result_anchor = false;
 	rec.ctor_result_stamp = nullptr;
+	rec.ctor_frame = false;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	--current_call_depth_;
 	frames_.pop_back();
@@ -18573,7 +18611,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		if (result.is_reference()) [[unlikely]] {
 			copy_reference_result(result);   // a reference result copies its target
 		}
-		if (rec.method_result_anchor) {
+		if (rec.method_result_anchor && !rec.ctor_frame) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
 		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
@@ -18724,7 +18762,7 @@ op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& i
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
-	script_value result = implicit_result_for_record(rec);   // conversion skipped: fall-off parity
+	script_value result = rec.ctor_frame ? rec.locals.get_this() : implicit_result_for_record(rec);   // conversion skipped: fall-off parity
 	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 		result.set_type_info(rec.ctor_result_stamp);
 	}

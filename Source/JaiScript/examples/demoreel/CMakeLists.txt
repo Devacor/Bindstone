@@ -37,3 +37,39 @@ add_custom_command(TARGET jai_demoreel POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/scenes
         $<TARGET_FILE_DIR:jai_demoreel>/demoreel_scenes
 )
+
+# --- demoreel_lua: Lua 5.4 + sol2 port (opt-in; builds Lua from source) ---
+option(DEMOREEL_PORT_LUA "Build demoreel_lua, the Lua/sol2 port of the demoreel" OFF)
+if(DEMOREEL_PORT_LUA)
+    set(DEMOREEL_LUA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../lua" CACHE PATH "Lua 5.4 source root")
+    set(DEMOREEL_SOL2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../sol2" CACHE PATH "sol2 source root")
+    if(NOT EXISTS "${DEMOREEL_LUA_ROOT}/src/lua.h" OR NOT EXISTS "${DEMOREEL_SOL2_ROOT}/include/sol/sol.hpp")
+        message(FATAL_ERROR "DEMOREEL_PORT_LUA=ON but Lua/sol2 not found at ${DEMOREEL_LUA_ROOT} / ${DEMOREEL_SOL2_ROOT}")
+    endif()
+    enable_language(C)
+    file(GLOB DEMOREEL_LUA_SOURCES "${DEMOREEL_LUA_ROOT}/src/*.c")
+    list(FILTER DEMOREEL_LUA_SOURCES EXCLUDE REGEX "/(lua|luac)\\.c$")
+    add_library(demoreel_lua_runtime STATIC ${DEMOREEL_LUA_SOURCES})
+    target_include_directories(demoreel_lua_runtime PUBLIC "${DEMOREEL_LUA_ROOT}/src")
+    if(MSVC)
+        target_compile_options(demoreel_lua_runtime PRIVATE /W3)
+        set_property(TARGET demoreel_lua_runtime PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    elseif(UNIX)
+        target_link_libraries(demoreel_lua_runtime PUBLIC m ${CMAKE_DL_LIBS})
+    endif()
+    add_executable(demoreel_lua demoreel_adapter_lua.cpp)
+    target_link_libraries(demoreel_lua PRIVATE demoreel_host demoreel_lua_runtime)
+    target_include_directories(demoreel_lua PRIVATE "${DEMOREEL_SOL2_ROOT}/include")
+    target_compile_definitions(demoreel_lua PRIVATE
+        DEMOREEL_LUA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/lua"
+    )
+    demoreel_msvc_settings(demoreel_lua)
+    add_custom_command(TARGET demoreel_lua POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/ports/lua
+            $<TARGET_FILE_DIR:demoreel_lua>/demoreel_lua_scenes
+    )
+    message(STATUS "demoreel: demoreel_lua enabled (${DEMOREEL_LUA_ROOT} + ${DEMOREEL_SOL2_ROOT})")
+endif()

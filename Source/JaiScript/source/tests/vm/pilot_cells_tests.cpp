@@ -1591,6 +1591,26 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(6), closed, "every loop over bools closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 		});
+		test("compound_binary_operands_land_in_temps", [this]() {
+			// x op= a op b inside a loop: the binary lands in a temp and the compound reads it; the results, the string rows, the errors
+			// of the binary and of the compound are the general form's
+			const std::string script = R"(
+				function run() -> string {
+					float fs = 0.0; int n = 0; string s = "";
+					for (int i = 0; i < 6; ++i) { float v = i * 0.5; fs += math::sqrt(v) * 1.5 - v / 3.0; n += i * i - 1; s += to_string(i + 1); }
+					string e1 = ""; int z = 0;
+					try { for (int i = 0; i < 3; ++i) { n += i / z; } } catch (ex) { e1 = ex; }
+					string e2 = ""; int big = 9223372036854775807;
+					try { for (int i = 0; i < 3; ++i) { big += i * 2 + 1; } } catch (ex) { e2 = ex; }
+					return "" + fs + "|" + n + "|" + s + "|" + e1 + "|" + e2 + "|" + big;
+				}
+				run();
+			)";
+			const std::string interp = run_on(false, script);
+			check_eq(interp, run_on(true, script), "compound temps: interpreter and vm agree");
+			check_true(interp.find("|49|123456|") != std::string::npos, interp.c_str());
+		});
+
 		test("member_reads_of_slot_instances_close_loops", [this]() {
 			// a member read in a truth test, a compound operand and a declaration lands in a member temp: the loop closes, and every
 			// kernel fact holds (a user accessor runs per read, a call in the body that changes a field is seen, a null receiver raises)

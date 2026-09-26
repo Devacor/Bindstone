@@ -1839,7 +1839,11 @@ private:
 				ctype r = infer(b->right.get());
 				if (b->op.type == token_type::left_bracket) {
 					// the proven element kind rides the node's class (int_int / float_float) for the compiler's temps
-					const ctype el = container_value_type(declared_container_receiver(b->left.get(), l));					const uint8_t cls = !el.element_proof ? operand_class_unknown
+					const ctype cont = declared_container_receiver(b->left.get(), l);
+					const ctype el = container_value_type(cont);
+					const bool object_elements = el.kind == ctype::object_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
+					const uint8_t cls = object_elements ? operand_class_object_element
+					                  : !el.element_proof ? operand_class_unknown
 					                  : el.kind == ctype::int_k ? operand_class_int_int
 					                  : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
 					stamp(b->static_operand_class, cls, operand_class_unknown);

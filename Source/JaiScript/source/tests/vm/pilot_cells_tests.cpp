@@ -3356,6 +3356,55 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(iv, vv, "the reload takes the fallback on the vm");
 			check_eq(std::string("80|804"), vv, "the values before and after the reload");
 		});
+		test("member_reads_of_elements_close_loops", [this]() {
+			// row 173: a[i].m inside a loop over an array of instances lands the element in an alias temp and the member in a member temp;
+			// the loop closes, and the kernel facts hold: a subclass element, a user accessor read per element, a store through a call between
+			// reads, an out-of-range index's text; both backends, proofs off, the middle end off and the injected miss agree
+			const std::string prelude =
+				"class Pt { float x = 0.0; float y = 0.0; bool alive = true; Pt(float a, float b) { x = a; y = b; alive = a > 2.0; } }\n"
+				"class Pt2 : Pt { Pt2(float a) : super(a, a * 2.0) { } }\n"
+				"class Acc { float v = 1.0; int reads = 0; function _get_v() -> float { reads += 1; return v + 0.5; } }\n"
+				"function bump(Pt& p) -> void { p.x = p.x + 100.0; }\n"
+				"var run = function(int n) -> string { array<Pt> pts = []; for (int i = 0; i < n; ++i) { pts.push(Pt(i * 1.0, 2.0)); } pts.push(Pt2(3.0)); "
+				"float fs = 0.0; float gs = 0.0; int alive = 0; for (int i = 0; i < pts.size(); ++i) { fs += pts[i].x; gs = gs + pts[i].y * 2.0; if (pts[i].alive) { alive += 1; } if (i == 1) { bump(pts[2]); } } "
+				"array<Acc> as = [Acc(), Acc()]; float w = 0.0; for (int i = 0; i < 2; ++i) { w += as[i].v; } "
+				"string err = \"\"; try { for (int i = 0; i < 9; ++i) { fs += pts[i].x; } } catch (ex) { err = ex; } "
+				"return \"\" + fs + \",\" + gs + \",\" + alive + \",\" + w + \",\" + as[0].reads + \"|\" + err; };\n";
+			const std::string body = "run(5);";
+			const std::string interp = run_on(false, prelude + body);
+			both(prelude + body, "", "element member reads");
+			both(prelude + body, "", "element member reads, proofs off", false);
+			check_true(interp.find("226.0,32.0,3,3.0,1|") == 0, interp.c_str());
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(interp, off, "the middle end's switch off agrees");
+			}
+			const std::string l = listing_run(R"(
+				class Pt { float x = 0.0; float y = 0.0; }
+				function f(array<Pt> pts) -> float { float fs = 0.0; for (int i = 0; i < pts.size(); ++i) { fs += pts[i].x; } return fs; }
+				array<Pt> xs = [Pt(), Pt()]; f(xs);
+			)");
+			check_true(l.find("-- cell loop") != std::string::npos, "the element member loop closes: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(interp, injected(every), "element member reads under an injected miss at every " + std::to_string(every)); }
+		});
+		test("constructor_field_stores_convert_and_run_accessors_elsewhere", [this]() {
+			// row 172: bare field stores in constructor bodies keep their this-field entry across constructions: the declared type converts
+			// (int from float, float from int), a subclass constructor's stores, a user setter on another field untouched by the bare store
+			const std::string script = R"(
+				class C { int n = 0; float f = 0.0; float g = 0.0; int sets = 0; function _set_g(float v) -> void { sets += 1; g = v * 2.0; } C(float a, int b) { n = a; f = b; g = a; } }
+				class D : C { int m = 0; D(float a) : super(a, 2) { m = a; } }
+				function run() -> string { int sn = 0; float sf = 0.0; float sg = 0.0; int st = 0; for (int i = 0; i < 50; ++i) { C c = C(i * 1.5, i); sn += c.n; sf += c.f; sg += c.g; st += c.sets; D d = D(2.5); sn += d.m; } return "" + sn + "," + sf + "," + sg + "," + st; }
+				run();
+			)";
+			both(script, "", "constructor field stores");
+			both(script, "", "constructor field stores, proofs off", false);
+		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
 			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without

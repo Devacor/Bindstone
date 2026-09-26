@@ -886,6 +886,43 @@ public:
             fs::remove_all(dir, ec);
         });
 
+        test("proven_builtin_calls_keep_the_general_semantics", [this, es]() {
+            // the builtin-call instruction's inline paths and its fallbacks: results, error texts, argument kinds, the receiver
+            // re-read after a reassigning argument
+            check_eq(std::string("4|-1|17|true|false|true|true|uick|ick brown fox|q|f|3|1|true|7"), es(R"(
+                string s = "the quick brown fox";
+                string out = "" + s.find("quick") + "|" + s.find("zz") + "|" + s.find("o", 13) + "|" + s.contains("fox") + "|" +
+                    s.contains("cat") + "|" + s.starts_with("the") + "|" + s.ends_with("fox") + "|" + s.substr(5, 4) + "|" +
+                    s.substr(-13) + "|" + s.at(4) + "|" + s.at(-3);
+                map<string, int> m = {"a": 3};
+                array<int> xs = [];
+                out = out + "|" + m.get("a", 9) + "|" + m.size() + "|" + m.has("a") + "|" + (s.size() - 12);
+                out;)"));
+            check_eq(std::string("find() first argument must be a string|at() index out of bounds|substr() start argument must be an integer|05"), es(R"(
+                string s = "hello"; var n = 3; var t = "x"; string out = "";
+                try { s.find(n); } catch (e) { out = out + e; }
+                try { s.at(9); } catch (e) { out = out + "|" + e; }
+                try { s.substr(t); } catch (e) { out = out + "|" + e; }
+                out = out + "|" + s.substr(99).size() + s.size();
+                out;)"));
+            check_eq(std::string("3"), es(R"(
+                string s = "abc";
+                function swap() -> string { s = "xyzw"; return "w"; }
+                "" + s.find(swap());)"));
+        });
+
+        test("template_chains_append_in_order", [this, es]() {
+            check_eq(std::string("a1b2.5ctruedx|AB:A,B|utf8_string|3|string"), es(R"(
+                string trail = "";
+                class P { string tag; P(string t) { tag = t; } function to_string() -> string { trail = trail + tag; return tag; } }
+                int i = 1; float f = 2.5; bool b = true; char c = 'x';
+                string first = `a${i}b${f}c${b}d${c}`;
+                string order = `${P("A")},${P("B")}`;
+                var u = `${"é".to_utf8()}!`;
+                string typed = "q"; string joined = `${typed}${typed}${typed}`;
+                first + "|" + trail + ":" + order + "|" + type_of(u) + "|" + joined.size() + "|" + type_of(joined);)"));
+        });
+
         test("floats_print_shortest_and_round_trip", [this, es, eb]() {
             check_eq(std::string("0.30000000000000004|2.0|0.3333333333333333|1e+20|-0.0|1e-07|123456789.0"),
                 es("to_string(0.1 + 0.2) + \"|\" + to_string(2.0) + \"|\" + to_string(1.0 / 3.0) + \"|\" + to_string(1e20) + \"|\" + to_string(-0.0) + \"|\" + to_string(1e-7) + \"|\" + to_string(123456789.0);"));

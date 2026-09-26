@@ -2235,6 +2235,18 @@ private:
 			if (recv.kind == ctype::enum_ref_k) {
 				return {};
 			}
+			uint8_t proven = 0;
+			if (!recv.tentative || recv.element_proof) {
+				proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
+			}
+			stamp(c->builtin_receiver, proven, uint8_t(0));
+			if (proven) {
+				for (auto& a : c->arguments) {   // a builtin reads its arguments as values: a subscript argument needs no element reference
+					if (a->get_type() == node_type::binary_expr && static_cast<binary_expr*>(a.get())->op.type == token_type::left_bracket) {
+						stamp(static_cast<binary_expr*>(a.get())->transient_element_read, true, false);
+					}
+				}
+			}
 			return {};   // builtin container/string methods etc.
 		}
 		infer(callee);

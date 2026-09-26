@@ -191,6 +191,8 @@ namespace {
 			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
+			case opcode::op_call_builtin:
+			case opcode::op_concat_append:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -368,6 +370,8 @@ namespace {
 			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
+			case opcode::op_call_builtin:
+			case opcode::op_concat_append:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -4311,6 +4315,26 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
+	if (expr->op.type == token_type::plus) {
+		// a left-deep `+` chain from a string literal (a template string): the literal, then each operand and its append, the
+		// order the chain evaluates in
+		std::vector<const binary_expr*> chain;
+		const expression* e = expr.get();
+		while (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::plus) {
+			chain.push_back(static_cast<const binary_expr*>(e));
+			e = static_cast<const binary_expr*>(e)->left.get();
+		}
+		if (chain.size() >= 2 && e->get_type() == node_type::literal_expr &&
+		    static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_STRING) {
+			compile_expression(chain.back()->left);
+			for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+				compile_expression((*it)->right);
+				emit(opcode::op_concat_append);
+			}
+			return;
+		}
+	}
+
 	if (expr->op.type == token_type::left_bracket) {
 		uint32_t flags = is_lvalue_shaped(expr->left.get()) ? index_flag_lvalue_shape : 0;
 		if (expr->transient_element_read) {
@@ -4951,8 +4975,41 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			if (probe_ip != SIZE_MAX) {
 				chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 			}
-			emit(opcode::op_call_method, static_cast<uint32_t>(expr->arguments.size()),
-			     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin
+			if (builtins_ && !member->null_safe && expr->builtin_receiver != 0) {
+				const call_site& cs = chunk_->call_sites.back();
+				bool args_callout_free = true;   // an identifier string receiver is re-read after the arguments: none may run code
+				if (member->object->get_type() == node_type::identifier_expr) {
+					for (const auto& arg : expr->arguments) { args_callout_free = args_callout_free && detail::transient_read_marker::callout_free(arg.get()); }
+				}
+				if (expr->builtin_receiver == 1 && cs.bi_string != builtin_method_registries::k_no_builtin &&
+				    builtins_->string_mutates_by_index[cs.bi_string] == 0 && args_callout_free) { builtin_kind = 1; }   // a string mutator writes the variable: the general call
+				else if (expr->builtin_receiver == 2 && cs.bi_array != builtin_method_registries::k_no_builtin) { builtin_kind = 2; }
+				else if (expr->builtin_receiver == 3 && cs.bi_map != builtin_method_registries::k_no_builtin) { builtin_kind = 3; }
+			}
+			if (builtin_kind != 0) {
+				uint32_t inline_op = 0;
+				const size_t n = expr->arguments.size();
+				const std::string_view name = member->member;
+				if (n == 0 && (name == "size" || name == "length")) inline_op = 1;
+				else if (n == 0 && name == "empty") inline_op = 2;
+				else if (builtin_kind == 1) {
+					if (name == "find" && (n == 1 || n == 2)) inline_op = 3;
+					else if (name == "contains" && n == 1) inline_op = 4;
+					else if (name == "starts_with" && n == 1) inline_op = 5;
+					else if (name == "ends_with" && n == 1) inline_op = 6;
+					else if (name == "substr" && (n == 1 || n == 2)) inline_op = 7;
+					else if (name == "at" && n == 1) inline_op = 8;
+				} else if (builtin_kind == 3) {
+					if (name == "has" && n == 1) inline_op = 9;
+					else if (name == "get" && n == 2) inline_op = 10;
+				}
+				emit(opcode::op_call_builtin, static_cast<uint32_t>(expr->arguments.size()),
+				     static_cast<uint32_t>(chunk_->call_sites.size() - 1), builtin_kind | (inline_op << 4));
+			} else {
+				emit(opcode::op_call_method, static_cast<uint32_t>(expr->arguments.size()),
+				     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+			}
 			if (null_guard != SIZE_MAX) {
 				patch_jump(null_guard, chunk_->code.size());
 			}

@@ -114,6 +114,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_call_method:
 				out << " argc=" << ins.a << " site=" << ins.b;
 				break;
+			case opcode::op_call_builtin:
+				out << " argc=" << ins.a << " site=" << ins.b << " kind=" << (ins.c & 15u) << " inline=" << (ins.c >> 4);
+				break;
 			case opcode::op_get_member:
 			case opcode::op_get_static:
 			case opcode::op_set_member:

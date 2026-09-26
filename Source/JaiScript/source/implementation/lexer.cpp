@@ -522,15 +522,23 @@ void lexer::scan_template_string() {
 
     // Opening paren and empty string to establish string context
     result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, start_loc));
+    const size_t leading_part = result.size();
     emit_string_part("");
+    bool leading_empty = true;   // literal text before the first splice replaces the leading "" (no "" + "text" concat)
+    auto emit_literal = [&](const std::string& part) {
+        if (part.empty()) return;   // an empty part joins nothing
+        if (leading_empty) { result[leading_part].string_value = part; leading_empty = false; return; }
+        emit_plus();
+        emit_string_part(part);
+    };
 
     std::string current_part;
 
     while (!is_at_end() && peek() != '`') {
         if (peek() == '$' && peek_next() == '{') {
-            emit_plus();
-            emit_string_part(current_part);
+            emit_literal(current_part);
             current_part.clear();
+            leading_empty = false;
 
             emit_plus();
 
@@ -657,10 +665,7 @@ void lexer::scan_template_string() {
         }
     }
 
-    if (!current_part.empty()) {
-        emit_plus();
-        emit_string_part(current_part);
-    }
+    emit_literal(current_part);
 
     if (!is_at_end() && peek() == '`') {
         advance();

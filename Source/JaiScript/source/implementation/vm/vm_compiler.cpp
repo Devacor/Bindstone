@@ -4,6 +4,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
@@ -127,6 +128,7 @@ namespace {
 			case opcode::op_member_temp:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
+			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
@@ -308,6 +310,7 @@ namespace {
 			case opcode::op_member_temp:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
+			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
 			case opcode::op_index_assign:
@@ -3873,8 +3876,10 @@ bool vm_compiler::quiet_read(const expression* e) {
 		return quiet_index(b->right.get());
 	}
 	const expression* arg = nullptr;
-	if (math_temp_operand(e) != detail::math_fn::none) { arg = static_cast<const call_expr*>(e)->arguments[0].get(); }
-	else if (unary_temp_operand(e)) { arg = static_cast<const unary_expr*>(e)->operand.get(); }
+	if (math_temp_operand(e) != detail::math_fn::none) {
+		if (math_alias_call(e)) return false;   // the name may bind user code by run time
+		arg = static_cast<const call_expr*>(e)->arguments[0].get();
+	} else if (unary_temp_operand(e)) { arg = static_cast<const unary_expr*>(e)->operand.get(); }
 	if (!arg) return false;
 	return arg->get_type() == node_type::literal_expr || primitive_local(arg) || quiet_read(arg);
 }
@@ -3931,7 +3936,9 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return detail::math_fn::none;
 	if (!e || e->get_type() != node_type::call_expr) return detail::math_fn::none;
 	auto* call = static_cast<const call_expr*>(e);
-	if (call->arguments.size() != 1 || !call->callee || call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
+	if (call->arguments.size() != 1 || !call->callee) return detail::math_fn::none;
+	if (call->callee->get_type() == node_type::identifier_expr) return math_alias_operand(call);
+	if (call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
 	const detail::math_fn fn = detail::math_intrinsic_for_call(static_cast<const member_expr*>(call->callee.get()));
 	switch (fn) {
 	case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::floor_: case detail::math_fn::ceil_:
@@ -3940,6 +3947,24 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 		return fn;
 	default: return detail::math_fn::none;
 	}
+}
+
+// `sqrt(x)` naming a registered stdlib alias from outside the frame: a math temp whose op checks at run time that the name
+// binds the registered builtin (the real call otherwise); an element or member argument keeps the general call, whose
+// argument may bind a reference parameter of whatever the name binds
+detail::math_fn vm_compiler::math_alias_operand(const call_expr* call) const {
+	if (!engine_) return detail::math_fn::none;
+	auto* id = static_cast<identifier_expr*>(call->callee.get());
+	if (identifier_slot_operand(id) != k_invalid_u32) return detail::math_fn::none;
+	const expression* arg = call->arguments[0].get();
+	if (arg->get_type() != node_type::identifier_expr && jai::detail::is_ref_bindable_lvalue(arg)) return detail::math_fn::none;
+	const uint8_t fn = engine_->math_alias_fn(id->symbol_id);
+	return fn >= engine::k_math_alias_rows ? detail::math_fn::none : static_cast<detail::math_fn>(fn);
+}
+
+bool vm_compiler::math_alias_call(const expression* e) {
+	return e && e->get_type() == node_type::call_expr && static_cast<const call_expr*>(e)->callee &&
+	       static_cast<const call_expr*>(e)->callee->get_type() == node_type::identifier_expr;
 }
 
 // The intrinsic's argument as an operand (a slot, a literal, an element read or another intrinsic into a temp;
@@ -4008,6 +4033,33 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 	auto* call = static_cast<call_expr*>(e.get());
 	const detail::math_fn fn = math_temp_operand(e.get());
 	const expression_ptr& arg = call->arguments[0];
+	uint32_t alias_site = k_invalid_u32, alias_temp = k_invalid_u32;
+	uint32_t args_begin = 0;
+	if (math_alias_call(e.get())) {
+		// the real call's site, as compile_call builds it; an argument evaluated ahead of the op that could raise or run user
+		// code needs the callee resolved first, at the guard
+		call_site site;
+		site.call_node = add_node(e);
+		site.callee = make_fused_operand(call->callee);
+		if (arg->get_type() == node_type::identifier_expr) {
+			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
+			site.arg_symbols.push_back(arg_ident->symbol_id);
+			site.arg_slots.push_back(identifier_slot_operand(arg_ident));
+			if (arg_ident->global_qualified) { site.arg_global.assign(1, 1); }
+		} else {
+			site.arg_symbols.push_back(UINT64_MAX);
+			site.arg_slots.push_back(k_invalid_u32);
+		}
+		chunk_->call_sites.push_back(std::move(site));
+		alias_site = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+		const bool in_op = arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr || quiet_read(arg.get());
+		if (!in_op) {
+			alias_temp = static_cast<uint32_t>(temp_next_++);
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_math_guard, alias_site, alias_temp, static_cast<uint32_t>(fn));
+		}
+		args_begin = static_cast<uint32_t>(chunk_->code.size());
+	}
 	fused_binary_proto p;
 	bool operand = true;
 	if (arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr) {
@@ -4041,6 +4093,18 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 	if (operand) {
 		chunk_->fused_binary_protos.push_back(std::move(p));
 		a = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+	}
+	if (alias_site != k_invalid_u32) {
+		const uint32_t t = alias_temp != k_invalid_u32 ? alias_temp : static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		if (chunk_->code.size() > args_begin) { chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size())); }
+		emit(opcode::op_math_temp, a, t, static_cast<uint32_t>(fn) | (alias_temp != k_invalid_u32 ? 0x80u : 0u) | ((alias_site + 1) << 8));
+		emit(opcode::op_call_temp, t);
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
 	}
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;

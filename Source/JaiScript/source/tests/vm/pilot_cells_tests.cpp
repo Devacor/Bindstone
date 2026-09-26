@@ -3962,6 +3962,103 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(prelude + "run();");
 			check_true(l.find("-- inlined itr") != std::string::npos && l.find("bail->") != std::string::npos, "the graft and the bail are in the loop: " + l.substr(0, 400));
 		});
+
+		// row 187: a bare call to a stdlib math builtin lowers to the math temp while the name binds the registered function
+		test("stdlib_math_calls_lower_to_math_temps", [this]() {
+			const std::string src = "function f(float x, float y) -> float { float a = sqrt(x * x + y * y); float b = sin(x) + cos(y); return a + b + floor(y * 0.5) + ceil(x) + tan(0.25) + degrees(radians(x)); }\n"
+				"to_string(f(3.0, 4.0)) + \",\" + to_string(f(1, 2));";
+			both(src, "", "the aliases");
+			check_true(run_on(true, src).rfind("throw:", 0) != 0, "runs: " + run_on(true, src));
+			both(src, "", "the aliases, proofs off", false);
+			const std::string all = listing_run(src);
+			const size_t fbeg = all.find("== f ");
+			const std::string l = fbeg == std::string::npos ? all : all.substr(fbeg);
+			size_t temps = 0, guards = 0;
+			for (size_t at = l.find("MATH_TEMP"); at != std::string::npos; at = l.find("MATH_TEMP", at + 9)) { ++temps; }
+			for (size_t at = l.find("MATH_GUARD"); at != std::string::npos; at = l.find("MATH_GUARD", at + 10)) { ++guards; }
+			check_true(temps == 8 && guards >= 3, "every alias lands in a math temp, a computed argument behind a guard: " + l);
+			check_true(l.find("PROBE_CALLEE") == std::string::npos, "no alias call is a probe: " + l);
+		});
+		test("stdlib_math_alias_numbers_match_the_builtin", [this]() {
+			const std::string src = "function r(var v) -> string { return to_string(sqrt(v)) + \":\" + type_of(sqrt(v)) + \" \" + to_string(floor(v)) + \" \" + to_string(sin(v)); }\n"
+				"function k(int i) -> string { return to_string(sqrt(i)) + \" \" + to_string(cos(i)); }\n"
+				"r(4) + \"|\" + r(2.25) + \"|\" + r(-1.5) + \"|\" + r(9007199254740993) + \"|\" + k(7) + \"|\" + k(-9223372036854775807) + \"|\" + to_string(sqrt(-1.0) == sqrt(-1.0));";
+			both(src, "", "int and float arguments");
+			check_true(run_on(true, src).rfind("2.0:float 4.0 ", 0) == 0, "runs: " + run_on(true, src));
+			both(src, "", "int and float arguments, proofs off", false);
+		});
+		test("stdlib_math_alias_non_numeric_arguments_take_the_builtin", [this]() {
+			const std::string src = "class F { float to_float() { return 16.0; } }\n"
+				"function g(var v) -> string { try { var r = sqrt(v); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function h(var v) -> string { try { float r = sin(v * 1) + 1.0; return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"g(true) + \"|\" + g(\"x\") + \"|\" + g(null) + \"|\" + g([1]) + \"|\" + g(F()) + \"|\" + h(\"s\") + \"|\" + h(false) + \"|\" + h(2);";
+			both(src, "", "non-numeric arguments");
+			check_true(run_on(true, src).rfind("E:script_value is not a float or integer. Actual type: 6|E:No viable candidates for function call|", 0) == 0, "the builtin's own texts: " + run_on(true, src));
+		});
+		test("stdlib_math_alias_follows_a_rebinding", [this]() {
+			// rebound between calls, from inside a loop, from inside its own argument (the callee resolved first), to a
+			// non-callable and to a function taking its parameter by reference
+			const std::string src = "function f(float x) -> float { return sqrt(x * 2.0) + sqrt(x); }\n"
+				"function twice(float x) -> float { sqrt = function(float v) { return v + 1000.0; }; return x * 2.0; }\n"
+				"function g(float x) -> float { return sqrt(twice(x) + 0.0) + sqrt(x); }\n"
+				"function loop() -> string { string s = \"\"; for (int i = 0; i < 4; ++i) { s += to_string(sqrt(i * 4.0)) + \" \"; if (i == 1) { sqrt = function(float v) { return -v; }; } } return s; }\n"
+				"string out = to_string(f(8.0));\n"
+				"sqrt = function(float v) { return v + 100.0; };\n"
+				"out += \",\" + to_string(f(8.0));\n"
+				"sqrt = SQRT0;\n"
+				"out += \",\" + to_string(g(8.0)) + \",\" + to_string(g(8.0));\n"
+				"sqrt = SQRT0;\n"
+				"out += \",\" + loop();\n"
+				"sqrt = function(float& v) { v = v + 1.0; return v; };\n"
+				"function byref(float x) -> string { float y = x; float r = sqrt(y) + 0.0; return to_string(r) + \"/\" + to_string(y); }\n"
+				"out += \",\" + byref(2.0);\n"
+				"sqrt = 5;\n"
+				"function nc(float x) -> string { try { return to_string(sqrt(x * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc2(float x) -> string { try { return to_string(sqrt(nope * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc3(float x) -> string { try { return to_string(sqrt(x)); } catch (e) { return \"E:\" + e; } }\n"
+				"out += \",\" + nc(1.0) + \",\" + nc2(1.0) + \",\" + nc3(1.0);\n"
+				"out;";
+			const std::string prelude = "[[warn_mode]]\nvar SQRT0 = sqrt;\n";
+			const std::string expected = "6.82842712474619,224.0,1012.0,2024.0,0.0 2.0 -8.0 -12.0 ,3.0/3.0,E:Cannot call 'sqrt': it is an int, not a function,"
+				"E:Cannot call 'sqrt': it is an int, not a function,E:Cannot call 'sqrt': it is an int, not a function";
+			both(prelude + src, expected, "rebinding");
+			both(prelude + src, expected, "rebinding, proofs off", false);
+		});
+		test("stdlib_math_alias_member_named_like_the_builtin", [this]() {
+			const std::string src = "class V { float k = 10.0; float sqrt(float x) { return x * k; } float g(float y) { return sqrt(y * 1.0) + sqrt(y) + cos(y * 0.0); } }\n"
+				"class W { float cos = 3.0; float g(float y) { try { return cos(y * 2.0); } catch (e) { return -1.0; } } }\n"
+				"var v = V(); var w = W(); to_string(v.g(2.0)) + \",\" + to_string(w.g(1.0)) + \",\" + to_string(sqrt(16.0));";
+			both(src, "41.0,-1.0,4.0", "a member named like the builtin");
+		});
+		test("stdlib_math_alias_host_reregistration", [this]() {
+			auto run = [](bool vm) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				std::string out;
+				out += e->execute("function f(float x) -> string { return to_string(sqrt(x * 1.0)) + \" \" + to_string(sqrt(x)); } f(16.0);").as_string();
+				e->add_function("sqrt", [](const std::string& s) -> script_float { return static_cast<script_float>(s.size()); });
+				out += "," + e->execute("f(16.0) + \" \" + to_string(sqrt(\"abc\"));").as_string();
+				return out;
+			};
+			const std::string interp = run(false), vm = run(true);
+			check_eq(interp, vm, "a host that registers sqrt again");
+			check_eq(std::string("4.0 4.0,4.0 4.0 3.0"), vm, "the overload set answers");
+		});
+		test("stdlib_math_alias_under_parallel_transform", [this]() {
+			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
+				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"
+				"function serial() -> string { float s = 0.0; for (int i = 0; i < 400; ++i) { s += row(i); } return to_string(s); }\n"
+				"function par() -> string { var r = parallel_transform(idx, row); float s = 0.0; for (int i = 0; i < 400; ++i) { s += r[i]; } return to_string(s); }\n"
+				"string a = serial() + \"=\" + par();\n"
+				"sqrt = function(float v) { return v * 2.0; };\n"
+				"a + \",\" + serial() + \"=\" + par();";
+			both(src, "", "the workers' aliases");
+			check_true(run_on(true, src).rfind("throw:", 0) != 0, "runs: " + run_on(true, src));
+			const std::string vm = run_on(true, src);
+			const size_t c = vm.find(',');
+			check_true(c != std::string::npos && vm.substr(0, vm.find('=')) == vm.substr(vm.find('=') + 1, c - vm.find('=') - 1), "serial and parallel agree: " + vm);
+		});
 	}
 };
 

@@ -147,6 +147,30 @@ namespace jai::detail {
                                                    : static_cast<math_fn>(callee->math_intrinsic_cache);
     }
 
+    // A stdlib math builtin the VM may evaluate here while its name binds the registered function (engine::register_math_alias):
+    // the one-argument float family, whose stdlib (script_float) -> script_float bodies are these expressions verbatim, so an
+    // int or float argument yields the same bits either way
+    inline bool math_alias_kernel(math_fn fn) noexcept {
+        switch (fn) {
+        case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
+        case math_fn::radians_to_degrees: case math_fn::degrees_to_radians:
+            return true;
+        default: return false;
+        }
+    }
+    inline script_float eval_math_alias(math_fn fn, script_float x) noexcept {
+        switch (fn) {
+        case math_fn::floor_: return std::floor(x);
+        case math_fn::ceil_: return std::ceil(x);
+        case math_fn::sqrt_: return std::sqrt(x);
+        case math_fn::sin_: return std::sin(x);
+        case math_fn::cos_: return std::cos(x);
+        case math_fn::tan_: return std::tan(x);
+        case math_fn::radians_to_degrees: return x * (180.0 / 3.14159265358979323846);
+        default: return x * (3.14159265358979323846 / 180.0);
+        }
+    }
+
     // The ONE evaluation kernel, used verbatim by both backends. Args arrive as an
     // array of DEREF'D pointers (zero-copy from the caller's stack). Type discipline
     // per ruling: ONE variant read per arg, switch on it; cpp_bound decodes through

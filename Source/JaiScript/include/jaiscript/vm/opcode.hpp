@@ -148,7 +148,13 @@ namespace jai::vm {
                                // runs underneath, verbatim)
         op_math_temp,          // a=fused_binary_protos index (left = the argument operand; k_invalid_u32 =
                                // the argument rides the stack), b=frame slot (a compiler temp), c=math_fn:
-                               // a one-argument math:: intrinsic's result lands in the temp
+                               // a one-argument math:: intrinsic's result lands in the temp; c above 0xFF is a stdlib alias
+                               // (c = fn | 0x80 guarded | (call site + 1) << 8): the kernel while the callee binds the registered
+                               // builtin and the argument is a number, then past the op_call_temp that follows; otherwise the
+                               // real call through the site, whose result that op_call_temp lands
+        op_math_guard,         // a=call site, b=the alias's temp, c=math_fn: the alias's callee resolves at the callee-first point
+                               // ahead of its argument code: the builtin marks the temp float, anything else is the probe's
+                               // outcome (a raise, or the callee parked for the real call) and marks it int
         op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
         op_set_member_fused,   // a=nodes index (a member_expr), b=the store proof, c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
         op_call_temp,          // a = frame slot (a compiler temp): the call's result, popped from the stack, lands in it: a call an
@@ -482,6 +488,7 @@ namespace jai::vm {
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_call_temp: return "CALL_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";
+            case opcode::op_math_guard: return "MATH_GUARD";
             case opcode::op_unary_temp: return "UNARY_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";

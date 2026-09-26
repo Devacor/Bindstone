@@ -297,6 +297,15 @@ namespace stdlib {
             std::uniform_real_distribution<script_float> dist(min_val, max_val);
             return dist(*rng);
         });
+
+        eng_ref.register_math_alias("floor", "floor");
+        eng_ref.register_math_alias("ceil", "ceil");
+        eng_ref.register_math_alias("sqrt", "sqrt");
+        eng_ref.register_math_alias("sin", "sin");
+        eng_ref.register_math_alias("cos", "cos");
+        eng_ref.register_math_alias("tan", "tan");
+        eng_ref.register_math_alias("degrees", "radians_to_degrees");
+        eng_ref.register_math_alias("radians", "degrees_to_radians");
     }
 
 } // namespace stdlib

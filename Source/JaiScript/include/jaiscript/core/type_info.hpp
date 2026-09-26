@@ -105,6 +105,7 @@ namespace jai {
                 case script_value_type::jai_int_type: return "int";
                 case script_value_type::jai_float_type: return "float";
                 case script_value_type::jai_string_type: return "string";
+                case script_value_type::jai_utf8_string_type: return "utf8_string";
                 case script_value_type::jai_bool_type: return "bool";
                 case script_value_type::jai_char_type: return "char";
                 case script_value_type::jai_null_type: return "void";
@@ -176,6 +177,13 @@ namespace jai {
         static type_info make_string(string_symbolizer& symbolizer) {
             type_info info(script_value_type::jai_string_type);
             info.type_name = "string";
+            info.id = symbolizer.intern(info.canonical_name());
+            return info;
+        }
+
+        static type_info make_utf8_string(string_symbolizer& symbolizer) {
+            type_info info(script_value_type::jai_utf8_string_type);
+            info.type_name = "utf8_string";
             info.id = symbolizer.intern(info.canonical_name());
             return info;
         }

@@ -198,6 +198,10 @@ public:
             case script_value_type::jai_string_type:
                 write_string(value.as<script_string>());
                 break;
+
+            case script_value_type::jai_utf8_string_type:
+                write_string(value.deref().unchecked_as_utf8().bytes);
+                break;
                 
             case script_value_type::jai_char_type:
                 write_uint8(static_cast<uint8_t>(value.as<script_char>()));
@@ -878,6 +882,9 @@ private:
 
             case script_value_type::jai_string_type:
                 return script_value(read_string_raw(), eng);
+
+            case script_value_type::jai_utf8_string_type:
+                return script_value::make_utf8(read_string_raw(), eng);
 
             case script_value_type::jai_char_type:
                 return script_value(static_cast<script_char>(read_uint8_raw()), eng);

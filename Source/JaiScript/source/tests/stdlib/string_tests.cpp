@@ -1,6 +1,9 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai::foundry;
 
@@ -822,6 +825,65 @@ public:
             check_eq(std::string("    ab|003.14|+5"), es("format(\"{0:>6}|{1:06.2f}|{2:+d}\", \"ab\", 3.14159, 5);"));
             check_eq(std::string("  x00"), es("`${\"x00\":>5}`;"));   // an explicit align on a string keeps its fill
             check_throws([&]() { eval("`${\"s\":05}`;"); });   // zero padding is numeric only
+        });
+
+        test("utf8_string_counts_characters", [this, es, ei, eb]() {
+            check_eq(script_int(4), ei("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u.size();"));
+            check_eq(script_int(4), ei("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u.length();"));
+            check_eq(script_int(7), ei("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u.byte_size();"));
+            check_eq(std::string("\xE6\x97\xA5"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u[2];"));
+            check_eq(std::string("utf8_string"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; type_of(u[2]);"));
+            check_eq(std::string("b|a|\xC3\xB1\xE6\x97\xA5" "b|\xC3\xB1\xE6\x97\xA5"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u.at(-1) + \"|\" + u.front() + \"|\" + u.substr(1) + \"|\" + u.substr(1, 2);"));
+            check_eq(std::string("2|3|-1|true|true"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; to_string(u.find(\"\xE6\x97\xA5\")) + \"|\" + to_string(u.rfind(\"b\")) + \"|\" + to_string(u.find(\"z\")) + \"|\" + to_string(u.contains(\"\xC3\xB1\")) + \"|\" + to_string(u.starts_with(\"a\xC3\xB1\"));"));
+            check_eq(std::string("b\xE6\x97\xA5\xC3\xB1" "a|4|aZ\xC3\xB1\xE6\x97\xA5" "b"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; utf8_string r = u; r.reverse(); utf8_string z = u; z.insert(1, \"Z\"); r + \"|\" + to_string(u.split(\"\").size()) + \"|\" + z;"));
+            check_eq(std::string("\xC3\xA9\xC3\xA9\xE6\x97\xA5|\xE6\x97\xA5\xC3\xA9\xC3\xA9"), es("utf8_string a = \"\xE6\x97\xA5\"; a.pad_left(3, \"\xC3\xA9\"); utf8_string b = \"\xE6\x97\xA5\"; b.pad_right(3, \"\xC3\xA9\"); a + \"|\" + b;"));
+            check_eq(std::string("utf8_string|utf8_string|utf8_string"), es("utf8_string u = \"a b\"; type_of(u.split(\" \")[0]) + \"|\" + type_of(u.to_upper()) + \"|\" + type_of(u.substr(0, 1));"));
+            check_eq(std::string("H\xC3\xA9LLO"), es("utf8_string u = \"h\xC3\xA9llo\"; u.to_upper(); u;"));
+        });
+
+        test("utf8_string_operators_and_slots", [this, es, ei, eb]() {
+            check_eq(std::string("utf8_string|utf8_string|utf8_string|string"), es("utf8_string u = \"\xC3\xA9\"; type_of(u + \"x\") + \"|\" + type_of(\"x\" + u) + \"|\" + type_of(u + 5) + \"|\" + type_of(\"x\" + \"y\");"));
+            check_eq(true, eb("utf8_string u = \"a\xC3\xB1\"; u == \"a\xC3\xB1\" && \"a\xC3\xB1\" == u && !(u != \"a\xC3\xB1\") && u < \"b\" && \"\xC3\xA9\" > u;"));
+            check_eq(true, eb("utf8_string u = \"\"; utf8_string v = \"x\"; !u && v;"));
+            check_eq(std::string("string|3|utf8_string|2"), es("utf8_string u = \"a\xC3\xB1\"; string s = u; utf8_string back = s; type_of(s) + \"|\" + to_string(s.size()) + \"|\" + type_of(back) + \"|\" + to_string(back.size());"));
+            check_eq(std::string("utf8_string|12"), es("utf8_string n = 12; type_of(n) + \"|\" + n;"));
+            check_eq(script_int(2), ei("function f(utf8_string t) -> utf8_string { return t + \"x\"; } f(\"\xC3\xBC\").size();"));
+            check_eq(std::string("utf8_string|utf8_string|2|3"), es("var w = utf8_string(\"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\"); class H { utf8_string t = \"\xC3\xBC\"; } H h = H(); h.t += \"x\"; array<var> a = [w]; a[0] += \"!\"; type_of(h.t) + \"|\" + type_of(a[0]) + \"|\" + to_string(h.t.size()) + \"|\" + to_string(w.size());"));
+            check_eq(std::string("utf8_string|string|utf8_string"), es("type_of(string::join([\"a\".to_utf8(), \"b\"], \"-\")) + \"|\" + type_of(string::join([\"a\", \"b\"], \"-\")) + \"|\" + type_of(string::trim(\"  \xC3\xBC \".to_utf8()));"));
+            check_eq(script_int(2), ei("map<var, int> m = {}; m[\"a\xC3\xB1\".to_utf8()] = 1; m[\"a\xC3\xB1\"] = 2; m[utf8_string(\"a\xC3\xB1\")] = 3; m.size();"));
+            check_eq(std::string("[\"\xC3\xA9\",\"x\"]"), es("to_json([\"\xC3\xA9\".to_utf8(), \"x\"]);"));
+            check_eq(std::string("utf8_string|3"), es("var r = from_binary(to_binary(\"a\xC3\xB1\".to_utf8())); type_of(r) + \"|\" + to_string(r.byte_size());"));
+        });
+
+        test("utf8_string_iteration_and_errors", [this, eval, es, ei]() {
+            check_eq(std::string("[a][\xC3\xB1][\xE6\x97\xA5][b]"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; string out = \"\"; for (auto c : u) { out += \"[\" + c + \"]\"; } out;"));
+            check_eq(script_int(7), ei("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; int n = 0; for (int i = 0; i < u.size(); ++i) { n += u[i].byte_size(); } n;"));
+            check_eq(std::string("a\xC3\xB1\xE6\x97\xA5" "b|aZ\xC3\xB1\xE6\x97\xA5" "b"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; var c = u; c.insert(1, \"Z\"); u + \"|\" + c;"));
+            check_eq(std::string("String index 4 out of bounds for string of size 4"), es("string m = \"\"; try { utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u[4]; } catch (e) { m = e; } m;"));
+            check_eq(std::string("Cannot iterate a utf8_string by reference: its characters are not lvalues (use for (auto c : s))"), es("string m = \"\"; try { utf8_string u = \"ab\"; for (auto& c : u) {} } catch (e) { m = e; } m;"));
+            check_eq(std::string("Strings are read-only through subscript: use substr()/+ to build a new string"), es("string m = \"\"; try { utf8_string u = \"ab\"; u[0] = \"x\"; } catch (e) { m = e; } m;"));
+            check_eq(std::string("utf8_string has no member 'to_utf8'"), es("string m = \"\"; try { utf8_string u = \"ab\"; u.to_utf8(); } catch (e) { m = e; } m;"));
+        });
+
+        test("utf8_string_positions_over_a_long_text", [this, ei]() {
+            check_eq(script_int(0), ei("string s = \"\"; for (int i = 0; i < 1000; ++i) { s += \"a\xC3\xA9\xE6\x97\xA5\"; } utf8_string u = s; array<var> ch = s.utf8_chars(); int bad = 0; for (int k = 0; k < 3000; k += 7) { int i = (k * 1237) % 3000; if (u[i] != ch[i]) { ++bad; } } for (int i = 2999; i >= 0; i -= 3) { if (u[i] != ch[i]) { ++bad; } } u.insert(0, \"\xE6\x97\xA5\"); if (u[1] != \"a\" || u.size() != 3001 || u[3000] != \"\xE6\x97\xA5\") { ++bad; } bad;"));
+        });
+
+        test("utf8_string_declarations_survive_the_jaibite_cache", [this]() {
+            namespace fs = std::filesystem;
+            fs::path dir = jai::foundry::test_temp_directory() / "jai_utf8_bite";
+            std::error_code ec;
+            fs::remove_all(dir, ec);
+            fs::create_directories(dir);
+            std::ofstream(dir / "main.jai") << "utf8_string u = \"a\xC3\xB1\"; var n = u.size(); var k = type_of(u);\n";
+            for (int run = 0; run < 2; ++run) {   // the first run writes the sibling, the second loads it
+                auto engine = make_engine(); stdlib::register_all(*engine);
+                engine->execute_file((dir / "main.jai").string());
+                check_eq(script_int(2), engine->execute("n;").as<script_int>());
+                check_eq(std::string("utf8_string"), engine->execute("k;").as<std::string>());
+                check_true(fs::exists(dir / "main.jaibite"));
+            }
+            fs::remove_all(dir, ec);
         });
 
         test("floats_print_shortest_and_round_trip", [this, es, eb]() {

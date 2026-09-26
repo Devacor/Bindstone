@@ -952,6 +952,7 @@ namespace jai {
         type_info* get_type_info_int();
         type_info* get_type_info_float();
         type_info* get_type_info_string();
+        type_info* get_type_info_utf8_string();
         type_info* get_type_info_bool();
         type_info* get_type_info_char();
         type_info* get_type_info_void();

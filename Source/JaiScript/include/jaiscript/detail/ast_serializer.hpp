@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 18;   // 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 19;   // 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -775,7 +775,7 @@ namespace jai::detail {
         type_info_ptr type() {
             if (!u8()) return type_info_ptr(nullptr);
             uint8_t bt = u8();
-            if (bt > uint8_t(script_value_type::jai_invalid_type)) jaibite_fail("corrupt type_info");
+            if (bt > uint8_t(script_value_type::jai_utf8_string_type)) jaibite_fail("corrupt type_info");
             ++depth_;
             if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("type nesting too deep");
             type_info temp(static_cast<script_value_type>(bt));

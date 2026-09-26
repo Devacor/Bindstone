@@ -52,7 +52,7 @@ namespace stdlib {
         }
 
         // Determine type from first argument
-        bool is_string_concat = args[0].is_string();
+        bool is_string_concat = args[0].is_text();
         bool is_array_concat = args[0].is_array();
 
         if (!is_string_concat && !is_array_concat) {
@@ -61,7 +61,7 @@ namespace stdlib {
 
         // Verify all arguments are the same type
         for (size_t i = 1; i < args.size(); ++i) {
-            if (is_string_concat && !args[i].is_string()) {
+            if (is_string_concat && !args[i].is_text()) {
                 throw runtime_error("concatenate() requires all arguments to be strings");
             }
             if (is_array_concat && !args[i].is_array()) {
@@ -72,10 +72,12 @@ namespace stdlib {
         // Handle string concatenation
         if (is_string_concat) {
             std::string result;
+            bool utf8 = false;
             for (const auto& arg : args) {
-                result += arg.as<std::string>();
+                result += arg.deref().unchecked_text();
+                utf8 = utf8 || arg.is_utf8_string();
             }
-            return script_value(result, args[0].get_engine());
+            return utf8 ? script_value::make_utf8(std::move(result), args[0].get_engine()) : script_value(result, args[0].get_engine());
         }
 
         // Handle array concatenation

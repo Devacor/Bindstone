@@ -198,6 +198,7 @@ namespace jai {
                 case TYPEID_INT:
                 case TYPEID_FLOAT:
                 case TYPEID_STRING:
+                case TYPEID_UTF8_STRING:
                 case TYPEID_CHAR:
                 case TYPEID_BOOL:
                     return *this;
@@ -360,6 +361,7 @@ namespace jai {
                     }
                 }
                 case 15: return script_value_type::jai_invalid_type;    // parallel borrow: region-internal, never a script-visible type
+                case 16: return script_value_type::jai_utf8_string_type;   // utf8_string
                 default: return script_value_type::jai_invalid_type;
             }
         }
@@ -424,6 +426,34 @@ namespace jai {
             const size_t idx = d.raw_storage_index();
             return idx == TYPEID_FLOAT || (idx == TYPEID_CPP_BOUND && d.bound_semantic_is(TYPEID_FLOAT));
         }
+        // utf8_string (TYPEID_UTF8_STRING): its own kind, so no byte-string lane takes it; text_bytes() is the bytes of either kind
+        bool is_utf8_string() const { return deref().raw_storage_index() == TYPEID_UTF8_STRING; }
+        inline const script_utf8& unchecked_as_utf8() const noexcept { return *storage_.get<strong_ptr<script_utf8>>(); }
+        // the in-place utf8_string write gate: a node anyone else holds is replaced by a private copy first (copy-on-write, as
+        // strings do), and the node's character caches clear: the write is about to move characters
+        inline script_utf8& unchecked_as_utf8_ref() {
+            auto& node = *storage_.get_if<TYPEID_UTF8_STRING>();
+            if (!node.unique()) [[unlikely]] { node = make_strong<script_utf8>(node->bytes); }
+            node->changed();
+            return *node;
+        }
+        // the bytes of a string or a utf8_string (the raw kind is one of the two): the builtin method bodies' receiver
+        inline const std::string& unchecked_text() const noexcept {
+            return storage_.index() == TYPEID_UTF8_STRING ? storage_.get<strong_ptr<script_utf8>>()->bytes : unchecked_as_string();
+        }
+        inline std::string& unchecked_text_ref() {
+            return storage_.index() == TYPEID_UTF8_STRING ? unchecked_as_utf8_ref().bytes : unchecked_as_string_ref();
+        }
+        // the bytes of a string or a utf8_string (a C++-bound string box excluded); null for anything else
+        const std::string* text_bytes() const noexcept {
+            const script_value& d = deref();
+            const size_t idx = d.raw_storage_index();
+            if (idx == TYPEID_STRING) return &d.unchecked_as_string();
+            if (idx == TYPEID_UTF8_STRING) return &d.unchecked_as_utf8().bytes;
+            return nullptr;
+        }
+        static script_value make_utf8(std::string bytes, engine* eng);
+        bool is_text() const { return is_string() || is_utf8_string(); }   // a string or a utf8_string
         bool is_string() const {
             const script_value& d = deref();
             const size_t idx = d.raw_storage_index();
@@ -947,6 +977,9 @@ namespace jai {
 
         inline checked_result<const script_string*> checked_as_string() const {
             const script_value& val = deref();
+            if (val.storage_.index() == TYPEID_UTF8_STRING) {   // C++ reads a utf8_string as its bytes
+                return checked_result<const script_string*>(&val.storage_.get<strong_ptr<script_utf8>>()->bytes);
+            }
             if (val.type() != script_value_type::jai_string_type) {
                 return checked_result<const script_string*>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -1996,7 +2029,8 @@ namespace jai {
             jai_weak_ptr = 12,
             jai_invalid = 13,
             jai_cpp_bound = 14,
-            jai_parallel_borrow = 15
+            jai_parallel_borrow = 15,
+            jai_utf8_string = 16
         };
 
     public:
@@ -2018,6 +2052,7 @@ namespace jai {
         static constexpr size_t TYPEID_INVALID = 13;
         static constexpr size_t TYPEID_CPP_BOUND = 14;
         static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
+        static constexpr size_t TYPEID_UTF8_STRING = 16;
 
         // The cpp_bound box encoding of a C++ type - make_cpp_bound and the binder's
         // member-address accessors share it so the two cannot drift. `capable` is false for
@@ -2070,6 +2105,7 @@ namespace jai {
             storage(strong_ptr<shared_value_holder> v) noexcept : index_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
             storage(jai::weaker_ptr<object_holder> v) noexcept : index_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
             storage(strong_ptr<cpp_bound_holder> v) noexcept : index_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
+            storage(strong_ptr<script_utf8> v) noexcept : index_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
 
             storage(const storage& o) noexcept : index_(o.index_) {
                 switch (index_) {
@@ -2082,6 +2118,7 @@ namespace jai {
                     case TYPEID_SHARED_PTR: new (&p_.sh) strong_ptr<shared_value_holder>(o.p_.sh); break;
                     case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
                     case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
+                    case TYPEID_UTF8_STRING: new (&p_.u) strong_ptr<script_utf8>(o.p_.u); break;
                     default: std::memcpy(&p_, &o.p_, sizeof(p_)); break;   // trivial payloads
                 }
             }
@@ -2141,7 +2178,7 @@ namespace jai {
                 script_char, script_bool, strong_ptr<script_array>, strong_ptr<script_map>,
                 strong_ptr<object_holder>, strong_ptr<script_function>, strong_ptr<reference_holder>,
                 strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
-                strong_ptr<cpp_bound_holder>, parallel_borrow_tag>>;
+                strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>>>;
 
             template <size_t I> JAI_FORCEINLINE alt_t<I>* get_if() noexcept {
                 return index_ == I ? &alt<I>() : nullptr;
@@ -2179,6 +2216,7 @@ namespace jai {
                 jai::weaker_ptr<object_holder> w;
                 strong_ptr<cpp_bound_holder> cb;
                 parallel_borrow_tag pb;              // tagged raw pointer, trivially copyable
+                strong_ptr<script_utf8> u;
             };
 
             static constexpr uint32_t k_trivial_mask =
@@ -2200,6 +2238,7 @@ namespace jai {
                     case TYPEID_SHARED_PTR: p_.sh.~strong_ptr(); break;
                     case TYPEID_WEAK_PTR: p_.w.~weaker_ptr(); break;
                     case TYPEID_CPP_BOUND: p_.cb.~strong_ptr(); break;
+                    case TYPEID_UTF8_STRING: p_.u.~strong_ptr(); break;
                     default: break;
                 }
             }
@@ -2224,6 +2263,7 @@ namespace jai {
                 else if constexpr (I == TYPEID_WEAK_PTR) { return p_.w; }
                 else if constexpr (I == TYPEID_INVALID) { return invalid_alt_; }
                 else if constexpr (I == TYPEID_CPP_BOUND) { return p_.cb; }
+                else if constexpr (I == TYPEID_UTF8_STRING) { return p_.u; }
                 else { return p_.pb; }
             }
             template <size_t I> JAI_FORCEINLINE const auto& alt() const noexcept {
@@ -2245,6 +2285,7 @@ namespace jai {
                 else if constexpr (std::is_same_v<T, jai::weaker_ptr<object_holder>>) { return TYPEID_WEAK_PTR; }
                 else if constexpr (std::is_same_v<T, invalid_tag>) { return TYPEID_INVALID; }
                 else if constexpr (std::is_same_v<T, strong_ptr<cpp_bound_holder>>) { return TYPEID_CPP_BOUND; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_utf8>>) { return TYPEID_UTF8_STRING; }
                 else { static_assert(std::is_same_v<T, parallel_borrow_tag>, "not a storage alternative"); return TYPEID_PARALLEL_BORROW; }
             }
 

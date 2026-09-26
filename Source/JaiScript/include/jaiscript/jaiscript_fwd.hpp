@@ -47,7 +47,8 @@ namespace jai {
         jai_weak_ptr_type,       // weak_ptr<T>
         jai_shared_ptr_type,     // shared_ptr<T>
         jai_cpp_bound_type,      // C++ bound value
-        jai_invalid_type         // Invalid/non-existent value (used as sentinel)
+        jai_invalid_type,        // Invalid/non-existent value (used as sentinel)
+        jai_utf8_string_type     // utf8_string: the same bytes as a string, character semantics
     };
     
     // The unit whose code is running and the execution that compiled it (docs/global_shadowing.md):

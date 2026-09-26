@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/detail/interpreter.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // kCheckedOverflow + jai::ints helpers
 #include "../../include/jaiscript/detail/char_promotion.hpp"
+#include <jaiscript/detail/utf8_operands.hpp>
 #include "../../include/jaiscript/detail/structural_equality.hpp"
 #include <cmath>
 #include <limits>
@@ -53,6 +54,8 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
         return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_add(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_add(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -130,6 +133,8 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
         return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_subtract(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_subtract(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -187,6 +192,8 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
         return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_multiply(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_multiply(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -244,6 +251,8 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
         return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_divide(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_divide(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -313,6 +322,8 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
         return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_modulo(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_modulo(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -378,6 +389,8 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
         return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_less(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_less(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -441,6 +454,8 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
         return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_less_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_less_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -504,6 +519,8 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
         return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_greater(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_greater(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -567,6 +584,8 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
         return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
                         ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
     // Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+        return detail::utf8_rewrapped(handle_greater_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
         return handle_greater_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -625,6 +644,8 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
 checked_result<script_value> interpreter::handle_equal(const script_value& left, const script_value& right) {
     // Integral promotion: char operands compare as int64 0..255, so 'a' == 97 and the
     // binary idiom s[i] == 0x1A hold (char_promotion.hpp; was silently false pre-ruling)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     // Handle weak_ptr comparisons with null
@@ -773,6 +794,8 @@ checked_result<script_value> interpreter::handle_not_equal(const script_value& l
 
 checked_result<script_value> interpreter::handle_spaceship(const script_value& left, const script_value& right) {
     // Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_spaceship(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_spaceship(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     // Fast path for integer spaceship - avoid function calls.
@@ -803,6 +826,8 @@ checked_result<script_value> interpreter::handle_spaceship(const script_value& l
 
 checked_result<script_value> interpreter::handle_bitwise_and(const script_value& left, const script_value& right) {
     // Integral promotion: char operands enter bitwise ops as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_bitwise_and(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_bitwise_and(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     if (!left.is_int() || !right.is_int()) {
@@ -813,6 +838,8 @@ checked_result<script_value> interpreter::handle_bitwise_and(const script_value&
 
 checked_result<script_value> interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
     // Integral promotion: char operands enter bitwise ops as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_bitwise_or(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_bitwise_or(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     if (!left.is_int() || !right.is_int()) {
@@ -823,6 +850,8 @@ checked_result<script_value> interpreter::handle_bitwise_or(const script_value& 
 
 checked_result<script_value> interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
     // Integral promotion: char operands enter bitwise ops as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_bitwise_xor(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_bitwise_xor(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     if (!left.is_int() || !right.is_int()) {
@@ -833,6 +862,8 @@ checked_result<script_value> interpreter::handle_bitwise_xor(const script_value&
 
 checked_result<script_value> interpreter::handle_left_shift(const script_value& left, const script_value& right) {
     // Integral promotion: char operands enter bitwise ops as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_left_shift(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_left_shift(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     if (!left.is_int() || !right.is_int()) {
@@ -847,6 +878,8 @@ checked_result<script_value> interpreter::handle_left_shift(const script_value& 
 
 checked_result<script_value> interpreter::handle_right_shift(const script_value& left, const script_value& right) {
     // Integral promotion: char operands enter bitwise ops as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+        return detail::utf8_rewrapped(handle_right_shift(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
         return handle_right_shift(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
     if (!left.is_int() || !right.is_int()) {

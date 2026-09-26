@@ -1180,6 +1180,7 @@ namespace jai {
                 case script_value::TYPEID_INT: return value.unchecked_as_int() != 0; // int
                 case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0; // float
                 case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty(); // string
+                case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
                 case script_value::TYPEID_CHAR: return true;                          // char - any char is truthy
                 case script_value::TYPEID_ARRAY: {
                     // array - empty is falsy (const_cast required, get_array_storage is non-const)
@@ -1270,6 +1271,7 @@ namespace jai {
         std::unordered_map<uint64_t, builtin_method> array_methods_;
         std::unordered_map<uint64_t, builtin_method> map_methods_;
         std::unordered_map<uint64_t, builtin_method> string_methods_;
+        std::unordered_map<uint64_t, builtin_method> utf8_methods_;
         std::unordered_set<uint64_t> string_mutator_ids_;   // k_string_mutator_method_names (receiver lvalue binding)
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods_;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods_;

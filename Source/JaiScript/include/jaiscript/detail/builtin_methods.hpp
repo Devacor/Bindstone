@@ -63,6 +63,7 @@ namespace jai {
         std::unordered_map<uint64_t, builtin_method> array_methods;
         std::unordered_map<uint64_t, builtin_method> map_methods;
         std::unordered_map<uint64_t, builtin_method> string_methods;
+        std::unordered_map<uint64_t, builtin_method> utf8_methods;
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods;
 
@@ -75,9 +76,11 @@ namespace jai {
         std::vector<const builtin_method*> array_by_index;
         std::vector<const builtin_method*> map_by_index;
         std::vector<const builtin_method*> string_by_index;
+        std::vector<const builtin_method*> utf8_by_index;   // utf8_string's methods: the string library in characters
         std::unordered_map<uint64_t, uint16_t> array_index;
         std::unordered_map<uint64_t, uint16_t> map_index;
         std::unordered_map<uint64_t, uint16_t> string_index;
+        std::unordered_map<uint64_t, uint16_t> utf8_index;
         // k_string_mutator_method_names by symbol id and by string_by_index position
         std::unordered_set<uint64_t> string_mutator_ids;
         std::vector<uint8_t> string_mutates_by_index;

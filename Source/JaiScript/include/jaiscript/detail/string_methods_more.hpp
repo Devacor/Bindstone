@@ -21,7 +21,7 @@ namespace jai::detail {
 
         m[sym->intern("utf8_chars")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("utf8_chars() takes no arguments");
-            const std::string& s = self.unchecked_as_string();
+            const std::string& s = self.unchecked_text();
             script_value out = string_array(ctx);
             script_array& a = *out.unchecked_get_array_storage();
             for (size_t at = 0; at < s.size();) {
@@ -33,20 +33,20 @@ namespace jai::detail {
         };
         m[sym->intern("utf8_length")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("utf8_length() takes no arguments");
-            const std::string& s = self.unchecked_as_string();
+            const std::string& s = self.unchecked_text();
             script_int n = 0;
             for (size_t at = 0; at < s.size(); ++n) { at += utf8::decode(s, at).length; }
             return ctx.make_value(n);
         };
         m[sym->intern("is_valid_utf8")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("is_valid_utf8() takes no arguments");
-            const std::string& s = self.unchecked_as_string();
+            const std::string& s = self.unchecked_text();
             for (size_t at = 0; at < s.size();) { const utf8::step st = utf8::decode(s, at); if (!st.valid) return ctx.make_value(false); at += st.length; }
             return ctx.make_value(true);
         };
         m[sym->intern("code")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("code() takes no arguments");
-            const std::string& s = self.unchecked_as_string();
+            const std::string& s = self.unchecked_text();
             const utf8::step st = s.empty() ? utf8::step{} : utf8::decode(s, 0);
             if (s.empty() || !st.valid || st.length != s.size()) {
                 return R(make_error_code(runtime_error_code::invalid_operation), "code() needs a string of exactly one UTF-8 character");
@@ -55,11 +55,11 @@ namespace jai::detail {
         };
         m[sym->intern("byte_size")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("byte_size() takes no arguments");
-            return ctx.make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+            return ctx.make_value(static_cast<script_int>(self.unchecked_text().size()));
         };
         m[sym->intern("lines")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("lines() takes no arguments");
-            const std::string& s = self.unchecked_as_string();
+            const std::string& s = self.unchecked_text();
             script_value out = string_array(ctx);
             script_array& a = *out.unchecked_get_array_storage();
             size_t start = 0;
@@ -74,9 +74,9 @@ namespace jai::detail {
         };
         m[sym->intern("partition")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (args.size() != 1) return count_error("partition() takes exactly one argument (separator)");
-            if (!args[0].is_string()) return type_error("partition() argument must be a string");
-            const std::string& s = self.unchecked_as_string();
-            const std::string& sep = args[0].unchecked_as_string();
+            if (!args[0].is_text()) return type_error("partition() argument must be a string");
+            const std::string& s = self.unchecked_text();
+            const std::string& sep = args[0].unchecked_text();
             if (sep.empty()) return R(make_error_code(runtime_error_code::invalid_operation), "partition() separator cannot be empty");
             script_value out = string_array(ctx);
             script_array& a = *out.unchecked_get_array_storage();
@@ -87,15 +87,15 @@ namespace jai::detail {
         };
         m[sym->intern("compare")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (args.size() != 1) return count_error("compare() takes exactly one argument");
-            if (!args[0].is_string()) return type_error("compare() argument must be a string");
-            const int c = self.unchecked_as_string().compare(args[0].unchecked_as_string());
+            if (!args[0].is_text()) return type_error("compare() argument must be a string");
+            const int c = self.unchecked_text().compare(args[0].unchecked_text());
             return ctx.make_value(static_cast<script_int>(c < 0 ? -1 : c > 0 ? 1 : 0));
         };
         // ASCII character classes: true when the string is non-empty and every byte is in the class
         auto char_class = [&](const char* name, const char* no_args, bool (*in_class)(unsigned char)) {
             m[sym->intern(name)] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
                 if (!args.empty()) return count_error(no_args);
-                const std::string& s = self.unchecked_as_string();
+                const std::string& s = self.unchecked_text();
                 if (s.empty()) return ctx.make_value(false);
                 for (const char c : s) { if (!in_class(static_cast<unsigned char>(c))) return ctx.make_value(false); }
                 return ctx.make_value(true);

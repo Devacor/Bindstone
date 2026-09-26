@@ -12,6 +12,8 @@ namespace jai::detail {
 // iterates by value only: its chars are reads like s[i], never cells.
 inline constexpr std::string_view string_range_for_by_ref_text =
     "Cannot iterate a string by reference: its chars are not lvalues (use for (auto c : s))";
+inline constexpr std::string_view utf8_range_for_by_ref_text =
+    "Cannot iterate a utf8_string by reference: its characters are not lvalues (use for (auto c : s))";
 
 // {0} = the payload's type, spelled like family D's source (class names for objects and
 // handles, the base names otherwise - every spelling is already interned, so the error

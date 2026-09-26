@@ -444,6 +444,10 @@ private:
             case script_value_type::jai_string_type:
                 oss << '"' << escape_json_string_local(val.as_string()) << '"';
                 break;
+
+            case script_value_type::jai_utf8_string_type:
+                oss << '"' << escape_json_string_local(val.deref().unchecked_as_utf8().bytes) << '"';
+                break;
                 
             case script_value_type::jai_char_type:
                 oss << '"' << escape_json_string_local(std::string(1, val.as_char())) << '"';

@@ -87,7 +87,8 @@ struct ctype {
         unknown, null_k, int_k, float_k, string_k, char_k, bool_k,
         array_k, map_k, function_k, object_k, weak_k,
         class_ref_k,   // a class used as a value (Class::static access, constructor callee)
-        enum_ref_k     // an enum name (member access checks its values)
+        enum_ref_k,    // an enum name (member access checks its values)
+        utf8_k
     };
     kind_t kind = unknown;
     std::string_view cls{};   // object_k / class_ref_k / enum_ref_k
@@ -119,6 +120,7 @@ std::string ctype_name(const ctype& t) {
 		case ctype::int_k: return "int";
 		case ctype::float_k: return "float";
 		case ctype::string_k: return "string";
+		case ctype::utf8_k: return "utf8_string";
 		case ctype::char_k: return "char";
 		case ctype::bool_k: return "bool";
 		case ctype::array_k: return t.ti ? t.ti->canonical_name() : "array";
@@ -143,6 +145,7 @@ ctype ctype_from_type_info(const type_info* ti) {
 		case script_value_type::jai_int_type: t = ctype::make(ctype::int_k); break;
 		case script_value_type::jai_float_type: t = ctype::make(ctype::float_k); break;
 		case script_value_type::jai_string_type: t = ctype::make(ctype::string_k); break;
+		case script_value_type::jai_utf8_string_type: t = ctype::make(ctype::utf8_k); break;
 		case script_value_type::jai_char_type: t = ctype::make(ctype::char_k); break;
 		case script_value_type::jai_bool_type: t = ctype::make(ctype::bool_k); break;
 		case script_value_type::jai_array_type: t = ctype::make(ctype::array_k); break;
@@ -191,6 +194,9 @@ ctype binary_result_kind(const ctype& l, token_type op, const ctype& r) {
         case token_type::pipe_pipe:
             return ctype::make(ctype::bool_k);   // guaranteed bool (binary_expr::returns_bool)
         case token_type::plus:
+            if (l.kind == ctype::utf8_k || r.kind == ctype::utf8_k) {
+                return ctype::make(ctype::utf8_k);   // a utf8_string side keeps the kind
+            }
             if (l.kind == ctype::string_k || r.kind == ctype::string_k) {
                 return ctype::make(ctype::string_k);   // concat, either side
             }
@@ -1494,6 +1500,7 @@ private:
 					   may_convert_via_method(src, "to_float");
 			case ctype::bool_k: return true;     // truthy conversion accepts anything
 			case ctype::string_k: return true;   // to_string conversion accepts anything
+			case ctype::utf8_k: return true;     // the string row
 			case ctype::char_k: return src.kind == ctype::char_k || may_convert_via_method(src, "to_char");
 			case ctype::array_k:
 			case ctype::map_k: return container_issue(src, dst).empty();
@@ -1772,7 +1779,7 @@ private:
             case script_value_type::jai_char_type:
                 return k == ctype::char_k || k == ctype::int_k || k == ctype::float_k;
             case script_value_type::jai_string_type:
-                return k == ctype::string_k;   // no builtin numeric->string conversion at the C++ boundary
+                return k == ctype::string_k || k == ctype::utf8_k;   // no builtin numeric->string conversion at the C++ boundary
             case script_value_type::jai_array_type:
                 return k == ctype::array_k;
             case script_value_type::jai_map_type:
@@ -2034,7 +2041,7 @@ private:
 		ctype recv = infer(m->object.get());
 		if (recv_out) { *recv_out = recv; }
 		if (recv.is_unknown() || recv.kind == ctype::map_k || recv.kind == ctype::array_k ||
-			recv.kind == ctype::string_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
+			recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
 			recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||
 			recv.kind == ctype::bool_k) {
 			return {};   // builtin methods / map keys / dynamic: lenient

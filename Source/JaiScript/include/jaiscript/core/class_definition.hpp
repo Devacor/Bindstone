@@ -2593,6 +2593,10 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
             if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::of(verdict::identity);
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::converted_to(script_value(v.to_string(), eng));
+        case script_value_type::jai_utf8_string_type:
+            if (ri == script_value::TYPEID_UTF8_STRING) return slot_conversion::of(verdict::identity);
+            if (object_src) return slot_conversion::of(verdict::needs_to_x);
+            return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
         case script_value_type::jai_bool_type: {
             // is_truthy minus its object tail (KEEP BYTE-PARALLEL with the backends' is_truthy)
             if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::of(verdict::identity);
@@ -2603,6 +2607,7 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
                 case script_value::TYPEID_INT: truthy = v.unchecked_as_int() != 0; break;
                 case script_value::TYPEID_FLOAT: truthy = v.unchecked_as_float() != 0.0; break;
                 case script_value::TYPEID_STRING: truthy = !v.unchecked_as_string().empty(); break;
+                case script_value::TYPEID_UTF8_STRING: truthy = !v.unchecked_as_utf8().bytes.empty(); break;
                 case script_value::TYPEID_CHAR: truthy = true; break;
                 case script_value::TYPEID_ARRAY: { auto& arr = const_cast<script_value&>(v).get_array_storage(); truthy = arr && !arr->empty(); break; }
                 case script_value::TYPEID_MAP: { auto& map = const_cast<script_value&>(v).get_map_storage(); truthy = map && !map->empty(); break; }
@@ -2877,6 +2882,7 @@ inline checked_result<script_value> field_store_convert(const script_value& valu
             case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;
             case script_value_type::jai_float_type: want = script_value::TYPEID_FLOAT; break;
             case script_value_type::jai_string_type: want = script_value::TYPEID_STRING; break;
+            case script_value_type::jai_utf8_string_type: want = script_value::TYPEID_UTF8_STRING; break;
             case script_value_type::jai_bool_type: want = script_value::TYPEID_BOOL; break;
             case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
             default: break;

@@ -30,6 +30,7 @@ namespace jai::detail {
 			case script_value_type::jai_int_type: return "int";
 			case script_value_type::jai_float_type: return "float";
 			case script_value_type::jai_string_type: return "string";
+			case script_value_type::jai_utf8_string_type: return "utf8_string";
 			case script_value_type::jai_char_type: return "char";
 			case script_value_type::jai_bool_type: return "bool";
 			case script_value_type::jai_array_type: return "array";

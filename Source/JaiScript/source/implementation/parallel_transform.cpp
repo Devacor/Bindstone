@@ -2131,7 +2131,7 @@ namespace {
 	// reach: what the body can reach below the element - a field no worker can name is never
 	// copied by one, so its shared handles need no detach.
 #ifdef JAISCRIPT_VM_PROFILE
-	inline uint64_t prof_norm_nodes_[16] = {};
+	inline uint64_t prof_norm_nodes_[32] = {};
 	inline uint64_t prof_norm_detach_ = 0;
 	inline uint64_t prof_obj_sec_[4] = {};
 #endif

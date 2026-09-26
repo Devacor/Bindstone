@@ -28,8 +28,7 @@ public:
 			"next", &demoreel::demo_rng::next,
 			"roll", &demoreel::demo_rng::roll,
 			"chance", &demoreel::demo_rng::chance,
-			"nextf", &demoreel::demo_rng::nextf,
-			"copy", [](const demoreel::demo_rng& r) { return r; });
+			"nextf", &demoreel::demo_rng::nextf);
 		lua_["host_log"] = [log = services.log](const std::string& line) { log(line); };
 		lua_["ESC"] = std::string("\x1b");
 	}

@@ -36,7 +36,7 @@ struct host_options {
 	int64_t seed = 20260705;
 	std::string backend = "vm";          // initially active backend
 	bool smoke = false;
-	int64_t frames = 1700;               // smoke frame budget (covers all 13 scene entries)
+	int64_t frames = 1700;               // smoke frame budget (covers all 16 scene entries)
 	bool precompiled = false;            // jaibite save/load boot path
 	std::string jaibite_path = "demoreel.jaibite";
 	int64_t capture = -1;                // scene index to text-capture (README material)
@@ -59,10 +59,10 @@ struct host_options {
 // Load order matters only in that base classes execute before derived ones.
 // main.jai is last and is NEVER hot-reloaded (it owns the persistent globals).
 const char* kSceneFiles[] = {
-	"util.jai", "reel.jai", "plasma.jai", "starfield.jai", "donut.jai",
-	"julia.jai", "pipes.jai", "fire.jai", "sand.jai", "boids.jai",
-	"kinstein.jai", "voxelspace.jai", "marcher.jai", "cloth.jai",
-	"finale.jai", "main.jai",
+	"util.jai", "reel.jai", "plasma.jai", "starfield.jai", "tunnel.jai",
+	"donut.jai", "julia.jai", "lava.jai", "pipes.jai", "fire.jai",
+	"sand.jai", "boids.jai", "kinstein.jai", "voxelspace.jai", "marcher.jai",
+	"cloth.jai", "chrome.jai", "finale.jai", "main.jai",
 };
 
 double now_seconds() {
@@ -740,7 +740,7 @@ void print_usage() {
 		"  --fps N          frame pacing target (default 30)\n"
 		"  --w N / --h N    force console dimensions\n"
 		"  --smoke          headless determinism + perf run on BOTH backends\n"
-		"  --frames N       smoke frame budget (default 1300)\n"
+		"  --frames N       smoke frame budget (default 1700)\n"
 		"  --capture I      print scene I as a plain-text frame and exit\n"
 		"  --reload-test    headless hot-reload + backend-swap self-test\n"
 		"  --precompiled    boot from demoreel.jaibite (saved on first run)\n"

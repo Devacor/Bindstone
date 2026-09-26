@@ -18,7 +18,8 @@
 // really fails — a hidden assist guarantees the cascade completes) -> the
 // moment the last thread parts, the gust dies and the free banner tumbles ->
 // it shreds into ember particles on a pre-shuffled tear order. Physics,
-// lighting, and a small tragedy in 4,000 cells.
+// lighting, and a small tragedy in 8,000 pixels. Every quad is rasterized as
+// two triangles by edge functions at pixel centers, from subpixel positions.
 
 class BannerFall : Scene {
 	int cw = 26;         // points along the banner
@@ -35,8 +36,8 @@ class BannerFall : Scene {
 	var colf = [];       // per-column wind wave (rebuilt each update)
 	var colz = [];
 	var rowf = [];       // per-row wind modulation
-	var sxs = [];        // per-point screen cells (rebuilt each render)
-	var sys = [];
+	array<float> sxs = [];   // per-point screen position, subpixel (rebuilt each render)
+	array<float> sys = [];
 	var qmask = [];      // sigil mask per quad
 	var hues = [];       // weave hue index per quad column
 	int nh = 0;
@@ -50,7 +51,9 @@ class BannerFall : Scene {
 	float shred_t = -1.0;
 	int shred_at = 0;
 	int polex = 14;
-	int poley = 7;
+	int poley = 14;
+	float kx = 1.65;     // projection scale, pixels per cloth unit
+	float ky = 3.0;
 	int polebase = 0;
 	int wbase = 0;
 	int gbase = 0;
@@ -92,37 +95,44 @@ class BannerFall : Scene {
 		seamn = chh;
 		for (int wc = 0; wc < cw; ++wc) { colf.push(0.0); colz.push(0.0); }
 		for (int wr = 0; wr < chh; ++wr) { rowf.push(0.0); }
-		sxs = gfx.make_grid(npts);
-		sys = gfx.make_grid(npts);
+		sxs = gfx.make_fgrid(npts);
+		sys = gfx.make_fgrid(npts);
+		kx = w * 0.024;
+		ky = h * 0.034;
+		polex = itrunc(w * 0.12);
+		poley = itrunc(h * 0.17);
 		// palette: bg gradient rows 0..h-1 (dusk), pole, 12 weave hues x 6 light
 		// levels, gold sigil ramp, tear flash
 		for (int py = 0; py < h; ++py) {
 			float f = py / (h - 1.0);
 			float f2 = f * f;
-			pal.add_bg(14.0 + 96.0 * f2 + 24.0 * f, 12.0 + 52.0 * f2 + 10.0 * f, 34.0 + 66.0 * f);
+			pal.add(14.0 + 96.0 * f2 + 24.0 * f, 12.0 + 52.0 * f2 + 10.0 * f, 34.0 + 66.0 * f);
 		}
 		polebase = h;
-		pal.add_bg(88, 72, 54);
-		pal.add_bg(122, 102, 76);
-		pal.add_bg(255, 214, 110);
-		wbase = polebase + 3;
+		pal.add(70, 56, 42);
+		pal.add(122, 102, 76);
+		pal.add(168, 144, 108);
+		pal.add(255, 214, 110);
+		pal.add(255, 250, 210);
+		wbase = polebase + 5;
 		for (int hu = 0; hu < 12; ++hu) {
 			var c3 = gfx.rainbow_rgb(hu * 0.5235987756);
 			float hr = c3[0];
 			float hg = c3[1];
 			float hb = c3[2];
-			for (int lv = 0; lv < 6; ++lv) {
-				float k2 = 0.16 + 0.84 * lv / 5.0;
-				pal.add_bg(hr * k2, hg * k2, hb * k2);
+			for (int lv = 0; lv < 10; ++lv) {
+				float k2 = 0.14 + 0.86 * lv / 9.0;
+				pal.add(hr * k2, hg * k2, hb * k2);
 			}
 		}
-		gbase = wbase + 72;
-		for (int lv2 = 0; lv2 < 6; ++lv2) {
-			float k3 = 0.22 + 0.78 * lv2 / 5.0;
-			pal.add_bg(255.0 * k3, 218.0 * k3, 96.0 * k3);
+		gbase = wbase + 120;
+		for (int lv2 = 0; lv2 < 10; ++lv2) {
+			float k3 = 0.2 + 0.8 * lv2 / 9.0;
+			float wh = lv2 >= 8 ? (lv2 - 7) * 0.25 : 0.0;
+			pal.add(255.0 * k3 + (255.0 - 255.0 * k3) * wh, 218.0 * k3 + (255.0 - 218.0 * k3) * wh, 96.0 * k3 + (255.0 - 96.0 * k3) * wh);
 		}
-		flashp = gbase + 6;
-		pal.add_bg(255, 255, 255);
+		flashp = gbase + 10;
+		pal.add(255, 255, 255);
 		for (int qc = 0; qc < cw - 1; ++qc) { hues.push(qc * 12 / (cw - 1)); }
 		// the JAI sigil, woven per quad (5x7 letters, single-column gaps)
 		qmask = gfx.make_grid((cw - 1) * (chh - 1));
@@ -373,6 +383,41 @@ class BannerFall : Scene {
 		}
 	}
 
+	// fill one triangle by edge functions at pixel centers (either winding)
+	void tri(var& grid, float ax, float ay, float bx, float by, float cx, float cy, int pi) {
+		int ww = w;
+		float mnx = ax < bx ? ax : bx;
+		mnx = cx < mnx ? cx : mnx;
+		float mxx = ax > bx ? ax : bx;
+		mxx = cx > mxx ? cx : mxx;
+		float mny = ay < by ? ay : by;
+		mny = cy < mny ? cy : mny;
+		float mxy = ay > by ? ay : by;
+		mxy = cy > mxy ? cy : mxy;
+		int x0 = itrunc(mnx);
+		int x1 = itrunc(mxx);
+		int y0 = itrunc(mny);
+		int y1 = itrunc(mxy);
+		x0 = x0 < 0 ? 0 : x0;
+		y0 = y0 < 1 ? 1 : y0;
+		x1 = x1 > ww - 1 ? ww - 1 : x1;
+		y1 = y1 > h - 1 ? h - 1 : y1;
+		float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+		if (area < 0.0001 && area > -0.0001) { return; }
+		float sg = area > 0.0 ? 1.0 : -1.0;
+		for (int y = y0; y <= y1; ++y) {
+			float py = y + 0.5;
+			int rb = y * ww;
+			for (int x = x0; x <= x1; ++x) {
+				float px = x + 0.5;
+				float e0 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * sg;
+				float e1 = ((cx - bx) * (py - by) - (cy - by) * (px - bx)) * sg;
+				float e2 = ((ax - cx) * (py - cy) - (ay - cy) * (px - cx)) * sg;
+				if (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) { grid[rb + x] = pi; }
+			}
+		}
+	}
+
 	void render(var& grid) override {
 		int ww = w;
 		int hh = h;
@@ -389,30 +434,40 @@ class BannerFall : Scene {
 		for (int y = 0; y < hh; ++y) {
 			for (int x = 0; x < ww; ++x) { grid[gi] = y; gi = gi + 1; }
 		}
-		// the pole
-		int pbot = poley + itrunc(chh * 1.5) + 3;
+		// the pole: a shaded round staff, a gold finial on top
+		int pbot = poley + itrunc(chh * ky) + 10;
 		pbot = pbot > h - 1 ? h - 1 : pbot;
-		grid[(poley - 2) * ww + polex] = polebase + 2;
-		for (int pr = poley - 1; pr <= pbot; ++pr) {
-			grid[pr * ww + polex] = polebase + (pr & 1);
+		for (int pr = poley - 2; pr <= pbot; ++pr) {
+			grid[pr * ww + polex - 1] = polebase;
+			grid[pr * ww + polex] = polebase + 2;
+			grid[pr * ww + polex + 1] = polebase + 1;
+		}
+		for (int fy = -2; fy <= 0; ++fy) {
+			for (int fx = -1; fx <= 1; ++fx) {
+				grid[(poley - 4 + fy) * ww + polex + fx] = (fx == -1 && fy == -2) ? polebase + 4 : polebase + 3;
+			}
 		}
 		// project every point once (skewed ortho: z folds read as depth)
 		int np = npts;
-		int px0 = polex + 1;
-		int py0 = poley;
+		float px0 = polex + 1.5;
+		float py0 = poley + 0.5;
+		float kxx = kx;
+		float kyy = ky;
 		for (int p2 = 0; p2 < np; ++p2) {
 			float X = px[p2];
 			float Y = py[p2];
 			float Z = pz[p2];
-			sx_[p2] = px0 + itrunc(X * 1.65 + Z * 0.28);
-			sy_[p2] = py0 + itrunc(Y * 1.5 - Z * 0.18);
+			sx_[p2] = px0 + X * kxx + Z * kxx * 0.17;
+			sy_[p2] = py0 + Y * kyy - Z * kyy * 0.12;
 		}
-		// quads: bbox splat, lit by the edge cross product (alpha-max magnitude,
-		// no normalize); a quad with any TORN bounding constraint is skipped, so
-		// tears read as holes the moment they happen (huge-bbox quads too)
+		// quads as two triangles, lit by the edge cross product (alpha-max
+		// magnitude, no normalize); a quad with any TORN bounding constraint is
+		// skipped, so tears read as holes the moment they happen
 		var& cnr = con;
 		int qw = cww - 1;
 		int vbase = nh;
+		float maxw = kxx * 4.0;
+		float maxh = kyy * 3.0;
 		for (int j = 0; j < chh - 1; ++j) {
 			for (int i = 0; i < qw; ++i) {
 				int a = j * cww + i;
@@ -421,32 +476,20 @@ class BannerFall : Scene {
 				int vl = cnr[vbase + j * cww + i];
 				int vr = cnr[vbase + j * cww + i + 1];
 				if (ht + hb + vl + vr < 4) { continue; }
-				int x00 = sx_[a];
-				int x01 = sx_[a + 1];
-				int x10 = sx_[a + cww];
-				int x11 = sx_[a + cww + 1];
-				int xmin = x00 < x01 ? x00 : x01;
-				xmin = x10 < xmin ? x10 : xmin;
-				xmin = x11 < xmin ? x11 : xmin;
-				int xmax = x00 > x01 ? x00 : x01;
-				xmax = x10 > xmax ? x10 : xmax;
-				xmax = x11 > xmax ? x11 : xmax;
-				int y00 = sy_[a];
-				int y01 = sy_[a + 1];
-				int y10 = sy_[a + cww];
-				int y11 = sy_[a + cww + 1];
-				int ymin = y00 < y01 ? y00 : y01;
-				ymin = y10 < ymin ? y10 : ymin;
-				ymin = y11 < ymin ? y11 : ymin;
-				int ymax = y00 > y01 ? y00 : y01;
-				ymax = y10 > ymax ? y10 : ymax;
-				ymax = y11 > ymax ? y11 : ymax;
-				if (xmax - xmin > 6 || ymax - ymin > 4) { continue; }
-				xmin = xmin < 0 ? 0 : xmin;
-				ymin = ymin < 1 ? 1 : ymin;
-				xmax = xmax > ww - 1 ? ww - 1 : xmax;
-				ymax = ymax > hh - 1 ? hh - 1 : ymax;
-				if (xmin > xmax || ymin > ymax) { continue; }
+				float x00 = sx_[a];
+				float x01 = sx_[a + 1];
+				float x10 = sx_[a + cww];
+				float x11 = sx_[a + cww + 1];
+				float y00 = sy_[a];
+				float y01 = sy_[a + 1];
+				float y10 = sy_[a + cww];
+				float y11 = sy_[a + cww + 1];
+				float dxq = x11 - x00;
+				float dyq = y11 - y00;
+				float dxr = x01 - x10;
+				float dyr = y01 - y10;
+				if (dxq > maxw || dxq < 0.0 - maxw || dyq > maxh || dyq < 0.0 - maxh) { continue; }
+				if (dxr > maxw || dxr < 0.0 - maxw || dyr > maxh || dyr < 0.0 - maxh) { continue; }
 				float e1x = px[a + 1] - px[a];
 				float e1y = py[a + 1] - py[a];
 				float e1z = pz[a + 1] - pz[a];
@@ -464,40 +507,43 @@ class BannerFall : Scene {
 				mmx = anz > mmx ? anz : mmx;
 				float b = ndl / ((anx + any + anz) * 0.62 + mmx * 0.36 + 0.0001);
 				b = b < 0.0 ? -b : b;   // the weave is two-sided
-				float li = 0.18 + 0.82 * b;
+				float li = 0.12 + 0.88 * b;
 				li = li > 0.999 ? 0.999 : li;
-				int lvl = itrunc(li * 6.0);
+				int lvl = itrunc(li * 10.0);
 				int m = qm[j * qw + i];
-				int pi2 = m == 1 ? gbase + lvl : wbase + hu[i] * 6 + lvl;
-				for (int yy = ymin; yy <= ymax; ++yy) {
-					int rw2 = yy * ww;
-					for (int xx = xmin; xx <= xmax; ++xx) { grid[rw2 + xx] = pi2; }
-				}
+				int pi2 = m == 1 ? gbase + lvl : wbase + hu[i] * 10 + lvl;
+				tri(grid, x00, y00, x01, y01, x11, y11, pi2);
+				tri(grid, x00, y00, x11, y11, x10, y10, pi2);
 			}
 		}
 		// once shredding starts the freed points fly as fading embers
 		if (shred_at > 0) {
 			int fl2 = itrunc(tt * 9.0);
-			int fade = itrunc((tt - shred_t) * 0.55);
+			int fade = itrunc((tt - shred_t) * 0.9);
 			int wb = wbase;
 			for (int p3 = 0; p3 < npts; ++p3) {
-				int sx2 = sx_[p3];
-				int sy3 = sy_[p3];
-				if (sx2 < 0 || sx2 >= ww || sy3 < 1 || sy3 >= hh) { continue; }
-				int lv3 = 3 + ((p3 * 2971 + fl2 * 40503) & 3) - fade;
+				int sx2 = itrunc(sx_[p3]);
+				int sy3 = itrunc(sy_[p3]);
+				if (sx2 < 0 || sx2 >= ww - 1 || sy3 < 1 || sy3 >= hh - 1) { continue; }
+				int lv3 = 6 + ((p3 * 2971 + fl2 * 40503) & 3) - fade;
 				lv3 = lv3 < 0 ? 0 : lv3;
-				lv3 = lv3 > 5 ? 5 : lv3;
+				lv3 = lv3 > 9 ? 9 : lv3;
 				int ii = p3 % cww;
 				if (ii == 0) { continue; }   // the hoist column stays on the pole
 				int hu2 = ii >= qw ? qw - 1 : ii;
-				grid[sy3 * ww + sx2] = wb + hu[hu2] * 6 + lv3;
+				int ec = wb + hu[hu2] * 10 + lv3;
+				grid[sy3 * ww + sx2] = ec;
+				if (lv3 > 4) { grid[sy3 * ww + sx2 + 1] = ec; }
 			}
 		}
-		// a thread snapped: one white flash cell at the tear
+		// a thread snapped: a white flash burst at the tear
 		if (tear_t > 0.0 && tearpt >= 0) {
-			int tx = sx_[tearpt];
-			int ty = sy_[tearpt];
-			if (tx >= 0 && tx < ww && ty >= 1 && ty < hh) { grid[ty * ww + tx] = flashp; }
+			int tx = itrunc(sx_[tearpt]);
+			int ty = itrunc(sy_[tearpt]);
+			for (int q = -1; q <= 1; ++q) {
+				if (tx + q >= 0 && tx + q < ww && ty >= 1 && ty < hh) { grid[ty * ww + tx + q] = flashp; }
+				if (tx >= 0 && tx < ww && ty + q >= 1 && ty + q < hh) { grid[(ty + q) * ww + tx] = flashp; }
+			}
 		}
 	}
 }

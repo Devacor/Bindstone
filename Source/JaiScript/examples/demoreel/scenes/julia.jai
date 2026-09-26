@@ -1,21 +1,68 @@
-// JULIA — morphing Julia set: c orbits inside the Mandelbrot cardioid so the
-// set stays connected while it writhes. Escape-count colored, computed at
-// half horizontal resolution (console cells are ~1:2, so doubled columns are
-// square pixels — and it halves the per-frame work of the heaviest scene).
+// JULIA — morphing Julia set: c orbits just inside the Mandelbrot cardioid so
+// the set stays connected while it writhes. Every pixel, full resolution, rows
+// iterated across all cores with parallel_transform, with continuous
+// escape-time coloring (the log-log fractional count removes the iteration
+// bands) into a 256-entry cycling palette, and an orbit trap for the inside:
+// the closest the orbit came to the origin shades the set's interior, so the
+// prisoner points glow instead of sitting flat black.
+
+float JU_CA = 0.0;
+float JU_CB = 0.0;
+float JU_SC = 0.01;
+float JU_X0 = 0.0;
+float JU_Y0 = 0.0;
+int JU_W = 0;
+int JU_MAXIT = 48;
+int JU_PHASE = 0;
+int JU_INNER = 0;
+array<int> JU_ROWS = [];
+
+function julia_row(int y) -> array<int> {
+	array<int> out = [];
+	int ww = JU_W;
+	int mi = JU_MAXIT;
+	float ca = JU_CA;
+	float cb = JU_CB;
+	float sc = JU_SC;
+	float zy0 = JU_Y0 + y * sc;
+	for (int x = 0; x < ww; ++x) {
+		float zx = JU_X0 + x * sc;
+		float zy = zy0;
+		float x2 = zx * zx;
+		float y2 = zy * zy;
+		float trap = 9.0;
+		int k = 0;
+		while (k < mi && x2 + y2 < 64.0) {
+			zy = 2.0 * zx * zy + cb;
+			zx = x2 - y2 + ca;
+			x2 = zx * zx;
+			y2 = zy * zy;
+			float m = x2 + y2;
+			trap = m < trap ? m : trap;
+			k = k + 1;
+		}
+		if (k >= mi) {
+			int tl = sqrt(trap) * 40.0;
+			out.push(JU_INNER + 31 - (tl > 31 ? 31 : tl));
+		} else {
+			float nu = k + 1.0 - log2(log2(x2 + y2) * 0.5);
+			int ci = sqrt(nu) * 52.0;
+			out.push((ci + JU_PHASE) & 255);
+		}
+	}
+	return out;
+}
 
 class Julia : Scene {
-	int maxit = 12;
+	int inner = 0;
 	float tt = 0.0;
-
 
 	void build() override {
 		name = "JULIA";
 		handle = "orbit morphing . by the type ladder";
-		pal.add_bg(6, 4, 18);                     // 0: inside the set
-		for (int k = 1; k <= maxit; ++k) {
-			float f = (k - 1.0) / (maxit - 1.0);
-			pal.add_bg(20.0 + 235.0 * f * f, 8.0 + 150.0 * f, 60.0 + 195.0 * (1.0 - f) + 60.0 * f);
-		}
+		pal.gradient(256, [[8.0, 4.0, 30.0], [40.0, 20.0, 110.0], [170.0, 40.0, 170.0], [255.0, 110.0, 80.0],
+			[255.0, 230.0, 130.0], [255.0, 255.0, 240.0], [100.0, 210.0, 255.0], [30.0, 70.0, 180.0], [8.0, 4.0, 30.0]]);
+		inner = pal.gradient(32, [[2.0, 2.0, 10.0], [10.0, 26.0, 60.0], [20.0, 90.0, 120.0], [150.0, 240.0, 230.0]]);
 	}
 
 	void update(float t, float dt) override {
@@ -23,35 +70,26 @@ class Julia : Scene {
 	}
 
 	void render(var& grid) override {
-		float ca = 0.7885 * cos(tt * 0.31 + 2.0);
-		float cb = 0.7885 * sin(tt * 0.23 + 2.0);
-		float zoom = 1.0 + 0.22 * sin(tt * 0.4);
-		float sx = 3.2 / (w * zoom);
-		float sy = 2.4 / (h * zoom);
-		float x0 = -1.6 / zoom;
-		float y0 = -1.2 / zoom;
+		float zoom = 1.05 + 0.3 * sin(tt * 0.4);
+		JU_CA = 0.7885 * cos(tt * 0.31 + 2.0);
+		JU_CB = 0.7885 * sin(tt * 0.23 + 2.0);
+		JU_SC = 3.3 / (w * zoom);
+		JU_X0 = 0.0 - w * 0.5 * JU_SC;
+		JU_Y0 = 0.0 - h * 0.5 * JU_SC;
+		JU_W = w;
+		JU_PHASE = itrunc(tt * 22.0);
+		JU_INNER = inner;
+		if (JU_ROWS.size() != h) {
+			JU_ROWS = [];
+			for (int r = 0; r < h; ++r) { JU_ROWS.push(r); }
+		}
+		var rows = parallel_transform(JU_ROWS, julia_row);
 		int idx = 0;
 		for (int y = 0; y < h; ++y) {
-			float zy0 = y0 + y * sy;
-			for (int x = 0; x < w; x += 2) {
-				float zx = x0 + x * sx;
-				float zy = zy0;
-				int k = 0;
-				while (k < maxit) {
-					float x2 = zx * zx;
-					float y2 = zy * zy;
-					if (x2 + y2 > 4.0) { break; }
-					zy = 2.0 * zx * zy + cb;
-					zx = x2 - y2 + ca;
-					k = k + 1;
-				}
-				int c = (k >= maxit) ? 0 : (k + 1);
-				grid[idx] = c;
+			var& row = rows[y];
+			for (int x = 0; x < w; ++x) {
+				grid[idx] = row[x];
 				idx = idx + 1;
-				if (x + 1 < w) {
-					grid[idx] = c;
-					idx = idx + 1;
-				}
 			}
 		}
 	}

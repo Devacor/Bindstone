@@ -8596,6 +8596,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
 		if (expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = node->ints()[at]; }
+		else if (site.cont_slot == chunk::k_iter_container) { return miss(); }   // a range-for variable binds the element as it is
 		else { bits = cell_bits_of_float(static_cast<script_float>(node->ints()[at])); }   // the decl's int -> float row
 		break;
 	case script_array::kind_t::f64:
@@ -8606,7 +8607,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 		const script_value& el = node->values()[at];
 		const size_t ei = el.raw_storage_index();
 		if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = el.unchecked_as_int(); }
-		else if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }
+		else if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && site.cont_slot != chunk::k_iter_container) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }
 		else if (ei == script_value::TYPEID_FLOAT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(el.unchecked_as_float()); }
 		else if (ei == script_value::TYPEID_BOOL && expect == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { bits = el.unchecked_as_bool() ? 1 : 0; }
 		else if (ei == script_value::TYPEID_STRING && expect == static_cast<uint8_t>(script_value::TYPEID_STRING) && loop.cells[ins.a].string_borrow) { bits = reinterpret_cast<int64_t>(el.unchecked_string_handle().get()); }   // borrowed for the statement: the append pair's temp only
@@ -8620,6 +8621,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 	default: return miss();
 	}
 	if (!adopted || cr.kinds[ins.a] == expect) { cr.payload[ins.a] = bits; cr.kinds[ins.a] = expect; cr.dirty->set(ins.a); }
+	else if (site.cont_slot == chunk::k_iter_container && cr.kinds[ins.a] != 0) return miss();   // a range-for variable is a fresh declaration per iteration: the general ITER_NEXT binds another kind as the element is
 	else if (!cell_land(f, loop, ins.a, expect, bits)) return miss();   // an adopted kind changing: the declared-type rule
 	++ip;
 	return {};

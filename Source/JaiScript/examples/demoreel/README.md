@@ -497,7 +497,9 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
     ```
     Workaround (ships in kinstein.jai): read into a declared local, then assign.
 
-11. **NEW (2026-09-26, VM only; open).** Found while rewriting DONUT (its splat
+11. **FIXED** (`2f92ca83`: a bail inside a statement flushes the values the statement
+    defined before it; an inlined call's fallback keeps the caller's statement).
+    ~~Found while rewriting DONUT (its splat
     version): inside a large render method of an IMPORTED unit (the shim's
     `import "scenes/donut.jai"`), the fused int expression
     `mt[mrow + i] + itrunc(d * 15.99) * 4 + itrunc(s16 * s8 * 3.99)` (`itrunc`
@@ -506,7 +508,8 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
     The same program pasted into one file is correct, and splitting the
     expression into three typed locals is correct. The sphere-traced DONUT no
     longer has the shape; the three-file reproduction (a host stub, `util.jai`,
-    the reduced scene) was handed to the engine side.
+    the reduced scene) was handed to the engine side.~~ Pinned by
+    `a_bail_inside_a_statement_flushes_its_spills_and_graft_values`.
 
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,

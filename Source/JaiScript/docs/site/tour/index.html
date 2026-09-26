@@ -51,7 +51,7 @@ print(`ship is ${ship.length():.1f} from home, heading for (${next.x}, ${next.y}
 <p>This is the one idea that makes JaiScript feel different from Lua, Python or JavaScript: <strong>objects are values</strong>, exactly as in C++. Assigning a ship gives you a second ship. When you want two names for one ship, you ask for a reference.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 0.0; float y = 0.0; }
 
-Vec2 a = Vec2();
+Vec2 a;           // a Vec2, default-constructed
 Vec2 b = a;        // a copy, like C++: two ships, not one
 b.x = 100.0;
 

@@ -3899,6 +3899,21 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + "by_ref(); three(); flat(); OUT;", "26a;22b;7c;31a;28b;3c;26a;22b;3c;", "element arguments with a declined second read");
 			both(prelude + "by_ref(); three(); flat(); OUT;", "26a;22b;7c;31a;28b;3c;26a;22b;3c;", "element arguments, proofs off", false);
 		});
+		test("a_range_for_variable_binds_each_element_as_it_is", [this]() {
+			// each iteration declares the loop variable afresh: an int after a float stays an int, a float after an int stays a float
+			const std::string src =
+				"var out = \"\";\n"
+				"function g(a) { out = out + a + \";\"; }\n"
+				"function d(var xs) { for (auto e : xs) { g(e); } for (var e : xs) { g(e); } }\n"
+				"d([1, 7.5, 1]); d([true, 3.0, 1, 2.5, -3]); out;";
+			both(src, "1;7.5;1;1;7.5;1;true;3.0;1;2.5;-3;true;3.0;1;2.5;-3;", "range-for kinds");
+			both(src, "1;7.5;1;1;7.5;1;true;3.0;1;2.5;-3;true;3.0;1;2.5;-3;", "range-for kinds, proofs off", false);
+		});
+		test("a_computed_index_beside_a_lifted_partner_compiles_without_typed_lowering", [this]() {
+			const std::string src = "var A = [1, 2, 3, 4];\nfunction d() -> int { int i = 0; return (i + A[i]) + A[i + 2]; }\nto_string(d());";
+			both(src, "4", "computed index, proofs off", false);
+			both(src, "4", "computed index");
+		});
 	}
 };
 

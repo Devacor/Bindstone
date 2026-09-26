@@ -4420,7 +4420,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 
 bool vm_compiler::lift_operand_shape(const expression* e) {
 	return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr ||
-	       fusable_subscript_operand(e) || fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);
+	       fusable_subscript_operand(e) || (typed_lowering_ && fusable_index_expr(e)) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);   // a subscript only a temp carries needs the typed lowering (compile_subscript_into_temp)
 }
 
 // a subscript only a temp can carry (not a chain operand) or an intrinsic needs a partner that cannot raise first;

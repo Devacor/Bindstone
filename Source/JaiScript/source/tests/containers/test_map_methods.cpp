@@ -197,6 +197,38 @@ public:
             auto neg = eng->execute(R"(var m = {{-1, "neg"}}; m.has(-1);)");
             check_eq(neg.as<bool>(), true);
         });
+
+        test("scalar_map_lanes_keep_the_general_semantics", [this]() {
+            // stores and reads with raw scalar keys and values (fused and unfused sites), against the texts and post-states the
+            // entry-reference path produces
+            auto eng = make_engine();
+            auto r = eng->execute(R"(
+                function run() -> string {
+                    map<string, int> ms = {};
+                    array<string> keys = ["a", "b"];
+                    string k = "b";
+                    ms[k] = 2.0;                 // a float converts into the int value slot
+                    ms[keys[0]] = 7;
+                    var v = (ms[keys[0]] = 9);   // the assignment's value
+                    string out = "" + ms["a"] + "," + ms[k] + "," + v + "," + ms.size();
+                    var miss = ms["zz"];
+                    out = out + "," + (miss == null) + "," + ms.size() + "," + ms.has(keys[1]) + "," + ms.has("q");
+                    var xs = "x"; try { ms[keys[0]] = xs; } catch (e) { out = out + "|" + e; }
+                    out = out + "," + ms.size();
+                    map<int, float> mi = {};
+                    for (int i = 0; i < 5; ++i) { mi[i & 1] = i; }
+                    out = out + "|" + mi[0] + "," + mi[1] + "," + mi.size();
+                    try { map<int, int> bad = {}; var s = "s"; bad[s] = 1; } catch (e) { out = out + "|" + e; }
+                    var& ref = keys[1];
+                    ms[ref] = 5;
+                    out = out + "|" + ms["b"];
+                    return out;
+                }
+                run();
+            )");
+            check_eq(std::string("9,2,9,2,true,2,true,false|Cannot assign 'string' to element of type 'int',2|4.0,3.0,2|Cannot use 'string' as a key of type 'int'|5"),
+                     r.as<std::string>());
+        });
     }
 };
 

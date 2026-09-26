@@ -2836,6 +2836,17 @@ namespace jai {
         kind_ = kind_t::hetero;
     }
 
+    // Map-key order (operator<=>): two keys of the same raw int or string kind order by payload, the answer the type rank and
+    // payload compare give; every other pair takes operator<=>
+    inline bool script_value_map_less::operator()(const script_value& a, const script_value& b) const {
+        const size_t ka = a.raw_storage_index();
+        if (ka == b.raw_storage_index()) {
+            if (ka == script_value::TYPEID_INT) { return a.unchecked_as_int() < b.unchecked_as_int(); }
+            if (ka == script_value::TYPEID_STRING) { return a.unchecked_as_string() < b.unchecked_as_string(); }
+        }
+        return a < b;
+    }
+
 } // namespace jai
 
 #endif // __JAISCRIPT_CORE_VALUE_HPP__

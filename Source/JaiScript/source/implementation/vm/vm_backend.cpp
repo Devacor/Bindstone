@@ -359,6 +359,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		op_left_shift_id_ = symbolizer_->intern("<<");
 		op_right_shift_id_ = symbolizer_->intern(">>");
 		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
+		builtin_has_id_ = symbolizer_->intern("has");
 		this_id_ = symbolizer_->get_this_id();
 		subscript_op_id_ = symbolizer_->intern("[]");
 		assign_operator_id_ = symbolizer_->intern("=");
@@ -5389,6 +5390,23 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 				f.ip = truthy ? f.ip + 1 : ins.a;
 				return {};
 			}
+			// String lane: handle_equal / handle_less and kin compare two strings by bytes (a shared node is equal to itself);
+			// the custom-binary-op latch guards the global operator consult that precedes them
+			if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING && !has_custom_binary_ops_) {
+				const script_string& a = lp->unchecked_as_string();
+				const script_string& b = rp->unchecked_as_string();
+				bool truthy;
+				switch (op) {
+				case token_type::equal_equal: truthy = &a == &b || a == b; break;
+				case token_type::bang_equal: truthy = &a != &b && a != b; break;
+				case token_type::less: truthy = a < b; break;
+				case token_type::less_equal: truthy = a <= b; break;
+				case token_type::greater: truthy = a > b; break;
+				default: truthy = a >= b; break;
+				}
+				f.ip = truthy ? f.ip + 1 : ins.a;
+				return {};
+			}
 			// Null-compare lane (`x == null` / `x != null`, the BST/gameplay guard shape):
 			// handle_equal answers a null operand from storage alone - null equals null and
 			// nothing else does (a transparent wrapper unwraps to a NON-null value or stays
@@ -6204,6 +6222,23 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
+	if ((ins.a & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
+	    stack_[stack_.size() - 2].deref().raw_storage_index() == script_value::TYPEID_MAP) {
+		// the scalar map store (map_scalar_store): raw scalar key and value, the entry reference left out
+		script_value& container_peek = stack_[stack_.size() - 2].deref();
+		bool handled = false;
+		script_value* stored = nullptr;
+		VM_TRY(map_scalar_store(container_peek, stack_.back(), stack_[stack_.size() - 3], handled, stored));
+		if (handled) {
+			stack_.pop_back();   // index
+			script_value container_local = std::move(stack_.back());
+			stack_.pop_back();
+			script_value value = std::move(stack_.back());
+			stack_.pop_back();
+			stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*stored) : std::move(value));
+			return {};
+		}
+	}
 	// Slow replay: identical to the old two-op sequence
 	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape), 0, 0};
 	auto indexed = exec_index(f, index_ins);
@@ -6533,6 +6568,31 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 #endif
 				auto it = map_ptr->find(map_string_key_probe{
 					*itmpl.get_storage().get<strong_ptr<script_string>>()});
+				if (it != map_ptr->end()) {
+					script_value val = it->second;
+					if (!val.has_valid_engine()) {
+						val.set_engine(engine_);
+					}
+					sink(std::move(val));
+				} else {
+					sink(make_null());
+				}
+				return {};
+			}
+		}
+	}
+	// Scalar-key map READ: the same plain-read branch of exec_index (a hit copies with the engine stamped, a miss sinks null) for a
+	// raw int, float, string, bool or char key operand, whenever exec_index would copy (no write, and no lvalue shape or a transient
+	// read); a reference key, a write or an entry reference replays
+	if (left.raw_storage_index() == script_value::TYPEID_MAP && !(ins.b & index_flag_lvalue_write) &&
+	    (!(ins.b & index_flag_lvalue_shape) || ((ins.b & index_flag_transient_read) != 0 && !has_custom_binary_ops_))) {
+		const script_value* key = computed_index ? &*computed_index : (have_raw_index ? nullptr : index_ptr);
+		const size_t kk = key ? key->raw_storage_index() : script_value::TYPEID_INT;
+		if (kk == script_value::TYPEID_INT || kk == script_value::TYPEID_FLOAT || kk == script_value::TYPEID_STRING ||
+		    kk == script_value::TYPEID_BOOL || kk == script_value::TYPEID_CHAR) {
+			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
+			if (map_ptr) {
+				auto it = key ? map_ptr->find(*key) : map_ptr->find(script_value(raw_index, engine_));
 				if (it != map_ptr->end()) {
 					script_value val = it->second;
 					if (!val.has_valid_engine()) {
@@ -9146,6 +9206,64 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 // statement position (ins.c=1, result push elided) — as an ident/literal operand. The
 // committed paths mirror exec_index_store's fast paths verbatim; every other shape
 // pushes the operands above the value and replays the unfused sequence.
+// m[k] = v for a scalar key and a scalar value into a map whose value type is primitive or open: exec_index's auto-insert and
+// exec_index_assign's store with the entry reference left out (no holder, no second lookup). The same checks in the same order
+// (the key type before the insert, the value's compatibility after it) and the same conversion kernel; no user code can run.
+// handled = false leaves everything to the general pair.
+op_status vm_backend::map_scalar_store(script_value& container, const script_value& key_in, const script_value& value, bool& handled, script_value*& stored) {
+	handled = false;
+	auto scalar = [](size_t k) {
+		return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT || k == script_value::TYPEID_STRING ||
+		       k == script_value::TYPEID_BOOL || k == script_value::TYPEID_CHAR;
+	};
+	if (!scalar(key_in.raw_storage_index()) || !scalar(value.raw_storage_index()) || !container.has_valid_engine()) return {};
+	type_info_ptr map_tag = container.get_type_info();
+	type_info_ptr value_type = map_tag ? map_tag->value_type() : nullptr;
+	if (value_type) {
+		switch (value_type->base_type) {
+			case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_string_type:
+			case script_value_type::jai_bool_type: case script_value_type::jai_char_type: case script_value_type::jai_any_type: break;
+			default: return {};
+		}
+	}
+	handled = true;
+	script_value key = key_in;
+	if (!key.has_valid_engine()) { key.set_engine(container.get_engine()); }
+	if (map_tag) {
+		if (type_info_ptr key_type = map_tag->key_type();
+		    key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
+			uint64_t got_id = symbolizer_->intern(vm_value_type_name(key));
+			uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
+			return raise_(make_error_code(runtime_error_code::map_key_type_mismatch),
+				"Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+		}
+	}
+	auto& map = const_cast<script_map&>(container.as_map());
+	const size_t prior_map_size = map.size();
+	script_value& value_ref = map[key];
+	if (map.size() != prior_map_size) {
+		limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
+	}
+	if (!value_ref.has_valid_engine()) { value_ref.set_engine(container.get_engine()); }
+	if (value_type) {
+		if (!vm_is_element_type_compatible(value, value_type, value_ref)) {
+			std::string value_type_name = vm_value_type_name(value);
+			std::string expected_type = vm_type_info_name(value_type);
+			uint64_t value_type_id = symbolizer_->intern(value_type_name);
+			uint64_t expected_type_id = symbolizer_->intern(expected_type);
+			return raise_(make_error_code(runtime_error_code::array_element_type_mismatch),
+				"Cannot assign '{0}' to element of type '{1}'", value_type_id, expected_type_id);
+		}
+		auto converted_result = vm_convert_array_element(engine_, value, value_type);
+		if (!converted_result) { return raise_from(converted_result); }
+		value_ref = std::move(converted_result.value());
+	} else {
+		value_ref = clone_for_assignment(value);
+	}
+	stored = &value_ref;
+	return {};
+}
+
 op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	const bool no_result = ins.c != 0;
@@ -9400,6 +9518,26 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				*target_ptr = clone_for_assignment(value);
 			}
 			if (!no_result) { stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value)); }   // a copy of the stored element is the expression's value
+			return {};
+		}
+	}
+	if (container.raw_storage_index() == script_value::TYPEID_MAP && (value_operand || !stack_.empty())) {
+		const script_value& value_peek = value_operand ? *value_ptr : stack_.back();   // raw: a reference operand declines the lane
+		const script_value key = have_raw_index ? script_value(raw_index, engine_)
+		                       : computed_index ? *computed_index
+		                       : p.index.const_index != k_invalid_u32 ? materialize_constant(*f.code, p.index.const_index)   // a chunk constant is a template: the map keeps its own copy
+		                       : *index_ptr;
+		bool handled = false;
+		script_value* stored = nullptr;
+		VM_TRY(map_scalar_store(container, key, value_peek, handled, stored));
+		if (handled) {
+			if (value_operand) {
+				if (!no_result) { stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*stored) : *value_ptr); }
+			} else {
+				script_value value = std::move(stack_.back());
+				stack_.pop_back();
+				if (!no_result) { stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*stored) : std::move(value)); }
+			}
 			return {};
 		}
 	}
@@ -13272,6 +13410,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					}
 					objv.unchecked_get_array_storage()->push(std::move(converted));
 					stack_.push_back(make_null());
+					return {};
+				}
+				// MAP has inline: the builtin's body (one find on the dereferenced key)
+				if (receiver_type == script_value::TYPEID_MAP && direct_member_id == builtin_has_id_ && arguments.size() == 1) {
+					const auto& map = objv.unchecked_as_map();
+					stack_.push_back(script_value(map.find(arguments[0].deref()) != map.end(), engine_));
 					return {};
 				}
 				// objv IS the deref'd copy member_access_value captures (line one of its

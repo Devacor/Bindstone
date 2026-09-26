@@ -4341,6 +4341,46 @@ public:
                 "class G { int x = 1; G(int v) { x = 4; if (v > 0) { return; } x = 9; } } G(1).x").as_int());
             check_eq((int64_t)9, e->execute("G(0).x").as_int());
         });
+        test("typed_declarations_default_initialize", [this]() {
+            // Dev ruling 2026-09-26: a typed declaration without an initializer takes its type's default - a class default-constructs,
+            // int 0, float 0.0, bool false, string "", containers empty; var stays null; locals, fields, statics and globals alike
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check_eq(std::string("0|0.0|false||0|0|null|1.5|2|3.5|0|1.5"), e->execute(R"(
+                class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
+                class H { int n; Vec2 p; array<int> xs; static float s; }
+                int gi; Vec2 gv;
+                function run() -> string {
+                    int i; float f; bool b; string s; array<int> xs; map<string, int> m; var v; Vec2 p;
+                    H h = H();
+                    return "" + i + "|" + f + "|" + b + "|" + s + "|" + xs.size() + "|" + m.size() + "|" + type_of(v) + "|" + p.x + "|" +
+                           (h.xs.size() + 2) + "|" + (h.p.y + 1.0) + "|" + gi + "|" + gv.x;
+                }
+                run();
+            )").as_string());
+        });
+        test("paren_and_brace_declarations_construct", [this]() {
+            // Dev ruling 2026-09-26: T x(args) direct-initializes, T x() default-constructs, and a primitive takes one value or its zero
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check_eq(std::string("3.0,4.0|1.5|5|0|7.0|2.5"), e->execute(R"(
+                class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
+                function run() -> string {
+                    Vec2 a(3.0, 4.0); Vec2 b(); int i{5}; int z{}; float f(7.0); Vec2 c{};
+                    return "" + a.x + "," + a.y + "|" + b.x + "|" + i + "|" + z + "|" + f + "|" + c.y;
+                }
+                run();
+            )").as_string());
+        });
+        test("a_class_holding_itself_by_value_is_an_error", [this]() {
+            // Dev ruling 2026-09-26: `Node next;` would build a Node inside every Node; `Node next = null;` is a link
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            std::string err;
+            try { e->execute("class Node { int v = 0; Node next; }"); } catch (const std::exception& ex) { err = ex.what(); }
+            check_true(err.find("would build a Node inside every Node") != std::string::npos, err);
+            check_eq((int64_t)2, e->execute("class Link { int v = 0; Link next = null; Link(int x) { v = x; } } Link a = Link(1); a.next = Link(2); a.next.v").as_int());
+        });
         test("ctor_throw_leaks_no_instance", [this]() {
             // Dev ruling 2026-09-26: a throw propagates, the target keeps its value, and the half-built instance runs no destructor
             auto e = make_engine();

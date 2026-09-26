@@ -2459,7 +2459,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
         // Check if this is followed by an identifier (variable/function name)
         if (check(token_type::identifier)) {
             advance(); // consume identifier
-            if (check(token_type::left_paren)) {
+            if (check(token_type::left_paren) && !paren_group_ends_statement(current_)) {
                 // This is a function declaration
                 current_ = savedPos;
                 return function_declaration();
@@ -2515,7 +2515,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
             // identifier makes it a class-typed free function (C++ return-type-first,
             // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}
             advance(); // consume second identifier
-            const bool is_function = check(token_type::left_paren);
+            const bool is_function = check(token_type::left_paren) && !paren_group_ends_statement(current_);
             current_ = savedPos;
             if (is_function) {
                 return function_declaration();
@@ -3194,6 +3194,8 @@ traditional_for:
         expression_ptr initializer = nullptr;
         if (match(token_type::equal)) {
             JAISCRIPT_TRY_ASSIGN(initializer, expression());
+        } else {
+            initializer = default_initializer(type, name.location);
         }
 
         auto var_init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
@@ -3555,6 +3557,14 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                             continue;
                         }
 
+                        if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == className.lexeme) {
+                            report_error("'" + std::string(className.lexeme) + " " + std::string(name.lexeme) + ";' would build a " + std::string(className.lexeme) +
+                                         " inside every " + std::string(className.lexeme) + ": write '" + std::string(className.lexeme) + " " + std::string(name.lexeme) +
+                                         " = null;' for a link, or 'shared_ptr<" + std::string(className.lexeme) + "> " + std::string(name.lexeme) + ";' to share one", name);
+                            synchronize_class_member(class_open_index);
+                            continue;
+                        }
+                        if (!init) { init = default_initializer(type, name.location); }
                         auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                         var_decl->is_static = is_static;
                         member = var_decl;
@@ -3808,6 +3818,14 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                         continue;
                     }
 
+                    if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == className.lexeme) {
+                        report_error("'" + std::string(className.lexeme) + " " + std::string(name.lexeme) + ";' would build a " + std::string(className.lexeme) +
+                                     " inside every " + std::string(className.lexeme) + ": write '" + std::string(className.lexeme) + " " + std::string(name.lexeme) +
+                                     " = null;' for a link, or 'shared_ptr<" + std::string(className.lexeme) + "> " + std::string(name.lexeme) + ";' to share one", name);
+                        synchronize_class_member(class_open_index);
+                        continue;
+                    }
+                    if (!init) { init = default_initializer(type, name.location); }
                     auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                     var_decl->is_static = is_static;
                     var_decl->function_spelling = function_spelling;
@@ -4052,6 +4070,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     continue;
                 }
 
+                if (!init) { init = default_initializer(type, member_name.location); }
                 auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
                 var_decl->function_spelling = function_spelling;
                 member_decl = var_decl;
@@ -4353,6 +4372,51 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     return func;
 }
 
+expression_ptr parser::default_initializer(const type_info_ptr& type, const source_location& loc) {
+    if (!type) return nullptr;
+    switch (type->base_type) {
+    case script_value_type::jai_int_type: return std::make_shared<literal_expr>(loc, script_value(script_value::ast_literal_tag{}, script_int(0)));
+    case script_value_type::jai_float_type: return std::make_shared<literal_expr>(loc, script_value(script_value::ast_literal_tag{}, script_float(0.0)));
+    case script_value_type::jai_bool_type: return std::make_shared<literal_expr>(loc, script_value(script_value::ast_literal_tag{}, script_bool(false)));
+    case script_value_type::jai_char_type: return std::make_shared<literal_expr>(loc, script_value(script_value::ast_literal_tag{}, script_char(0)));
+    case script_value_type::jai_string_type:
+    case script_value_type::jai_utf8_string_type: return std::make_shared<literal_expr>(loc, script_value(script_value::ast_literal_tag{}, script_string()));
+    case script_value_type::jai_array_type: return std::make_shared<array_literal_expr>(loc, std::vector<expression_ptr>());
+    case script_value_type::jai_map_type: return std::make_shared<map_literal_expr>(loc, std::vector<std::pair<expression_ptr, expression_ptr>>());
+    case script_value_type::jai_object_type:
+        if (!type->type_name.empty()) return std::make_shared<new_expr>(loc, type, std::vector<expression_ptr>());
+        return nullptr;
+    default: return nullptr;
+    }
+}
+
+checked_result<expression_ptr> parser::initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc) {
+    switch (type ? type->base_type : script_value_type::jai_any_type) {
+    case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+    case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+        // a primitive: () and {} are its zero, one argument is its value
+        if (arguments.empty()) return default_initializer(type, loc);
+        if (arguments.size() == 1) return std::move(arguments[0]);
+        report_error("A '" + type->canonical_name() + "' is initialized by one value, not " + std::to_string(arguments.size()), previous());
+        return make_error_code(parse_error_code::unexpected_token);
+    default:
+        return expression_ptr(std::make_shared<new_expr>(loc, type, std::move(arguments)));
+    }
+}
+
+bool parser::paren_group_ends_statement(size_t lparen) const {
+    size_t depth = 0;
+    for (size_t i = lparen; i < stream_->size(); ++i) {
+        const token_type k = (*stream_)[i].type;
+        if (k == token_type::left_paren) { ++depth; }
+        else if (k == token_type::right_paren) {
+            if (--depth == 0) { return i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::semicolon; }
+        }
+        else if (k == token_type::eof) { return false; }
+    }
+    return false;
+}
+
 checked_result<declaration_ptr> parser::variable_declaration() {
     const bool function_spelling = check(token_type::function_keyword);
     JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());
@@ -4374,29 +4438,25 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     expression_ptr initializer = nullptr;
     if (match(token_type::equal)) {
         JAISCRIPT_TRY_ASSIGN(initializer, expression());
-    } else if (check(token_type::left_brace)) {
-        // Brace initialization: Type name{args...}
-        // Create a new_expr for construction
-        if (type) {
-            advance(); // consume '{'
-
-            std::vector<expression_ptr> arguments;
-            if (!check(token_type::right_brace)) {
-                arguments.reserve(4);
-                do {
-                    JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                    arguments.push_back(std::move(arg));
-                } while (match(token_type::comma));
-            }
-
-            JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
-
-            // Create new_expr with the variable's type
-            initializer = std::make_shared<new_expr>(name.location, type, std::move(arguments));
-        } else {
-            // Auto type with brace initializer - parse as expression
-            JAISCRIPT_TRY_ASSIGN(initializer, expression());
+    } else if ((check(token_type::left_brace) || check(token_type::left_paren)) && type && !is_reference) {
+        // Type name{args...} / Type name(args...): construction with the declared type (a primitive takes its one value)
+        const bool brace = check(token_type::left_brace);
+        advance();
+        std::vector<expression_ptr> arguments;
+        if (!check(brace ? token_type::right_brace : token_type::right_paren)) {
+            arguments.reserve(4);
+            do {
+                JAISCRIPT_TRY_ASSIGN(auto arg, expression());
+                arguments.push_back(std::move(arg));
+            } while (match(token_type::comma));
         }
+        JAISCRIPT_TRY(consume(brace ? token_type::right_brace : token_type::right_paren, "Expected closing bracket after constructor arguments"));
+        JAISCRIPT_TRY_ASSIGN(initializer, initializer_from_arguments(type, std::move(arguments), name.location));
+    } else if (check(token_type::left_brace)) {
+        // Auto type with brace initializer - parse as expression
+        JAISCRIPT_TRY_ASSIGN(initializer, expression());
+    } else if (!is_reference) {
+        initializer = default_initializer(type, name.location);   // T x;: the type's default (a class default-constructs)
     }
 
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));

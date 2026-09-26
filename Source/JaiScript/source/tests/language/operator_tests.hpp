@@ -280,7 +280,7 @@ public:
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(
                 class Inner { int z = 0; Inner() {} Inner(int v) { z = v; } }
-                class P { int a = 1; string s = "x"; array<int> xs = [1, 2]; Inner in = Inner(3); P child; P() {} P(int v) { a = v; } }
+                class P { int a = 1; string s = "x"; array<int> xs = [1, 2]; Inner in = Inner(3); P child = null; P() {} P(int v) { a = v; } }
                 class D : P { int extra = 0; D() {} }
                 class Cmp { int a = 1; Cmp() {} Cmp(int v) { a = v; } bool operator==(Cmp other) { return true; } }
                 nocopy class Ledger { int total = 5; Ledger() {} }

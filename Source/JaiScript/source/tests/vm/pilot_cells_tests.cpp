@@ -1676,6 +1676,34 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			check_true(listing.find("-- cell loop") != std::string::npos, "the size head closes");
 		});
 
+		test("compound_element_operands_land_in_temps", [this]() {
+			// x op= a[i] (and a size, a unary or a math operand) inside a loop: the operand lands in a temp and the compound reads it; the
+			// sums, the float promotion, an out-of-range read, an overflow and a string element are the general form's
+			const std::string script = R"(
+				function run() -> string {
+					array<int> xs = [1, 2, 3, 4]; array<float> fs = [0.5, 1.5];
+					int s = 0; float g = 0.0; int n = 0; float h = 1.0;
+					for (int k = 0; k < xs.size(); ++k) { s += xs[k]; g += xs[k]; n -= -xs[k]; h *= fs[k % 2]; n += xs.size(); }
+					string e1 = "";
+					try { for (int k = 0; k < 9; ++k) { s += xs[k]; } } catch (ex) { e1 = ex; }
+					array<int> big = [9223372036854775807, 1]; int b = 0; string e2 = "";
+					try { for (int k = 0; k < 2; ++k) { b += big[k]; } } catch (ex) { e2 = ex; }
+					array<string> ws = ["a", "b"]; string w = "";
+					for (int k = 0; k < 2; ++k) { w += ws[k]; }
+					return "" + s + "," + g + "," + n + "," + h + "," + w + "|" + e1 + "|" + e2;
+				}
+				run();
+			)";
+			const std::string interp = run_on(false, script);
+			check_eq(interp, run_on(true, script), "compound element temps: interpreter and vm agree");
+			check_true(interp.find("20,10.0,26,0.5625,ab|") == 0, interp.c_str());
+			const std::string listing = listing_run(R"(
+				function f(array<int> xs) -> int { int s = 0; for (int k = 0; k < xs.size(); ++k) { s += xs[k]; } return s; }
+				f([1, 2, 3]);
+			)");
+			check_true(listing.find("C_APPEND") == std::string::npos, listing.c_str());
+		});
+
 		test("a_block_holds_up_to_256_cells", [this]() {
 			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
 			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close

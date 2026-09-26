@@ -1717,6 +1717,28 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(assign->value));
 				return true;
 			}
+			if (assign->op.type != token_type::equal && !loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
+			    !ident->global_qualified && assign->value->get_type() != node_type::member_expr &&
+			    assign->static_operand_class >= operand_class_int_int && assign->static_operand_class <= operand_class_float_int && value_temp_operand(assign->value.get())) {
+				// `x op= a[i];` (or a unary or math operand) inside a loop: the operand lands in a temp and the compound reads it, as
+				// row 167's binary operand does, so the typed rows and the cell translation take the statement
+				const uint32_t dst = identifier_slot_operand(ident);
+				const size_t temp_mark = temp_next_;
+				fused_operand src;
+				if (dst != k_invalid_u32 && dst < k_typed_slot_mask &&
+				    compile_value_into_temp(assign->value, fusable_index_expr(assign->value.get()) ? operand_expect(static_cast<const binary_expr*>(assign->value.get())) : 0xFF, src)) {
+					compound_fused_proto cp;
+					cp.rhs_proto = k_invalid_u32;
+					cp.rhs = src;
+					cp.symbol = add_symbol(ident->symbol_id); cp.slot = dst;
+					cp.kind_flags = compound_kind_for(assign->op.type) | compound_flag_no_result;
+					cp.typed_class = assign->static_operand_class;
+					chunk_->compound_fused_protos.push_back(cp);
+					emit(opcode::op_compound_fused, static_cast<uint32_t>(chunk_->compound_fused_protos.size() - 1), 0, 0);
+					temp_next_ = temp_mark;   // the operand's temp dies into the compound
+					return true;
+				}
+			}
 			compile_expression(assign->value);
 			if (assign->op.type == token_type::equal) {
 				uint32_t flags = store_flag_no_result;

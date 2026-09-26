@@ -3300,6 +3300,62 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "inlined leaves under an injected miss at every " + std::to_string(every)); }
 		});
+		test("methods_graft_at_their_call_sites", [this]() {
+			// row 171: recv.m(args) on a slot receiver compiles as the method's body (this and the bare fields read through the receiver);
+			// a subclass instance behind a base reference takes the fallback (its own override), a field owned by a user accessor keeps the
+			// call (the bare name is the backing field), a void method storing fields, a method with a loop; the values hold on both
+			// backends, with proofs off, with the middle end off and under the injected miss; the listing names the graft and the loop closes
+			const std::string prelude =
+				"class Pt { float x = 0.0; float y = 0.0; Pt(float a, float b) { x = a; y = b; } function len2() -> float { return x * x + y * y; } "
+				"function scale(float k) -> void { x = x * k; y = this.y * k; } function tri(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s = s + i; } return s; } }\n"
+				"class Pt3 : Pt { float z = 0.0; Pt3(float a) : super(a, a) { z = a; } override function len2() -> float { return x * x + y * y + z * z; } }\n"
+				"class Acc { float x = 3.0; function _get_x() -> float { return x + 1.0; } function twice() -> float { return x * 2.0; } }\n"
+				"function measure(Pt& r) -> float { float h = 0.0; for (int i = 0; i < 3; ++i) { h += r.len2(); } return h; }\n"
+				"var run = function(int n) -> string { Pt p = Pt(1.0, 2.0); float fs = 0.0; int k = 0; for (int i = 0; i < n; ++i) { fs += p.len2(); k = k + p.tri(i % 4); } "
+				"p.scale(2.0); float g = p.len2(); var t3 = Pt3(1.0); float h = measure(t3); float h2 = measure(p); Acc a = Acc(); float w = 0.0; for (int i = 0; i < 2; ++i) { w += a.twice(); } "
+				"return \"\" + fs + \",\" + k + \",\" + g + \",\" + h + \",\" + h2 + \",\" + w; };\n";
+			const std::string body = "run(10);";
+			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts");
+			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts, proofs off", false);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(std::string("50.0,8,20.0,9.0,60.0,12.0"), off, "the middle end's switch off (no graft) agrees");
+			}
+			const std::string l = listing_run(prelude + body);
+			check_true(l.find("-- inlined len2") != std::string::npos && l.find("-- inlined scale") != std::string::npos, "the methods are inlined: " + l);
+			check_true(l.find("-- inlined twice") == std::string::npos, "an accessor-owned field keeps the call: " + l);
+			check_true(l.find("-- cell loop") != std::string::npos, "a loop closes around a method graft: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string vm = run_on(true, prelude + body);
+			auto injected = [&](uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, injected(every), "method grafts under an injected miss at every " + std::to_string(every)); }
+		});
+		test("a_method_graft_follows_reloads", [this]() {
+			// row 171: the guard validates the receiver's class at its method epoch; a reload of the class (a new body)
+			// takes the fallback, so the caller sees the new method without recompiling
+			const std::string prelude =
+				"class Q { int v = 2; function get() -> int { return v * 10; } }\n"
+				"class R { int v = 0; function get() -> int { return v + 1000; } }\n"
+				"var run = function(Q& q, int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + q.get(); } return s; };\n"
+				"Q qq = Q();\n";
+			auto sequence = [&](bool vm) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				try {
+					e->execute(prelude);
+					const std::string a = e->execute("run(qq, 4);").to_string();
+					e->execute("class Q { int v = 2; function get() -> int { return v * 100 + 1; } }");
+					const std::string b = e->execute("run(qq, 4);").to_string();
+					return a + "|" + b;
+				} catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string iv = sequence(false), vv = sequence(true);
+			check_eq(iv, vv, "the reload takes the fallback on the vm");
+			check_eq(std::string("80|804"), vv, "the values before and after the reload");
+		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
 			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without

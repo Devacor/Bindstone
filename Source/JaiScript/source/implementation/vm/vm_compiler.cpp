@@ -3328,6 +3328,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		break;
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
+		for (const uint32_t si : loop_inline_sites) {   // a method graft's guard runs at the entry and after each call: its receiver stays put for the block
+			const chunk::inline_site& s = c.inline_sites[si];
+			if (!s.method) continue;
+			bool held = !is_alias(s.receiver_slot);
+			for (const ir_op& o : ops) { if (o.writes == s.receiver_slot) { held = false; } }
+			if (!held) { refuse(chunk::cell_refusal_translation, s.guard_ip); }
+		}
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
 		// legality and lifetimes (region_ir.hpp verify): a container binding's slot is never written; a slot the block enters with
 		// undefined is defined on every path to each of its reads; a snapshot's slot is written only by its own guard between the

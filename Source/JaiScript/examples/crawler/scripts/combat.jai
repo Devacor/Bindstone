@@ -106,9 +106,11 @@ function hurt_entity(var& target, int amount, string source) -> void {
 		return;
 	}
 	target.hp = target.hp - amount;
+	view_note_hit(target.id);
 	if (target.hp <= 0) {
 		target.hp = 0;
 		target.alive = false;
+		view_note_kill(target.x, target.y);
 		on_monster_death(target, source);
 	}
 }

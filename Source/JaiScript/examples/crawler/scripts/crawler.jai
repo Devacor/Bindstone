@@ -10,7 +10,8 @@
 //   jaiscript.exe --backend=interp crawler.jai -- smoke backend interp
 //
 // Flags mirror main.cpp (leading dashes optional): seed N, smoke, turns/frames N, input KEYS,
-// quiet, dev, god, load, save PATH, backend LABEL.
+// quiet, dev, god, load, save PATH, backend LABEL. Shim-only: view N (first-person view rows),
+// dump PATH (smoke frames + FRAME_HASH), shots N, bench N.
 //
 // Runner-keyboard differences from the C++ host's blocking _getch console:
 //   - uppercase commands (E M S Q R) = shift+letter (the runner reports lowercase edges;
@@ -37,6 +38,10 @@ var HOST_BACKEND = "vm";
 var ESC = "\x1b";
 var SHIM_QUIET = false;
 var SHIM_INPUT = "";
+var SHIM_DUMP = "";         // dump PATH: every smoke turn's frame -> PATH.ans (+ FRAME_HASH)
+var SHIM_BENCH = 0;         // bench N: re-render the final smoke view N times, print ms/frame
+var SHIM_SHOT_EVERY = 0;    // shots N (with dump): also PATH_tT.bmp/.txt every N turns
+var SHIM_VIEW_ROWS = 0;     // view N: an N-row first-person view, 16:5 like the default 64x20 (0 = fit the console)
 
 function shim_flag_name(string a) -> string {
 	int i = 0;
@@ -69,13 +74,17 @@ function shim_parse_int(string text, int fallback) -> int {
 		else if (flag == "input") { SHIM_INPUT = value; i = i + 2; }
 		else if (flag == "save") { SAVE_PATH = value; i = i + 2; }
 		else if (flag == "backend") { HOST_BACKEND = value; i = i + 2; }
+		else if (flag == "dump") { SHIM_DUMP = value; HOST_SMOKE = true; i = i + 2; }
+		else if (flag == "shots") { SHIM_SHOT_EVERY = shim_parse_int(value, 0); i = i + 2; }
+		else if (flag == "view") { SHIM_VIEW_ROWS = shim_parse_int(value, 20); i = i + 2; }
+		else if (flag == "bench") { SHIM_BENCH = shim_parse_int(value, 200); HOST_SMOKE = true; i = i + 2; }
 		else if (flag == "smoke") { HOST_SMOKE = true; i = i + 1; }
 		else if (flag == "quiet") { SHIM_QUIET = true; i = i + 1; }
 		else if (flag == "dev") { HOST_DEV = true; i = i + 1; }
 		else if (flag == "god") { HOST_GOD = true; i = i + 1; }
 		else if (flag == "load") { HOST_LOAD = true; i = i + 1; }
 		else {
-			print("crawler shim: unknown arg '" + ARGS[i] + "' (seed/turns/input/save/backend/smoke/quiet/dev/god/load)");
+			print("crawler shim: unknown arg '" + ARGS[i] + "' (seed/turns/input/save/backend/smoke/quiet/dev/god/load/view/dump/shots/bench)");
 			i = i + 1;
 		}
 	}
@@ -216,6 +225,79 @@ class Rng {
 // ---- boot: same sequence as main.cpp (console init, import, crawler_main) ----
 import "main.jai";
 
+var SHIM_FRAMES = [];
+var SHIM_FRAME_MS = 0;
+
+function shim_view_probe() -> void {
+	int t0 = clock_ms();
+	string frame = frame_join(frame_lines(game_view_lines()));
+	SHIM_FRAME_MS = SHIM_FRAME_MS + clock_ms() - t0;
+	SHIM_FRAMES.push(frame);
+	if (SHIM_SHOT_EVERY > 0 && G.turn % SHIM_SHOT_EVERY == 0) { shim_dump_view(`${SHIM_DUMP}_t${G.turn}`); }
+}
+
+function shim_le(int v, int bytes) -> string {
+	string out = "";
+	for (int i = 0; i < bytes; ++i) { out += to_char((v >> (8 * i)) & 255); }
+	return out;
+}
+
+// the last rendered view as ground truth: a 24-bit BMP and a luminance sketch
+function shim_dump_view(string base) -> void {
+	int pad = (4 - (PW * 3) % 4) % 4;
+	int stride = PW * 3 + pad;
+	string bmp = "BM" + shim_le(54 + stride * PH, 4) + shim_le(0, 4) + shim_le(54, 4);
+	bmp += shim_le(40, 4) + shim_le(PW, 4) + shim_le(PH, 4) + shim_le(1, 2) + shim_le(24, 2) + shim_le(0, 4);
+	bmp += shim_le(stride * PH, 4) + shim_le(2835, 4) + shim_le(2835, 4) + shim_le(0, 4) + shim_le(0, 4);
+	string ramp = " .:-=+*#%@";
+	var sketch = [];
+	for (int y = PH - 1; y >= 0; --y) {
+		for (int x = 0; x < PW; ++x) {
+			int rgb = VPAL_RGB[VPIX[y * PW + x]];
+			bmp += "" + to_char(rgb & 255) + to_char((rgb >> 8) & 255) + to_char((rgb >> 16) & 255);
+		}
+		bmp += shim_le(0, pad);
+	}
+	for (int y = 0; y < PH; y += 2) {
+		string row = "";
+		for (int x = 0; x < PW; ++x) {
+			int a = VPAL_RGB[VPIX[y * PW + x]];
+			int b = VPAL_RGB[VPIX[(y + 1) * PW + x]];
+			int lum = ((a >> 16) & 255) * 2 + ((a >> 8) & 255) * 3 + (a & 255) + ((b >> 16) & 255) * 2 + ((b >> 8) & 255) * 3 + (b & 255);
+			row += ramp.substr(imin(9, lum / 250), 1);
+		}
+		sketch.push(row);
+	}
+	write_file(base + ".bmp", bmp);
+	write_file(base + ".txt", sketch.join("\n") + "\n");
+}
+
+function shim_probe_report() -> void {
+	if (SHIM_DUMP != "") {
+		shim_dump_view(SHIM_DUMP);
+		var path = SHIM_DUMP + ".ans";
+		write_file(path, SHIM_FRAMES.join(""));
+		print(`FRAME_HASH: ${sha256_file(path)} (${SHIM_FRAMES.size()} frames -> ${path})`);
+		print(`frame build: ${SHIM_FRAME_MS} ms total, ${(1.0 * SHIM_FRAME_MS) / imax(1, SHIM_FRAMES.size())} ms/frame`);
+	}
+	if (SHIM_BENCH > 0) {
+		int t0 = clock_ms();
+		int bytes = 0;
+		for (int i = 0; i < SHIM_BENCH; ++i) { bytes = frame_join(frame_lines(game_view_lines())).size(); }
+		int spent = clock_ms() - t0;
+		print(`bench: ${SHIM_BENCH} frames, ${(1.0 * spent) / SHIM_BENCH} ms/frame, ${bytes} bytes/frame`);
+	}
+}
+
+if (SHIM_DUMP != "") { VIEW_PROBE = shim_view_probe; }
+if (SHIM_VIEW_ROWS == 0 && !SHIM_QUIET && !HOST_SCRIPTED) {
+	// a big console gets a big view: title + view + 5 log lines tall, panel beside it
+	SHIM_VIEW_ROWS = imin(48, imin(term_rows() - 8, ((term_cols() - 18) * 5) / 16));
+}
+if (SHIM_VIEW_ROWS > 20) {
+	VIEW_H = SHIM_VIEW_ROWS;
+	VIEW_W = SHIM_VIEW_ROWS * 16 / 5;
+}
 if (!SHIM_QUIET) { print(ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline); }
 try {
 	crawler_main();
@@ -224,4 +306,5 @@ try {
 	print("crawler shim: script error: " + to_string(e));
 	throw e;
 }
+shim_probe_report();
 if (!SHIM_QUIET) { print(ESC + "[0m" + ESC + "[?25h", skip_newline); print(""); }

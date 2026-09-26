@@ -14,9 +14,11 @@ heading sweep so the turn reads as motion) — but on the `m` overhead map the
 movement keys go **absolute**: `wasd`/`hjkl`/arrows step by compass direction,
 roguelike-style, with your facing following the step (so dropping back to first
 person points where you were walking; turn-then-walk is FPS-view-only). The view
-is a real one-ray-per-column raycaster — walls shaded by torch distance, faces darkened by orientation,
-materials that change wardrobe every couple of floors, and billboard sprites with
-per-column z-buffer occlusion. A distant Grublin is a small green blob at the end
+is a real one-ray-per-column raycaster drawn into a 24-bit pixel framebuffer at
+twice the text resolution (JaiDOOM's half-block method) — procedurally textured
+walls, floors and ceilings shaded by torch distance and face orientation, materials
+that change wardrobe every couple of floors, and pixel-art billboard sprites with
+per-column z-buffer occlusion. A distant Grublin is a few green pixels at the end
 of the hall. It does not stay small.
 
 ## Shared logic: copied from the roguelike (now the canonical copy)
@@ -51,8 +53,9 @@ cmake --build "out/build/x64-Release BENCHMARKS" --target jai_crawler   # PLAY T
 cmake --build out/build/x64-Debug --target jai_crawler                  # --dev iteration
 ```
 
-**Play the Release exe** — the view casts 64 rays plus sprite math per keypress,
-which Release does in a few ms and Debug does in a few hundred. The exe prefers
+**Play the Release exe** — the view casts a ray per column and shades every pixel
+of a 64x40 framebuffer per keypress (about 1 ms on the VM, 5 ms on the interpreter
+in Release; Debug is far slower). The exe prefers
 the *source* `scripts/` dir (so `--dev` hot reload edits the files you have open);
 a `crawler_scripts/` copy sits next to the binary for distribution.
 `--time` prints a key-to-frame latency report on exit.
@@ -67,7 +70,8 @@ jai_crawler.exe --dev               # 'R' re-imports scripts mid-game (hot reloa
 jai_crawler.exe --god               # tourist mode (visit Vexadrach, stay alive)
 ```
 
-Needs a Windows 10+ console at least 80x28 (256-color VT processing).
+Needs a Windows 10+ console at least 80x28 with truecolor VT processing and UTF-8
+output (Windows Terminal is ideal); the view is drawn with `▀` half blocks.
 
 ### No build at all: the standalone-runner shim
 
@@ -85,7 +89,18 @@ jaiscript.exe crawler.jai                                  # interactive, seed 1
 jaiscript.exe crawler.jai -- seed 7 god
 jaiscript.exe crawler.jai -- smoke turns 250 seed 99       # headless; prints STATE_HASH
 jaiscript.exe crawler.jai -- input "11^dwwwww" quiet       # scripted keys (';'=enter '^'=esc)
+jaiscript.exe crawler.jai -- view 36                       # a 115x36-cell view (default: fit the console)
+jaiscript.exe crawler.jai -- smoke turns 250 seed 99 dump out/s99   # + every frame, FRAME_HASH
 ```
+
+Interactively the shim sizes the view to the console (16:5 cells, 20 to 48 rows, the
+panel beside it and five log lines under it); smoke, dump and scripted runs keep the
+64x20 default unless `view N` says otherwise. `dump PATH` renders the full frame after
+every smoke turn without touching the game (the STATE_HASH is unchanged), writes them
+all to `PATH.ans`, prints `FRAME_HASH` (sha256 of that file) and the frame-build
+ms/frame, and leaves the last view as `PATH.bmp` plus a luminance sketch `PATH.txt`;
+`shots N` adds `PATH_tT.bmp/.txt` every N turns, and `bench N` re-renders the final
+view N times and prints ms/frame.
 
 Runner-keyboard deltas (its console pump reports lowercase letter edges and no
 punctuation on Windows): uppercase commands = shift+letter, `>` descend = **TAB**,
@@ -117,73 +132,76 @@ skill it never asked of you is remembering which way you're pointing.
 
 ## The view
 
+JaiDOOM's terminal video method: the caster draws into a palette-indexed framebuffer
+of `VIEW_W x 2*VIEW_H` pixels, and each text cell is an upper-half block `▀` whose
+truecolor foreground is the top pixel and background the bottom one. A row emits an
+escape only when its color changes (run-length), from `VPAL_FG`/`VPAL_BG` escape
+tables built once per color. Wide views (160+ columns) build their rows through
+`parallel_transform`.
+
 One DDA ray per column across a ~84 degree FOV; perpendicular distance kills the
-fisheye by construction. Wall slices get 8 torch shades by distance, a 0.68x
-darkening on N/S vs E/W faces, and a 3-char texture pattern (checker + mortar
-rows). Floors and ceilings are per-row gradient bands, brightest at your feet.
-Monsters, loot, stairs, statues and murals are billboard sprites scaled by depth,
-occluded per column against the wall z-buffer, feet planted on the floor line at
-their distance. Torchlight swallows sprites past 14 tiles.
+fisheye by construction. Every color is a 16-step **ramp** from the floor's fog color
+(dark) to torch-lit (warm), so distance shading is one table lookup, with a 4x4 Bayer
+dither between steps for the VGA grain; N/S faces sit at 0.72x the light of E/W
+faces, the torchlight flickers a little turn to turn, and glowing things (flames,
+embers, fungus, eyes, runes) use flat ramps that ignore the dark.
+
+- **Walls** are 32x32 procedural textures, one per wardrobe: mossy brick with moss
+  dripping from the top, blood-streaked brick, violet blocks sprouting glowing gold
+  mushrooms, teal riveted panels weeping orange, ash rock split by ember cracks,
+  veined gray marble with moldings. Wall tiles pick variants from a coordinate hash
+  (never the game RNG): iron torch sconces with a two-frame flame and a halo of
+  light, and skull niches.
+- **Floor and ceiling** are cast per pixel from the same rays: flagstones with
+  bevels, plus hashed puddles, bone scatter, moss, blood and a cyan rune circle
+  under the stairs; the ceiling is stone slabs crossed by timber beams with roots.
+  Both fade into the fog with distance. Monsters that die here leave blood on the
+  flagstones for the rest of the floor.
+- **Sprites** are pixel art written as strings in `view.jai` (a role letter per
+  texel: body, shade, highlight, outline, eyes, teeth, gold, steel, flame...), tinted
+  by each monster's or item's identity color: every bestiary member, a mimic chest
+  that grows teeth, loot by kind, the stairs arch, the statue and the mural. They
+  scale by depth, stand on the floor at their distance (bats, moths and wisps hover
+  and bob), sort far to near, and clip per column against the wall z-buffer.
+  Torchlight swallows them past 14 tiles. A monster flashes white on the turn it
+  takes a hit, and a wounded one carries a health bar.
+- **You**: a torch in your off hand (flame flickers turn to turn), your blade in the
+  other once you wield one, and a ragged red rim around the view on a turn you took
+  damage.
 
 Every two floors the Well changes wardrobe (Moraff would approve of the palette):
 Mossrot Warrens, Bloodbrick Vaults, Gilded Fungus Halls, Screaming Copper Vein,
 The Ashen Throat, and — floor 10 — The Hollow Gallery, where the color has been
 swallowed like everything else.
 
-Captures below are plaintext (ANSI colors stripped). A corridor with a Grublin
-blob at the end of it:
+The luminance sketch `dump` writes beside the BMP (one character per cell, two pixels
+averaged), here a mossy corridor with a Gloop taking a hit point-blank — torch hand
+bottom left, the rest of the corridor fading into the dark:
 
 ```
- GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 10  ~ Mossrot Warrens ~
-%%%%%%%%%######%%%#                                             | Wanderer
-#########%%%%%%###%%#                                           | Jackodile-kin
-%%%%%%%%%######%%%##%%                                        %%| HP 28/28
-=======================                                   ======| ############
-%%%%%%%%%######%%%##%%#%#                             #%%%####%%|
-#########%%%%%%###%%##%#%                            %%###%%%%##| Fo 14/14
-%%%%%%%%%######%%%##%%#%#                            ##%%%####%%| ############
-=========================                            ===========| Lv 1  XP 0/15
-%%%%%%%%%######%%%##%%#%#%                    ####%####%%%####%%| Atk 6  Def 1
-#########%%%%%%###%%##%#%###%#ggggg#%#%##%#%%#%%%%#%%%%###%%%%##| Eva 10  Crt 5
-%%%%%%%%%######%%%##%%#%#%%%#%ggggg%#%#%%#%##%####%####%%%####%%| Gold 0
-=========================     ggggg                =============|
-%%%%%%%%%######%%%##%%#%#.....ggggg..................##%%%####%%|       N
-#########%%%%%%###%%##%#%                            %%###%%%%##|     W + E
-%%%%%%%%%######%%%##%%#%#............................##%%%####%%|       S
-========================                                ========| Face WEST
-%%%%%%%%%######%%%##%%#.....................................##%%| Wpn -
-#########%%%%%%###%%#                                           | Arm -
-%%%%%%%%%######%%%##............................................| Trk -
+----:---:---------------------:---:-------:-:-=-=-=---=-=-=-=---
+---:-.-.::::.:-:-:-:.:::---::.::::.:-:-:--..++=-+++:::+--+++----
+-:::::::::..:..:::.::..::.:.:.:.::.::.:.::.:-+=-+++:.--.:+++----
+-:::...:...:..:..:..::..:...:::.:..::.::....-=::=-+-==+.:+++----
+-::.:.........:......... ...:.....::... ..:.-.:-==+=-:+.:+++----
+--......................===============.....:-+---+---+.:+++----
+-: . .   .   .. .  . ...  .. . ...  .. ... .=-=---+---+.:+++----
+-:::....      .      .              .      .-:+---=---+.:+++----
+-:.:...=....... .............     ........::--:--::--:+.:+++::--
+-::....@.. . .% ......+.......    ..........-:::::::::...+++..:-
+-:............*.   .  .      *******   .....-------------===--=-
+-:..........      . .. . ****@@@@@@@***.....----=+:+-==-=---==--
+-::....=@=..............*@@@@@@@@@@@@@@**...-----=:=------------
+-:....#@@@#...........**@@@@@@@@@@@@@@@@@**.---:-+::------------
+-::.::.+#+::.::::.:.::@@@@@@@@@@@@@@@@@@@@@.:.---=:-----:-------
+-:::--::==:-::+:::-:-:@@@@@@@@@@@@@@@@@@@@@:-:.::+:-------------
+----:-+%==%%+::::+::@@@@@@@@@@@@@@@@@@@@@@@@@:-=-..:::=---------
+-:-=--%%%%%%-*-:--::@@@@@@@@@@@@@@@@@@@@@@@@@::-==+-.:+::-------
+-----:*%%%%*---=--@@@#@@@@#@@@@#@@@@#@@@@#@@@@:---===-+.:.:::---
+-----:-:-:-:-----=-#-#-#-#-#-#-#-#-#-#-#-#-#-#-------=-:-:------
 ```
 
-Two steps later it is very much no longer small (bump it to attack):
-
-```
- GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 12  ~ Mossrot Warrens ~
-                                                                | Wanderer
-                                                                | Jackodile-kin
-%%                                                              | HP 25/28
-======                ggggggggggggggggggggg                     | ##########--
-%%####%%%#            ggggggggggggggggggggg                     | -3 HP (Grublin)
-##%%%%###%%##%        ggggggggggggggggggggg                     | Fo 14/14
-%%####%%%##%%##%#%    ggggggggggggggggggggg                     | ############
-======================ggggggggggggggggggggg             ========| Lv 1  XP 0/15
-%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Atk 6  Def 1
-##%%%%###%%##%%#%#%##%ggggggggggggggggggggg%#%%%%%#%%#%#%%#%%##%| Eva 10  Crt 5
-%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Gold 0
-======================ggggggggggggggggggggg        =============|
-%%####%%%##%%##%#%#%..ggggggggggggggggggggg.................#%%#|       N
-##%%%%###%%##%%#      ggggggggggggggggggggg                     |     W + E
-%%####%%%##%..........ggggggggggggggggggggg.....................|       S
-========              ggggggggggggggggggggg                     | Face WEST
-%%##..................ggggggggggggggggggggg.....................| Wpn -
-                      ggggggggggggggggggggg                     | Arm -
-......................ggggggggggggggggggggg.....................| Trk -
-                      ggggggggggggggggggggg                     |
- The Grublin claws you for 3 (HP 25/28).
-```
-
-And the `m` minimap — explored tiles only, facing arrow, loot in sight:
+The `m` minimap stays text — explored tiles only, facing arrow, loot in sight:
 
 ```
  GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 0  ~ Mossrot Warrens ~
@@ -225,6 +243,16 @@ Scripted interactive input is also available: `--input "11^dwwwww" --quiet`
 (`;` = enter, `^` = esc), and a `save -> load` round trip restores turn, facing,
 position, inventory and effects exactly.
 
+The view has its own gate on the runner shim: `dump` renders every smoke turn's
+frame and prints a `FRAME_HASH` that must also match across backends (the renderer
+reads the game but never the RNG, so the STATE_HASH is the same with or without it):
+
+```bash
+jaiscript.exe --backend=vm crawler.jai -- smoke turns 250 seed 99 dump f99
+jaiscript.exe --backend=interp crawler.jai -- smoke turns 250 seed 99 dump f99
+# STATE_HASH: 252356464 and the same FRAME_HASH on both
+```
+
 ## Files
 
 ```
@@ -237,7 +265,7 @@ scripts/items.jai   loot gen, inventory, potions/scrolls             [copied ver
 scripts/dungeon.jai rooms+corridors gen, FOV, BFS                    [copied, 4-dir BFS delta]
 scripts/combat.jai  attack resolution, XP, class skills              [copied, facing-target delta]
 scripts/ai.jai      monster behaviors                                [copied, boss-handle delta]
-scripts/view.jai    NEW: DDA raycaster, themes, sprites, compass math
+scripts/view.jai    NEW: pixel raycaster, textures, themes, sprite art, half-block blit
 scripts/ui.jai      NEW: frame chrome, compass panel, minimap, modals
 scripts/game.jai    NEW: Game class (+boss coroutine method), facing movement, saves, pilot
 scripts/main.jai    NEW: imports + entry + hot reload list

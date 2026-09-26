@@ -104,6 +104,7 @@ import "scenes/voxelspace.jai";
 import "scenes/marcher.jai";
 import "scenes/cloth.jai";
 import "scenes/chrome.jai";
+import "scenes/skull.jai";
 import "scenes/finale.jai";
 import "scenes/main.jai";
 

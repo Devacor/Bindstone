@@ -36,7 +36,7 @@ class Reel {
 	bool hud = true;
 	bool paused = false;
 
-	int nscenes = 16;
+	int nscenes = 17;
 	var durs = [];
 	var cur = null;
 	var nxt = null;
@@ -88,7 +88,7 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 18.0];
+		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 18.0];
 		start_scene(0, 0.0);
 	}
 
@@ -108,6 +108,7 @@ class Reel {
 		if (idx == 12) { return BannerFall(); }
 		if (idx == 13) { return Chrome(); }
 		if (idx == 14) { return Fire(); }
+		if (idx == 15) { return Ossuary(); }
 		return Finale();
 	}
 

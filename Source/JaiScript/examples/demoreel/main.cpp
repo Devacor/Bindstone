@@ -62,7 +62,7 @@ const char* kSceneFiles[] = {
 	"util.jai", "reel.jai", "plasma.jai", "starfield.jai", "tunnel.jai",
 	"donut.jai", "julia.jai", "lava.jai", "pipes.jai", "fire.jai",
 	"sand.jai", "boids.jai", "kinstein.jai", "voxelspace.jai", "marcher.jai",
-	"cloth.jai", "chrome.jai", "finale.jai", "main.jai",
+	"cloth.jai", "chrome.jai", "skull.jai", "finale.jai", "main.jai",
 };
 
 double now_seconds() {

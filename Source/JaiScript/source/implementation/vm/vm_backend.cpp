@@ -8691,16 +8691,16 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		out = static_cast<script_int>(cr.payload[k]);
 		return true;
 	};
-	// the value: a cell of either kind, or a constant; its stamp and engine are what its landing gave it
-	// (a var element takes the value's stamp and engine, as typed_index_store does)
-	uint8_t vkind; int64_t vbits; type_info_ptr vstamp; auto* veng = engine_;
+	// the value: a cell of either kind, or a constant; its stamp is what its landing gave it
+	// (a var element takes the value's stamp and this engine, as typed_index_store does)
+	uint8_t vkind; int64_t vbits; type_info_ptr vstamp;
 	if (p.store_value.const_index != k_invalid_u32) {
 		const script_value& v = cr.consts[p.store_value.const_index];
 		vkind = static_cast<uint8_t>(v.raw_storage_index());
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { vbits = v.unchecked_as_int(); }
 		else if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { vbits = cell_bits_of_float(v.unchecked_as_float()); }
 		else return miss();
-		vstamp = v.get_type_info(); veng = v.get_engine();
+		vstamp = v.get_type_info();
 	} else {
 		const uint32_t k = p.store_value.slot;   // a cell position
 		if (k == k_invalid_u32 || cr.kinds[k] == 0) return miss();
@@ -8738,7 +8738,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_INT)) { target.unchecked_set_int_payload(static_cast<script_int>(vbits)); }
 		else { target.unchecked_set_float_payload(cell_float_of_bits(vbits)); }
 		target.set_type_info(vstamp);
-		target.set_engine(veng);
+		target.set_engine(engine_);
 		break;
 	}
 	default: return miss();
@@ -9150,7 +9150,7 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 		if (vi == script_value::TYPEID_INT) { target.unchecked_set_int_payload(v.unchecked_as_int()); }
 		else { target.unchecked_set_float_payload(v.unchecked_as_float()); }
 		target.set_type_info(v.get_type_info());
-		target.set_engine(v.get_engine());
+		target.set_engine(engine_);   // a constant operand carries no engine; the element is this engine's
 		break;
 	}
 	default:

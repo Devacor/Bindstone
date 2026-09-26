@@ -7127,6 +7127,8 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 		if (original_ip == loop.head && f.cells->loop < 64) { f.cells->refused_loops |= uint64_t(1) << f.cells->loop; }
 	}
 	cells_flush(f, loop);
+	// a guarded stdlib alias re-runs reading its guard's mark: the block ran it as the builtin (its name held at the entry and the landings)
+	if (const vm_instruction& oi = f.code->code[original_ip]; oi.op == opcode::op_math_temp && oi.c > 0xFF && (oi.c & 0x80)) { typed_land_float(f, oi.b | (k_typed_dst_temp << k_typed_dst_shift), 0.0); }
 	for (const uint32_t pi : loop.inner_counted) {   // outermost first: the general form resumes inside these loops with their states in place
 		const counted_for_proto& p = f.code->counted_for_protos[pi];
 		if (original_ip >= p.body_ip && original_ip < p.exit_ip) { cfor_state_push(f, p); }
@@ -7615,6 +7617,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	}
 	if (!loop.sites.empty() && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
+	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	return true;
 }
 
@@ -7874,6 +7877,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
 	if (!loop.inline_sites.empty()) { for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; } }   // a callee rebound the inlined leaf's name
+	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) return false; }
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
@@ -10365,6 +10369,13 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 // an inlined leaf's guard (docs/typed_regions_design.md, Inlined leaves): the site's name binds the function the graft was made from,
 // read through the name's own cache row without running a getter (a binding that is a property or an element reference takes the
 // fallback), and no debugger is armed; otherwise the fallback runs the original statement with its real call
+// a stdlib alias's name resolves (the non-raising resolver the entry uses) to the registered builtin
+bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& ms) {
+	if (debug_hook_ || !math_alias_rows_ || !math_alias_rows_[ms.fn].identity || ms.site >= f.code->call_sites.size()) return false;
+	const script_value* v = fused_cmp_operand(f, f.code->call_sites[ms.site].callee, ms.cache_slot);
+	return v && v->raw_storage_index() == script_value::TYPEID_FUNCTION && &v->unchecked_as_function() == math_alias_rows_[ms.fn].identity;
+}
+
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_) return false;
 	if (site.method) return inline_method_holds(f, site);

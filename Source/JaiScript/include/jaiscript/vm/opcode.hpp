@@ -262,6 +262,8 @@ namespace jai::vm {
         op_c_push,          // a = push proto (the copy's, its value or index naming a cell), b = cell loop index, c = the original ip: recv.push(v) onto a frame-slot array by the push kernel's rows
                             // C_JUMP's c = 1 marks an inner loop's back edge (the budget polls there)
         op_call_builtin,    // a = argc, b = call site, c = receiver kind (1 string, 2 array, 3 map) | inline << 4 (1 size/length, 2 empty, 3 find, 4 contains, 5 starts_with, 6 ends_with, 7 substr, 8 at, 9 map has, 10 map get, 11 array pop); stack [object, args...]: a method the checker proved builtin, guarded on the kind, else op_call_method
+        op_size_temp,       // a = frame slot (a compiler temp), b = call site (a slot receiver, no arguments), c = the proven kind (1 string, 2 array, 3 map): the receiver's size into the temp, else op_call_method's result
+        op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
         op_halt,
     };
@@ -519,6 +521,8 @@ namespace jai::vm {
             case opcode::op_t_load: return "T_LOAD";
             case opcode::op_call_builtin: return "CALL_BUILTIN";
             case opcode::op_concat_append: return "CONCAT_APPEND";
+            case opcode::op_size_temp: return "SIZE_TEMP";
+            case opcode::op_c_size: return "C_SIZE";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

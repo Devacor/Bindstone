@@ -7189,6 +7189,14 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
 		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; cs.site_member[ip - loop.copy_head] = nullptr; cs.site_member_class[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
+		if (ci.op == opcode::op_c_size) {
+			// a size site: the receiver slot's array node (a plain cell reference passes through), read live by C_SIZE
+			const script_value* cp = frame_slot(f, ci.b);
+			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return refuse_site(ip, "a size receiver behind a non-plain reference"); cp = &cp->deref(); }
+			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY || !cp->unchecked_array_node()) return refuse_site(ip, "a size receiver that is not an array");
+			cs.site_node[ip - loop.copy_head] = cp->unchecked_array_node(); cs.site_slot[k] = ci.b; cs.site_member[ip - loop.copy_head] = nullptr;
+			continue;
+		}
 		if (ci.op == opcode::op_c_mload || ci.op == opcode::op_c_mstore) {
 			// a member read or store site: the base slot's instance and its plain field through the read-side probe (the class, the slot, no user
 			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
@@ -7511,7 +7519,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
-	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore:
+	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 		return true;
 	default:
@@ -7581,6 +7589,15 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_cmpval: st = exec_c_cmpval(f, ci, regs); break;
 		case opcode::op_c_append: st = exec_c_append(f, ci, regs); break;
 		case opcode::op_c_push: st = exec_c_push(f, ci, regs); break;
+		case opcode::op_c_size: {
+			const script_array* node = cs.site_node[f.ip - loop.copy_head];
+			const uint32_t dk = ci.a & k_cell_index_mask;
+			regs.payload[dk] = static_cast<int64_t>(node->size());
+			regs.kinds[dk] = static_cast<uint8_t>(script_value::TYPEID_INT);
+			regs.dirty->set(dk);
+			++f.ip;
+			break;
+		}
 		default: st = cells_run_cold(f, loop, ci); if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher; the block resumes at the landing)
 		}
 #ifdef JAISCRIPT_VM_PROFILE
@@ -12304,6 +12321,30 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 // a member read of a frame-slot base landing in a compiler temp: the base pushed as its LOAD would have, op_get_member's kernel
 // (its cache, its proofs, its texts; a user getter runs inside it, as it does for the general read) and the value popped into the
 // temp, so the read keeps its place among the statement's operands and its consumers take a direct operand
+// s.size() on a slot receiver the checker proved: the proven kind's count into the temp (the builtin's body), any other receiver
+// through op_call_method whole (a null raises its text) with the result into the temp
+op_status vm_backend::exec_size_temp(frame& f, const vm_instruction& ins) {
+	const call_site& site = f.code->call_sites[ins.b];
+	const script_value* r = frame_slot(f, site.receiver_slot);
+	if (r) {
+		const script_value& v = r->deref();
+		const size_t k = v.raw_storage_index();
+		size_t count = 0; bool ok = true;
+		if (ins.c == 1 && k == script_value::TYPEID_STRING) { count = v.unchecked_as_string().size(); }
+		else if (ins.c == 2 && k == script_value::TYPEID_ARRAY) { count = v.unchecked_array_node()->size(); }
+		else if (ins.c == 3 && k == script_value::TYPEID_MAP) { count = v.unchecked_as_map().size(); }
+		else { ok = false; }
+		if (ok) { frame_slot_set(f, ins.a, script_value(static_cast<script_int>(count), engine_)); return {}; }
+	}
+	stack_.push_back(r ? *r : make_null());
+	VM_TRY(exec_call_method(f, vm_instruction{opcode::op_call_method, 0, ins.b, 0}));
+	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "size temp across a frame switch"); }
+	script_value out = std::move(stack_.back());
+	stack_.pop_back();
+	frame_slot_set(f, ins.a, std::move(out));
+	return {};
+}
+
 op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	const script_value* base = frame_slot(f, ins.c);
 	stack_.push_back(base ? *base : make_null());
@@ -16014,6 +16055,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_from_this: return exec_from_this(f, ins);
 		case opcode::op_get_member: return exec_get_member(f, ins);
 		case opcode::op_member_temp: return exec_member_temp(f, ins);
+		case opcode::op_size_temp: return exec_size_temp(f, ins);
 		case opcode::op_set_member_fused: return exec_set_member_fused(f, ins);
 		case opcode::op_set_member_value: return exec_set_member_value(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
@@ -17294,6 +17336,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_member_temp:
 				VM_TRY_OP_SHARED(exec_member_temp(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_size_temp:
+				VM_TRY_OP_SHARED(exec_size_temp(f, ins));
 				break;
 			case opcode::op_set_member_fused:
 				VM_TRY_OP_SHARED(exec_set_member_fused(f, ins));

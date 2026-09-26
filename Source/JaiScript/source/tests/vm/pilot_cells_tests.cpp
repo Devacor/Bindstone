@@ -1644,6 +1644,38 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			check_true(listing.find("-- cell loop") != std::string::npos, "the range-for over instances closes");
 		});
 
+		test("size_heads_land_in_temps", [this]() {
+			// k < xs.size() as a loop head: the size lands in a temp and the loop closes; the size is read live (a push inside the body
+			// grows it), a string and a map answer size and length, a null receiver raises the call's text, a class with its own size()
+			// keeps its method
+			const std::string script = R"(
+				class Box { int n = 3; function size() -> int { return n; } }
+				function run() -> string {
+					array<int> xs = [1, 2, 3]; int s = 0;
+					for (int k = 0; k < xs.size(); ++k) { s += xs[k]; if (xs.size() < 6) { xs.push(k + 10); } }
+					string t = "abcd"; int c = 0;
+					for (int k = 0; k < t.length(); ++k) { c += k; }
+					map<string, int> m = {"a": 1, "b": 2}; int d = 0;
+					for (int k = 0; k < m.size(); ++k) { d += 10; }
+					Box b = Box(); int e = 0;
+					for (int k = 0; k < b.size(); ++k) { e += 1; }
+					string err = "";
+					var z = null;
+					try { for (int k = 0; k < z.size(); ++k) { s += 1; } } catch (ex) { err = ex; }
+					return "" + s + "," + xs.size() + "," + c + "," + d + "," + e + "|" + err;
+				}
+				run();
+			)";
+			const std::string interp = run_on(false, script);
+			check_eq(interp, run_on(true, script), "size temps: interpreter and vm agree");
+			check_true(interp.find("39,6,6,20,3|") == 0, interp.c_str());
+			const std::string listing = listing_run(R"(
+				function f(array<int> xs) -> int { int s = 0; for (int k = 0; k < xs.size(); ++k) { s += xs[k]; } return s; }
+				f([1, 2, 3]);
+			)");
+			check_true(listing.find("-- cell loop") != std::string::npos, "the size head closes");
+		});
+
 		test("a_block_holds_up_to_256_cells", [this]() {
 			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
 			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close

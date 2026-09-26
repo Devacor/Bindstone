@@ -125,6 +125,7 @@ namespace {
 			case opcode::op_operand_temp:
 			case opcode::op_call_temp:
 			case opcode::op_member_temp:
+			case opcode::op_size_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
@@ -145,6 +146,7 @@ namespace {
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_mload:
+			case opcode::op_c_size:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
 			case opcode::op_c_cmp:
@@ -304,6 +306,7 @@ namespace {
 			case opcode::op_operand_temp:
 			case opcode::op_call_temp:
 			case opcode::op_member_temp:
+			case opcode::op_size_temp:
 			case opcode::op_math_temp:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
@@ -324,6 +327,7 @@ namespace {
 			case opcode::op_cells_back:
 			case opcode::op_c_arith:
 			case opcode::op_c_mload:
+			case opcode::op_c_size:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
 			case opcode::op_c_cmp:
@@ -2829,6 +2833,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(mp.value.slot, 0, false, 0, nullptr, ip); op.b = mp.value.slot; slot_read(op, mp.value.slot);
 				} else { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
+			} else if (st.op == opcode::op_size_temp && st.a < k_typed_slot_mask && st.b < c.call_sites.size()) {
+				// the size of an array held in a frame slot: a site whose node the entry resolves, read live (a push inside the body grows it)
+				const call_site& cs2 = c.call_sites[st.b];
+				if (st.c != 2 || cs2.receiver_slot == k_invalid_u32 || cs2.receiver_slot >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(st.a, kint, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot;
 			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
@@ -3541,6 +3551,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::bail: append(vm_instruction{opcode::op_c_bail, op.target, 0, 0}, ip); break;   // a planned miss at its own origin
+			case ir::size: append(vm_instruction{opcode::op_c_size, dst_of(op.a), op.container, 0}, ip); break;   // the array site's live size
 			case ir::append: {
 				// a plus onto a cell pinned to int or float with an operand of the same pinned kind is the typed add (no string row can apply)
 				const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
@@ -3586,7 +3597,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			code[back] = vm_instruction{opcode::op_cells_cfor_back, loop_index, static_cast<uint32_t>(head), 0};
 		}
 		copy_at[back - head] = loop.copy_back;
-		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range || o == opcode::op_c_mload || o == opcode::op_c_mstore) { loop.sites.push_back(ip2); } }
+		for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { const opcode o = code[ip2].op; if (o == opcode::op_c_load || o == opcode::op_c_load_any || o == opcode::op_c_index_store || o == opcode::op_c_push || o == opcode::op_c_rebind || o == opcode::op_c_range || o == opcode::op_c_mload || o == opcode::op_c_mstore || o == opcode::op_c_size) { loop.sites.push_back(ip2); } }
 		for (uint32_t k = 0; k < loop.sites.size(); ++k) { if (code[loop.sites[k]].op == opcode::op_c_range) { loop.iter_site = k; } }
 		if (!loop.rebinds.empty()) {
 			// the alias's sites: every load or store whose container slot is the alias, resolved by the rebind and never by the entry
@@ -4030,10 +4041,53 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
 }
-bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32; }
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e); }
+// s.size() / s.length() on a receiver the checker proved (a string, an array or a map) held in a frame slot: a value that lands in a temp
+bool vm_compiler::size_temp_operand(const expression* e) const {
+	if (!builtins_ || !typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (!e || e->get_type() != node_type::call_expr) return false;
+	const auto* call = static_cast<const call_expr*>(e);
+	if (call->builtin_receiver == 0 || !call->arguments.empty() || !call->callee || call->callee->get_type() != node_type::member_expr) return false;
+	const auto* m = static_cast<const member_expr*>(call->callee.get());
+	if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::identifier_expr) return false;
+	if (m->member != "size" && m->member != "length") return false;
+	auto* id = static_cast<identifier_expr*>(m->object.get());
+	if (id->global_qualified) return false;
+	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
+	return slot != k_invalid_u32 && slot < k_typed_slot_mask;
+}
 // The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
 // becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
 void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
+	if (size_temp_operand(e.get())) {
+		// the size call's site (a slot receiver, the builtin indexes), its value into a temp
+		const auto call = std::static_pointer_cast<call_expr>(e);
+		const auto member = std::static_pointer_cast<member_expr>(call->callee);
+		auto* recv = static_cast<identifier_expr*>(member->object.get());
+		call_site site;
+		site.member_node = add_node(member);
+		site.call_node = add_node(call);
+		site.receiver_symbol = recv->symbol_id;
+		site.receiver_slot = identifier_slot_operand(recv);
+		auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
+			auto it = index.find(member->member_id);
+			return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;
+		};
+		site.bi_array = builtin_index_for(builtins_->array_index);
+		site.bi_map = builtin_index_for(builtins_->map_index);
+		site.bi_string = builtin_index_for(builtins_->string_index);
+		chunk_->builtin_indexed = true;
+		chunk_->call_sites.push_back(std::move(site));
+		const uint32_t t = static_cast<uint32_t>(temp_next_);
+		++temp_next_;
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		emit(opcode::op_size_temp, t, static_cast<uint32_t>(chunk_->call_sites.size() - 1), call->builtin_receiver);
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
+	}
 	const uint32_t base = member_base_slot(e.get());
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;

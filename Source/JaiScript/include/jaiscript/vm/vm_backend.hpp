@@ -1840,6 +1840,7 @@ namespace jai::vm {
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f);
+        op_status exec_size_temp(frame& f, const vm_instruction& ins);
         std::vector<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth (a builtin may call back into the VM)
         size_t builtin_arg_depth_ = 0;
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);

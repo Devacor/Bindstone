@@ -2240,6 +2240,7 @@ private:
 				proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
 			}
 			stamp(c->builtin_receiver, proven, uint8_t(0));
+			if (proven && c->arguments.empty() && (m->member == "size" || m->member == "length")) { return ctype::make(ctype::int_k); }   // every kind's size is its count
 			if (proven) {
 				for (auto& a : c->arguments) {   // a builtin reads its arguments as values: a subscript argument needs no element reference
 					if (a->get_type() == node_type::binary_expr && static_cast<binary_expr*>(a.get())->op.type == token_type::left_bracket) {

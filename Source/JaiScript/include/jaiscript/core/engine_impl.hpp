@@ -258,7 +258,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                    std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                    std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||
                    is_specialization_v<T, std::shared_ptr> ||
-                   is_specialization_v<T, std::vector> || is_specialization_v<T, std::map> ||
+                   is_specialization_v<T, std::vector> || is_script_map_like_v<T> ||
                    is_specialization_v<T, std::unordered_map>) {
         // nested containers convert to arrays/maps, never to objects: the element type
         // stays dynamic (a class-typed element type would mint an object buffer)

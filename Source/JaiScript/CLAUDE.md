@@ -234,9 +234,10 @@ engine stays usable", not by `check_throws`.
   Use instance members or engine-bound storage (`parameter_storage` pattern). `static const`
   (non-pointer) is fine.
 - **Every `script_value` needs an engine ref** (`script_value(v, eng)` / `(std::monostate{}, eng)`).
-- **`operator==` and `operator<=>` must stay consistent** and form a strict weak ordering —
-  `script_value` is used as `std::map` key. Float comparison uses `std::strong_order` (total
-  order incl. NaN); complex types order by held-pointer identity, never by `&storage_`.
+- **`operator==`, `operator<=>` and `map_key_hash` must stay consistent**: `<=>` is a strict weak ordering
+  (the map's iteration and serialization order) and `map_key_hash` hashes `<=>`-equivalent keys alike (the map's
+  lookup, `core/script_map.hpp`). Float comparison uses `std::strong_order` (total order incl. NaN); complex types
+  order and hash by held-pointer identity, never by `&storage_`.
 - **Never read a `script_value` after moving from it** (the move ctor nulls the source).
 - Match surrounding style (tabs in `interpreter.cpp`/`parser.cpp`).
 

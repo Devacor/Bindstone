@@ -155,7 +155,7 @@ namespace jai {
         bool operator()(const script_value& a, const map_string_key_probe& p) const;
         bool operator()(const map_string_key_probe& p, const script_value& b) const;
     };
-    using script_map = std::map<script_value, script_value, script_value_map_less>;
+    class script_map;   // core/script_map.hpp: hashed lookup, key order on iteration
     
     // Function type for script functions
     // Returns checked_result to allow proper error propagation without exceptions

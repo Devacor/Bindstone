@@ -65,7 +65,7 @@ class engine;
         template<typename T>
         struct value_converter {
             static T from(const script_value& v, engine* eng)
-                requires std::is_copy_constructible_v<T> || is_specialization_v<T, std::vector> || is_specialization_v<T, std::map>
+                requires std::is_copy_constructible_v<T> || is_specialization_v<T, std::vector> || is_script_map_like_v<T>
             {
                 // Handle containers explicitly to avoid infinite recursion
                 if constexpr (std::is_same_v<T, script_map>) {
@@ -75,7 +75,7 @@ class engine;
                 } else if constexpr (is_specialization_v<T, std::vector>) {
                     using element_type = typename T::value_type;
                     return conversions::convert_script_array_to_vector<element_type>(v, eng);
-                } else if constexpr (is_specialization_v<T, std::map>) {
+                } else if constexpr (is_script_map_like_v<T>) {
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
@@ -107,7 +107,7 @@ class engine;
                     // For vectors, use the conversion utility with engine for registry access
                     using element_type = typename T::value_type;
                     return conversions::convert_vector_to_script_array<element_type>(t, eng);
-                } else if constexpr (is_specialization_v<T, std::map>) {
+                } else if constexpr (is_script_map_like_v<T>) {
                     // For maps, use the conversion utility
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
@@ -326,7 +326,7 @@ class engine;
                 else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
+                             !is_script_map_like_v<T>) {
                     return convert_reference_with_registry<T>(t, eng);
                 }
                 // For basic types, delegate to const T& version
@@ -362,7 +362,7 @@ class engine;
                     return temp;
                 }
                 // For std::map<K,V> containers, use conversion utility
-                else if constexpr (is_specialization_v<T, std::map>) {
+                else if constexpr (is_script_map_like_v<T>) {
                     auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
@@ -389,7 +389,7 @@ class engine;
                 else if constexpr (std::is_class_v<T> &&
                                   !std::is_same_v<T, std::string> &&
                                   !is_specialization_v<T, std::vector> &&
-                                  !is_specialization_v<T, std::map>) {
+                                  !is_script_map_like_v<T>) {
                     return const_cast<script_value&>(v).deref().as<T&>();
                 } else {
                     // For basic types (int, float, bool, etc.), need to make a copy
@@ -414,7 +414,7 @@ class engine;
                 else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
+                             !is_script_map_like_v<T>) {
                     // For user classes, use the conversion registry if available
                     // Implementation moved to engine_impl.hpp to avoid circular dependencies
                     if (!eng) {
@@ -866,7 +866,7 @@ class engine;
                             !is_bound_array_type<base_type>::value &&
                             !is_bound_map_type<base_type>::value &&
                             !is_specialization_v<base_type, std::vector> &&
-                            !is_specialization_v<base_type, std::map>) {
+                            !is_script_map_like_v<base_type>) {
 					// Reference parameters borrow the live object. Ownership is only required
 					// for shared_ptr parameters; their conversion is handled above.
 					return std::ref(const_cast<script_value&>(actual_arg).as<base_type&>());

@@ -10261,12 +10261,53 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 // fallback), and no debugger is armed; otherwise the fallback runs the original statement with its real call
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_) return false;
+	if (site.method) return inline_method_holds(f, site);
 	const script_value* v = fused_cmp_operand(f, site.callee, static_cast<size_t>(site.guard_ip) * 3);
 	if (!v) return false;
 	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
 	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
 	const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
 	return thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
+}
+// a method graft's guard: the receiver slot holds an instance whose class the guard validated at its current method epoch, and the
+// instance carries no field of the method's name; the validation is the call's own resolution (one public overload with the graft's
+// body, no user getter of the method's name, no field shadowing it), plus no user accessor owning a bare field the body names and each
+// such field declared where the method's class finds it. A worker takes the fallback (its pinned call).
+bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
+	if (parallel_worker_ || !cached_global_env_) return false;
+	const script_value* r = frame_slot(f, site.receiver_slot);
+	if (!r) return false;
+	const script_value& v = r->deref();
+	const size_t k = v.raw_storage_index();
+	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
+	const auto holder = v.get_object_holder();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data || holder->type_id == coroutine_handle_type_id_) return false;
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) return false;
+	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
+	if (cd == site.holds_cd && cd->method_epoch() == site.holds_epoch) return true;
+	if (site.field_class && cd != site.field_class) return false;
+	if (cd->chain_has_nonpublic() || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
+	const uint64_t getter_id = symbolizer_->get_getter_id_with_view(site.member_id).first;
+	const script_value getter = cd->get_method(getter_id, false);
+	if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) return false;
+	for (const uint64_t id : site.field_ids) {
+		if (cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first)) return false;
+	}
+	const script_value mv = cd->get_method(site.member_id, false);
+	if (mv.is_null() || mv.is_invalid() || !mv.is_function()) return false;
+	const auto* dispatch = mv.as_function().target<script_method_dispatch>();
+	if (!dispatch || dispatch->eng != engine_ || !dispatch->cls) return false;
+	const function_decl* fn = dispatch->cls->single_method_overload(dispatch->name_id);
+	if (!fn || fn->is_coroutine || fn->body.get() != site.body) return false;
+	for (const uint64_t id : site.field_ids) {   // a bare field is the one the method's class sees: the receiver's class resolves it to the same declaration
+		const class_definition* at = cd->find_field_declaring_class(id);
+		if (!at || at != dispatch->cls->find_field_declaring_class(id)) return false;
+	}
+	site.holds_cd = cd;
+	site.holds_epoch = cd->method_epoch();
+	return true;
 }
 op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
 	const chunk::inline_site& site = f.code->inline_sites[ins.a];

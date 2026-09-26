@@ -231,6 +231,7 @@ namespace jai {
         mutable uint64_t proven_epoch = 0;
         mutable type_info* proven_field_type = nullptr;
         mutable bool proven_field_write = false;
+        mutable bool this_field = false;   // a bare name in a method the checker resolved to a field of the class chain (declared, no user accessor): the method graft's `recv.name`
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}
@@ -324,6 +325,7 @@ namespace jai {
         mutable std::vector<uint8_t> static_arg_proofs;
         mutable const block_stmt* proven_callee_body = nullptr;
         mutable const class function_decl* proven_callee_decl = nullptr;
+        mutable const class function_decl* proven_method_decl = nullptr;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
         mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)

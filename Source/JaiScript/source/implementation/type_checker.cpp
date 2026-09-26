@@ -1968,10 +1968,13 @@ private:
 		}
 	}
 
+    bool bare_this_field_ = false;
     ctype infer_identifier(identifier_expr* id) {
         std::optional<field_proof> fp;
+        bare_this_field_ = false;
         ctype t = infer_identifier_impl(id, fp);
         stamp_field(id, fp);
+        stamp(id->this_field, bare_this_field_, false);
         if (extended_names_.count(id->name)) { return {}; }
         return t;
     }
@@ -2001,6 +2004,7 @@ private:
 				if (global_tier_name(id->name)) { return {}; }
 				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 				if (hit.methods) { return ctype::make(ctype::function_k); }
+				if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { bare_this_field_ = true; }
 				if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
 				return {};
 			}
@@ -2114,6 +2118,18 @@ private:
             }
         }
         stamp_call_proofs(c, program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty());
+        {
+            const function_decl* md = nullptr;
+            if (stamping() && ov && ov->size() == 1 && c->callee && c->callee->get_type() == node_type::member_expr) {
+                auto* m = static_cast<member_expr*>(c->callee.get());
+                auto* recv = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(m->object.get()) : nullptr;
+                const function_decl* fn = (*ov)[0];
+                auto [lo, hi] = arity_range(fn);
+                if (!m->is_static && !m->null_safe && recv && recv->slot_index != SIZE_MAX && !recv->global_qualified &&
+                    fn->body && !fn->is_coroutine && !fn->is_static && lo == c->arguments.size() && hi == c->arguments.size()) { md = fn; }
+            }
+            stamp(c->proven_method_decl, md, static_cast<const function_decl*>(nullptr));
+        }
         if (ov) {
             // a map key passed where every viable overload binds the parameter by reference
             // or as a shared_ptr handle (a by-value parameter copies)
@@ -2273,7 +2289,8 @@ private:
 		if (target->get_type() == node_type::identifier_expr) {
 			auto* id = static_cast<identifier_expr*>(target);
 			std::optional<field_proof> fp;
-			auto done = [&](ctype t) { stamp_field(id, fp); return t; };
+			bool this_field = false;
+			auto done = [&](ctype t) { stamp_field(id, fp); stamp(id->this_field, this_field, false); return t; };
 			size_t scope_index = 0;
 			if (var_entry* local = find_local(id->name, &scope_index)) {
 				if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
@@ -2293,6 +2310,7 @@ private:
 					if (global_tier_name(id->name)) { return done(rhs); }
 					if (hit.read_only) { read_only_store(a->location, id->name); return done({}); }
 					if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
+					if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { this_field = true; }
 					if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
 					if (hit.field && (hit.field->type || hit.field->function_spelling)) {
 						ctype ft = member_type(hit);

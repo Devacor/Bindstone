@@ -492,6 +492,13 @@ namespace jai::vm {
             const function_decl* decl = nullptr;   // the callee: its name for the trace
             const ast_node* call_stmt = nullptr;   // the caller's statement: the trace's line for the caller's frame
             uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
+            bool method = false;                   // a method graft: the receiver slot's instance resolves member_id to the body
+            uint32_t receiver_slot = k_invalid_u32;
+            uint64_t member_id = 0;
+            const class_definition* field_class = nullptr;   // the class of the bare fields the body names (the receiver's exact class); null: none
+            std::vector<uint64_t> field_ids;
+            mutable const class_definition* holds_cd = nullptr;   // the last class the guard validated, at its method epoch
+            mutable uint64_t holds_epoch = 0;
         };
         std::vector<inline_site> inline_sites;
         struct inline_refusal { std::string callee; const char* reason = nullptr; uint32_t line = 0; };   // a call the inliner kept and the rule that kept it

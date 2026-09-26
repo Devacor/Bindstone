@@ -17,6 +17,7 @@
 // First run: with no WAD in wads/ the game fetches Freedoom and (if you say yes) the DOOM
 //            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
+//           jaiscript jaidoom.jai -- uncapped    (no frame cap: the camera eases between 35 Hz tics; U toggles in game)
 //
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
 //           jaiscript jaidoom.jai -- doom2.wad mypack.wad   (further WADs merge over the first; a
@@ -47,6 +48,8 @@ import "netplay.jai";
 import "boot.jai";
 
 float TICK_MS = 1000.0 / 35.0;
+bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
+float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
 bool RUN_TOGGLE = false;
 int MUS_POLL = 0;
 
@@ -497,6 +500,10 @@ function game_key(string k) -> void {
 		RUN_TOGGLE = !RUN_TOGGLE;
 		set_msg(RUN_TOGGLE ? "run: on" : "run: off");
 	}
+	else if (k == "u") {
+		UNCAPPED = !UNCAPPED;
+		set_msg(UNCAPPED ? "frame rate: uncapped" : "frame rate: 35");
+	}
 	else if (k == "1") { weapon_select(1); }
 	else if (k == "2") { weapon_select(2); }
 	else if (k == "3" && HAVE_SHOTGUN) { weapon_select(3); }
@@ -572,6 +579,7 @@ function play(string mapname) -> int {
 			accum = accum + (now - last);
 			if (accum > 120.0) { accum = 120.0; }    // stall recovery, GLOOM-style
 			while (accum >= TICK_MS) {
+				IP_X = P_X; IP_Y = P_Y; IP_ANG = P_ANG; IP_Z = P_VIEWZ;
 				read_input();
 				game_tic();
 				accum = accum - TICK_MS;
@@ -672,9 +680,21 @@ function play(string mapname) -> int {
 			set_palette_bank(bank);
 			if (AM_ON) { automap_draw(); }
 			else {
-				EYE_Z = P_VIEWZ;
 				EXTRA_LIGHT = P_GOGGLES > 0 ? 32 : (FLASH_TICS > 0 ? 1 : 0);
-				render_view(P_X, P_Y, P_ANG);
+				float vx = P_X; float vy = P_Y; float va = P_ANG; EYE_Z = P_VIEWZ;
+				if (UNCAPPED) {
+					// the camera between the last two tics (the playsim stays at 35 Hz); a teleport snaps
+					float f = accum / TICK_MS;
+					float jx = P_X - IP_X; float jy = P_Y - IP_Y;
+					if (jx * jx + jy * jy < 64.0 * 64.0) {
+						vx = IP_X + jx * f; vy = IP_Y + jy * f; EYE_Z = IP_Z + (P_VIEWZ - IP_Z) * f;
+						float da = P_ANG - IP_ANG;
+						while (da > 3.14159265358979) { da = da - 6.28318530717959; }
+						while (da < -3.14159265358979) { da = da + 6.28318530717959; }
+						va = IP_ANG + da * f;
+					}
+				}
+				render_view(vx, vy, va);
 				if (P_HP > 0) {
 					var w = WEAPONS[CUR_WEAPON];
 					draw_weapon(w.spr, w.view_frame());
@@ -717,7 +737,7 @@ function play(string mapname) -> int {
 
 		int spent = clock_ms() - now;
 		int rest = math::itrunc(TICK_MS) - spent;
-		if (rest > 0) { sleep_ms(rest); }
+		if (rest > 0 && !UNCAPPED) { sleep_ms(rest); }
 	}
 	demo_finish();                                   // quitting mid-level still writes the tape
 	music_stop();
@@ -1219,6 +1239,7 @@ function main() -> int {
 		else if (ARGS[i] == "bootstrap") { bootstrap = true; }
 		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
 		else if (ARGS[i] == "--no-audio") { want_audio = false; }
+		else if (ARGS[i] == "uncapped") { UNCAPPED = true; }
 		else if (ARGS[i] == "flowtest") { flow = true; }
 		else if (ARGS[i] == "freedoom2") { path = "freedoom2"; }
 		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }

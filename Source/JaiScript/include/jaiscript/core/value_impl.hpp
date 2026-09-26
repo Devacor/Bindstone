@@ -41,16 +41,16 @@ namespace jai {
                 val.type_info_ = cpp_bound_type_info(eng, encoding::semantic_index);
                 val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, encoding::semantic_index);
             } else if constexpr (std::is_class_v<T>) {
-                if (eng->template has_registered_class<T>()) {
+                if (auto bound_def = eng->get_class_definition_by_type(std::type_index(typeid(T)))) {
                     // This enables non-owning reference semantics for T& returns
                     auto holder = make_strong<object_holder>();
-                    holder->type_name = eng->template get_registered_name<T>();
-                    holder->type_id = eng->get_symbolizer()->intern(holder->type_name);
+                    holder->type_name = bound_def->interned_name();   // interned once per class
+                    holder->type_id = bound_def->interned_name_id();
                     holder->data = nullptr;  // Non-owning! bound_ptr holds the pointer
                     holder->is_class_instance_wrapper = false;
                     holder->bound_ptr = boundPtr;
 
-                    val.type_info_ = eng->get_type_info_object(holder->type_name);
+                    val.type_info_ = eng->get_type_info_object(holder->type_id);
                     val.storage_ = std::move(holder);
                 } else {
                     val.type_info_ = eng->get_type_info_object(typeid(T).name());

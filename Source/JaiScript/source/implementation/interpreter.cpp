@@ -2238,7 +2238,7 @@ const script_value& interpreter::member_target::get_field(uint64_t id) const {
     return instance->get_field(id);
 }
 
-const std::string& interpreter::member_target::class_name() const {
+std::string_view interpreter::member_target::class_name() const {
     if (class_def) {
         return class_def->get_name();
     }
@@ -2276,7 +2276,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
     } else if (engine_) {
         target.engine_def = holder->type_id != UINT64_MAX
             ? engine_->get_class_definition(holder->type_id)
-            : engine_->get_class_definition(holder->type_name);
+            : engine_->get_class_definition(std::string(holder->type_name));
         target.class_def = target.engine_def.get();
     }
     return target;
@@ -4243,8 +4243,8 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         }
         target.instance->set_field_unchecked(member_id, enforced.value());
     } else {
-        const std::string& cls = target.class_name();
-        std::string text = "Cannot assign to '" + std::string(memberExpr->member) + "': " + (cls.empty() ? "object" : cls) + " has no such member";
+        const std::string_view cls = target.class_name();
+        std::string text = "Cannot assign to '" + std::string(memberExpr->member) + "': " + (cls.empty() ? std::string("object") : std::string(cls)) + " has no such member";
         active_exception_value_ = make_value(text);
         current_exception_ = script_exception(text, memberExpr->location);
         is_unwinding_ = true;
@@ -7453,8 +7453,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         const script_method_dispatch* d = method_val.is_function()
                             ? method_val.as_function().target<script_method_dispatch>() : nullptr;
                         if (!d || d->eng != engine_) {
-                            const std::string& cls = target.class_name();
-                            std::string text = (cls.empty() ? "object" : cls) + " has no member '" + std::string(member->member) + "'";
+                            const std::string_view cls = target.class_name();
+                            std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member->member) + "'";
                             active_exception_value_ = make_value(text);
                             current_exception_ = script_exception(text, member->location);
                             is_unwinding_ = true;
@@ -8443,8 +8443,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
     }
 
-    const std::string& cls = target.class_name();
-    std::string text = (cls.empty() ? "object" : cls) + " has no member '" + std::string(expr->member) + "'";
+    const std::string_view cls = target.class_name();
+    std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(expr->member) + "'";
     active_exception_value_ = make_value(text);
     current_exception_ = script_exception(text, expr->location);
     is_unwinding_ = true;

@@ -223,7 +223,7 @@ public:
                         oss_ << ", \"$weak_ptr_data\": ";
                         // Create a script_value from the object_holder using factory method
                         script_value shared_val = script_value::make_object(
-                            shared->type_name,
+                            std::string(shared->type_name),
                             shared->type_id,
                             shared->data,
                             engine_ref_,

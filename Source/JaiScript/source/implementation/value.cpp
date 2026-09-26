@@ -357,6 +357,19 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     return v;
 }
 
+namespace {
+// a type's name as the engine's interned text: read by the interned id the caller already holds (an index, no hash), interning only
+// when the id is missing or names other text
+std::string_view interned_type_text(engine* eng, std::string_view name, uint64_t type_id) {
+    auto* symbols = eng->get_symbolizer();
+    if (type_id != UINT64_MAX) {
+        const std::string_view text = symbols->get_string(type_id);
+        if (text == name) { return text; }
+    }
+    return symbols->intern_with_view(name).second;
+}
+}
+
 script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
@@ -383,7 +396,7 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     v.type_info_ = class_def->get_type_info();
 
     auto obj = make_strong<object_holder>();
-    obj->type_name = type_name;
+    obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
     obj->is_class_instance_wrapper = is_cpp_class;  // True when data is a class_instance object (both C++ and script classes), false for raw data
@@ -395,7 +408,7 @@ script_value script_value::make_class_object(const class_definition& cd, std::sh
     script_value v(std::monostate{}, eng);
     v.type_info_ = cd.get_type_info();
     auto obj = make_strong<object_holder>();
-    obj->type_name = cd.get_name();
+    obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
     obj->data = std::move(data);
     obj->is_class_instance_wrapper = true;
@@ -406,7 +419,7 @@ script_value script_value::make_class_object(const class_definition& cd, std::sh
 script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng) {
     script_value v(std::monostate{}, eng);
     auto obj = make_strong<object_holder>();
-    obj->type_name = "coroutine_handle";
+    obj->type_name = interned_type_text(eng, "coroutine_handle", type_id);
     obj->type_id = type_id;
     obj->data = std::move(handle);
     obj->is_class_instance_wrapper = false;
@@ -432,7 +445,7 @@ script_value script_value::make_cpp_object(const std::string& type_name, uint64_
     v.type_info_ = class_def->get_type_info();
 
     auto obj = make_strong<object_holder>();
-    obj->type_name = type_name;
+    obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
     obj->data = data;
     obj->is_class_instance_wrapper = false;  // make_cpp_object is for raw C++ objects
@@ -452,7 +465,7 @@ script_value script_value::make_cpp_reference(const std::string& type_name, uint
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
     auto obj = make_strong<object_holder>();
-    obj->type_name = type_name;
+    obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;
     obj->bound_ptr = object;
     obj->weak_data = std::move(owner);
@@ -721,8 +734,8 @@ script_value script_value::clone() const {
         }
 
         throw runtime_error(
-            "Cannot clone shared_ptr<" + obj_holder->type_name + ">: type is non-copyable. "
-            "Register a copy constructor with dynamic_binder<" + obj_holder->type_name + ">::copy_constructor() "
+            "Cannot clone shared_ptr<" + std::string(obj_holder->type_name) + ">: type is non-copyable. "
+            "Register a copy constructor with dynamic_binder<" + std::string(obj_holder->type_name) + ">::copy_constructor() "
             "to enable deep copying.");
     }
 
@@ -825,9 +838,9 @@ script_value script_value::clone() const {
 
                 if (!copied) {
                     throw runtime_error(
-                        "Cannot copy C++ object of type '" + obj_holder->type_name +
+                        "Cannot copy C++ object of type '" + std::string(obj_holder->type_name) +
                         "': the type is not copy-constructible. Hold it by reference (auto&/var&) "
-                        "or share it (shared_ptr<" + obj_holder->type_name + ">).");
+                        "or share it (shared_ptr<" + std::string(obj_holder->type_name) + ">).");
                 }
             }
             break;

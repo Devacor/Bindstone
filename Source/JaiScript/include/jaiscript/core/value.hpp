@@ -1845,7 +1845,7 @@ namespace jai {
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
-            std::string type_name;           // Type identification for serialization
+            std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
             bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data

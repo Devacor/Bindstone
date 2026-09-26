@@ -52,8 +52,11 @@ class class_definition;
 
 class class_instance : public std::enable_shared_from_this<class_instance> {
 public:
-    class_instance(const std::string& class_name, engine* eng = nullptr)
-        : class_name_(class_name), engine_(eng), invalid_value_(std::monostate{}, eng) {}
+    class_instance(std::string_view class_name, engine* eng = nullptr);
+    struct interned_name_t {};
+    // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
+    class_instance(interned_name_t, std::string_view interned, engine* eng)
+        : class_name_(interned), engine_(eng), invalid_value_(std::monostate{}, eng) {}
 
     ~class_instance();
 
@@ -109,7 +112,7 @@ public:
     void note_field_ref_minted() noexcept { ++live_field_refs_; }
     void note_field_ref_released() noexcept { if (live_field_refs_) { --live_field_refs_; } }
     [[noreturn]] void throw_retired_script_layer() const {
-        throw runtime_error("Script layer '" + class_name_ + "' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+        throw runtime_error("Script layer '" + std::string(get_class_name()) + "' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
     }
 
     // Field storage lookup WITHOUT lazy default insertion (field-reference resolution:
@@ -144,7 +147,7 @@ public:
         }
     }
 
-    const std::string& get_class_name() const { return class_name_; }
+    std::string_view get_class_name() const { return class_name_; }
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
     // conversion kernel for declared-type retypes).
@@ -239,7 +242,7 @@ public:
     }
 
 private:
-    std::string class_name_;
+    std::string_view class_name_;   // the engine's interned text (empty for an instance built without an engine)
     // Tier-1 flat fields: slot-indexed per class_definition's append-only registry.
     // unique_ptr pointees NEVER move (vector growth relocates the pointers only), so
     // cached field addresses — suspended coroutines' env chains, this-capturing
@@ -1018,7 +1021,7 @@ public:
         }
 
         if (has_script_dtor_) {
-            auto* raw_instance = new class_instance(name_, engine_);
+            auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
             auto class_def = shared_from_this();
 
             instance = std::shared_ptr<class_instance>(raw_instance,
@@ -1059,7 +1062,7 @@ public:
                     }
                 });
         } else {
-            instance = std::make_shared<class_instance>(name_, engine_);   // instance + control block, one allocation
+            instance = std::make_shared<class_instance>(class_instance::interned_name_t{}, interned_name(), engine_);   // instance + control block, one allocation
         }
 
         instance->set_class_definition(shared_from_this());
@@ -1463,6 +1466,16 @@ public:
     }
 
     const std::string& get_name() const { return name_; }
+    // the name's view in the engine's interned table, looked up once (instances and handles name their type by it)
+    std::string_view interned_name() const { intern_name_once(); return interned_name_; }
+    uint64_t interned_name_id() const { intern_name_once(); return interned_name_id_; }
+    void intern_name_once() const {
+        if (interned_name_.data() == nullptr && engine_) {
+            const auto [id, view] = engine_->get_symbolizer()->intern_with_view(name_);
+            interned_name_id_ = id;
+            interned_name_ = view;
+        }
+    }
     uint64_t get_type_id() const { return type_id_; }
 
     void set_type_id(uint64_t type_id) { type_id_ = type_id; }
@@ -2044,6 +2057,8 @@ public:
 
 private:
     std::string name_;
+    mutable std::string_view interned_name_;
+    mutable uint64_t interned_name_id_ = UINT64_MAX;
     uint64_t type_id_;
     bool auto_registered_ = false;
     bool cpp_backed_ = false;
@@ -2323,7 +2338,7 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
     }
     flat_fields_.clear();
     class_def_ = class_def.get();
-    class_name_ = class_def->get_name();
+    class_name_ = class_def->interned_name();
     bound_method_cache_.clear();
     flat_fields_.resize(class_def_->field_slot_count());
     for (auto& [id, cell] : cells) {
@@ -2456,7 +2471,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
         }
     } else if (eng) {
         view.engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
-                                                        : eng->get_class_definition(holder->type_name);
+                                                        : eng->get_class_definition(std::string(holder->type_name));
         view.def = view.engine_def.get();
     }
     return view;
@@ -2755,7 +2770,7 @@ inline std::string slot_source_type_name(const script_value& value_in, engine* e
             if (named_tag) return tag->type_name;
             auto view = resolve_slot_class(v, eng);
             if (view.def) return view.def->get_name();
-            if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) return holder->type_name;
+            if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) return std::string(holder->type_name);
             return "object";
         }
         default:
@@ -3134,9 +3149,9 @@ inline uint64_t class_instance::get_cpp_object_field_id() const {
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     if (class_def_ && class_def_->nocopy()) {
-        throw runtime_error("Cannot copy an instance of nocopy class '" + class_name_ + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
+        throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
-    auto new_instance = std::make_shared<class_instance>(class_name_, engine_);
+    auto new_instance = std::make_shared<class_instance>(interned_name_t{}, class_name_, engine_);
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();
     if (class_def_ && !overflow_fields_) {
@@ -3158,11 +3173,11 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                     if (cpp_obj) {
                         auto new_cpp_obj = class_def_->copy_object(cpp_obj.get());
                         if (!new_cpp_obj) {
-                            throw runtime_error("Failed to copy C++ object of type '" + class_name_ +
+                            throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
                                 "'. The registered copy function returned null.");
                         }
                         new_instance->set_field(cpp_obj_id,
-                            script_value::make_cpp_object(class_name_, class_def_->get_type_id(), new_cpp_obj, cell->get_engine()));
+                            script_value::make_cpp_object(std::string(get_class_name()), class_def_->get_type_id(), new_cpp_obj, cell->get_engine()));
                         continue;
                     }
                 }
@@ -3182,13 +3197,13 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                     auto new_cpp_obj = class_def_->copy_object(cpp_obj.get());
 
                     if (!new_cpp_obj) {
-                        throw runtime_error("Failed to copy C++ object of type '" + class_name_ +
+                        throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
                             "'. The registered copy function returned null.");
                     }
 
                     auto eng_ref = value.get_engine();
                     new_instance->set_field(cpp_obj_id,
-                        script_value::make_cpp_object(class_name_, class_def_->get_type_id(), new_cpp_obj, eng_ref));
+                        script_value::make_cpp_object(std::string(get_class_name()), class_def_->get_type_id(), new_cpp_obj, eng_ref));
                     return;
                 }
             }
@@ -3331,6 +3346,11 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
         throw runtime_error("Class definition not available for method with ID " + std::to_string(id) + " lookup");
     }
     return script_value::make_invalid(nullptr);
+}
+
+inline class_instance::class_instance(std::string_view class_name, engine* eng)
+    : engine_(eng), invalid_value_(std::monostate{}, eng) {
+    if (eng) { class_name_ = eng->get_symbolizer()->intern_with_view(class_name).second; }
 }
 
 inline class_instance::~class_instance() {

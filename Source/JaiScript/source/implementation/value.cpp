@@ -1451,9 +1451,6 @@ bool script_value::operator==(const script_value& other) const {
 // Transparent map-key ordering: MUST mirror operator<=> below exactly — type rank
 // first (a probe ranks as jai_string_type), then string content (std::string <=>
 // string_view is the same lexicographic order as string <=> string).
-bool script_value_map_less::operator()(const script_value& a, const script_value& b) const {
-    return a < b;
-}
 bool script_value_map_less::operator()(const script_value& a, const map_string_key_probe& p) const {
     if (auto cmp = a.type() <=> script_value_type::jai_string_type; cmp != 0) { return cmp < 0; }
     return a.unchecked_as_string() < p.text;

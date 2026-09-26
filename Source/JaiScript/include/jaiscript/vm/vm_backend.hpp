@@ -936,6 +936,7 @@ namespace jai::vm {
         uint64_t cpp_object_field_id_ = 0;
         uint64_t same_as_id_ = 0;
         uint64_t builtin_push_id_ = 0;   // "push" (the array-push inline fast path)
+        uint64_t builtin_has_id_ = 0;    // "has" (the map-has inline)
         uint64_t coroutine_handle_type_id_ = 0;
         uint64_t resume_id_ = 0;
         uint64_t done_id_ = 0;
@@ -1836,6 +1837,7 @@ namespace jai::vm {
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
+        op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
         // custom-getter shadow / no field slot)

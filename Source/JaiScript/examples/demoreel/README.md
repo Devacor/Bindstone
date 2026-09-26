@@ -178,9 +178,8 @@ Every scene holds 30 fps on the VM with room to spare (mean 2.8 ms, worst
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
   every one of the sixteen scene entries plus the wrap back to PLASMA: shim
   stream hash `3352695962` on both. The C++ host's `--smoke` hash is FNV-1a 64
-  over the same frames: `23505cc87911c46d`, computed offline over the shim's
-  stream (the method reproduces the previous reel's `499577b411b67162`
-  exactly; the host's HUD is off in smoke, so its frames are the same bytes).
+  over the same frames: `23505cc87911c46d` on both backends (the host's HUD
+  is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into both engines. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
   re-binds them on the next frame; a reload mid-transition cancels the

@@ -3914,6 +3914,20 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "4", "computed index, proofs off", false);
 			both(src, "4", "computed index");
 		});
+		test("a_bail_inside_a_statement_flushes_its_spills_and_graft_values", [this]() {
+			// the first itr grafts behind the spill of m[i], the second stays a call (its left operand has no class to spill) and the statement
+			// bails inside the if after the graft's join; the spill and the graft's result live only in cells, so the bail flushes them
+			const std::string prelude =
+				"function itr(float v) -> int { return math::itrunc(v); }\n"
+				"var q = 4;\n"
+				"function run() -> string { array<int> m = [10, 20, 30, 40]; string out = \"\";\n"
+				"  for (int i = 0; i < 4; ++i) { float d = i * 1.5; if (d > 0.5) { int c = m[i] + itr(d) * q + itr(d); out += to_string(c) + \" \"; } }\n"
+				"  return out; }\n";
+			both(prelude + "run();", "25 45 60 ", "a statement bailing after its graft");
+			both(prelude + "run();", "25 45 60 ", "a statement bailing after its graft, proofs off", false);
+			const std::string l = listing_run(prelude + "run();");
+			check_true(l.find("-- inlined itr") != std::string::npos && l.find("bail->") != std::string::npos, "the graft and the bail are in the loop: " + l.substr(0, 400));
+		});
 	}
 };
 

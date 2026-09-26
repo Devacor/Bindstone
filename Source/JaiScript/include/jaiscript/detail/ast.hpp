@@ -323,7 +323,8 @@ namespace jai {
         // (identified by body); empty = unproven call
         mutable std::vector<uint8_t> static_arg_proofs;
         mutable const block_stmt* proven_callee_body = nullptr;
-        mutable const class function_decl* proven_callee_decl = nullptr;   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
+        mutable const class function_decl* proven_callee_decl = nullptr;
+        mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };

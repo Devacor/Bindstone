@@ -1135,6 +1135,7 @@ namespace jai::vm {
         bool is_truthy(const script_value& value);
         bool object_to_bool_via_method(const script_value& value);
         std::string value_to_string_with_method(const script_value& val);
+        script_string concat_text(const script_value& left, const script_value& right);
         script_value materialize_constant(const script_value& tmpl);
         script_value materialize_constant(const chunk& code, uint32_t const_index);
         // A string literal's value: the main engine shares the AST node (string copies share
@@ -1837,6 +1838,10 @@ namespace jai::vm {
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
+        op_status exec_call_builtin(frame& f, const vm_instruction& ins);
+        op_status exec_concat_append(frame& f);
+        std::vector<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth (a builtin may call back into the VM)
+        size_t builtin_arg_depth_ = 0;
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /

@@ -1,3 +1,4 @@
+#include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
 #include <intrin.h>
@@ -1344,6 +1345,32 @@ bool vm_backend::is_truthy(const script_value& value) {
 	}
 }
 
+// String + x (either side a string): the text of each operand joined, as value_to_string_with_method + value_to_string_with_method
+// gives it; a string operand appends its bytes and an int its digits without an intermediate copy. Two operands that would both run
+// a to_string method keep the original expression (its operand order).
+script_string vm_backend::concat_text(const script_value& left, const script_value& right) {
+	auto direct = [](size_t k) { return k == script_value::TYPEID_STRING || k == script_value::TYPEID_INT; };
+	const size_t lk = left.raw_storage_index(), rk = right.raw_storage_index();
+	if (!direct(lk) && !direct(rk)) {
+		return value_to_string_with_method(left) + value_to_string_with_method(right);
+	}
+	auto append = [this](script_string& out, const script_value& v, size_t k) {
+		if (k == script_value::TYPEID_STRING) { out += v.unchecked_as_string(); }
+		else if (k == script_value::TYPEID_INT) {
+			char buf[24];
+			auto res = std::to_chars(buf, buf + sizeof(buf), v.unchecked_as_int());
+			out.append(buf, res.ptr);
+		} else { out += value_to_string_with_method(v); }
+	};
+	script_string out;
+	if (lk == script_value::TYPEID_STRING && rk == script_value::TYPEID_STRING) {
+		out.reserve(left.unchecked_as_string().size() + right.unchecked_as_string().size());
+	}
+	append(out, left, lk);
+	append(out, right, rk);
+	return out;
+}
+
 std::string vm_backend::value_to_string_with_method(const script_value& val) {
 	if (val.type() == script_value_type::jai_object_type) {
 		auto target = resolve_member_target(val);
@@ -1873,7 +1900,7 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 			return script_value(lf + rf, engine_);
 		}
 		if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-			script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+			script_string joined = concat_text(left, right);
 			// engine::memory_cap chokepoint: deny the concat result before it exists
 			if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
 				return detail::raise_memory_cap(*limits_);
@@ -1904,7 +1931,7 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 	}
 
 	if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-		script_string joined = value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right);
+		script_string joined = concat_text(unwrapped_left, unwrapped_right);
 		// engine::memory_cap chokepoint: deny the concat result before it exists
 		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
 			return detail::raise_memory_cap(*limits_);
@@ -2862,7 +2889,7 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-		script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+		script_string joined = concat_text(left, right);
 		// engine::memory_cap chokepoint: deny the concat result before it exists
 		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
 			return detail::raise_memory_cap(*limits_);
@@ -6577,6 +6604,19 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				} else {
 					sink(make_null());
 				}
+				return {};
+			}
+		}
+	}
+	// String READ s[i]: exec_index's string branch for an in-bounds integer index (the char at that byte); a write, a non-int or
+	// out-of-bounds index replays for its text
+	if (left.raw_storage_index() == script_value::TYPEID_STRING && !(ins.b & index_flag_lvalue_write)) {
+		const script_value* iv = computed_index ? &*computed_index : (have_raw_index ? nullptr : &index_ptr->deref());
+		if (!iv || iv->raw_storage_index() == script_value::TYPEID_INT) {
+			const script_int index = iv ? iv->unchecked_as_int() : raw_index;
+			const script_string& str = left.unchecked_as_string();
+			if (index >= 0 && index < static_cast<script_int>(str.size())) {
+				sink(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
 				return {};
 			}
 		}
@@ -12955,6 +12995,165 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// A method call the checker proved builtin (op_call_builtin): the receiver's raw kind is the proven one, so the registry method
+// runs as the general call's builtin paths run it (the receiver's dereferenced copy as self, arguments dereferenced in place,
+// the pending site armed for callback builtins, native exceptions converted); size/length/empty compute inline. Any other
+// receiver (null, a reference-wrapped host value, a utf8_string) replays op_call_method.
+// acc + x for a template chain: binary_general's `+`. With no global operator registered, a plain string acc and a string or
+// scalar x take handle_add's string branch in place: the same memory charge (the joined size), the same text for x, an untagged
+// result; the accumulated node is written only when nothing else holds it (copy-on-write).
+op_status vm_backend::exec_concat_append(frame& f) {
+	(void)f;
+	script_value right_raw = std::move(stack_.back());
+	stack_.pop_back();
+	script_value& acc = stack_.back();
+	const script_value& right = right_raw.deref();
+	const size_t rk = right.raw_storage_index();
+	if (acc.raw_storage_index() == script_value::TYPEID_STRING && !(operator_table_ && operator_table_->any()) &&
+	    (rk == script_value::TYPEID_STRING || rk == script_value::TYPEID_INT || rk == script_value::TYPEID_FLOAT ||
+	     rk == script_value::TYPEID_BOOL || rk == script_value::TYPEID_CHAR)) {
+		char digits[24];
+		std::string_view text;
+		std::string scratch;
+		if (rk == script_value::TYPEID_STRING) { text = right.unchecked_as_string(); }
+		else if (rk == script_value::TYPEID_INT) {
+			auto res = std::to_chars(digits, digits + sizeof(digits), right.unchecked_as_int());
+			text = std::string_view(digits, static_cast<size_t>(res.ptr - digits));
+		} else { scratch = right.to_string(); text = scratch; }
+		if (!limits_->memory_charge(sizeof(script_value) + acc.unchecked_as_string().size() + text.size())) [[unlikely]] {
+			return raise_from(detail::raise_memory_cap(*limits_));
+		}
+		acc.unchecked_as_string_ref().append(text);
+		acc.set_type_info(nullptr);
+		return {};
+	}
+	script_value left_raw = std::move(acc);
+	stack_.pop_back();
+	auto result = binary_general(token_type::plus, left_raw.deref(), right);
+	if (!result) { return raise_from(result); }
+	stack_.push_back(std::move(result.value()));
+	return {};
+}
+
+op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
+	const size_t argc = ins.a;
+	const call_site& site = f.code->call_sites[ins.b];
+	const size_t base = stack_.size() - argc;
+	const script_value& recv = stack_[base - 1].deref();
+	const size_t kind = recv.raw_storage_index();
+	const builtin_method* fn = nullptr;
+	switch (ins.c & 15u) {
+	case 1: if (kind == script_value::TYPEID_STRING) fn = builtins_.string_by_index[site.bi_string]; break;
+	case 2: if (kind == script_value::TYPEID_ARRAY) fn = builtins_.array_by_index[site.bi_array]; break;
+	case 3: if (kind == script_value::TYPEID_MAP) fn = builtins_.map_by_index[site.bi_map]; break;
+	default: break;
+	}
+	if (!fn) {
+		return exec_call_method(f, vm_instruction{opcode::op_call_method, ins.a, ins.b, 0});
+	}
+	if (const uint32_t inline_op = ins.c >> 4; inline_op != 0) {
+		// the builtin's body on its happy path (the argument kinds it accepts); any other argument calls the builtin for its text
+		std::optional<script_value> result;
+		if (inline_op <= 2) {
+			size_t count = 0;
+			switch (kind) {
+			case script_value::TYPEID_STRING: count = recv.unchecked_as_string().size(); break;
+			case script_value::TYPEID_ARRAY: count = recv.unchecked_array_node()->size(); break;
+			default: count = recv.unchecked_as_map().size(); break;
+			}
+			result.emplace(inline_op == 1 ? script_value(static_cast<script_int>(count), engine_) : script_value(count == 0, engine_));
+		} else if (inline_op <= 8) {
+			const std::string& str = recv.unchecked_as_string();
+			const script_value& a0 = stack_[base].deref();
+			const script_int len = static_cast<script_int>(str.size());
+			switch (inline_op) {
+			case 3:
+				if (a0.is_text() && (argc == 1 || stack_[base + 1].deref().is_int())) {
+					size_t start_pos = 0;
+					if (argc == 2) {
+						script_int start = stack_[base + 1].deref().unchecked_as_int();
+						if (start < 0) start += len;
+						if (start < 0) start = 0;
+						start_pos = static_cast<size_t>(start);
+					}
+					const size_t pos = str.find(a0.unchecked_text(), start_pos);
+					result.emplace(static_cast<script_int>(pos == std::string::npos ? -1 : static_cast<script_int>(pos)), engine_);
+				}
+				break;
+			case 4:
+				if (a0.is_text()) { result.emplace(str.find(a0.unchecked_text()) != std::string::npos, engine_); }
+				break;
+			case 5:
+				if (a0.is_text()) {
+					const std::string& prefix = a0.unchecked_text();
+					result.emplace(prefix.size() <= str.size() && str.compare(0, prefix.size(), prefix) == 0, engine_);
+				}
+				break;
+			case 6:
+				if (a0.is_text()) {
+					const std::string& suffix = a0.unchecked_text();
+					result.emplace(suffix.size() <= str.size() && str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0, engine_);
+				}
+				break;
+			case 7:
+				if (a0.is_int() && (argc == 1 || stack_[base + 1].deref().is_int())) {
+					script_int start = a0.unchecked_as_int();
+					if (start < 0) start += len;
+					if (start < 0) start = 0;
+					if (start >= len) { result.emplace(std::string(""), engine_); }
+					else if (argc == 2) {
+						script_int sub_len = stack_[base + 1].deref().unchecked_as_int();
+						if (sub_len < 0) sub_len = 0;
+						result.emplace(str.substr(static_cast<size_t>(start), static_cast<size_t>(sub_len)), engine_);
+					} else {
+						result.emplace(str.substr(static_cast<size_t>(start)), engine_);
+					}
+				}
+				break;
+			default:
+				if (a0.is_int()) {
+					script_int idx = a0.unchecked_as_int();
+					if (idx < 0) idx += len;
+					if (idx >= 0 && idx < len) { result.emplace(std::string(1, str[static_cast<size_t>(idx)]), engine_); }
+				}
+				break;
+			}
+		} else {
+			const script_map& map = recv.unchecked_as_map();
+			auto it = map.find(stack_[base].deref());
+			if (inline_op == 9) { result.emplace(it != map.end(), engine_); }
+			else { result.emplace(it != map.end() ? it->second : stack_[base + 1].deref()); }
+		}
+		if (result) {
+			stack_.truncate(base - 1);
+			stack_.push_back(std::move(*result));
+			return {};
+		}
+	}
+	if (builtin_arg_depth_ == builtin_arg_pool_.size()) { builtin_arg_pool_.emplace_back(); }
+	std::vector<script_value>& arguments = builtin_arg_pool_[builtin_arg_depth_];
+	struct depth_release {
+		vm_backend* vm; std::vector<script_value>* args;
+		~depth_release() { args->clear(); --vm->builtin_arg_depth_; }
+	} release{this, &arguments};
+	++builtin_arg_depth_;
+	arguments.clear();
+	for (size_t i = 0; i < argc; ++i) {
+		arguments.push_back(std::move(stack_[base + i]));
+	}
+	stack_.truncate(base);
+	script_value self = stack_.back().deref();
+	stack_.pop_back();
+	detail::deref_builtin_args_in_place(arguments);
+	pending_call_site saved_pending = pending_site_ctx_;
+	pending_site_ctx_ = arguments.empty() ? saved_pending : pending_call_site{&site, &f, f.code};
+	struct pending_restore {
+		vm_backend* vm; pending_call_site saved;
+		~pending_restore() { vm->pending_site_ctx_ = saved; }
+	} restore_pending{this, saved_pending};
+	return guarded_native_call([&] { return (*fn)(builtin_ctx(), self, arguments); });
+}
+
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_method_, coarse_methods_)
 #ifdef JAISCRIPT_VM_PROFILE
@@ -15802,6 +16001,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_set_static: return exec_set_static(f, ins);
 		case opcode::op_member_compound: return exec_member_compound(f, ins);
 		case opcode::op_call_method: return exec_call_method(f, ins);
+		case opcode::op_call_builtin: return exec_call_builtin(f, ins);
+		case opcode::op_concat_append: return exec_concat_append(f);
 		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
 		case opcode::op_class_decl: return exec_class_decl(f, ins);
@@ -16101,6 +16302,7 @@ namespace {
 			}
 			case opcode::op_call:
 			case opcode::op_call_method:
+			case opcode::op_call_builtin:
 			case opcode::op_call_from_scratch:
 				r.call_ips.push_back(ip);
 				if (ins.b < c.call_sites.size()) {
@@ -17088,6 +17290,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_call_method:
 				VM_TRY_OP_SHARED(exec_call_method(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
+				break;
+			case opcode::op_concat_append:
+				VM_TRY_OP_SHARED(exec_concat_append(f));
+				break;
+			case opcode::op_call_builtin:
+				VM_TRY_OP_SHARED(exec_call_builtin(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;

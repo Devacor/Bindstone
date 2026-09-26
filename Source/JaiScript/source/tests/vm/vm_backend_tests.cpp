@@ -3909,7 +3909,7 @@ public:
 				c.lut[key] = c.lut[key] + 1;
 				"" + total + ":" + c.arr[1] + ":" + c.lut["a"] + ":" + c.lut["b"];
 			)");
-			check_eq(std::string("204:12.500000:107:201"), i1, "interp: member-container reads/stores");
+			check_eq(std::string("204:12.5:107:201"), i1, "interp: member-container reads/stores");
 			check_eq(i1, v1, "member-container fusion parity");
 		});
 

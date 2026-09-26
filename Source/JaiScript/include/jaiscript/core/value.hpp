@@ -1710,6 +1710,8 @@ namespace jai {
 
         // Conversion to string for debugging
         std::string to_string() const;
+        // a float's text: the shortest that reads back to the same double, ".0" kept on a whole number
+        static std::string float_text(double v);
 
         // Try to unwrap a transparent wrapper type (like observable_property_ref)
         // Returns the unwrapped value if this is a transparent wrapper, otherwise returns copy of this

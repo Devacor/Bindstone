@@ -233,7 +233,7 @@ print(&quot;Counter::twice_count() = {}&quot;, Counter::twice_count());
 Counter::PI;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Counter::count = 3
 Counter::twice_count() = 6
-== result: 3.141590</code></pre></div>
+== result: 3.14159</code></pre></div>
 <p><code>Class::name</code> is the <em>only</em> spelling from outside. <code>Counter.count</code> is not a static access. It is a member lookup on the constructor value, and fails at run time. Static fields also enforce their declared type exactly like instance fields, through the same table: a literal mismatch is a load error, a <code>var</code>-sourced one raises where it lands, and the initializer converts on the way in:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Registry {
     static int count = 0;
@@ -245,7 +245,7 @@ print(&quot;count = {} ({}), ratio = {}, last_id = {}&quot;, Registry::count, ty
 var bad = &quot;many&quot;;
 try { Registry::count = bad; } catch (e) { print(&quot;caught: {}&quot;, e); }
 try { Registry.count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.000000, last_id = null
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = null
 caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
 caught: function has no member &#x27;count&#x27;</code></pre></div>
 <p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) Statics are <strong>not inherited</strong>: a derived class neither sees them bare nor answers to <code>Derived::count</code>. Qualify with the declaring class:</p>

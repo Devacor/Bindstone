@@ -963,12 +963,12 @@ public:
         test("fuzz_neg_zero_preserved", [this]() {
             auto e = make_engine();
             stdlib::register_all(*e);
-            check_eq(std::string("-0.000000"), e->execute(R"(
+            check_eq(std::string("-0.0"), e->execute(R"(
                 double x = 0.0;
                 to_string(-x);
             )").as_string());
-            check_eq(std::string("-0.000000"), e->execute("to_string(-(0.0))").as_string());
-            check_eq(std::string("-0.000000"), e->execute("to_string(0.0 * -1.0)").as_string());
+            check_eq(std::string("-0.0"), e->execute("to_string(-(0.0))").as_string());
+            check_eq(std::string("-0.0"), e->execute("to_string(0.0 * -1.0)").as_string());
         });
         test("fuzz_neg_zero_map_key_ordering", [this]() {
             // strong_order keys: -0.0 and +0.0 stay DISTINCT map keys on both backends
@@ -3565,7 +3565,7 @@ public:
                 to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" +
                     to_string(s4) + "|" + to_string(total);
             )");
-            check_eq(std::string("60|200|true|20.500000|60"), r.as_string());
+            check_eq(std::string("60|200|true|20.5|60"), r.as_string());
         });
 
         test("fused_subscript_operand_errors_and_maps", [this]() {
@@ -3630,7 +3630,7 @@ public:
                 to_string(pix[0]) + "|" + to_string(pix[1]) + "|" + to_string(fl[1]) + "|" +
                     to_string(arr2[0]) + "|" + to_string(arr2.size());
             )");
-            check_eq(std::string("42|41|5.000000|15|2"), r.as_string());
+            check_eq(std::string("42|41|5.0|15|2"), r.as_string());
         });
 
         // A pooled holder escaping the engine must stay destructible after engine death
@@ -3669,7 +3669,7 @@ public:
                 to_string(math::abs(-7)) + "|" + to_string(math::min(3, 9)) + "|" +
                 to_string(math::max(3, 9)) + "|" + to_string(math::clamp(15, 0, 10));
             )");
-            check_eq(std::string("2.000000|3.000000|3|-2|4.000000|1024.000000|7|3|9|10"), r.as_string());
+            check_eq(std::string("2.0|3.0|3|-2|4.0|1024.0|7|3|9|10"), r.as_string());
         });
 
         test("trig_and_distance", [this]() {
@@ -3763,7 +3763,7 @@ public:
                 to_string(geo::area(3.0, 4.0)) + "|" + to_string(v.x + v.y) + "|" +
                     to_string(bare) + "|" + to_string(math::floor(2.9));
             )");
-            check_eq(std::string("12.000000|10.000000|2.000000|2.000000"), r.as_string());
+            check_eq(std::string("12.0|10.0|2.0|2.0"), r.as_string());
         });
 
         // Parallel bodies admit math:: intrinsics (pure value functions; admission-time

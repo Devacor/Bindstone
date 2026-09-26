@@ -768,7 +768,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else if (elem.is_int()) {
                 result += std::to_string(elem.unchecked_as_int());
             } else if (elem.is_float()) {
-                result += std::to_string(elem.unchecked_as_float());
+                result += script_value::float_text(elem.unchecked_as_float());
             } else if (elem.is_bool()) {
                 result += elem.unchecked_as_bool() ? "true" : "false";
             } else if (elem.is_char()) {

@@ -71,7 +71,7 @@ auto y = 1.5;    // locked to float
 y = 2;           // int widens to float
 print(&quot;y = {} ({})&quot;, y, type_of(y));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">x = 2 (int)
-y = 2.000000 (float)</code></pre></div>
+y = 2.0 (float)</code></pre></div>
 <p>Once locked, an incompatible type is an error on the same terms as an explicitly typed variable. A literal fails the load:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = 5;      // auto infers int, then enforces it
 x = &quot;hello&quot;;     // locked to int: string is not convertible</code></pre></div>
@@ -120,7 +120,7 @@ t.name = 5;                                  // field store: string accepts anyt
 print(&quot;declaration: &quot;, f);
 print(&quot;parameter:   &quot;, shout(42));
 print(&quot;field:       &quot;, t.name, &quot; (&quot;, type_of(t.name), &quot;)&quot;);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">declaration: 3.000000
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">declaration: 3.0
 parameter:   42!
 field:       5 (string)</code></pre></div>
 <p>What each target accepts, and what it does with it:</p>
@@ -151,7 +151,7 @@ bool b = 5;          // numeric -&gt; bool is truthiness
 print(&quot;b = {}&quot;, b);
 string s = 5;        // int -&gt; string coercion on typed target
 print(&quot;s = {} ({})&quot;, s, type_of(s));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">f = 3.000000 (float)
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">f = 3.0 (float)
 i = 3 (int)
 j = -3
 b = true
@@ -249,7 +249,7 @@ v /= 2;
 print(&quot;var 7 /= 2 -&gt; {} ({})&quot;, v, type_of(v));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int 7 /= 2 -&gt; 3 (int)
 int -7 /= 2 -&gt; -3
-float 7.0 /= 2 -&gt; 3.500000
+float 7.0 /= 2 -&gt; 3.5
 auto(int) 7 /= 2 -&gt; 3 (int)
 var 7 /= 2 -&gt; 3 (int)</code></pre></div>
 <p>(<code>var v = 7; v /= 2</code> gives <code>3</code> because <code>7 / 2</code> is integer division; the type difference shows with a float operand:)</p>
@@ -258,7 +258,7 @@ i += 0.5;
 var v = 7;
 v += 0.5;
 print(&quot;int: {} ({})  var: {} ({})&quot;, i, type_of(i), v, type_of(v));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int: 7 (int)  var: 7.500000 (float)</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int: 7 (int)  var: 7.5 (float)</code></pre></div>
 <p>The compound-assignment conversion also applies to typed <strong>class fields</strong>, typed array <strong>elements</strong>, and by-<strong>ref</strong> targets.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/01-hello.html"><span>&larr; previous</span>Hello &amp; Basics</a><a class="next" rel="next" href="../guide/03-value-semantics.html"><span>next &rarr;</span>Value Semantics &amp; References</a></nav></article>
 </main>
 </div>

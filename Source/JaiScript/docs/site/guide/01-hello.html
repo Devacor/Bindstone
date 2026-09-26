@@ -72,7 +72,7 @@ print(&quot;hex: {}, binary: {}, exponent: {}&quot;, 0xFF, 0b1010, 2.5e3);
 i + f;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string char bool null
 hex: 255, binary: 10, exponent: 2500.000000
-== result: 45.140000</code></pre></div>
+== result: 45.14</code></pre></div>
 <p>Integers are 64-bit (<code>int64</code>), floats are doubles. Hex (<code>0xFF</code>) and binary (<code>0b1010</code>) integer literals work, as do exponent floats (<code>2.5e3</code>). Strings support the usual escapes (<code>\n</code>, <code>\&quot;</code>, <code>\\</code>) plus <code>\xNN</code> byte escapes (see <a href="09-containers-strings.html#bytes-and-chars">Containers &amp; Strings</a>). Which rung each of these declarations sits on (and why <code>auto</code> here is not &quot;dynamic&quot;) is the <a href="02-type-ladder.html">next chapter</a>.</p>
 <h2 id="comments-and-the-implicit-result">Comments and the implicit result<a class="hlink" href="#comments-and-the-implicit-result" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// single-line comment
@@ -107,7 +107,7 @@ no newline continues the line
 <ul><li><code>print(value)</code>. One argument: printed as-is (no <code>{}</code> processing).</li><li><code>print(fmt, args...)</code>. If the first argument contains <code>{}</code> or <code>{n}</code> placeholders, it is treated as a format string: <code>{}</code> consumes the next argument, <code>{0}</code>/<code>{1}</code> are positional (0-based over the args after the format string), <code>{{</code>/<code>}}</code> escape braces.</li><li><code>print(a, b, c)</code>. If the first argument has <strong>no</strong> placeholders, all arguments are concatenated.</li><li>Trailing <code>skip_newline</code> suppresses the newline; <code>skip_flush</code> suppresses newline and flush.</li><li><code>format(...)</code> follows the same rules but returns the string instead of printing.</li></ul>
 <p>Note: brace escaping (<code>{{</code>) only applies on the <em>format path</em> (multiple arguments with placeholders). A single-argument <code>print(&quot;{{x}}&quot;)</code> prints the braces literally.</p>
 <h2 id="stringifying-values">Stringifying values<a class="hlink" href="#stringifying-values" aria-label="link">&#8203;</a></h2>
-<p><code>to_string(x)</code> converts any value to a string; floats print with six decimals (<code>3.14</code> → <code>&quot;3.140000&quot;</code>). For containers, <code>to_string</code> prints only a tag (<code>[array]</code>, <code>[map]</code>). Use <code>to_json(x)</code> when you want the contents:</p>
+<p><code>to_string(x)</code> converts any value to a string; a float prints as the shortest text that reads back to the same value, keeping <code>.0</code> on a whole number (<code>3.14</code> → <code>&quot;3.14&quot;</code>, <code>2.0</code> → <code>&quot;2.0&quot;</code>, <code>0.1 + 0.2</code> → <code>&quot;0.30000000000000004&quot;</code>), so <code>to_string(x).to_float() == x</code> for every float; a format spec such as <code>${x:.2f}</code> picks a fixed width when you want one. For containers, <code>to_string</code> prints only a tag (<code>[array]</code>, <code>[map]</code>). Use <code>to_json(x)</code> when you want the contents:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1,2,3];
 print(nums);
 print(to_json(nums));

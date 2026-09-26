@@ -823,6 +823,14 @@ public:
             check_eq(std::string("  x00"), es("`${\"x00\":>5}`;"));   // an explicit align on a string keeps its fill
             check_throws([&]() { eval("`${\"s\":05}`;"); });   // zero padding is numeric only
         });
+
+        test("floats_print_shortest_and_round_trip", [this, es, eb]() {
+            check_eq(std::string("0.30000000000000004|2.0|0.3333333333333333|1e+20|-0.0|1e-07|123456789.0"),
+                es("to_string(0.1 + 0.2) + \"|\" + to_string(2.0) + \"|\" + to_string(1.0 / 3.0) + \"|\" + to_string(1e20) + \"|\" + to_string(-0.0) + \"|\" + to_string(1e-7) + \"|\" + to_string(123456789.0);"));
+            check_eq(std::string("x2.5 [1.5] 1.0,2.5"), es("array<float> a = [1.0, 2.5]; \"x\" + 2.5 + ` [${1.5}] ` + a.join(\",\");"));
+            check_eq(true, eb("array<float> v = [0.1, 0.1 + 0.2, 1.0 / 3.0, 2.0, 1e20, 1e-300, 5e-324, 1.7976931348623157e308]; bool ok = true; "
+                              "for (int i = 0; i < v.size(); ++i) { float x = v[i]; float t = to_string(x).to_float(); var j = from_json(to_json([x])); float y = j[0]; if (t != x || y != x) { ok = false; } } ok;"));
+        });
     }
 };
 

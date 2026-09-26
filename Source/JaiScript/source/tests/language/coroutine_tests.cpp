@@ -1033,10 +1033,10 @@ public:
         test("decl_spellings_free", [this, both_drained]() {
             const std::string drive = "auto h = g(); drain(h) + \"#\" + to_string(h.done())";
             both_drained("coroutine int g() { yield 1; return 2.9; }\n" + drive, "1|2#true", "coroutine int g()");
-            both_drained("coroutine function g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine function g() -> auto");
-            both_drained("coroutine function g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine function g()");
-            both_drained("coroutine var g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine var g()");
-            both_drained("coroutine auto g() { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine auto g()");
+            both_drained("coroutine function g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine function g() -> auto");
+            both_drained("coroutine function g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine function g()");
+            both_drained("coroutine var g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine var g()");
+            both_drained("coroutine auto g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine auto g()");
             both_drained("coroutine string g() { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine string g(): the completion value converts, yields do not");
             both_drained("coroutine void g() { yield; yield; }\n" + drive, "null|null|null#true", "coroutine void g()");
         });
@@ -1045,17 +1045,17 @@ public:
             // `coroutine name() -> T` (no leading type, no `function`): landing with the coroutine syntax pass
             const std::string drive = "auto h = g(); drain(h) + \"#\" + to_string(h.done())";
             both_drained("coroutine g() -> int { yield 1; return 2.9; }\n" + drive, "1|2#true", "coroutine g() -> int");
-            both_drained("coroutine g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.900000#true", "coroutine g() -> auto");
+            both_drained("coroutine g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine g() -> auto");
             both_drained("coroutine g() -> string { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine g() -> string");
         });
 
         test("decl_spellings_methods", [this, both_drained]() {
             const std::string drive = "auto c = C(); auto h = c.g(); drain(h) + \"#\" + to_string(h.done()) + \"#\" + to_string(c.v)";
             both_drained("class C { int v = 3; coroutine int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine int g() method");
-            both_drained("class C { int v = 3; coroutine function g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine function g() -> auto method");
-            both_drained("class C { int v = 3; coroutine function g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine function g() method");
-            both_drained("class C { int v = 3; coroutine var g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine var g() method");
-            both_drained("class C { int v = 3; coroutine auto g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine auto g() method");
+            both_drained("class C { int v = 3; coroutine function g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.9#true#4", "coroutine function g() -> auto method");
+            both_drained("class C { int v = 3; coroutine function g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.9#true#4", "coroutine function g() method");
+            both_drained("class C { int v = 3; coroutine var g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.9#true#4", "coroutine var g() method");
+            both_drained("class C { int v = 3; coroutine auto g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.9#true#4", "coroutine auto g() method");
             both_drained("class C { int v = 3; coroutine void g() { yield; v = 4; } }\n" + drive, "null|null#true#4", "coroutine void g() method");
             both_drained("class B { int v = 3; } class C : B { coroutine int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine method over an inherited field");
             both_drained("class B { int v = 3; coroutine int g() { yield v; return 1; } } class C : B { coroutine override int g() { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine override int g() method");
@@ -1064,7 +1064,7 @@ public:
         test("decl_spellings_methods_arrow_only", [this, both_drained]() {
             const std::string drive = "auto c = C(); auto h = c.g(); drain(h) + \"#\" + to_string(h.done()) + \"#\" + to_string(c.v)";
             both_drained("class C { int v = 3; coroutine g() -> int { yield v; v = 4; return 2.9; } }\n" + drive, "3|2#true#4", "coroutine g() -> int method");
-            both_drained("class C { int v = 3; coroutine g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.900000#true#4", "coroutine g() -> auto method");
+            both_drained("class C { int v = 3; coroutine g() -> auto { yield v; v = 4; return 2.9; } }\n" + drive, "3|2.9#true#4", "coroutine g() -> auto method");
         });
 
         // A yield with no resume value evaluates to null; every expression position must
@@ -1156,7 +1156,7 @@ public:
 
         test("typed_completion_values", [this, both_drained]() {
             both_drained("coroutine int g() { yield 1.5; return 2.7; }\nauto h = g(); var a = h.resume(); var b = h.resume(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
-                "float:1.500000|int:2", "yields are unconverted, the completion value converts to the declared type");
+                "float:1.5|int:2", "yields are unconverted, the completion value converts to the declared type");
             both_drained("coroutine string g() { yield 1; return 2; }\nauto h = g(); h.resume(); var b = h.resume(); type_of(b) + \":\" + b",
                 "string:2", "string completion converts");
             both_drained("coroutine int g() { yield 1; var x = \"s\"; return x; }\nauto h = g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",

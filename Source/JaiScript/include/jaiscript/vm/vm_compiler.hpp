@@ -194,6 +194,7 @@ namespace jai::vm {
         void compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement);
         void compile_call(const std::shared_ptr<call_expr>& expr);
         void compile_member(const std::shared_ptr<member_expr>& expr);
+        void member_tail_into_temp(const expression* e);
         void compile_new(const std::shared_ptr<new_expr>& expr);
         void compile_cast(const std::shared_ptr<cast_expr>& expr);
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);

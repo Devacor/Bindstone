@@ -508,6 +508,22 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 		switch (rhs->get_type()) {
 		case node_type::binary_expr:
 			if (code.back().op == opcode::op_binary_fused) {
+				if (!loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body && slot != k_invalid_u32 &&
+				    (kind_flags & compound_flag_no_result) && !(kind_flags & (compound_flag_old_result | compound_flag_incdec))) {
+					// inside a loop the operand lands in a temp first (the same kernel, the result into the temp) and the compound reads
+					// the temp: the typed rows and the cell translation take both halves, where a compound over a binary proto stays general
+					const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+					++temp_next_;
+					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+					vm_instruction& last = code.back();
+					last.op = opcode::op_binary_fused_temp; last.b = t0;
+					cp.rhs_proto = k_invalid_u32;
+					cp.rhs.slot = t0; cp.rhs.symbol = temp_symbol_index(); cp.rhs.direct = true;
+					cp.symbol = symbol_index; cp.slot = slot; cp.kind_flags = kind_flags; cp.typed_class = typed_class;
+					chunk_->compound_fused_protos.push_back(cp);
+					emit(opcode::op_compound_fused, static_cast<uint32_t>(chunk_->compound_fused_protos.size() - 1), 0, 0);
+					return;
+				}
 				cp.rhs_proto = code.back().a;
 				fuse = true;
 			}
@@ -3525,7 +3541,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::bail: append(vm_instruction{opcode::op_c_bail, op.target, 0, 0}, ip); break;   // a planned miss at its own origin
-			case ir::append: append(vm_instruction{opcode::op_c_append, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
+			case ir::append: {
+				// a plus onto a cell pinned to int or float with an operand of the same pinned kind is the typed add (no string row can apply)
+				const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
+				const uint8_t kint2 = static_cast<uint8_t>(script_value::TYPEID_INT), kflt2 = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				if (op.tok == static_cast<uint8_t>(token_type::plus) && op.a == op.b) {
+					if (pinned_operand(b2, kint2) && pinned_operand(c2, kint2)) { append(vm_instruction{opcode::op_c_arith_p, (static_cast<uint32_t>(opcode::op_t_add_ii) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); break; }
+					if (pinned_operand(b2, kflt2) && pinned_operand(c2, kflt2)) { append(vm_instruction{opcode::op_c_arith_p, (static_cast<uint32_t>(opcode::op_t_add_ff) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); break; }
+				}
+				append(vm_instruction{opcode::op_c_append, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+				break;
+			}
 			case ir::push: {
 				// the copy's proto: a clone whose value, or the index of its element, names a cell; the receiver and the source container
 				// stay the general operands, resolved from the frame or the environment at entry; the original proto stays the general form's

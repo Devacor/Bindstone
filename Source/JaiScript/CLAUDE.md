@@ -360,6 +360,10 @@ engine stays usable", not by `check_throws`.
   by-reference params.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,
   field-init in **declaration order**, static members/methods, hot reload with instance migration.
+- **Declarations without an initializer** (Dev ruling 2026-09-26): `T x;` takes its type's default - a class
+  default-constructs, `int` 0, `float` 0.0, `bool` false, `string` "", containers empty; `var` stays null. `T x(args);`
+  direct-initializes, `T x();` default-constructs, `int i{5};` / `int i{};` brace-initialize a primitive. The parser writes
+  the initializer (`.jaibite` 21); a class holding itself by value without one is a parse error (`Node next = null;` is a link).
 - **Constructor exits** (Dev ruling 2026-09-26): a bare `return;` ends a constructor body early and the call
   yields the instance; `return expr;` in a constructor's own body is a parse error (a lambda or nested function
   inside it returns freely); a `throw` propagates, the assignment target keeps its value and the half-built

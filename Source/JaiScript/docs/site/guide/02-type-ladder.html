@@ -35,6 +35,26 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>Pick your strictness per variable: prototype loosely with <code>var</code>, lock things down with explicit types as the code matures, in the same file, with no rewrite. JaiScript has three rungs of typing strictness for variables (and class fields):</p>
 <div class="tablewrap"><table><thead><tr><th>Declaration</th><th>Meaning</th></tr></thead><tbody><tr><td><code>int x = 5;</code> (any explicit type)</td><td><strong>Enforced.</strong> The variable holds this type forever; assignments convert if <a href="#conversion-table-typed-locked-auto-targets">the conversion table</a> allows it and error if not.</td></tr><tr><td><code>auto x = 5;</code></td><td><strong>Inferred, then enforced.</strong> The initializer&#x27;s type is inferred once, then locked. From that point <code>auto</code> behaves exactly like the explicit type. <code>auto</code> is <em>not</em> dynamic.</td></tr><tr><td><code>var x = 5;</code></td><td><strong>Dynamic.</strong> Any type may be assigned at any time.</td></tr></tbody></table></div>
 <p>&quot;Error&quot; comes in two flavors, and which one you get depends on what the checker could see. A mismatch it can see (a literal, a typed local, a typed return) is a <strong>load error</strong>: the script never starts. A mismatch it cannot see (a value that came through a <code>var</code>) is a <strong>catchable run-time error</strong>. Nothing here is opt-in; the checker is on, in strict mode, from the first line.</p>
+<h2 id="declarations-without-an-initializer">Declarations without an initializer<a class="hlink" href="#declarations-without-an-initializer" aria-label="link">&#8203;</a></h2>
+<p>A typed declaration always holds a value of its type. Leave the initializer off and it takes the type&#x27;s default, the way a C++ object is value-initialized:</p>
+<div class="tablewrap"><table><thead><tr><th>Declared type</th><th>Without an initializer</th></tr></thead><tbody>
+<tr><td><code>int</code> / <code>float</code> / <code>bool</code></td><td><code>0</code> / <code>0.0</code> / <code>false</code></td></tr>
+<tr><td><code>string</code></td><td><code>&quot;&quot;</code></td></tr>
+<tr><td><code>array&lt;T&gt;</code> / <code>map&lt;K, V&gt;</code></td><td>empty, of the declared type</td></tr>
+<tr><td>a class <code>T</code></td><td>default-constructed, as <code>T()</code></td></tr>
+<tr><td><code>var</code>, <code>shared_ptr&lt;T&gt;</code>, <code>weak_ptr&lt;T&gt;</code>, <code>function</code></td><td><code>null</code></td></tr>
+</tbody></table></div>
+<p>Parentheses and braces construct with arguments: <code>T x(args);</code> and <code>T x{args};</code> call a constructor, <code>T x();</code> and <code>T x{};</code> default-construct, and a primitive takes one value or its zero (<code>int lives{3};</code>).</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
+int hits; float speed; bool alive; string name; array&lt;int&gt; scores; var anything; Vec2 home;
+print(&quot;hits={} speed={} alive={} name=[{}] scores={} anything={} home=({}, {})&quot;, hits, speed, alive, name, scores.size(), type_of(anything), home.x, home.y);
+Vec2 a(3.0, 4.0);     // direct-initialization
+Vec2 b();             // default construction
+int lives{3};         // a primitive takes one value in braces
+print(&quot;a=({}, {}) b.x={} lives={}&quot;, a.x, a.y, b.x, lives);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hits=0 speed=0.0 alive=false name=[] scores=0 anything=null home=(1.5, 2.5)
+a=(3.0, 4.0) b.x=1.5 lives=3</code></pre></div>
+<p>A class cannot hold itself by value (<code>class Node { Node next; }</code> would build a Node inside every Node, and the parser says so). Spell a link <code>Node next = null;</code>, or share nodes with <code>shared_ptr&lt;Node&gt;</code>.</p>
 <h2 id="when-a-mismatch-is-caught">When a mismatch is caught<a class="hlink" href="#when-a-mismatch-is-caught" aria-label="Link to this section">&#8203;</a></h2>
 <p>A typed variable holds its type for good. Assign something incompatible and you get an error. The interesting question is <em>when</em>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;

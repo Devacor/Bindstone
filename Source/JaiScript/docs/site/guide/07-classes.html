@@ -238,14 +238,14 @@ Counter::twice_count() = 6
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Registry {
     static int count = 0;
     static float ratio = 3;       // the initializer converts: holds 3.0
-    static int last_id;           // no initializer: a typed null until the first store
+    static int last_id;           // no initializer: an int&#x27;s default, 0
 }
 Registry::count = 2.9;            // the same table as an instance field: truncates
 print(&quot;count = {} ({}), ratio = {}, last_id = {}&quot;, Registry::count, type_of(Registry::count), Registry::ratio, Registry::last_id);
 var bad = &quot;many&quot;;
 try { Registry::count = bad; } catch (e) { print(&quot;caught: {}&quot;, e); }
 try { Registry.count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = null
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = 0
 caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
 caught: function has no member &#x27;count&#x27;</code></pre></div>
 <p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) Statics are <strong>not inherited</strong>: a derived class neither sees them bare nor answers to <code>Derived::count</code>. Qualify with the declaring class:</p>

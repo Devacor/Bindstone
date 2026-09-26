@@ -140,11 +140,12 @@ class Rock { int mass = 3; }
 array&lt;Unit&gt; squad = [Unit(), Archer()];    // a subclass in a Base slot keeps its class
 squad.push(Archer());
 print(&quot;{} units, squad[2] is {}&quot;, squad.size(), reflect::type_name(squad[2]));
-print(&quot;Archer fields survive: range = {}&quot;, squad[1].range);
+print(&quot;Archer fields survive: range = {}&quot;, cast&lt;Archer&amp;&gt;(squad[1]).range);
 array&lt;Archer&gt; archers = [Archer(), Archer()];
 array&lt;Unit&gt; promoted = archers;             // array&lt;Derived&gt; -&gt; array&lt;Base&gt;, by value
 print(&quot;promoted: {}&quot;, promoted.size());
-try { squad.push(Rock()); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+var rock = Rock();                          // a var hides the class from the checker: the push raises
+try { squad.push(rock); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 units, squad[2] is Archer
 Archer fields survive: range = 6
 promoted: 2
@@ -160,17 +161,16 @@ anything[&quot;five&quot;] = 5;
 print(&quot;map&lt;var,int&gt;: {}&quot;, to_json(anything));
 map&lt;auto, int&gt; inferred = {5: 1};                              // auto key: int, from the literal
 try { inferred[&quot;k&quot;] = 2; } catch (e) { print(&quot;caught: {}&quot;, e); }
-map&lt;string, int&gt; empty;                                        // no initializer: a typed null
-print(&quot;empty == null: {}&quot;, empty == null);
-empty = {};
+map&lt;string, int&gt; empty;                                        // no initializer: an empty map of its declared type
+print(&quot;empty.size(): {}&quot;, empty.size());
 empty[&quot;x&quot;] = 1;
 print(&quot;after assigning a literal: {}&quot;, to_json(empty));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot use &#x27;int&#x27; as a key of type &#x27;string&#x27;
 map&lt;var,int&gt;: {&quot;5&quot;:1,&quot;five&quot;:5}
 caught: Cannot use &#x27;string&#x27; as a key of type &#x27;int&#x27;
-empty == null: true
+empty.size(): 0
 after assigning a literal: {&quot;x&quot;:1}</code></pre></div>
-<p>The same is true of any typed declaration without an initializer (<code>array&lt;int&gt; xs;</code>, <code>Unit u;</code>): the slot is typed, the value is null. Give containers a literal.</p>
+<p>Every typed declaration without an initializer takes its type&#x27;s default: containers start empty, numbers at zero, strings empty, and a class type default-constructs (<a href="02-type-ladder.html#declarations-without-an-initializer">the Type Ladder</a> has the table).</p>
 <h2 id="strings-observers-vs-mutators">Strings: observers vs mutators<a class="hlink" href="#strings-observers-vs-mutators" aria-label="link">&#8203;</a></h2>
 <p>This is the part that surprises people: JaiScript string methods split into two camps, and the mutating camp <strong>modifies the receiver in place and returns self for chaining</strong>, deliberately:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// OBSERVERS return information and leave the string alone:

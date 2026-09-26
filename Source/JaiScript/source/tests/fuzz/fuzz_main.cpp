@@ -23,6 +23,8 @@
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false)
 //   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)
+//   jaiscript_fuzz --element-band           prepend the element-argument band to every program (default: its own roll, ~30%)
+//   jaiscript_fuzz --no-element-band        never prepend it (the programs of the generator before the band)
 //   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with
 //                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)
 //   jaiscript_fuzz --jaibite-mutate --iterations 10000
@@ -70,6 +72,7 @@ namespace {
 		bool param_alias = true;
 		bool passes = true;
 		uint32_t miss_every = 0;
+		band_mode band = band_mode::sometimes;
 		bool jaibite_mutate = false;
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
@@ -98,6 +101,8 @@ namespace {
 			else if (a == "--no-proofs") { opt.proofs = false; }
 			else if (a == "--no-param-alias") { opt.param_alias = false; }
 			else if (a == "--no-passes") { opt.passes = false; }
+			else if (a == "--element-band") { opt.band = band_mode::always; }
+			else if (a == "--no-element-band") { opt.band = band_mode::never; }
 			else if (a == "--miss-every") { const char* v = next("--miss-every"); if (!v) return false; opt.miss_every = static_cast<uint32_t>(std::stoul(v)); }
 			else if (a == "--run") { const char* v = next("--run"); if (!v) return false; opt.run_file = v; }
 			else { std::cerr << "unknown argument: " << a << "\n"; return false; }
@@ -142,7 +147,7 @@ namespace {
 	enum class verdict { agree, diverge_new, diverge_suppressed, budget_skip };
 
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
-		program p = generate_program(seed, opt.max_depth);
+		program p = generate_program(seed, opt.max_depth, opt.band);
 		double budget_seconds = opt.timeout_ms / 1000.0;
 		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
 
@@ -244,6 +249,8 @@ namespace {
 		if (!opt.proofs) cmd += " --no-proofs";
 		if (!opt.param_alias) cmd += " --no-param-alias";
 		if (!opt.passes) cmd += " --no-passes";
+		if (opt.band == band_mode::always) cmd += " --element-band";
+		if (opt.band == band_mode::never) cmd += " --no-element-band";
 		if (opt.miss_every) cmd += " --miss-every " + std::to_string(opt.miss_every);
 		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";
 #ifdef _WIN32
@@ -274,7 +281,7 @@ int main(int argc, char** argv) {
 	if (opt.miss_every && !jai::engine::miss_injection_available()) { std::cerr << "--miss-every needs a build with JAISCRIPT_MISS_INJECTION defined\n"; return 2; }
 
 	if (opt.dump) {
-		program p = generate_program(opt.seed, opt.max_depth);
+		program p = generate_program(opt.seed, opt.max_depth, opt.band);
 		std::cout << p.joined();
 		return 0;
 	}
@@ -372,7 +379,7 @@ int main(int argc, char** argv) {
 		{
 			// Parse-validity metric (jaibite throws on hard parse errors; recoverable
 			// ones synchronize silently, so this is a lower bound on brokenness only).
-			program p = generate_program(seed, opt.max_depth);
+			program p = generate_program(seed, opt.max_depth, opt.band);
 			bool ok = true;
 			try {
 				auto probe = jai::engine::make();

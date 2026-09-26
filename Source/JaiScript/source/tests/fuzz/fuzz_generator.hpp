@@ -62,10 +62,318 @@ namespace jai::fuzz {
 		std::string typed_int_field;                      // declared-int field (typed writes convert)
 	};
 
+	enum class band_mode { sometimes, always, never };
+
+	// Element-argument band: mixed-kind flat arrays and arrays of rows, read by index as
+	// SEVERAL operands of one consumer (a call's arguments, print, a concatenation, a push, a
+	// math:: call) inside loops the vm closes into cell blocks. A cell the block declines
+	// (a string, a nested array, a bool) at one operand position must not leave an earlier
+	// operand stale. Its own RNG stream and name prefix: the main program's draws and text
+	// are unchanged, the band runs as a segment of its own ahead of them when its roll comes
+	// up (band_mode::sometimes, the jaiscript_fuzz default; generate_program's default is never,
+	// so the gates that replay seeds keep their programs), and its result is [zout, zp] (the harness engine has no to_string: strings build by
+	// concatenation). Callee parameter types are chosen from the kinds each argument can hold,
+	// so a band raises only where the backends disagree.
+	class element_arg_band {
+	public:
+		explicit element_arg_band(uint64_t seed) : rng_(mix64(seed + 0x5851F42D4C957F2DULL)) {}
+
+		bool wanted(band_mode mode) {
+			const bool roll = rng_.chance(30);
+			return mode == band_mode::always || (mode == band_mode::sometimes && roll);
+		}
+
+		std::string emit() {
+			flat_ = make_table("zA", false);
+			rows_ = make_table("zR", true);
+			std::vector<std::string> head{"var zout = \"\";", "var zp = [];", decl_text(flat_), decl_text(rows_)};
+			const int drivers = static_cast<int>(rng_.range(1, 3));
+			std::vector<std::string> calls;
+			for (int d = 0; d < drivers; ++d) {
+				std::vector<std::string> body = loop_lines();
+				if (rng_.chance(15)) {
+					for (auto& l : body) main_.push_back(std::move(l));
+					continue;
+				}
+				std::string name = "zd" + std::to_string(names_++);
+				main_.push_back("function " + name + "() -> void {");
+				for (auto& l : body) main_.push_back(std::move(l));
+				main_.push_back("}");
+				calls.push_back(name + "();");
+				if (rng_.chance(25)) calls.push_back(name + "();");
+			}
+			std::string out;
+			for (const auto& l : head) out += l + "\n";
+			for (const auto& l : callees_) out += l + "\n";
+			for (const auto& l : main_) out += l + "\n";
+			for (const auto& l : calls) out += l + "\n";
+			out += "[zout, zp];\n";
+			return out;
+		}
+
+	private:
+		static constexpr unsigned K_I = 1, K_F = 2, K_B = 4, K_S = 8, K_A = 16, K_NUM = K_I | K_F;
+		struct table { std::string name; bool rows = false; std::vector<std::vector<unsigned>> cells; };
+		struct operand { std::string text; unsigned kinds = 0; bool element = false; };
+		struct loop_ctx {
+			int shape = 0;
+			std::string ivar;               // int index/counter in scope ("" = none)
+			std::string evar;               // range-for element variable
+			const table* t = nullptr;
+			std::vector<int> visits;        // flat: i values; rows: row indices
+			int mul = 1, max_off = 0;
+		};
+
+		fuzz_rng rng_;
+		int names_ = 0;
+		table flat_, rows_;
+		std::vector<std::string> callees_, main_;
+
+		unsigned random_kind() {
+			switch (rng_.below(10)) {
+				case 0: case 1: case 2: case 3: return K_I;
+				case 4: case 5: return K_S;
+				case 6: return K_F;
+				case 7: return K_B;
+				default: return rng_.chance(50) ? K_A : K_S;
+			}
+		}
+		std::string cell_text(unsigned k) {
+			switch (k) {
+				case K_I: return std::to_string(rng_.range(-3, 40));
+				case K_F: { static constexpr const char* const f[] = {"2.5", "0.5", "-1.25", "3.0", "7.75"}; return f[rng_.below(5)]; }
+				case K_B: return rng_.chance(50) ? "true" : "false";
+				case K_S: { static constexpr const char* const s[] = {"\"a\"", "\"bb\"", "\"q r\"", "\"\"", "\"7\""}; return s[rng_.below(5)]; }
+				default: { static constexpr const char* const a[] = {"[1, \"x\"]", "[2.5]", "[]", "[[3], \"y\"]"}; return a[rng_.below(4)]; }
+			}
+		}
+		table make_table(const char* prefix, bool rows) {
+			table t;
+			t.name = prefix + std::to_string(names_++);
+			t.rows = rows;
+			const bool clean = rng_.chance(15);
+			const int deviate = clean ? 0 : static_cast<int>(rng_.range(10, 35));
+			if (rows) {
+				const int n = static_cast<int>(rng_.range(2, 5)), w = static_cast<int>(rng_.range(2, 4));
+				std::vector<unsigned> home;
+				for (int j = 0; j < w; ++j) home.push_back(random_kind());
+				for (int r = 0; r < n; ++r) {
+					t.cells.emplace_back();
+					for (int j = 0; j < w; ++j) t.cells.back().push_back(rng_.chance(static_cast<uint32_t>(deviate)) ? random_kind() : home[static_cast<size_t>(j)]);
+				}
+			} else {
+				const int len = static_cast<int>(rng_.range(4, 12)), period = static_cast<int>(rng_.range(1, 3));
+				std::vector<unsigned> home;
+				for (int j = 0; j < period; ++j) home.push_back(random_kind());
+				t.cells.emplace_back();
+				for (int i = 0; i < len; ++i) t.cells.back().push_back(rng_.chance(static_cast<uint32_t>(deviate)) ? random_kind() : home[static_cast<size_t>(i % period)]);
+			}
+			return t;
+		}
+		std::string decl_text(const table& t) {
+			auto row_text = [&](const std::vector<unsigned>& row) {
+				std::string s = "[";
+				for (size_t j = 0; j < row.size(); ++j) { if (j) s += ", "; s += cell_text(row[j]); }
+				return s + "]";
+			};
+			if (!t.rows) return "var " + t.name + " = " + row_text(t.cells[0]) + ";";
+			std::string s = "var " + t.name + " = [";
+			for (size_t r = 0; r < t.cells.size(); ++r) { if (r) s += ", "; s += row_text(t.cells[r]); }
+			return s + "];";
+		}
+		int flat_len() const { return static_cast<int>(flat_.cells[0].size()); }
+		int row_count() const { return static_cast<int>(rows_.cells.size()); }
+		int row_width() const { return static_cast<int>(rows_.cells[0].size()); }
+
+		std::vector<std::string> loop_lines() {
+			loop_ctx c;
+			c.shape = static_cast<int>(rng_.below(7)); // 0 cfor flat, 1 cfor rows, 2 range rows, 3 range& rows, 4 while flat, 5 while rows, 6 range flat
+			std::vector<std::string> out;
+			std::string local = "zl" + std::to_string(names_++);
+			out.push_back("int " + local + " = " + std::to_string(rng_.range(0, 9)) + ";");
+			std::string head, tail;
+			const std::string iv = "zi" + std::to_string(names_++);
+			if (c.shape == 0 || c.shape == 4) {
+				c.t = &flat_;
+				c.mul = rng_.chance(30) ? 2 : 1;
+				const int stride = c.mul == 2 ? 1 : static_cast<int>(rng_.range(1, 3));
+				c.max_off = static_cast<int>(rng_.range(0, 2));
+				if (c.max_off >= flat_len()) c.max_off = flat_len() - 1;
+				const int n = (flat_len() - 1 - c.max_off) / c.mul + 1;
+				for (int i = 0; i < n; i += stride) c.visits.push_back(i);
+				std::string bound = (c.mul == 1 && rng_.chance(35)) ? flat_.name + ".size() - " + std::to_string(c.max_off) : std::to_string(n);
+				std::string step = stride == 1 ? (rng_.chance(50) ? iv + "++" : "++" + iv) : iv + " += " + std::to_string(stride);
+				c.ivar = iv;
+				if (c.shape == 0) head = "for (int " + iv + " = 0; " + iv + " < " + bound + "; " + step + ") {";
+				else { out.push_back("int " + iv + " = 0;"); head = "while (" + iv + " < " + bound + ") {"; tail = step + ";"; }
+			} else if (c.shape == 1 || c.shape == 5) {
+				c.t = &rows_;
+				for (int r = 0; r < row_count(); ++r) c.visits.push_back(r);
+				std::string bound = rng_.chance(40) ? rows_.name + ".size()" : std::to_string(row_count());
+				c.ivar = iv;
+				if (c.shape == 1) head = "for (int " + iv + " = 0; " + iv + " < " + bound + "; " + iv + "++) {";
+				else { out.push_back("int " + iv + " = 0;"); head = "while (" + iv + " < " + bound + ") {"; tail = iv + " += 1;"; }
+			} else {
+				c.t = c.shape == 6 ? &flat_ : &rows_;
+				const int n = c.shape == 6 ? flat_len() : row_count();
+				for (int r = 0; r < n; ++r) c.visits.push_back(r);
+				c.evar = "zr" + std::to_string(names_++);
+				c.ivar = iv;
+				out.push_back("int " + iv + " = 0;");
+				const char* decl = c.shape == 3 ? "auto&" : (rng_.chance(70) ? "auto" : "var");
+				head = std::string("for (") + decl + " " + c.evar + " : " + c.t->name + ") {";
+				tail = rng_.chance(50) ? iv + "++;" : iv + " += 1;";
+			}
+			out.push_back(head);
+			const int consumers = static_cast<int>(rng_.range(1, 2));
+			for (int k = 0; k < consumers; ++k) out.push_back(consumer(c, local));
+			if (!tail.empty()) out.push_back(tail);
+			out.push_back("}");
+			return out;
+		}
+
+		unsigned flat_kinds(const loop_ctx& c, int off) const {
+			unsigned m = 0;
+			for (int i : c.visits) m |= flat_.cells[0][static_cast<size_t>(c.mul * i + off)];
+			return m;
+		}
+		unsigned column_kinds(int j) const {
+			unsigned m = 0;
+			for (const auto& row : rows_.cells) m |= row[static_cast<size_t>(j)];
+			return m;
+		}
+		operand element(const loop_ctx& c) {
+			if (c.shape == 0 || c.shape == 4) {
+				if (rng_.chance(12)) {
+					const int at = static_cast<int>(rng_.below(static_cast<uint32_t>(flat_len())));
+					return {flat_.name + "[" + std::to_string(at) + "]", flat_.cells[0][static_cast<size_t>(at)], true};
+				}
+				const int off = static_cast<int>(rng_.range(0, c.max_off));
+				std::string idx = c.mul == 2 ? c.ivar + " * 2" : c.ivar;
+				if (off) idx += " + " + std::to_string(off);
+				return {flat_.name + "[" + idx + "]", flat_kinds(c, off), true};
+			}
+			if (c.shape == 6) {
+				if (rng_.chance(40)) return {flat_.name + "[" + c.ivar + "]", flat_kinds(c, 0), true};
+				return {c.evar, flat_kinds(c, 0), true};
+			}
+			const int j = static_cast<int>(rng_.below(static_cast<uint32_t>(row_width())));
+			const std::string row = c.evar.empty() ? rows_.name + "[" + c.ivar + "]" : (rng_.chance(20) ? rows_.name + "[" + c.ivar + "]" : c.evar);
+			return {row + "[" + std::to_string(j) + "]", column_kinds(j), true};
+		}
+		operand literal() {
+			const unsigned k = random_kind();
+			return {cell_text(k), k, false};
+		}
+		operand arg(const loop_ctx& c, const std::string& local) {
+			switch (pick({62, 7, 6, 6, 7, 6, 6})) {
+				case 0: return element(c);
+				case 1: return {c.ivar, K_I, false};
+				case 2: return {local, K_I, false};
+				case 3: return literal();
+				case 4: {
+					operand e = element(c);
+					if ((e.kinds & ~K_NUM) == 0) return {"(" + e.text + (rng_.chance(50) ? " + 1)" : " * 2)"), e.kinds, true};
+					return {"(" + c.ivar + " + " + std::to_string(rng_.range(1, 3)) + ")", K_I, false};
+				}
+				case 5: {
+					operand e = element(c);
+					if ((e.kinds & ~K_NUM) == 0) {
+						switch (rng_.below(3)) {
+							case 0: return {"math::abs(" + e.text + ")", e.kinds, true};
+							case 1: return {"math::max(" + e.text + ", " + c.ivar + ")", e.kinds | K_I, true};
+							default: return {"math::min(" + e.text + ", 10)", e.kinds | K_I, true};
+						}
+					}
+					return {"math::max(" + c.ivar + ", " + local + ")", K_I, false};
+				}
+				default: {
+					operand e = element(c);
+					return {rng_.chance(50) ? "(\"\" + " + e.text + ")" : "cast<string>(" + e.text + ")", K_S, true};
+				}
+			}
+		}
+		int pick(const std::vector<uint32_t>& w) {
+			uint32_t total = 0;
+			for (auto x : w) total += x;
+			uint32_t roll = rng_.below(total);
+			for (size_t i = 0; i < w.size(); ++i) { if (roll < w[i]) return static_cast<int>(i); roll -= w[i]; }
+			return 0;
+		}
+		std::vector<operand> args(const loop_ctx& c, const std::string& local, int lo, int hi) {
+			std::vector<operand> a;
+			const int n = static_cast<int>(rng_.range(lo, hi));
+			for (int i = 0; i < n; ++i) a.push_back(arg(c, local));
+			bool any_element = false;
+			for (const auto& o : a) any_element |= o.element;
+			if (!any_element) a[rng_.below(static_cast<uint32_t>(a.size()))] = element(c);
+			return a;
+		}
+		static std::string joined(const std::vector<operand>& a, const char* sep) {
+			std::string s;
+			for (size_t i = 0; i < a.size(); ++i) { if (i) s += sep; s += a[i].text; }
+			return s;
+		}
+		std::string param_type(unsigned kinds) {
+			if (rng_.chance(40)) { switch (rng_.below(3)) { case 0: return ""; case 1: return "var "; default: return "auto "; } }
+			if ((kinds & ~(K_NUM | K_B)) == 0) { static constexpr const char* const t[] = {"int ", "float ", "string "}; return t[rng_.below(3)]; }
+			return "string ";
+		}
+		std::string callee(const std::vector<operand>& a, bool& returns) {
+			const std::string name = "zf" + std::to_string(names_++);
+			returns = rng_.chance(35);
+			std::string sig = "function " + name + "(";
+			std::string body;
+			const bool templ = rng_.chance(50);
+			for (size_t i = 0; i < a.size(); ++i) {
+				const std::string p = "zq" + std::to_string(i);
+				const std::string ty = param_type(a[i].kinds);
+				if (i) sig += ", ";
+				sig += ty + p;
+				std::string use = p;
+				if ((ty == "int " || ty == "float ") && rng_.chance(30)) use = "(" + p + " + 1)";
+				if (templ) body += "${" + use + "}" + (i + 1 < a.size() ? " " : "");
+				else body += (i ? " + \",\" + " : "") + use;
+			}
+			const std::string text = templ ? "`" + body + ";`" : "\"\" + " + body + " + \";\"";
+			if (returns) callees_.push_back(sig + ") -> string { return " + text + "; }");
+			else callees_.push_back(sig + (rng_.chance(50) ? ") -> void" : ")") + " { zout = zout + " + text + "; }");
+			return name;
+		}
+		std::string consumer(const loop_ctx& c, const std::string& local) {
+			switch (pick({55, 10, 12, 12, 11})) {
+				case 0: {
+					std::vector<operand> a = args(c, local, 2, 4);
+					bool returns = false;
+					const std::string f = callee(a, returns);
+					const std::string call = f + "(" + joined(a, ", ") + ")";
+					return returns ? "zout = zout + " + call + ";" : call + ";";
+				}
+				case 1: return "print(" + joined(args(c, local, 2, 3), ", ") + ");";
+				case 2: {
+					std::vector<operand> a = args(c, local, 2, 3);
+					std::string s = "zout = zout";
+					for (const auto& o : a) s += " + " + o.text + " + \",\"";
+					return s + ";";
+				}
+				case 3: {
+					if (rng_.chance(50)) return "zp.push(" + element(c).text + ");";
+					return "zp.push([" + joined(args(c, local, 2, 3), ", ") + "]);";
+				}
+				default: {
+					operand x = element(c), y = element(c);
+					if ((x.kinds & ~K_NUM) == 0 && (y.kinds & ~K_NUM) == 0)
+						return std::string("zout = zout + math::") + (rng_.chance(50) ? "max(" : "min(") + x.text + ", " + y.text + ") + \";\";";
+					return "zout = zout + " + x.text + " + " + y.text + ";";
+				}
+			}
+		}
+	};
+
 	class generator {
 	public:
-		generator(uint64_t seed, int max_expr_depth = 4)
-			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed) {}
+		generator(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never)
+			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band) {}
 
 		program generate() {
 			program p;
@@ -87,6 +395,8 @@ namespace jai::fuzz {
 
 			// Final expression: the program's result value.
 			lines_.push_back(expr(random_value_type(), max_depth_) + ";");
+			element_arg_band band(seed_);
+			if (band.wanted(band_)) p.segments.push_back(band.emit());
 			p.segments.push_back(join());
 
 			// Hot-reload shape: a second execute() on the same engine that
@@ -107,6 +417,7 @@ namespace jai::fuzz {
 		fuzz_rng rng_;
 		int max_depth_;
 		uint64_t seed_;
+		band_mode band_;
 		int names_ = 0;
 		std::vector<class_info> classes_;
 		std::vector<func_info> funcs_;
@@ -1457,8 +1768,8 @@ namespace jai::fuzz {
 		}
 	};
 
-	inline program generate_program(uint64_t seed, int max_expr_depth = 4) {
-		return generator(seed, max_expr_depth).generate();
+	inline program generate_program(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never) {
+		return generator(seed, max_expr_depth, band).generate();
 	}
 
 } // namespace jai::fuzz

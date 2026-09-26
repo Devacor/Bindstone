@@ -3700,6 +3700,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (fused != opcode::op_halt) { code[ip2].op = fused; ++ip2; }
 			}
 		}
+		if (ir_passes_) {
+			// jump threading: a block jump whose target is another unconditional block jump goes straight to that jump's target and takes
+			// its budget poll with it (a nested loop's end-of-body jump onto its back-edge poll); the skipped jump stays for its other entries
+			for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) {
+				if (code[ip2].op != opcode::op_c_jump) continue;
+				for (int hop = 0; hop < 8; ++hop) {
+					const uint32_t to = code[ip2].a;
+					if (to < loop.copy_head || to >= loop.copy_back || to == ip2 || code[to].op != opcode::op_c_jump) break;
+					code[ip2].a = code[to].a;
+					code[ip2].c |= code[to].c;
+				}
+			}
+		}
 		for (uint32_t k = 0; k < loop.cells.size(); ++k) {   // the landing's lists (row 156.2): the environment cells, and the slot cells a string may sit in
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			if (cl.env_operand != k_invalid_u32) { loop.env_cells.push_back(k); continue; }

@@ -373,6 +373,11 @@ namespace stdlib {
             return static_cast<script_char>(static_cast<unsigned char>(n));
         });
 
+        eng_ref.add_function("utf8_string", [eng = &eng_ref](const script_value& val) -> script_value {
+            const script_value& v = val.deref();
+            return script_value::make_utf8(v.is_text() ? v.unchecked_text() : v.to_string(), eng);
+        });
+
         eng_ref.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";
@@ -381,6 +386,7 @@ namespace stdlib {
                 case script_value_type::jai_float_type: return "float";
                 case script_value_type::jai_char_type: return "char";
                 case script_value_type::jai_string_type: return "string";
+                case script_value_type::jai_utf8_string_type: return "utf8_string";
                 case script_value_type::jai_array_type: return "array";
                 case script_value_type::jai_map_type: return "map";
                 case script_value_type::jai_function_type: return "function";

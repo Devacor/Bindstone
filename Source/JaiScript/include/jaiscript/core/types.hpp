@@ -27,6 +27,22 @@ namespace jai {
     using script_int = int64_t;      // Always 64-bit signed
     using script_float = double;     // Always 64-bit double precision
     using script_string = std::string;
+    // utf8_string's node: the bytes (UTF-8 text) and the character-position caches its character operations keep: whether every
+    // byte is ASCII (then characters are bytes), the last two (character, byte) positions resolved (walks and two-cursor loops step
+    // from them) and, for long text indexed at random, the byte offset of every 64th character. A mutation clears them; only the
+    // engine's main thread writes them (parallel workers read shared text without caching)
+    struct script_utf8 {
+        std::string bytes;
+        mutable int8_t ascii = -1;                 // -1 unknown, 0 no, 1 yes
+        mutable uint8_t hint_next = 0;             // the slot the next remembered position replaces
+        mutable uint32_t hint_char[2] = {0, 0};    // remembered positions: character index -> byte offset (0 -> 0 always holds)
+        mutable uint32_t hint_byte[2] = {0, 0};
+        mutable std::vector<uint32_t> crumbs;      // byte offset of character 64 * k (empty until a long text is indexed at random)
+        mutable int64_t chars = -1;                // the character count, -1 unknown
+        script_utf8() = default;
+        explicit script_utf8(std::string b) : bytes(std::move(b)) {}
+        void changed() const noexcept { ascii = -1; chars = -1; hint_next = 0; hint_char[0] = hint_char[1] = 0; hint_byte[0] = hint_byte[1] = 0; crumbs.clear(); }
+    };
     using script_char = char;       // 8-bit character
     using script_bool = bool;       // 1 byte boolean
     

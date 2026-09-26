@@ -16,6 +16,8 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
+#include <jaiscript/detail/utf8_operands.hpp>
+#include <jaiscript/detail/utf8_text.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -1312,6 +1314,7 @@ bool vm_backend::is_truthy(const script_value& value) {
 		case script_value::TYPEID_INT: return value.unchecked_as_int() != 0;
 		case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0;
 		case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty();
+		case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
 		case script_value::TYPEID_CHAR: return true;
 		case script_value::TYPEID_ARRAY: {
 			auto& arr = const_cast<script_value&>(value).get_array_storage();
@@ -1849,6 +1852,8 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 		return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_add(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_add(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -1922,6 +1927,8 @@ checked_result<script_value> vm_backend::handle_subtract(const script_value& lef
 		return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_subtract(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_subtract(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -1978,6 +1985,8 @@ checked_result<script_value> vm_backend::handle_multiply(const script_value& lef
 		return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_multiply(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_multiply(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2034,6 +2043,8 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 		return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_divide(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_divide(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2102,6 +2113,8 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 		return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_modulo(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_modulo(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2166,6 +2179,8 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_less(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_less(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2226,6 +2241,8 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_less_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_less_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2286,6 +2303,8 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_greater(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_greater(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2346,6 +2365,8 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
+		return detail::utf8_rewrapped(handle_greater_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
 		return handle_greater_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
@@ -2401,6 +2422,8 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 checked_result<script_value> vm_backend::handle_equal(const script_value& left, const script_value& right) {
 	// Integral promotion: char operands compare as int64 0..255, so 'a' == 97 and the
 	// binary idiom s[i] == 0x1A hold (char_promotion.hpp; was silently false pre-ruling)
+	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return detail::utf8_rewrapped(handle_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 		return handle_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 	if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
@@ -2520,6 +2543,8 @@ checked_result<script_value> vm_backend::handle_not_equal(const script_value& le
 
 checked_result<script_value> vm_backend::handle_spaceship(const script_value& left, const script_value& right) {
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return detail::utf8_rewrapped(handle_spaceship(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 		return handle_spaceship(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 	if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
@@ -2551,6 +2576,9 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 	case token_type::caret:
 	case token_type::left_shift:
 	case token_type::right_shift:
+		if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
+			return detail::utf8_rewrapped(handle_binary_op(op, detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
+		}
 		if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
 			return handle_binary_op(op, detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 		}
@@ -2827,6 +2855,8 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::utf8_operands(li, ri)) [[unlikely]]
+		return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_)), engine_);
 	if (detail::char_operands_promote(li, ri)) [[unlikely]]
 		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
 
@@ -2933,6 +2963,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 			case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;
 			case script_value_type::jai_float_type: want = script_value::TYPEID_FLOAT; break;
 			case script_value_type::jai_string_type: want = script_value::TYPEID_STRING; break;
+			case script_value_type::jai_utf8_string_type: want = script_value::TYPEID_UTF8_STRING; break;
 			case script_value_type::jai_bool_type: want = script_value::TYPEID_BOOL; break;
 			case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
 			default: break;
@@ -3012,6 +3043,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		case script_value::TYPEID_INT: if (target_base_type == script_value_type::jai_int_type) return arg; break;
 		case script_value::TYPEID_FLOAT: if (target_base_type == script_value_type::jai_float_type) return arg; break;
 		case script_value::TYPEID_STRING: if (target_base_type == script_value_type::jai_string_type) return arg; break;
+		case script_value::TYPEID_UTF8_STRING: if (target_base_type == script_value_type::jai_utf8_string_type) return arg; break;
 		case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
 		case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
 		case script_value::TYPEID_SHARED_PTR: if (target_base_type == script_value_type::jai_shared_ptr_type) return arg; break;
@@ -4053,7 +4085,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		// Integral promotion (char_promotion.hpp): a char operand leaves the in-place
 		// ladder and takes the general arithmetic path as int64 0..255, storing back
 		// like the %= case does. KEEP BYTE-PARALLEL with the interpreter's in-place switch.
-		if (detail::char_operands_promote(leftIdx, rightIdx)) [[unlikely]] {
+		if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx)) [[unlikely]] {
 			token_type baseOp = token_type::plus;
 			switch (kind) {
 				case compound_plus: baseOp = token_type::plus; break;
@@ -5858,6 +5890,29 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	if (left.is_utf8_string()) {
+		// u[i]: character i as a utf8_string, read-only like s[i] (KEEP BYTE-PARALLEL with the interpreter subscript path)
+		if (!right.is_int()) {
+			return raise_(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
+		}
+		if (lvalue_shape && lvalue_write) {
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
+				"Strings are read-only through subscript: use substr()/+ to build a new string");
+		}
+		const script_utf8& text = left.unchecked_as_utf8();
+		const bool cache = !engine_->parallel_region_active();
+		const size_t len = detail::utf8::length(text, cache);
+		script_int index = right.unchecked_as_int();
+		if (index < 0 || index >= static_cast<script_int>(len)) {
+			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
+				"String index {0} out of bounds for string of size {1}",
+				symbolizer_->intern(std::to_string(index)),
+				symbolizer_->intern(std::to_string(len)));
+		}
+		stack_.push_back(detail::utf8::char_value(text, static_cast<size_t>(index), engine_, cache));
+		return {};
+	}
+
 	if (left.is_object()) {
 		// Safe-mode workers: operator[]/global-operator dispatch copies shared method
 		// values and escapes to the engine backend — verdict (increment B)
@@ -5998,7 +6053,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 			rightValue = rightValue.bound_decoded_temp();
 		switch (op) {
 			case token_type::plus: {
-				if (currentValue.is_string() || rightValue.is_string()) {
+				if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
 					resultValue = script_value(currentValue.to_string() + rightValue.to_string(), engine_);
 				} else {
 					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
@@ -10169,6 +10224,15 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		}
 		return {};
 	}
+	if (objectValue.is_utf8_string()) {
+		const bool known = f.code->builtin_indexed
+			? site.bi_string != builtin_method_registries::k_no_builtin && builtins_.utf8_by_index[site.bi_string]
+			: builtins_.utf8_methods.find(member_id) != builtins_.utf8_methods.end();
+		if (!known) {
+			raise_script_exception("utf8_string has no member '" + std::string(member->member) + "'", member->location);
+		}
+		return {};
+	}
 	if (objectValue.is_array()) {
 		const bool known = f.code->builtin_indexed
 			? site.bi_array != builtin_method_registries::k_no_builtin
@@ -11443,9 +11507,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
-	if (objectValue.is_string()) {
-		auto methodIt = builtins_.string_methods.find(expr->member_id);
-		if (methodIt != builtins_.string_methods.end()) {
+	if (objectValue.is_string() || objectValue.is_utf8_string()) {
+		const auto& table = objectValue.is_utf8_string() ? builtins_.utf8_methods : builtins_.string_methods;
+		auto methodIt = table.find(expr->member_id);
+		if (methodIt != table.end()) {
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 				std::vector<script_value> scratch;
@@ -11455,7 +11520,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return {};
 		}
 		std::string member_str(expr->member);
-		raise_script_exception("string has no member '" + member_str + "'", expr->location);
+		raise_script_exception(std::string(objectValue.is_utf8_string() ? "utf8_string" : "string") + " has no member '" + member_str + "'", expr->location);
 		out = make_null();
 		return {};
 	}
@@ -12435,6 +12500,11 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 					return raise_from(detail::raise_memory_cap(*limits_));
 				}
 				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
+			} else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
+				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
+					return raise_from(detail::raise_memory_cap(*limits_));
+				}
+				resultValue = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
 			} else {
 				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Invalid operands for +=");
@@ -12768,6 +12838,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	// between here and the bind (invariant 2b), env cells and field cells are
 	// stable, and no user code runs in between.
 	script_value* string_recv = nullptr;
+	bool string_recv_utf8 = false;
 	{
 		// The pre-gate probes the VARIABLE, not just the name: a method NAME that
 		// collides with a string builtin (insert/count/find/...) must not exile
@@ -12783,6 +12854,11 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			script_value* recv_cell = string_receiver_cell(f, site, static_cast<identifier_expr*>(member->object.get()));
 			if (recv_cell && recv_cell->is_string()) {
 				string_recv = recv_cell;
+			} else if (recv_cell && recv_cell->is_utf8_string() &&
+			           (f.code->builtin_indexed ? builtins_.utf8_by_index[site.bi_string] != nullptr
+			                                    : builtins_.utf8_methods.count(member->member_id) != 0)) {
+				string_recv = recv_cell;
+				string_recv_utf8 = true;
 			}
 			maybe_string_builtin = string_recv != nullptr;
 		}
@@ -12924,9 +13000,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	if (string_recv) {
 		// The pre-gate proved the name is a registered string builtin AND the variable
 		// holds a string (indexed chunks bake bi_string; raw-compiler chunks find)
-		const builtin_method* string_builtin = f.code->builtin_indexed
-			? builtins_.string_by_index[site.bi_string]
-			: &builtins_.string_methods.find(member->member_id)->second;
+		const builtin_method* string_builtin = string_recv_utf8
+			? (f.code->builtin_indexed ? builtins_.utf8_by_index[site.bi_string] : &builtins_.utf8_methods.find(member->member_id)->second)
+			: (f.code->builtin_indexed ? builtins_.string_by_index[site.bi_string] : &builtins_.string_methods.find(member->member_id)->second);
 		// Resolve through references (ref decls/cells): string builtins read self's
 		// storage RAW, and in-place mutation must land in the target; a scratch-backed
 		// alias (typed element, C++ property) writes back after. The LOADed receiver
@@ -13141,6 +13217,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				if (site.bi_string != builtin_method_registries::k_no_builtin) {
 					direct = builtins_.string_by_index[site.bi_string];
 					string_mutator = builtins_.string_mutates_by_index[site.bi_string] != 0;
+				}
+				break;
+			case script_value::TYPEID_UTF8_STRING:
+				if (site.bi_string != builtin_method_registries::k_no_builtin) {
+					direct = builtins_.utf8_by_index[site.bi_string];
+					string_mutator = direct && builtins_.string_mutates_by_index[site.bi_string] != 0;
 				}
 				break;
 			default:
@@ -15080,16 +15162,19 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 		state.container.emplace(std::move(container));
 		state.index = 0;
 		state.is_map = false;
-	} else if (container.is_string()) {
-		// By value only, one char per element like s[i]; a char is not a cell, so the
-		// by-reference binding raises (KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt)
+	} else if (container.is_string() || container.is_utf8_string()) {
+		// By value only, one char per element like s[i] (a utf8_string: one character, like u[i]); a char is not a cell, so
+		// the by-reference binding raises (KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt)
+		const bool utf8 = container.is_utf8_string();
 		if (proto.is_reference) {
 			if (state.env_pushed) pop_scope();
-			return raise_(make_error_code(runtime_error_code::invalid_reference), detail::string_range_for_by_ref_text);
+			return raise_(make_error_code(runtime_error_code::invalid_reference),
+				utf8 ? detail::utf8_range_for_by_ref_text : detail::string_range_for_by_ref_text);
 		}
 		state.container.emplace(std::move(container));
 		state.index = 0;
 		state.is_string = true;
+		state.is_utf8 = utf8;
 	} else if (container.is_map()) {
 		state.container.emplace(std::move(container));
 		state.is_map = true;
@@ -15162,15 +15247,18 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 	script_value element = make_null();
 	if (state.is_string) {
 		// Live size each iteration: the body can alias and shrink the shared string
-		const script_string& str = state.container->unchecked_as_string();
-		if (state.index >= str.size()) {
+		const bool cache = state.is_utf8 && !engine_->parallel_region_active();
+		const size_t size = state.is_utf8 ? detail::utf8::length(state.container->unchecked_as_utf8(), cache)
+		                                  : state.container->unchecked_as_string().size();
+		if (state.index >= size) {
 			stack_.push_back(script_value(false, engine_));
 			return {};
 		}
 		if (execution_limit_exhausted()) [[unlikely]] {
 			return raise_from(execution_limit_failure());
 		}
-		element = script_value(static_cast<script_char>(str[state.index]), engine_);
+		element = state.is_utf8 ? detail::utf8::char_value(state.container->unchecked_as_utf8(), state.index, engine_, cache)
+		                        : script_value(static_cast<script_char>(state.container->unchecked_as_string()[state.index]), engine_);
 		++state.index;
 	} else if (!state.is_map) {
 		// Live size each iteration: the body can alias and shrink the shared array

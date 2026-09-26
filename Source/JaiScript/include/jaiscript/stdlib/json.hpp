@@ -81,6 +81,10 @@ namespace stdlib {
         case script_value_type::jai_string_type:
             oss << '"' << escape_json_string(val.as_string()) << '"';
             break;
+
+        case script_value_type::jai_utf8_string_type:
+            oss << '"' << escape_json_string(val.unchecked_as_utf8().bytes) << '"';
+            break;
             
         case script_value_type::jai_array_type: {
             const script_array* node = val.unchecked_array_node();
@@ -122,8 +126,8 @@ namespace stdlib {
                 if (pretty) oss << next_indent;
                 
                 // Keys must be strings in JSON
-                if (k.is_string()) {
-                    oss << '"' << escape_json_string(k.as_string()) << '"';
+                if (k.is_text()) {
+                    oss << '"' << escape_json_string(k.deref().unchecked_text()) << '"';
                 } else {
                     // Convert other types to string representation
                     oss << '"' << escape_json_string(k.to_string()) << '"';

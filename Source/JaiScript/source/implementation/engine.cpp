@@ -107,6 +107,7 @@ const char* spec_value_type_name(const script_value& v) {
         case script_value_type::jai_float_type: return "float";
         case script_value_type::jai_char_type: return "char";
         case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_utf8_string_type: return "utf8_string";
         case script_value_type::jai_array_type: return "array";
         case script_value_type::jai_map_type: return "map";
         case script_value_type::jai_function_type: return "function";
@@ -571,6 +572,7 @@ struct engine::implementation {
     type_info* type_info_int_ = nullptr;
     type_info* type_info_float_ = nullptr;
     type_info* type_info_string_ = nullptr;
+    type_info* type_info_utf8_string_ = nullptr;
     type_info* type_info_bool_ = nullptr;
     type_info* type_info_char_ = nullptr;
     type_info* type_info_void_ = nullptr;
@@ -1317,6 +1319,9 @@ engine::implementation::implementation()
     type_info string_info = type_info::make_string(string_symbolizer_);
     type_info_string_ = &type_infos_.emplace(type_key{script_value_type::jai_string_type, 0, 0}, string_info).first->second;
     type_id_index_[type_info_string_->id] = type_info_string_;
+    type_info utf8_info = type_info::make_utf8_string(string_symbolizer_);
+    type_info_utf8_string_ = &type_infos_.emplace(type_key{script_value_type::jai_utf8_string_type, 0, 0}, utf8_info).first->second;
+    type_id_index_[type_info_utf8_string_->id] = type_info_utf8_string_;
 
     type_info bool_info = type_info::make_bool(string_symbolizer_);
     type_info_bool_ = &type_infos_.emplace(type_key{script_value_type::jai_bool_type, 0, 0}, bool_info).first->second;
@@ -2722,6 +2727,10 @@ type_info* engine::get_type_info_float() {
 
 type_info* engine::get_type_info_string() {
     return impl->type_info_string_;
+}
+
+type_info* engine::get_type_info_utf8_string() {
+    return impl->type_info_utf8_string_;
 }
 
 type_info* engine::get_type_info_bool() {

@@ -68,6 +68,9 @@ namespace jai::detail {
                     if (target == script_value_type::jai_string_type) {
                         return slot_conversion::converted_to(script_value(v.to_string(), eng));
                     }
+                    if (target == script_value_type::jai_utf8_string_type) {
+                        return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
+                    }
                     return slot_conversion::of(verdict::reject);
                 }
                 script_value bound = make_bound_method(v, method);

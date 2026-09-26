@@ -34,6 +34,13 @@ script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr)
 
 script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng) : type_info_(tag), engine_(eng), storage_(std::move(handle)) {}
 
+script_value script_value::make_utf8(std::string bytes, engine* eng) {
+    script_value v(std::monostate{}, eng);
+    v.storage_ = make_strong<script_utf8>(std::move(bytes));
+    v.type_info_ = eng ? eng->get_type_info_utf8_string() : nullptr;
+    return v;
+}
+
 script_value::script_value(strong_ptr<script_string> shared, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::move(shared)) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
@@ -929,6 +936,15 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             result.storage_ = fresh;
             break;
         }
+        case TYPEID_UTF8_STRING: {
+            const auto& handle = storage_.get<strong_ptr<script_utf8>>();
+            if (!handle) { break; }
+            engine_->execution_limits().memory_charge_deferred(handle->bytes.size() + sizeof(script_utf8));
+            auto fresh = make_strong<script_utf8>(handle->bytes);
+            if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+            result.storage_ = fresh;
+            break;
+        }
         case TYPEID_ARRAY: {
             const auto& handle = storage_.get<strong_ptr<script_array>>();
             if (!handle) { break; }
@@ -1118,6 +1134,8 @@ std::string script_value::to_string() const {
             return float_text(as_float());
         case script_value_type::jai_string_type:
             return as_string();
+        case script_value_type::jai_utf8_string_type:
+            return unchecked_as_utf8().bytes;
         case script_value_type::jai_char_type:
             return std::string(1, as_char());
         case script_value_type::jai_bool_type:
@@ -1419,6 +1437,8 @@ bool script_value::operator==(const script_value& other) const {
             return lhs.unchecked_as_float() == rhs.unchecked_as_float();
         case script_value_type::jai_string_type:
             return lhs.unchecked_as_string() == rhs.unchecked_as_string();
+        case script_value_type::jai_utf8_string_type:
+            return lhs.unchecked_as_utf8().bytes == rhs.unchecked_as_utf8().bytes;
         case script_value_type::jai_char_type:
             return lhs.unchecked_as_char() == rhs.unchecked_as_char();
         case script_value_type::jai_bool_type:
@@ -1461,6 +1481,8 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             return std::strong_order(unchecked_as_float(), other.unchecked_as_float());
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
+        case script_value_type::jai_utf8_string_type:
+            return unchecked_as_utf8().bytes <=> other.unchecked_as_utf8().bytes;
         case script_value_type::jai_char_type:
             // char is unsigned 0..255 by spec (char_promotion.hpp); ordering here must
             // agree with promoted script-level comparisons, not platform char signedness

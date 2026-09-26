@@ -284,6 +284,7 @@ type = primitiveType
      | "var"                                    // Dynamic typing (any type allowed)
 
 primitiveType = "int" | "float" | "string" | "char" | "bool" | "void"
+              | "utf8_string" | "double"            // identifiers read as types: text by character; an alias of float
 
 // Statements
 statement = expressionStatement

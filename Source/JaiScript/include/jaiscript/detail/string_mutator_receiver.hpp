@@ -57,8 +57,10 @@ namespace jai::detail {
 	// A chain root binds only while its node IS the node the inner call handed back (an
 	// inner call that minted a new string - substr, a user method - leaves a temporary)
 	inline bool string_mutator_chain_matches(const script_value& root_storage, const script_value& receiver_copy) noexcept {
-		return root_storage.raw_storage_index() == script_value::TYPEID_STRING &&
-		       receiver_copy.raw_storage_index() == script_value::TYPEID_STRING &&
+		const size_t kind = root_storage.raw_storage_index();
+		if (kind != receiver_copy.raw_storage_index()) { return false; }
+		if (kind == script_value::TYPEID_UTF8_STRING) { return &root_storage.unchecked_as_utf8() == &receiver_copy.unchecked_as_utf8(); }
+		return kind == script_value::TYPEID_STRING &&
 		       root_storage.unchecked_string_handle().get() == receiver_copy.unchecked_string_handle().get();
 	}
 
@@ -105,7 +107,8 @@ namespace jai::detail {
 			return string_mutator_chain_matches(*storage, receiver_copy) ? storage : nullptr;
 		}
 		script_value* storage = b.pinned_storage();
-		if (!storage || !storage->is_string()) { return nullptr; }
+		if (!storage || storage->is_utf8_string() != receiver_copy.is_utf8_string() ||
+		    !(storage->is_string() || storage->is_utf8_string())) { return nullptr; }
 		if (b.chain && !string_mutator_chain_matches(*storage, receiver_copy)) { return nullptr; }
 		return storage;
 	}

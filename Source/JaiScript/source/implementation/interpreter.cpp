@@ -15,6 +15,8 @@
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
+#include <jaiscript/detail/utf8_operands.hpp>
+#include <jaiscript/detail/utf8_text.hpp>
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
@@ -31,6 +33,7 @@
 #include <functional>
 #include <filesystem>
 #include <jaiscript/detail/string_methods_more.hpp>
+#include <jaiscript/detail/utf8_methods.hpp>
 #include <fstream>
 
 namespace jai {
@@ -189,6 +192,7 @@ static std::string get_type_name(script_value_type type) {
         case script_value_type::jai_int_type: return "int";
         case script_value_type::jai_float_type: return "float";
         case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_utf8_string_type: return "utf8_string";
         case script_value_type::jai_char_type: return "char";
         case script_value_type::jai_bool_type: return "bool";
         case script_value_type::jai_array_type: return "array";
@@ -980,21 +984,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
             }
-            return ctx.make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+            return ctx.make_value(static_cast<script_int>(self.unchecked_text().size()));
         }},
 
         {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
             }
-            return ctx.make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+            return ctx.make_value(static_cast<script_int>(self.unchecked_text().size()));
         }},
 
         {symbolizer->intern("empty"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
             }
-            return ctx.make_value(self.unchecked_as_string().empty());
+            return ctx.make_value(self.unchecked_text().empty());
         }},
 
         {symbolizer->intern("at"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1004,7 +1008,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args[0].is_int()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "at() argument must be an integer");
             }
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             script_int idx = args[0].unchecked_as_int();
             script_int len = static_cast<script_int>(str.size());
 
@@ -1024,7 +1028,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
             }
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "front() called on empty string");
             }
@@ -1035,7 +1039,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
             }
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "back() called on empty string");
             }
@@ -1049,7 +1053,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args[0].is_int()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() start argument must be an integer");
             }
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             script_int start = args[0].unchecked_as_int();
             script_int len = static_cast<script_int>(str.size());
 
@@ -1079,11 +1083,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes 1 or 2 arguments (substr, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& search = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& search = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = 0;
@@ -1108,11 +1112,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "rfind() takes 1 or 2 arguments (substr, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "rfind() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& search = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& search = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = std::string::npos;
@@ -1139,11 +1143,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_of() takes 1 or 2 arguments (chars, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_of() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& chars = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& chars = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = 0;
@@ -1168,11 +1172,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_of() takes 1 or 2 arguments (chars, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_of() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& chars = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& chars = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = std::string::npos;
@@ -1199,11 +1203,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_not_of() takes 1 or 2 arguments (chars, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_not_of() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& chars = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& chars = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = 0;
@@ -1228,11 +1232,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_not_of() takes 1 or 2 arguments (chars, [start])");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_not_of() first argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& chars = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& chars = args[0].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             size_t start_pos = std::string::npos;
@@ -1259,11 +1263,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "contains() argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& search = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& search = args[0].unchecked_text();
             return ctx.make_value(str.find(search) != std::string::npos);
         }},
 
@@ -1271,11 +1275,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "starts_with() takes exactly one argument");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "starts_with() argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& prefix = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& prefix = args[0].unchecked_text();
             if (prefix.size() > str.size()) {
                 return ctx.make_value(false);
             }
@@ -1286,11 +1290,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "ends_with() takes exactly one argument");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "ends_with() argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& suffix = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& suffix = args[0].unchecked_text();
             if (suffix.size() > str.size()) {
                 return ctx.make_value(false);
             }
@@ -1301,11 +1305,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "count() takes exactly one argument");
             }
-            if (!args[0].is_string()) {
+            if (!args[0].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "count() argument must be a string");
             }
-            const auto& str = self.unchecked_as_string();
-            const auto& search = args[0].unchecked_as_string();
+            const auto& str = self.unchecked_text();
+            const auto& search = args[0].unchecked_text();
 
             if (search.empty()) {
                 return ctx.make_value(static_cast<script_int>(0));
@@ -1345,7 +1349,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_int() takes at most 2 arguments (default, base)");
             }
 
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             try {
                 size_t pos = 0;
                 long long val = std::stoll(str, &pos, base);
@@ -1373,7 +1377,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_float() takes at most 1 argument (default)");
             }
 
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
             try {
                 size_t pos = 0;
                 double val = std::stod(str, &pos);
@@ -1397,7 +1401,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_lower() takes no arguments");
             }
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             for (auto& c : str) {
                 if (c >= 'A' && c <= 'Z') {
                     c = c + ('a' - 'A');
@@ -1410,7 +1414,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_upper() takes no arguments");
             }
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             for (auto& c : str) {
                 if (c >= 'a' && c <= 'z') {
                     c = c - ('a' - 'A');
@@ -1422,16 +1426,16 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         {symbolizer->intern("trim"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
-                if (!args[0].is_string()) {
+                if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim() argument must be a string");
                 }
-                chars = args[0].unchecked_as_string();
+                chars = args[0].unchecked_text();
             }
             if (args.size() > 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t start = str.find_first_not_of(chars);
             if (start == std::string::npos) {
                 str.clear();
@@ -1445,16 +1449,16 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         {symbolizer->intern("trim_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
-                if (!args[0].is_string()) {
+                if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_left() argument must be a string");
                 }
-                chars = args[0].unchecked_as_string();
+                chars = args[0].unchecked_text();
             }
             if (args.size() > 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_left() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t start = str.find_first_not_of(chars);
             if (start == std::string::npos) {
                 str.clear();
@@ -1467,16 +1471,16 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         {symbolizer->intern("trim_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
-                if (!args[0].is_string()) {
+                if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_right() argument must be a string");
                 }
-                chars = args[0].unchecked_as_string();
+                chars = args[0].unchecked_text();
             }
             if (args.size() > 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_right() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t end = str.find_last_not_of(chars);
             if (end == std::string::npos) {
                 str.clear();
@@ -1499,8 +1503,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() > 1) {
                 if (args[1].is_char()) {
                     pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_string()) {
-                    const auto& pad_str = args[1].unchecked_as_string();
+                } else if (args[1].is_text()) {
+                    const auto& pad_str = args[1].unchecked_text();
                     if (pad_str.empty()) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_left() padding character cannot be empty");
                     }
@@ -1510,7 +1514,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
                 str.insert(0, static_cast<size_t>(target_len) - str.size(), pad_char);
             }
@@ -1530,8 +1534,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() > 1) {
                 if (args[1].is_char()) {
                     pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_string()) {
-                    const auto& pad_str = args[1].unchecked_as_string();
+                } else if (args[1].is_text()) {
+                    const auto& pad_str = args[1].unchecked_text();
                     if (pad_str.empty()) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_right() padding character cannot be empty");
                     }
@@ -1541,7 +1545,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
                 str.append(static_cast<size_t>(target_len) - str.size(), pad_char);
             }
@@ -1561,8 +1565,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() > 1) {
                 if (args[1].is_char()) {
                     pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_string()) {
-                    const auto& pad_str = args[1].unchecked_as_string();
+                } else if (args[1].is_text()) {
+                    const auto& pad_str = args[1].unchecked_text();
                     if (pad_str.empty()) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_center() padding character cannot be empty");
                     }
@@ -1572,7 +1576,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
                 size_t total_pad = static_cast<size_t>(target_len) - str.size();
                 size_t left_pad = total_pad / 2;
@@ -1587,17 +1591,17 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_first() takes exactly 2 arguments (old, new)");
             }
-            if (!args[0].is_string() || !args[1].is_string()) {
+            if (!args[0].is_text() || !args[1].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_first() arguments must be strings");
             }
-            const auto& old_str = args[0].unchecked_as_string();
-            const auto& new_str = args[1].unchecked_as_string();
+            const auto& old_str = args[0].unchecked_text();
+            const auto& new_str = args[1].unchecked_text();
 
             if (old_str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_first() search string cannot be empty");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t pos = str.find(old_str);
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
@@ -1609,17 +1613,17 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_last() takes exactly 2 arguments (old, new)");
             }
-            if (!args[0].is_string() || !args[1].is_string()) {
+            if (!args[0].is_text() || !args[1].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_last() arguments must be strings");
             }
-            const auto& old_str = args[0].unchecked_as_string();
-            const auto& new_str = args[1].unchecked_as_string();
+            const auto& old_str = args[0].unchecked_text();
+            const auto& new_str = args[1].unchecked_text();
 
             if (old_str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_last() search string cannot be empty");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t pos = str.rfind(old_str);
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
@@ -1631,17 +1635,17 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_all() takes exactly 2 arguments (old, new)");
             }
-            if (!args[0].is_string() || !args[1].is_string()) {
+            if (!args[0].is_text() || !args[1].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_all() arguments must be strings");
             }
-            const auto& old_str = args[0].unchecked_as_string();
-            const auto& new_str = args[1].unchecked_as_string();
+            const auto& old_str = args[0].unchecked_text();
+            const auto& new_str = args[1].unchecked_text();
 
             if (old_str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_all() search string cannot be empty");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             size_t pos = 0;
             while ((pos = str.find(old_str, pos)) != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
@@ -1657,13 +1661,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args[0].is_int()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() first argument must be an integer");
             }
-            if (!args[1].is_string()) {
+            if (!args[1].is_text()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() second argument must be a string");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             script_int pos = args[0].unchecked_as_int();
-            const auto& text = args[1].unchecked_as_string();
+            const auto& text = args[1].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
 
             // Normalize negative index
@@ -1692,7 +1696,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "erase() first argument must be an integer");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             script_int pos = args[0].unchecked_as_int();
             script_int len = static_cast<script_int>(str.size());
 
@@ -1724,7 +1728,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_prefix() argument must be an integer");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             script_int n = args[0].unchecked_as_int();
             if (n < 0) n = 0;
             if (n > 0) {
@@ -1742,7 +1746,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_suffix() argument must be an integer");
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             script_int n = args[0].unchecked_as_int();
             if (n < 0) n = 0;
             if (n > 0) {
@@ -1756,7 +1760,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
             }
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             std::reverse(str.begin(), str.end());
             return self;
         }},
@@ -1771,11 +1775,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             script_int count = args[0].unchecked_as_int();
             if (count <= 0) {
-                self.unchecked_as_string_ref().clear();
+                self.unchecked_text_ref().clear();
                 return self;
             }
 
-            auto& str = self.unchecked_as_string_ref();
+            auto& str = self.unchecked_text_ref();
             // engine::memory_cap chokepoint: deny the growth before it exists
             if (count > 1) {
                 if (engine* eng = ctx.get_engine()) {
@@ -1812,13 +1816,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             std::string delim = "";
             if (args.size() > 0) {
-                if (!args[0].is_string()) {
+                if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "split() argument must be a string");
                 }
-                delim = args[0].unchecked_as_string();
+                delim = args[0].unchecked_text();
             }
 
-            const auto& str = self.unchecked_as_string();
+            const auto& str = self.unchecked_text();
 
             // Create array with string element type
             auto eng = ctx.get_engine();
@@ -2102,9 +2106,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
     };
     detail::add_more_string_methods(out.string_methods, symbolizer);
+    out.string_methods[symbolizer->intern("to_utf8")] = [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_utf8() takes no arguments");
+        return script_value::make_utf8(self.unchecked_text(), ctx.get_engine());
+    };
+    out.utf8_methods = detail::make_utf8_methods(out.string_methods, symbolizer);
+    out.utf8_methods.erase(symbolizer->intern("to_utf8"));
     build_index(out.array_methods, out.array_by_index, out.array_index);
     build_index(out.map_methods, out.map_by_index, out.map_index);
     build_index(out.string_methods, out.string_by_index, out.string_index);
+    out.utf8_by_index.assign(out.string_by_index.size(), nullptr);   // aligned: a baked bi_string serves both kinds
+    out.utf8_index.clear();
+    for (const auto& [id, at] : out.string_index) {
+        auto it = out.utf8_methods.find(id);
+        if (it != out.utf8_methods.end()) { out.utf8_by_index[at] = &it->second; out.utf8_index.emplace(id, at); }
+    }
     out.string_mutator_ids.clear();
     out.string_mutates_by_index.assign(out.string_by_index.size(), 0);
     for (std::string_view name : k_string_mutator_method_names) {
@@ -2140,6 +2156,7 @@ void interpreter::init_builtin_methods() {
     array_methods_ = std::move(registries.array_methods);
     map_methods_ = std::move(registries.map_methods);
     string_methods_ = std::move(registries.string_methods);
+    utf8_methods_ = std::move(registries.utf8_methods);
     string_mutator_ids_ = std::move(registries.string_mutator_ids);
     weak_ptr_methods_ = std::move(registries.weak_ptr_methods);
     shared_ptr_methods_ = std::move(registries.shared_ptr_methods);
@@ -3835,6 +3852,26 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     string_symbolizer_->intern(std::to_string(str.size())));
             }
             push_value(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
+        } else if (left.is_utf8_string()) {
+            // u[i]: character i as a utf8_string, read-only like s[i] (KEEP BYTE-PARALLEL with vm_backend::exec_index)
+            if (!right.is_int()) {
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
+            }
+            if (want_lvalue_write) {
+                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                    "Strings are read-only through subscript: use substr()/+ to build a new string");
+            }
+            const script_utf8& text = left.unchecked_as_utf8();
+            const bool cache = !engine_->parallel_region_active();
+            const size_t len = detail::utf8::length(text, cache);
+            script_int index = right.unchecked_as_int();
+            if (index < 0 || index >= static_cast<script_int>(len)) {
+                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+                    "String index {0} out of bounds for string of size {1}",
+                    string_symbolizer_->intern(std::to_string(index)),
+                    string_symbolizer_->intern(std::to_string(len)));
+            }
+            push_value(detail::utf8::char_value(text, static_cast<size_t>(index), engine_, cache));
         } else {
             if (left.is_object()) {
                 // Safe-mode workers: operator[]/global-operator dispatch copies shared
@@ -4586,7 +4623,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Integral promotion (char_promotion.hpp): a char operand leaves the in-place
                 // ladder and takes the general arithmetic path as int64 0..255, storing back
                 // like the %= case does. KEEP BYTE-PARALLEL with the VM exec_compound_store.
-                if (detail::char_operands_promote(leftIdx, rightIdx)) [[unlikely]] {
+                if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx)) [[unlikely]] {
                     token_type baseOp = token_type::plus;
                     switch (expr->op.type) {
                         case token_type::plus_equal: baseOp = token_type::plus; break;
@@ -5018,6 +5055,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return detail::raise_memory_cap(*limits_);
                         }
                         resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
+                    } else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
+                        if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
+                            return detail::raise_memory_cap(*limits_);
+                        }
+                        resultValue = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for +=");
@@ -5284,7 +5326,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Fall back to built-in operators
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
-                        if (currentValue.is_string() || rightValue.is_string()) {
+                        if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
                             resultValue = make_value(currentValue.to_string() + rightValue.to_string());
                         } else {
                             JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
@@ -6938,6 +6980,8 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
                                    ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+    if (detail::utf8_operands(li, ri)) [[unlikely]]
+        return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_)), engine_);
     if (detail::char_operands_promote(li, ri)) [[unlikely]]
         return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
 
@@ -7138,9 +7182,11 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         if (!member->is_static && member->object->get_type() == node_type::identifier_expr) {
             auto* ident = static_cast<identifier_expr*>(member->object.get());
             script_value* recv_cell = string_receiver_cell(ident);
-            if (recv_cell && recv_cell->is_string()) {
-                auto methodIt = string_methods_.find(member->member_id);
-                if (methodIt != string_methods_.end()) {
+            const bool recv_utf8 = recv_cell && recv_cell->is_utf8_string();
+            if (recv_cell && (recv_utf8 || recv_cell->is_string())) {
+                const auto& table = recv_utf8 ? utf8_methods_ : string_methods_;
+                auto methodIt = table.find(member->member_id);
+                if (methodIt != table.end()) {
                     // C++17 [expr.call]: the receiver resolves before the arguments. An
                     // argument that runs code may rebind or retype the variable, so the
                     // cell is re-resolved after them; a cell that no longer holds a string
@@ -7168,7 +7214,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     }
                     if (pre_args) {
                         recv_cell = string_receiver_cell(ident);
-                        if (recv_cell && recv_cell->is_string()) {
+                        if (recv_cell && (recv_utf8 ? recv_cell->is_utf8_string() : recv_cell->is_string())) {
                             pre_args.reset();   // a live copy would only make the write gate copy the node
                         } else {
                             recv_cell = &*pre_args;
@@ -7946,9 +7992,11 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // An identifier chain root re-resolves at call time, after the arguments, like the
     // identifier fast path. Unbound = a temporary: the builtin mutates the copy alone.
     // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method's builtin-direct string branch)
-    if (as_callee && objectValue.deref().raw_storage_index() == script_value::TYPEID_STRING &&
+    if (as_callee && (objectValue.deref().raw_storage_index() == script_value::TYPEID_STRING ||
+                      objectValue.deref().raw_storage_index() == script_value::TYPEID_UTF8_STRING) &&
         string_mutator_ids_.count(expr->member_id)) {
-        const builtin_method& method = string_methods_.find(expr->member_id)->second;
+        const builtin_method& method = (objectValue.deref().raw_storage_index() == script_value::TYPEID_UTF8_STRING
+            ? utf8_methods_ : string_methods_).find(expr->member_id)->second;
         script_value copy(objectValue.deref());
         detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(objectValue, expr->object.get(),
             detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
@@ -8091,9 +8139,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     }
 
     // Handle string methods
-    if (objectValue.is_string()) {
-        auto methodIt = string_methods_.find(expr->member_id);
-        if (methodIt != string_methods_.end()) {
+    if (objectValue.is_string() || objectValue.is_utf8_string()) {
+        const auto& table = objectValue.is_utf8_string() ? utf8_methods_ : string_methods_;
+        auto methodIt = table.find(expr->member_id);
+        if (methodIt != table.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
 
@@ -8108,7 +8157,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
         else {
             // Set exception state instead of throwing
-            std::string text = "string has no member '" + std::string(expr->member) + "'";
+            std::string text = std::string(objectValue.is_utf8_string() ? "utf8_string" : "string") + " has no member '" + std::string(expr->member) + "'";
             active_exception_value_ = make_value(text);
             current_exception_ = script_exception(text, expr->location);
             is_unwinding_ = true;
@@ -10718,15 +10767,18 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
         }
 
-    } else if (container.is_string()) {
-        // Iterate a string by value, one char per element like s[i]; a char is not a cell,
-        // so the by-reference binding raises (KEEP BYTE-PARALLEL with vm_backend::exec_iter_init)
+    } else if (container.is_string() || container.is_utf8_string()) {
+        // Iterate a string by value, one char per element like s[i] (a utf8_string: one character, like u[i]); a char is not a
+        // cell, so the by-reference binding raises (KEEP BYTE-PARALLEL with vm_backend::exec_iter_init)
+        const bool utf8 = container.is_utf8_string();
         if (stmt->is_reference) {
             pop_scope();
             return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
-                detail::string_range_for_by_ref_text);
+                utf8 ? detail::utf8_range_for_by_ref_text : detail::string_range_for_by_ref_text);
         }
-        if (!container.unchecked_as_string().empty()) {
+        const bool cache = !engine_->parallel_region_active();
+        auto text_size = [&]() { return utf8 ? detail::utf8::length(container.unchecked_as_utf8(), cache) : container.unchecked_as_string().size(); };
+        if (text_size() != 0) {
             script_value* loop_var_ptr = nullptr;
             if (use_slot) {
                 if (!replaying || !call_stack_.back().get_local(stmt->variable_slot_index)) {
@@ -10741,7 +10793,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
 
             // Live size each iteration: the body can alias and shrink the shared string
-            for (size_t i = resume_index; i < container.unchecked_as_string().size(); ++i) {
+            for (size_t i = resume_index; i < text_size(); ++i) {
                 if (execution_limit_exhausted()) [[unlikely]] {
                     pop_scope();
                     return execution_limit_failure();
@@ -10759,7 +10811,8 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (replaying) {
                     replaying = false;
                 } else {
-                    *loop_var_ptr = script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
+                    *loop_var_ptr = utf8 ? detail::utf8::char_value(container.unchecked_as_utf8(), i, engine_, cache)
+                                         : script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
                 }
 
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());

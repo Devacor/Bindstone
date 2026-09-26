@@ -1652,6 +1652,11 @@ checked_result<type_info_ptr> parser::parse_type() {
         return store_type_info(std::move(info));
     }
 
+    if (check(token_type::identifier) && peek().lexeme == "utf8_string") {
+        advance();
+        return store_type_info(type_info::make_utf8_string(*symbolizer_));
+    }
+
     // Handle "double" as an alias for float (since we only have float_keyword)
     if (check(token_type::identifier) && peek().lexeme == "double") {
         advance();  // consume "double"

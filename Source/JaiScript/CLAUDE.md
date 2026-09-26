@@ -480,6 +480,14 @@ engine stays usable", not by `check_throws`.
   registration order: `Insufficient privilege: {name}.` No new locks/atomics/globals; registration and
   grant changes obey the same execution-thread/idle-only, no-active-region ownership rule. A custom name
   gates only callables/host code that require it; naming `"network"` does not install a network gate.
+- **`utf8_string`** (Dev ruling 2026-09-25, guide ch. 9): its own storage kind (`TYPEID_UTF8_STRING`, `script_utf8` node:
+  bytes + character caches) with the string library in characters (`detail/utf8_methods.hpp` wraps every string method;
+  size/at/substr/find/insert/erase/pads/reverse/split("")/`u[i]`/range-for count characters, results keep the kind).
+  Operators unwrap it to its string at the head of every general entry and rewrap a string result (`detail/utf8_operands.hpp`,
+  before the char promotion); `==`/`<=>` compare bytes, a map key keeps its kind. Caches (`detail/utf8_text.hpp`: ASCII flag,
+  count, two remembered positions, breadcrumbs every 64 characters) live only on utf8_string, clear on every write
+  (`unchecked_as_utf8_ref` is the copy-on-write gate), and are written only while no parallel region runs. `utf8_string` is
+  an identifier the parser reads as a type (like `double`); `.jaibite` version 19.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

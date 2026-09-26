@@ -30,13 +30,13 @@ namespace stdlib {
                         "string::to_lower expects exactly 1 argument");
                 }
                 const script_value& arg = args[0].deref();
-                if (!arg.is_string()) {
+                if (!arg.is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
                         "string::to_lower expects a string argument");
                 }
-                std::string out = arg.as<std::string>();
+                std::string out = arg.is_utf8_string() ? arg.unchecked_as_utf8().bytes : arg.as<std::string>();
                 for (auto& c : out) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
-                return script_value(std::move(out), eng);
+                return arg.is_utf8_string() ? script_value::make_utf8(std::move(out), eng) : script_value(std::move(out), eng);
             }, &eng_ref);
 
         ns->variables[eng_ref.symbolize("to_upper")] = script_value::make_function(
@@ -46,13 +46,13 @@ namespace stdlib {
                         "string::to_upper expects exactly 1 argument");
                 }
                 const script_value& arg = args[0].deref();
-                if (!arg.is_string()) {
+                if (!arg.is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
                         "string::to_upper expects a string argument");
                 }
-                std::string out = arg.as<std::string>();
+                std::string out = arg.is_utf8_string() ? arg.unchecked_as_utf8().bytes : arg.as<std::string>();
                 for (auto& c : out) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
-                return script_value(std::move(out), eng);
+                return arg.is_utf8_string() ? script_value::make_utf8(std::move(out), eng) : script_value(std::move(out), eng);
             }, &eng_ref);
 
         // the rest of the namespace's free functions: each checks its arguments and returns a new value
@@ -69,7 +69,7 @@ namespace stdlib {
         auto type_error = [](const char* text) { return R(make_error_code(runtime_error_code::type_mismatch), text); };
         auto pad_char = [](const script_value* a, char& out) {
             if (a->is_char()) { out = a->unchecked_as_char(); return true; }
-            if (a->is_string() && !a->unchecked_as_string().empty()) { out = a->unchecked_as_string()[0]; return true; }
+            if (a->is_text() && !a->unchecked_text().empty()) { out = a->unchecked_text()[0]; return true; }
             return false;
         };
 
@@ -85,8 +85,8 @@ namespace stdlib {
         });
         def("is_valid_utf8", [=](engine* e, const std::vector<const script_value*>& a) -> R {
             if (a.size() != 1) return count_error("string::is_valid_utf8 expects exactly 1 argument");
-            if (!a[0]->is_string()) return type_error("string::is_valid_utf8 expects a string argument");
-            const std::string& s = a[0]->unchecked_as_string();
+            if (!a[0]->is_text()) return type_error("string::is_valid_utf8 expects a string argument");
+            const std::string& s = a[0]->unchecked_text();
             for (size_t at = 0; at < s.size();) { const auto st = detail::utf8::decode(s, at); if (!st.valid) return script_value(false, e); at += st.length; }
             return script_value(true, e);
         });
@@ -94,46 +94,46 @@ namespace stdlib {
             if (a.size() < 1 || a.size() > 2) return count_error("string::join expects 1 or 2 arguments (parts, [separator])");
             if (!a[0]->is_array()) return type_error("string::join expects an array of strings");
             std::string sep;
-            if (a.size() == 2) { if (!a[1]->is_string()) return type_error("string::join separator must be a string"); sep = a[1]->unchecked_as_string(); }
-            std::string out; bool first = true, bad = false;
+            if (a.size() == 2) { if (!a[1]->is_text()) return type_error("string::join separator must be a string"); sep = a[1]->unchecked_text(); }
+            std::string out; bool first = true, bad = false, utf8 = a.size() == 2 && a[1]->is_utf8_string();
             a[0]->unchecked_array_node()->for_each(e, [&](const script_value& el) {
                 const script_value& v = el.deref();
-                if (!v.is_string()) { bad = true; return; }
+                if (!v.is_text()) { bad = true; return; }
                 if (!first) out += sep;
-                out += v.unchecked_as_string(); first = false;
+                out += v.unchecked_text(); first = false; utf8 = utf8 || v.is_utf8_string();
             });
             if (bad) return type_error("string::join expects an array of strings");
-            return script_value(std::move(out), e);
+            return utf8 ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
         def("trim", [=](engine* e, const std::vector<const script_value*>& a) -> R {
             if (a.size() != 1) return count_error("string::trim expects exactly 1 argument");
-            if (!a[0]->is_string()) return type_error("string::trim expects a string argument");
-            const std::string& s = a[0]->unchecked_as_string();
+            if (!a[0]->is_text()) return type_error("string::trim expects a string argument");
+            const std::string& s = a[0]->unchecked_text();
             const auto space = [](char c) { return c == ' ' || (c >= '\t' && c <= '\r'); };
             size_t b = 0, n = s.size();
             while (b < n && space(s[b])) ++b;
             while (n > b && space(s[n - 1])) --n;
-            return script_value(s.substr(b, n - b), e);
+            return a[0]->is_utf8_string() ? script_value::make_utf8(s.substr(b, n - b), e) : script_value(s.substr(b, n - b), e);
         });
         def("replace_all", [=](engine* e, const std::vector<const script_value*>& a) -> R {
             if (a.size() != 3) return count_error("string::replace_all expects exactly 3 arguments (s, from, to)");
-            if (!a[0]->is_string() || !a[1]->is_string() || !a[2]->is_string()) return type_error("string::replace_all expects string arguments");
-            const std::string& s = a[0]->unchecked_as_string(); const std::string& from = a[1]->unchecked_as_string(); const std::string& to = a[2]->unchecked_as_string();
-            if (from.empty()) return script_value(s, e);
+            if (!a[0]->is_text() || !a[1]->is_text() || !a[2]->is_text()) return type_error("string::replace_all expects string arguments");
+            const std::string& s = a[0]->unchecked_text(); const std::string& from = a[1]->unchecked_text(); const std::string& to = a[2]->unchecked_text();
+            if (from.empty()) return a[0]->is_utf8_string() ? script_value::make_utf8(s, e) : script_value(s, e);
             std::string out; size_t at = 0, hit;
             while ((hit = s.find(from, at)) != std::string::npos) { out.append(s, at, hit - at); out += to; at = hit + from.size(); }
             out.append(s, at, std::string::npos);
-            return script_value(std::move(out), e);
+            return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
         def("repeat", [=](engine* e, const std::vector<const script_value*>& a) -> R {
             if (a.size() != 2) return count_error("string::repeat expects exactly 2 arguments (s, count)");
-            if (!a[0]->is_string()) return type_error("string::repeat expects a string first argument");
+            if (!a[0]->is_text()) return type_error("string::repeat expects a string first argument");
             if (!a[1]->is_int()) return type_error("string::repeat count must be an integer");
-            const std::string& s = a[0]->unchecked_as_string(); const script_int n = a[1]->unchecked_as_int();
+            const std::string& s = a[0]->unchecked_text(); const script_int n = a[1]->unchecked_as_int();
             if (n < 0) return R(make_error_code(runtime_error_code::invalid_operation), "string::repeat count cannot be negative");
             std::string out; out.reserve(s.size() * static_cast<size_t>(n));
             for (script_int k = 0; k < n; ++k) out += s;
-            return script_value(std::move(out), e);
+            return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
         struct pad_texts { const char* name; const char* count; const char* first; const char* width; const char* fill; bool left; };
         for (const pad_texts& pt : {
@@ -141,16 +141,18 @@ namespace stdlib {
                 pad_texts{"pad_right", "string::pad_right expects 2 or 3 arguments (s, width, [fill])", "string::pad_right expects a string first argument", "string::pad_right width must be an integer", "string::pad_right fill must be a char or a non-empty string", false}}) {
             def(pt.name, [=](engine* e, const std::vector<const script_value*>& a) -> R {
                 if (a.size() < 2 || a.size() > 3) return count_error(pt.count);
-                if (!a[0]->is_string()) return type_error(pt.first);
+                if (!a[0]->is_text()) return type_error(pt.first);
                 if (!a[1]->is_int()) return type_error(pt.width);
                 char fill = ' ';
                 if (a.size() == 3 && !pad_char(a[2], fill)) return type_error(pt.fill);
-                std::string s = a[0]->unchecked_as_string(); const script_int w = a[1]->unchecked_as_int();
-                if (w > static_cast<script_int>(s.size())) {
-                    const size_t pad = static_cast<size_t>(w) - s.size();
+                std::string s = a[0]->unchecked_text(); const script_int w = a[1]->unchecked_as_int();
+                size_t len = s.size();
+                if (a[0]->is_utf8_string()) { len = 0; for (size_t at = 0; at < s.size(); ++len) { at += detail::utf8::decode(s, at).length; } }   // a utf8_string pads to a width in characters
+                if (w > static_cast<script_int>(len)) {
+                    const size_t pad = static_cast<size_t>(w) - len;
                     if (pt.left) s.insert(0, pad, fill); else s.append(pad, fill);
                 }
-                return script_value(std::move(s), e);
+                return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(s), e) : script_value(std::move(s), e);
             });
         }
     }

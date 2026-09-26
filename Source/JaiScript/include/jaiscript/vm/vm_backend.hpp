@@ -231,8 +231,8 @@ namespace jai::vm {
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
-        uint64_t profile_load_kinds_[16] = {};    // LOAD result storage kind (the DECL_VAR initializer kinds' twin)
-        uint64_t profile_index_kinds_[16] = {};   // INDEX result storage kind
+        uint64_t profile_load_kinds_[32] = {};    // LOAD result storage kind (the DECL_VAR initializer kinds' twin)
+        uint64_t profile_index_kinds_[32] = {};   // INDEX result storage kind
         // typed heads: binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
         // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
         // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
@@ -256,7 +256,7 @@ namespace jai::vm {
         uint64_t profile_index_fused_next_[256] = {};
         uint64_t profile_decl_var_prev_[256] = {};    // what produced DECL_VAR's initializer (previous opcode)
         uint64_t profile_store_prev_[256] = {};       // what produced STORE's value
-        uint64_t profile_decl_var_kinds_[16] = {};    // DECL_VAR initializer storage index
+        uint64_t profile_decl_var_kinds_[32] = {};    // DECL_VAR initializer storage index
         // index_fused_read branch taxonomy: [0]=raw-int lane [1]=raw-float lane
         // [2]=untyped array element copy [3]=lvalue element-ref [4]=const-string map
         // [5]=general replay [6]=binary-index raw fold [7]=member-node container
@@ -870,6 +870,7 @@ namespace jai::vm {
             script_map::iterator map_it{};
             bool is_map = false;
             bool is_string = false;    // chars by value, like s[i]
+            bool is_utf8 = false;      // a utf8_string: characters by value, like u[i]
             bool env_pushed = false;   // slotted loop vars skip the iteration scope env
             // A slotted by-reference loop variable: its slot is cleared when the loop ends
             // (normal exit, break, or an unwind caught in `owner`), so no element cursor

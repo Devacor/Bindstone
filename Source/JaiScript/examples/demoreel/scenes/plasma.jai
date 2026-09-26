@@ -1,32 +1,30 @@
-// PLASMA — the classic: four summed sine fields, cycling truecolor palette.
-// Everything is integer table lookups per cell; sin() only runs at build time.
+// PLASMA — the classic: four summed sine fields over a 256-entry cyclic palette.
+// Integer table lookups per pixel; sin() only runs at build time. The radial
+// term reads a double-size distance table through a sliding window, so the
+// ripple's center orbits the screen at zero per-pixel cost.
 
 class Plasma : Scene {
-	var st = [];        // sine table, 256 entries scaled to +-512
-	var dist = [];      // per-cell radial term, precomputed
-	int ncolors = 96;
+	array<int> st = [];      // sine table, 1024 entries scaled to +-1024
+	array<int> dist = [];    // (2w x 2h) radial distance, read through a moving window
+	int dw = 0;
 	float tt = 0.0;
 
 	void build() override {
 		name = "PLASMA";
 		handle = "warmup loop . by the symbolizer";
-		for (int i = 0; i < 256; ++i) {
-			st.push(ifloor(sin(i * 0.0245436926) * 512.0));
+		for (int i = 0; i < 1024; ++i) {
+			st.push(itrunc(sin(i * 0.00613592315) * 1024.0));
 		}
-		for (int y = 0; y < h; ++y) {
-			for (int x = 0; x < w; ++x) {
-				float dx = x - w * 0.5;
-				float dy = (y - h * 0.5) * 2.0;
-				int d = itrunc(sqrt(dx * dx + dy * dy) * 3.0);
-				dist.push(d & 255);
+		dw = w * 2;
+		for (int y = 0; y < h * 2; ++y) {
+			for (int x = 0; x < dw; ++x) {
+				float dx = x - w * 1.0;
+				float dy = y - h * 1.0;
+				dist.push(itrunc(sqrt(dx * dx + dy * dy) * 26.0) & 1023);
 			}
 		}
-		for (int i = 0; i < ncolors; ++i) {
-			float ph = i * 6.28318530718 / ncolors;
-			var c = gfx.rainbow_rgb(ph);
-			// raw element args into typed params (finding 5 FIXED: exercises overload deref)
-			pal.add_bg(c[0], c[1], c[2]);
-		}
+		pal.gradient(256, [[12.0, 6.0, 40.0], [68.0, 20.0, 150.0], [214.0, 40.0, 150.0], [255.0, 120.0, 60.0],
+			[255.0, 226.0, 110.0], [120.0, 240.0, 200.0], [30.0, 140.0, 230.0], [20.0, 30.0, 110.0], [12.0, 6.0, 40.0]]);
 	}
 
 	void update(float t, float dt) override {
@@ -34,17 +32,27 @@ class Plasma : Scene {
 	}
 
 	void render(var& grid) override {
-		int t1 = itrunc(tt * 37.0);
-		int t2 = itrunc(tt * 23.0);
-		int t3 = itrunc(tt * 15.0);
-		int phase = itrunc(tt * 41.0);
+		int ww = w;
+		int hh = h;
+		int dww = dw;
+		var& s = st;
+		var& dt_ = dist;
+		int t1 = itrunc(tt * 150.0);
+		int t2 = itrunc(tt * 97.0);
+		int t3 = itrunc(tt * -210.0) + 4096;
+		int t4 = itrunc(tt * 61.0);
+		int phase = itrunc(tt * 38.0);
+		int ox = itrunc(w * 0.5 + w * 0.42 * sin(tt * 0.61));
+		int oy = itrunc(h * 0.5 + h * 0.40 * sin(tt * 0.83 + 1.3));
+		int zoom = 17 + itrunc(6.0 * sin(tt * 0.35));
 		int idx = 0;
-		for (int y = 0; y < h; ++y) {
-			int ys = st[(y * 7 + t2) & 255];
-			for (int x = 0; x < w; ++x) {
-				int v = st[(x * 5 + t1) & 255] + ys + st[(dist[idx] + t3) & 255] + st[(x * 3 + y * 4 + phase) & 255];
-				int ci = v / 32 + phase;
-				grid[idx] = ((ci % ncolors) + ncolors) % ncolors;
+		for (int y = 0; y < hh; ++y) {
+			int ys = s[(y * 21 + t2) & 1023];
+			int drow = (y + oy) * dww + ox;
+			int yx = y * 13 + t4;
+			for (int x = 0; x < ww; ++x) {
+				int v = s[(x * zoom + t1) & 1023] + ys + s[(dt_[drow + x] + t3) & 1023] + s[(x * 11 + yx) & 1023];
+				grid[idx] = ((v >> 4) + phase) & 255;
 				idx = idx + 1;
 			}
 		}

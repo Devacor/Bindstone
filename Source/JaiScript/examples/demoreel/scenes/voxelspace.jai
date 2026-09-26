@@ -24,7 +24,9 @@ class CanyonRun : Scene {
 	int msz = 128;
 	int mmask = 127;
 	int tbase = 0;         // terrain palette base (sky rows sit at 0..h-1)
-	int nsteps = 44;
+	int nsteps = 72;
+	int nhaze = 10;
+	int sunb = 0;
 	float posx = 64.0;
 	float posy = 0.0;
 	float dirx = 0.0;
@@ -48,10 +50,10 @@ class CanyonRun : Scene {
 		for (int py = 0; py < h; ++py) {
 			float f = py / (h - 1.0);
 			float f2 = f * f;
-			pal.add_bg(16.0 + 150.0 * f2 + 30.0 * f, 24.0 + 138.0 * f2 + 18.0 * f, 64.0 + 130.0 * f);
+			pal.add(16.0 + 150.0 * f2 + 30.0 * f, 24.0 + 138.0 * f2 + 18.0 * f, 64.0 + 130.0 * f);
 		}
 		tbase = h;
-		// 8 height bands x 2 slope shades x 6 haze banks (haze lerps toward the sky)
+		// 8 height bands x 4 light shades x 10 haze banks (haze lerps toward the sky)
 		var bands = [[16.0, 48.0, 112.0], [30.0, 94.0, 158.0], [152.0, 134.0, 94.0], [98.0, 128.0, 58.0],
 			[154.0, 88.0, 54.0], [190.0, 124.0, 78.0], [146.0, 142.0, 136.0], [238.0, 242.0, 248.0]];
 		for (int b = 0; b < 8; ++b) {
@@ -59,14 +61,14 @@ class CanyonRun : Scene {
 			float br = bc[0];
 			float bg = bc[1];
 			float bb = bc[2];
-			for (int sh = 0; sh < 2; ++sh) {
-				float k = sh == 1 ? 0.60 : 1.0;
+			for (int sh = 0; sh < 4; ++sh) {
+				float k = 0.52 + sh * 0.20;
 				float cr = br * k;
 				float cg = bg * k;
 				float cb = bb * k;
-				for (int hq = 0; hq < 6; ++hq) {
-					float hf = hq * 0.155;
-					pal.add_bg(cr + (176.0 - cr) * hf, cg + (176.0 - cg) * hf, cb + (206.0 - cb) * hf);
+				for (int hq = 0; hq < nhaze; ++hq) {
+					float hf = hq * 0.093;
+					pal.add(cr + (176.0 - cr) * hf, cg + (176.0 - cg) * hf, cb + (206.0 - cb) * hf);
 				}
 			}
 		}
@@ -160,8 +162,8 @@ class CanyonRun : Scene {
 		}
 		// colormap: water lives ONLY in the carved channel (banding low terrain
 		// as water flooded half the map); heights band into sand/scrub/mesa/rock/
-		// snow with north-light slope shading, then the color index is PACKED
-		// into the height cell (hv*16 + ci) so the render inner loop pays one
+		// snow with four levels of slope light, then the color index is PACKED
+		// into the height cell (hv*32 + ci) so the render inner loop pays one
 		// array read per sample instead of two
 		cmap = gfx.make_grid(nm);
 		for (int my = 0; my < msz; ++my) {
@@ -183,22 +185,31 @@ class CanyonRun : Scene {
 				else if (hv2 <= 165) { band = 4; }
 				else if (hv2 <= 205) { band = 5; }
 				else if (hv2 <= 235) { band = 6; }
-				int shade = (band >= 2 && hn > hv2 + 2) ? 1 : 0;
-				cmap[rowm + mx] = band * 2 + shade;
+				// sun from the south-west: lit when the ground falls away toward it,
+				// plus a little hashed grain so broad faces are not flat blocks
+				int he = hmap[rowm + ((mx + 1) & mmask)];
+				int hs = hmap[((my - 1) & mmask) * msz + mx];
+				int hw = hmap[rowm + ((mx - 1) & mmask)];
+				int grain = (((mx * 73856093 + my * 19349663) & 1048575) * 1274126177 >> 12) & 3;
+				int lit = 6 + (hw - he) + (hs - hn) + grain - 1;
+				int shade = band < 2 ? 1 + grain / 2 : (lit < 3 ? 0 : (lit < 7 ? 1 : (lit < 11 ? 2 : 3)));
+				cmap[rowm + mx] = band * 4 + shade;
 			}
 		}
-		for (int q2 = 0; q2 < nm; ++q2) { cmap[q2] = hmap[q2] * 16 + cmap[q2]; }
+		for (int q2 = 0; q2 < nm; ++q2) { cmap[q2] = hmap[q2] * 32 + cmap[q2]; }
 		// depth tables: geometric steps, projection scale and haze bank per step
-		float z = 2.6;
+		float z = 2.4;
 		float hsc = h * 0.085;
 		for (int i = 0; i < nsteps; ++i) {
 			zs.push(z);
 			invz.push(itrunc(hsc * 65536.0 / z));
 			float zr = i / (nsteps - 1.0);
-			int hzv = itrunc(zr * zr * 6.6);
-			hazes.push(hzv > 5 ? 5 : hzv);
-			z = z * 1.092;
+			int hzv = itrunc(zr * zr * (nhaze + 0.6));
+			hazes.push(hzv > nhaze - 1 ? nhaze - 1 : hzv);
+			z = z * 1.058;
 		}
+		// the sun: a glow ramp toward white, drawn only where sky shows through
+		sunb = pal.gradient(6, [[255.0, 170.0, 110.0], [255.0, 210.0, 150.0], [255.0, 244.0, 214.0]]);
 		ybuf = gfx.make_grid(w);
 		rolloff = gfx.make_grid(w);
 	}
@@ -267,11 +278,12 @@ class CanyonRun : Scene {
 		int cam = camh;
 		int horiz = horizon;
 		int ns = nsteps;
+		int nh = nhaze;
 		float dx_ = dirx;
 		float dy_ = diry;
 		float px_ = planex;
 		float py_ = planey;
-		var& tm = cmap;   // packed terrain: hv*16 + color index (ref decl: no copy)
+		var& tm = cmap;   // packed terrain: hv*32 + color index (ref decl: no copy)
 		var& yb = ybuf;
 		var& ro = rolloff;
 		var& zt = zs;
@@ -303,10 +315,10 @@ class CanyonRun : Scene {
 				if (ybv > 0) {
 					int mi = ((ryf >> 16) & mm) * ms + ((rxf >> 16) & mm);   // coords kept positive: shift == floor
 					int tv = tm[mi];
-					int sy = (cam - (tv >> 4)) * iz / 65536 + ro[x2];
+					int sy = (cam - (tv >> 5)) * iz / 65536 + ro[x2];
 					if (sy < ybv) {
 						sy = sy < 0 ? 0 : sy;
-						int pi = tb + (tv & 15) * 6 + hz;
+						int pi = tb + (tv & 31) * nh + hz;
 						int gi = sy * ww + x2;
 						int yy = sy;
 						while (yy < ybv) { grid[gi] = pi; gi += ww; yy = yy + 1; }
@@ -323,6 +335,29 @@ class CanyonRun : Scene {
 			int gi2 = x3;
 			int yy2 = 0;
 			while (yy2 < yb2) { grid[gi2] = yy2; gi2 += ww; yy2 = yy2 + 1; }
+		}
+		// the sun sits at a fixed bearing: its screen column follows the heading
+		float rel = atan2(dx_, dy_) - 0.55;
+		float sxf = ww * 0.5 - rel * ww * 0.55;
+		float syf = horiz - hh * 0.16;
+		float sr = hh * 0.07;
+		int sx0 = itrunc(sxf - sr * 2.2);
+		int sx1 = itrunc(sxf + sr * 2.2);
+		int sy0 = itrunc(syf - sr * 2.2);
+		int sy1 = itrunc(syf + sr * 2.2);
+		for (int sy = sy0; sy <= sy1; ++sy) {
+			if (sy < 0 || sy >= hh) { continue; }
+			for (int sx = sx0; sx <= sx1; ++sx) {
+				if (sx < 0 || sx >= ww || sy >= yb[sx]) { continue; }
+				float ddx = sx + 0.5 - sxf;
+				float ddy = sy + 0.5 - syf;
+				float d = sqrt(ddx * ddx + ddy * ddy) / sr;
+				if (d < 1.0) { grid[sy * ww + sx] = sunb + 5; }
+				else if (d < 2.2) {
+					int gl = itrunc((2.2 - d) * 4.2);
+					if (gl > 0) { grid[sy * ww + sx] = sunb + (gl > 4 ? 4 : gl - 1); }
+				}
+			}
 		}
 	}
 }

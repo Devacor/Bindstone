@@ -1,15 +1,41 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Thirteen auto-advancing truecolor scenes, transitions, title cards, and a finale where
-the word JAISCRIPT ignites out of a wall of rainbow fire — every effect coded in
-`scenes/*.jai`. The C++ host (`main.cpp`) is a thin shell: a VT console, a
-monotonic clock, non-blocking keys, a seeded rng class, and the frame pump.
-Everything you see is script.
+Sixteen auto-advancing truecolor scenes, five kinds of transition, pixel-font
+title cards, and a finale where the word JAISCRIPT ignites out of a wall of
+rainbow fire — every effect coded in `scenes/*.jai`, every frame drawn at
+**double vertical resolution** with half-block pixels. A ray tracer, a sphere
+tracer, a Menger-sponge raymarcher, a textured Wolfenstein raycaster, a
+VoxelSpace terrain flight, Verlet cloth, metaballs, a falling-sand toy, a
+murmuration, a texture tunnel and the classics. The C++ host (`main.cpp`) is a
+thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
+class, and the frame pump. Everything you see is script.
 
 The reel is also an engine showcase: it keeps **two live engines** warm — one
 tree-walking interpreter, one bytecode VM — running the same scripts, and lets you
 flip between them mid-run. It doubles as a parity test: in `--smoke` mode both
-backends must produce **byte-identical** frame streams.
+backends must produce **byte-identical** frame streams. Five scenes trace their
+rows across every core with `parallel_transform`, and the streams stay
+byte-identical anyway.
+
+## How a frame is drawn
+
+Each scene paints a `w x 2h` grid of palette indices (square pixels, two per
+terminal row) and the presenter in `util.jai` packs them into cells through the
+upper-half-block glyph `▀`: the **foreground** truecolor escape paints the top
+pixel, the **background** escape the bottom one (JaiDOOM's `vid_row_half`
+technique). Escapes are emitted only when a color changes along the row, and a
+cell whose two pixels agree collapses to a space (a background run) or a full
+block (a foreground run), so smooth regions cost one byte per cell. Palettes
+precompute both escape strings per entry; a transition simply concatenates the
+two scenes' tables (the incoming scene's indices shift by an offset) and the
+reel's own UI entries ride at the end. `hb_row` is written as a
+`parallel_transform` body over captured globals, so the same function serves
+the serial loop and, with `HB_WORKERS` set (the standalone runner does on wide
+terminals), a parallel presentation.
+
+Text stays crisp on top: the HUD, the scene handle under each title card and
+the finale's credits are ordinary glyph rows; the big title letters themselves
+are pixels from a 5x7 font (`FONT5`), typed in with a shine sweeping across.
 
 ## Build
 
@@ -31,10 +57,20 @@ xorshift64* `Rng` — checked-int64-safe via 16-bit-limb multiplies) and pumps t
 reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
 
 ```
-jaiscript demoreel.jai                  # the reel, 30 fps (q/esc quits; h/f/n/p/space/digits work)
-jaiscript demoreel.jai -- frames 1700   # headless self-test: smoke frames, sizes + stream hash + timing
-jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt for diffing
+jaiscript demoreel.jai                       # the reel, 30 fps, with its soundtrack (q/esc quits; h/f/n/p/space/digits work)
+jaiscript demoreel.jai -- frames 1700        # headless self-test: smoke frames, sizes + stream hash + timing
+jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt (+ P_<i>.bmp, the pixel grid)
+jaiscript demoreel.jai -- bench 60           # every scene mid-flight: script ms/frame and KB/frame
+jaiscript demoreel.jai -- shot 14 at 4 dump P   # one frame of scene 14 at scene time 4 -> P.txt + P.bmp
+jaiscript demoreel.jai -- midi song.mid      # write the soundtrack and exit
+jaiscript demoreel.jai -- music 0            # the reel, silent
 ```
+
+The soundtrack is composed by the script at boot: a Standard MIDI File (64 bars
+at 124 bpm in A minor over i-VI-III-VII — pumping synth bass, warm pad, a saw
+arpeggiating sixteenths, a square lead improvising on the pentatonic from the
+reel's seed, a four-on-the-floor kit) written to the app cache dir and looped
+through the runner's `play_midi`.
 
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
@@ -48,7 +84,7 @@ jai_demoreel                     # the reel, VM backend active, 30 fps pacing
 jai_demoreel --backend interp    # start on the interpreter instead
 jai_demoreel --smoke             # headless: both backends, frame-hash parity + perf
 jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
-jai_demoreel --capture I         # print scene I as plain text (ANSI stripped)
+jai_demoreel --capture I         # print scene I as plain text (ANSI stripped: half blocks and spaces)
 jai_demoreel --reload-test       # headless hot-reload + backend-swap self-test
 jai_demoreel --precompiled       # boot from demoreel.jaibite (saved on first run)
 ```
@@ -59,10 +95,10 @@ Keys while running:
 | --- | ------ |
 | `TAB` | swap live backend (interpreter <-> VM); scene state re-synced, stateful scenes replay up to 3 sim-seconds |
 | `r` | hot-reload every `scenes/*.jai` from disk into BOTH engines |
-| `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps) |
+| `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps, pixel size) |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
-| `1`..`9`, `0` | jump straight to a scene (`0` = scene 13, the finale) |
+| `1`..`9`, `0` | jump straight to a scene (`0` = scene 16, the finale) |
 | `q` / `ESC` | quit |
 
 The HUD shows the active backend and its frame cost, plus the last measured cost
@@ -72,138 +108,119 @@ of the other backend — press TAB and watch the ms number move.
 
 | # | scene | what it is |
 | - | ----- | ---------- |
-| 1 | PLASMA | the classic summed sine field, 96-color cycling truecolor palette, all integer table lookups per cell |
-| 2 | STARFIELD | 3D perspective star streaming with speed-scaled trails (flat parallel arrays on purpose) |
-| 3 | DONUT | the rotating torus homage, z-buffered, luminance-shaded ASCII, molten copper |
-| 4 | JULIA | morphing Julia set (c orbits the cardioid), escape-count colored, half-res doubled columns |
-| 5 | PIPEDREAM | the 3D Pipes screensaver homage: four THICK pipes (block-glyph splats, midpoint-filled tubes) grow one segment per tick through a 16x12x16 voxel volume, glossy elbow balls at every turn, never intersecting. The camera holds still for a whole generation — fill, hold, CRT wipe, reseed from a NEW angle. ~2% of elbows spawn the jackodile's eye (a rainbow-shimmering ball) — canon demanded a teapot |
-| 6 | POWDER | falling-sand toy: sand / water / ember / plant / smoke, each element a script class, spawners keep it evolving |
-| 7 | BOIDS | murmuration with fading trails and one hungry hawk |
-| 8 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep: one ray per column, perpendicular-distance slices (no fisheye), N/S vs E/W face shading, stone/moss/gold walls + an animated rainbow-fire banner. Billboard Grublins and Orglis brutes garrison the route (wall-occluded per column, distance-scaled, idle wobble); the scripted camera auto-fires on line-of-sight cone lock — muzzle flash, rainbow tracer, hit-flash, gib scatter, kill tally. Enemies respawn each lap. The reel's compute stress scene |
-| 9 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm: a 128x128 wrapping heightmap grown by diamond-square (pure integer hashing), a river canyon carved along a wrapping sine meander, height bands + north-light slope shading baked into a packed color/height map. Rendered front-to-back per depth line with a per-column y-buffer, the inner loop pure 16.16 fixed-point integer adds — zero host calls, zero float math. The camera flies the river's own meander formula, banking into turns (per-column horizon roll) and diving on an altitude wave with terrain-clearance lookahead |
-| 10 | SPONGEWORKS | a raymarched Menger sponge: per-pixel signed-distance sphere tracing of the KIFS fold (abs / sort / x3 — no sqrt, no mod, no host calls), exact face normals recovered by ONE tracked re-fold (the fold is abs+permutation, so the folded box's gradient axis maps back through the swaps), SDF-probe ambient occlusion, distance fog, six face palettes. Half resolution into a persistent buffer, 4-phase Bayer temporal update, and per-pixel temporal reprojection (last hit distance warm-starts the march). The reel's floating-point stress: the VM showcase |
-| 11 | BANNERFALL | Verlet cloth: a 26x11 grid (structural + shear, Jakobsen sqrt-free relaxation, constraint topology as index arithmetic — the hot loop has zero host calls) flying a rainbow weave with the gold JAI sigil from a pole. Real surface-normal lighting (edge cross products, alpha-max magnitude — no normalize). The arc is state-driven physics: calm ripple, rising gale, the hoist seam TEARS thread by thread (weakest at the top, so it peels downward; tears render as holes the moment they happen), the gust dies as the last thread parts, and the free banner tumbles and bursts into ember scraps on a pre-shuffled tear order |
-| 12 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
-| 13 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
+| 1 | PLASMA | four summed sine fields over a 256-entry cyclic palette, integer table lookups per pixel; the radial term reads a double-size distance table through a sliding window, so the ripple's center orbits at zero per-pixel cost |
+| 2 | STARFIELD | a warp run: 700 stars in four color temperatures drawn as motion streaks (tail dim, head bright, near stars bloom) over a periodic value-noise nebula; the palette is ADDITIVE (nebula level x star light), the view rolls, and the ship spools up, jumps to warp and drops out in a flash |
+| 3 | TUNNEL | the table-driven texture tunnel: atan2 and 1/r baked per pixel of a double-size table, a frame is four integer lookups per pixel; the vanishing point wanders (sliding window), the walls twist with depth, bevelled riveted plates with racing neon rings dissolve into the glow at the tunnel's end |
+| 4 | DONUT | the torus homage grown up: sphere-traced per pixel on the torus distance field in the donut's own frame, exact normals, diffuse + Blinn specular, pink icing with a wavy drip edge and sprinkles on a hashed (phi, theta) grid; rows in parallel |
+| 5 | JULIA | morphing Julia set (c orbits the cardioid) at full resolution, continuous escape-time coloring (log-log fractional count, no bands) into a cycling 256-entry palette, orbit-trap shading inside the set; rows in parallel |
+| 6 | LAVALAMP | eight metaballs: one loop sums the inverse-square field, its gradient and a contribution-weighted hue, so merging blobs blend colors; the wax is lit from a normal built out of the gradient (the height of a blob under the field), with a tinted glow outside; rows in parallel |
+| 7 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes grow one segment per tick through a 16x12x16 voxel volume, never intersecting; every tube is a chain of lit sphere impostors a quarter voxel apart (per-pixel normal, specular, fog, depth nudge so crossings intersect), glossy elbow balls at every turn, a static camera per generation, CRT wipe, reseed from a new angle; ~2% of elbows spawn the jackodile's rainbow eye |
+| 8 | POWDER | falling-sand toy at full pixel resolution, two substeps a frame: sand / water / ember / plant / smoke, each element a script class; water levels out (up to four cells of sideways flow a step), surfaces catch the light, water darkens with depth, embers glow onto the air around them |
+| 9 | BOIDS | a starling murmuration at sunset: 80 boids (script class instances) and a flapping hawk as silhouettes against a baked sky (gradient, sun glow, a lit skyline); every palette entry is a sky tone darkened by a level, so birds and their fading wakes shade whatever sky they cross |
+| 10 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel, distance fog; billboard Grublins and Orglis brutes lit as spheres per pixel, with eyes and grins, wall-occluded per column; the camera auto-fires on line-of-sight cone lock — recoil, muzzle flash, rainbow tracer, hit-flash, gib scatter, a pixel-font kill counter |
+| 11 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm: a 128x128 wrapping heightmap by diamond-square, a river canyon carved along a sine meander, four levels of sun-side slope light plus hashed grain baked into a packed color/height map; 72 geometric depth steps of 16.16 fixed-point marching with a per-column y-buffer, ten haze banks, a sun that tracks the heading, banking into turns |
+| 12 | SPONGEWORKS | a raymarched Menger sponge: one ray per pixel, KIFS-fold sphere tracing (no sqrt, no mod), the exact face normal from ONE tracked re-fold, SDF-probe AO, fog, six 16-level face ramps, a 4-phase Bayer temporal update with per-pixel reprojection; rows in parallel |
+| 13 | BANNERFALL | Verlet cloth: a 26x11 grid (structural + shear, Jakobsen sqrt-free relaxation, topology as index arithmetic) flying a rainbow weave with the gold JAI sigil; each quad rasterized as two triangles by edge functions at pixel centers from subpixel positions, lit by edge cross products; the hoist seam tears thread by thread, the banner tumbles and bursts into ember scraps |
+| 14 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
+| 15 | FIRE | convection fire with the Doom fire's random sideways jitter at full resolution, 73 heat levels, sparks breaking off and drifting up; ignites into RAINBOW fire mid-scene (house signature) |
+| 16 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (a heat-source mask), burns in rolling rainbow flame, and remains white-hot as the fire dies while the credits come up |
 
-Between scenes: dissolve / wipe / shutter transitions (two grids merged per cell
-into a combined palette). Title card with a demoscene handle on every scene.
+Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
+glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
+into the combined palette. A title card with a demoscene handle opens on every
+scene.
 
 ## Measured numbers
 
-Release (`x64-Release BENCHMARKS`), 100x40 = 4,000 truecolor cells per frame,
-seed 20260705, fixed dt 1/30, whole 13-scene reel incl. transitions
-(`--smoke`, 1,700 frames); 2026-07-06 VM-perf branch, quiet machine
-(~10% ambient load — the earlier 10-scene table was taken while other agents
-were compiling on this box and ran ~2x hot; treat absolute ms across README
-revisions with suspicion, ratios and hashes are the stable part):
+Standalone runner (`x64-Release BENCHMARKS` `jaiscript.exe`), 100x40 cells =
+100x80 = 8,000 pixels per frame, seed 20260705, fixed dt 1/30, the whole
+16-scene reel incl. transitions (`-- frames 1700`, smoke durations of 3 s per
+scene), two runs each. "render" is `demo_frame` alone (update + render +
+presentation); "incl. hashing" adds the shim's per-byte script hash of every
+frame:
 
-| backend | ms/frame (mean) | fps | boot (parse) |
-| ------- | --------------- | --- | ------------ |
-| interpreter | 47.1 | ~21 | 18.8 ms |
-| **VM** | **36.8** | **~27** | 17.3 ms |
+| backend | render ms/frame | incl. hashing | bytes/frame (mean) |
+| ------- | --------------- | ------------- | ------------------ |
+| **VM** | **3.5 - 3.8** | 8.9 - 9.1 | 52 KB |
+| interpreter | 20.1 - 20.7 | 29.9 - 30.6 | 52 KB |
 
-- VM 1.28x over the interpreter for the whole 13-scene reel. The three new
-  climax scenes are array-element-bound (terrain maps, cloth positions, pixel
-  buffers) where the two backends are closer than in pure control flow —
-  PIPEDREAM-style scripted logic remains the widest per-scene gap.
-- Parity: frame streams **byte-identical** across backends over 1,700 frames —
-  every one of the thirteen scene entries (hash `499577b411b67162`), covering
-  CANYONRUN's terrain march, SPONGEWORKS' temporal-reprojected raymarch, and
-  BANNERFALL's full physics arc; plus the earlier 2,660-frame full-duration
-  run for PIPEDREAM/KINSTEIN. Debug build parity also green historically —
-  iterate in Release for this demo (Debug ran ~0.7-0.8 s/frame on the 10-scene
-  reel).
-- `--reload-test`: hot reload of all scenes into both engines + TAB-style state
-  sync, green (13 scenes).
+The earlier cell renderer (one pixel per cell, 4,000 per frame, thirteen scenes)
+measured 1.8 / 11.8 ms render on the same runner: the reel now draws twice the
+pixels with far heavier effects for about twice the script cost, and the VM
+spends about a ninth of the 33 ms frame budget. The five `parallel_transform`
+scenes are what keep it there — CHROME traced serially cost 30.6 ms/frame on
+the VM, 4.0 ms across the cores.
 
-## Console performance (the write is half the frame)
+Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 
-The smoke numbers above are script-only: a live frame also has to get through the
-console, and legacy conhost parses VT escapes ~16x slower than Windows Terminal
-(measured: the identical ~47 KB plasma stream costs **1.2 ms** to write in Windows
-Terminal, **~19 ms** in conhost). The HUD is honest about this now: its headline
-frame cost is `sim + draw` (script update + frame string, plus the console write),
-split out so you can see which side you're bound on. `--bench N --scene I` runs N
-real frames and reports the same split headlessly (`--bench-out FILE` to save it).
+| scene | VM ms | interp ms | KB/frame |
+| ----- | ----- | --------- | -------- |
+| PLASMA | 0.8 | 11.3 | 139 |
+| STARFIELD | 1.5 | 8.3 | 31 |
+| TUNNEL | 0.7 | 8.9 | 63 |
+| DONUT | 4.7 | 14.6 | 30 |
+| JULIA | 5.0 | 16.9 | 123 |
+| LAVALAMP | 2.3 | 18.1 | 51 |
+| PIPEDREAM | 1.1 | 10.9 | 56 |
+| POWDER | 4.9 | 25.3 | 33 |
+| BOIDS | 4.0 | 14.2 | 23 |
+| KINSTEIN 3D | 1.2 | 12.6 | 33 |
+| CANYONRUN | 0.8 | 12.2 | 22 |
+| SPONGEWORKS | 5.8 | 21.2 | 28 |
+| BANNERFALL | 2.9 | 18.4 | 21 |
+| CHROME | 4.0 | 17.5 | 27 |
+| FIRE | 2.7 | 16.1 | 54 |
+| FINALE | 3.1 | 24.5 | 96 |
 
-What the host does about it (all post-processing in `main.cpp` — scenes and the
-`--smoke` frame stream are untouched, so parity hashes don't move):
+Every scene holds 30 fps on the VM with room to spare (mean 2.8 ms, worst
+5.8 ms); on the interpreter every scene stays under 26 ms (mean 15.7 ms).
 
-- **Escape trimming.** Scripts already emit a color escape only when the palette
+- Parity: frame streams **byte-identical** across backends over 1,700 frames,
+  every one of the sixteen scene entries plus the wrap back to PLASMA: shim
+  stream hash `3352695962` on both. The C++ host's `--smoke` hash is FNV-1a 64
+  over the same frames: `23505cc87911c46d`, computed offline over the shim's
+  stream (the method reproduces the previous reel's `499577b411b67162`
+  exactly; the host's HUD is off in smoke, so its frames are the same bytes).
+- `--reload-test` re-executes every scene file into both engines. The
+  presenter's globals live in `util.jai`, so a reload resets them and the reel
+  re-binds them on the next frame; a reload mid-transition cancels the
+  transition (the live scene rebuilds), so no scene reads a reset buffer.
+
+## Console performance
+
+Half-block frames carry two colors per cell, so a frame is bigger than the old
+one-pixel-per-cell stream (52 KB on average, 139 KB for PLASMA, whose 256-entry
+palette changes nearly every pixel; KINSTEIN and CANYONRUN stay near 20-30 KB).
+Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
+host's post-processing in `main.cpp` is for (scenes and the `--smoke` stream
+are untouched by it, so parity hashes don't move):
+
+- **Escape trimming.** Scripts already emit a color escape only when a palette
   index changes; the host additionally drops any SGR group that wouldn't change
   terminal state, and (default on conhost) rewrites 24-bit colors to the xterm-256
   cube — shorter escapes and coarser quanta = longer runs. `--truecolor` keeps
   24-bit with per-channel merge tolerance (`--tol N`, default 8); `--no-filter`
-  is the byte-exact legacy stream.
+  is the byte-exact legacy stream. The filter tracks foreground and background
+  separately, which is exactly the half-block stream's shape.
 - **Terminal detection.** `WT_SESSION` distinguishes Windows Terminal from legacy
   conhost. Conhost defaults to 256-color mode and shows a one-line tip on the
   title card ("Windows Terminal renders this reel much faster"); everything else
   defaults to truecolor + tolerance merging.
 - **One buffered write per frame**, via `WriteConsoleA` on a real console.
 - **`--diff`** row-diff redraw: only rows that changed since the last frame are
-  rewritten (cursor-move + row). Not the default — plasma/fire change every cell
-  every frame and defeat it — but starfield's write drops to ~1 ms.
+  rewritten (cursor-move + row). Not the default — most scenes change every
+  pixel every frame.
 
-Measured on conhost (Release, 120 real frames per scene, ~110x29 window):
-
-| scene | bytes/frame raw -> written | write ms raw -> filtered | fps |
-| ----- | -------------------------- | ------------------------ | --- |
-| plasma | 29.6 KB -> 15.2 KB (2.6x) | 19.1 -> 14.1 | 23.8 -> 25.0 |
-| fire | 34.2 KB -> 9.7 KB (3.6x) | 23.4 -> 8.2 | 18.7 -> 27.8 |
-| finale | 29.9 KB -> 10.9 KB (3.0x) | 19.4 -> 9.7 | 13.4 -> 14.9 (sim-bound) |
-| starfield (`--diff`) | 5.3 KB -> 2.4 KB | 1.0 | 82 uncapped |
-
-The two new scenes, measured headless (`--bench 30 --scene I`, Release, 100x40,
-truecolor+tolerance mode, quiet machine — sim ms is the interesting split here):
-
-| scene | backend | sim ms | bytes/frame raw -> written | fps uncapped |
-| ----- | ------- | ------ | -------------------------- | ------------ |
-| PIPEDREAM (4) | **vm** | **25.6** | 14.8 KB -> 14.4 KB (1.02x) | **38.3** |
-| PIPEDREAM (4) | interpreter | 39.7 | 14.9 KB -> 14.5 KB (1.02x) | 24.8 |
-| KINSTEIN (7) | **vm** | **28.4** | 9.0 KB -> 9.0 KB (1.00x) | **34.2** |
-| KINSTEIN (7) | interpreter | 32.2 | 9.0 KB -> 9.0 KB (1.00x) | 30.7 |
-
-KINSTEIN is the cheapest frame in the reel to *write*: quantized distance shades
-over solid-bg slices mean the script's own run-length trick already emits ~9 KB
-a frame — the host filter finds nothing left to trim (1.00x). PIPEDREAM shows
-the widest per-scene TAB gap (25.6 vs 39.7 ms sim, VM 1.55x) — its incremental
-splat pass is pure scripted control flow, exactly where the VM pulls ahead.
-Both scenes hold comfortably above 20 fps on both backends in Release.
-
-The technical climax block (`--bench 30 --scene I`, Release, 100x40, truecolor
-mode, min of 3 runs at high process priority, quiet machine ~10% ambient —
-KINSTEIN re-measured the same session as the in-family reference: vm 14.7 /
-interpreter 19.2 ms sim):
-
-| scene | backend | sim ms | bytes/frame raw -> written | fps uncapped |
-| ----- | ------- | ------ | -------------------------- | ------------ |
-| CANYONRUN (9) | **vm** | **29.3** | 11.4 KB -> 11.4 KB (1.00x) | **~33** |
-| CANYONRUN (9) | interpreter | 35.2 | 11.3 KB -> 11.3 KB (1.00x) | ~28 |
-| SPONGEWORKS (10) | **vm** | **32.5** | 13.7 KB -> 13.4 KB (1.02x) | **~30** |
-| SPONGEWORKS (10) | interpreter | 43.1 | 13.8 KB -> 13.5 KB (1.02x) | ~23 |
-| BANNERFALL (11) | **vm** | **39.9** | 10.2 KB -> 10.2 KB (1.00x) | **~24** |
-| BANNERFALL (11) | interpreter | 54.6 | 10.0 KB -> 10.1 KB (1.00x) | ~18 |
-
-All three hold 15+ fps on BOTH backends. BANNERFALL shows the widest VM gap of
-the three (1.37x — the Verlet constraint solver is exactly the branchy
-element-heavy loop the VM chews through), SPONGEWORKS 1.32x (per-pixel float
-fold math), CANYONRUN 1.20x (its inner loop is integer adds and grid fills, the
-most backend-neutral work in the reel). Honest-tuning ledger: SPONGEWORKS runs
-half-res 2x2 blocks with a 4-phase temporal update and 14-step ray budget;
-BANNERFALL runs 2 relaxation passes (structural both, shear on the first) on a
-26x11 grid — four passes of a 34x13 grid looked marginally better and cost
-double; CANYONRUN marches 44 depth lines with a 6-bank haze quantization.
-
-And if it still *feels* like one frame per second: check you're not running the
-Debug build (~0.7 s of sim per frame — see above).
+The HUD's headline frame cost is `sim + draw` (script update + frame string,
+plus the console write), split out so you can see which side you're bound on.
+`--bench N --scene I` runs N real frames and reports the same split headlessly
+(`--bench-out FILE` to save it).
 
 ## Live coding
 
 1. Run `jai_demoreel`.
-2. Open `scenes/plasma.jai` in an editor; change palette constants (e.g. the
-   `gfx.rainbow_rgb` phase offsets, `ncolors`, or the field frequencies in
-   `render`).
+2. Open `scenes/plasma.jai` in an editor; change the palette stops (the
+   `pal.gradient` call), or the field frequencies in `render`.
 3. Press `r` in the console window.
 
 Both engines re-execute every scene file (hot reload with instance migration) and
@@ -214,152 +231,155 @@ deliberately never reloaded: it owns the persistent globals.
 
 `--smoke` runs N frames headless at a fixed dt on the interpreter, then the VM,
 FNV-1a-hashing every returned frame; the hashes must match. All scene randomness
-goes through the host's seeded xorshift `Rng` class, so a one-cell divergence
-between backends fails the run. Env helpers: `JAI_DEMOREEL_SMOKE_FULLDUR=1`
-(full interactive scene durations), `JAI_DEMOREEL_DUMP_FRAME=N` (write frame N of
-each backend to a file for diffing), `JAI_DEMOREEL_TRACE=1` (per-frame progress
-for crash localization). Deliberately NOT part of the main test suite.
+goes through the host's seeded xorshift `Rng` class (the presentation-only hashes
+are integer arithmetic on pixel coordinates), and `parallel_transform` returns
+rows in order, so a one-pixel divergence between backends fails the run. Env
+helpers: `JAI_DEMOREEL_SMOKE_FULLDUR=1` (full interactive scene durations),
+`JAI_DEMOREEL_DUMP_FRAME=N` (write frame N of each backend to a file for
+diffing), `JAI_DEMOREEL_TRACE=1` (per-frame progress for crash localization).
+Deliberately NOT part of the main test suite.
 
 ## --precompiled
 
 `engine->jaibite()` parses the concatenated scene source once; `--precompiled`
-saves the parsed AST as `demoreel.jaibite` on first boot and loads it afterwards.
-Measured: parse ~8-12 ms vs .jaibite load ~3.2-3.5 ms (and the .jaibite saved by the
-interpreter engine loads into the VM engine — `jaibite_load` re-interns symbols
-per engine, so one file serves both backends).
+saves the parsed AST as `demoreel.jaibite` on first boot and loads it afterwards
+(the .jaibite saved by the interpreter engine loads into the VM engine —
+`jaibite_load` re-interns symbols per engine, so one file serves both backends).
 
-## Text captures
+## Captures
 
-DONUT (`--capture 2`, ANSI stripped — luminance-shaded torus):
+Stripped of color a half-block frame is only `▀`, `█` and spaces, so these are
+brightness maps of the pixel grid (one character per terminal cell, the two
+pixels averaged; `-- shot I at T dump P` writes the full-color `P.bmp`).
 
-```
-     ,.--....., . .. . .. :......= ......!  ..   .    .*     ~    !
-     ,.,., .... .. . .-.. ............   ..   .   *     . ,   * :*
-      . .... ....... . .- ...:..... = ..   .!   .  . .    * ,
-      ...... ......... ...-......  ..  ...   .   ..   .  .   ,  ~ :!=
-      ..... ..... .............:...  ..;  .   ..   . ! .  .      !
-       .... . ... . ........-. ..  ..  ..  ..  =   .       . !,  -  :;=
-        ........  ..., ,......-.. ..  .  ;.  .   .   . !.          ! ~:
-         .,,,,-,,., .,.-...:.~.  .  :  .  ..  .  =.  .   .  .  !.  -   ;
-          .,--.~.:.:= ; .!.!...;. .. .~ .  .   .  .   .  .=  .  .  ,= - ;
-```
-
-BOIDS (`--capture 6` — the flock, trails, and the hawk `@`):
+CHROME (`shot 14 at 4` — three chrome spheres over the checkerboard; the `@@`
+are sun glints, the reflections carry the sky and the floor):
 
 ```
-                                            ^ :  ^.^^
-                                         */^: ^^ .^ *
-                                      ./ . /:^:*^ ^  ^
-                                         /.:/ ^.^ ^  ^
-                                  /       /:*^.^. ^  :
-                                 .* /./ :/.  : .  .
-                  @        :/      :*   .
-                          . :/  :/   */
+##########********************************************************************************##########
+########################++=====++####**************************#####################################
+####################++:::::::::::::=+###############################################################
+##################+-:::::::::::::::::-+#############################################################
+#################*--:::::+++::::::::::--*###########################################################
+################*=-----::@@@*::::::::---=*##########################################################
+################+=======--------------====##########################################################
+%%%%%%%%%%%%%%%%+++++++++++++++++++++++++++%%%%%%%+-:::::-+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%*********++**+++*++*+****++%%%%%*--:::+:::--*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%*+***--=-==*===-*-===-.-*=+%%%%#+=::-**---===#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%+===:===*==*======:=:-=*-%%%%%***..=++-+++***%%*++*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%-:*=*::*=::=***::*=.=:=#%%%%%#+-+*=+==:-+==-:......:-+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%+*:====**=::::***:=-+%%%%%%%%+=:::*=.:*:-:..........:-*%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%###%######%%%%#%%##==::=======.:.=%%%%#######*==:=*:=::.-::..@@..::::-*##%%%%%#%%%%######%##%%%%
+%%###**%%%#########****##*++####=+=##%%####****#****##+%%=..-------------==***%%%%%##%%%%%******####
+##*##%######*####+#########+####%%+######%%***++**%****++:-==-=--=-======-=+#######******#######*%%%
+###+#++++###**********%%%%%%+********%*++++++*%******===#--:--=-:=::-=::=:=+++********++++*%%%######
++*%%%***********%%%%%+++++****%*****====*********==*===+++-==-:-===----=--*++****%%%%%%*+++****%****
+++++++****+*****=====%%%%%%%%%**-=====++++==-----====%%****-=:---------++%**==****%%%****+++++++***%
+%%%%%%%%%%==*********%========----=============*%%%%%%%%%**====:==***+**=========***%%%%%****=***%%%
+****=====%%%%%%%%%%%%%=********%***+------======**%******==----=======**%%***==*****%%%****=========
+========********=======%%%%%%%%%%%%%%*=******%%%%%%**======--------===---**=====**%%%%%%%%%%%%***===
+*%%%%%%*===============%%%%******======%%%%%%%%%%%%%%%*=====*+++-====-+-=============**%%%%%%***====
+%%%%%%%=======******%%%%================*%%%%%%%%%*****==*%%%%%%%%%%%%%%%%**=========****%***=======
+%%******%%%%%%%%%%%%%%%%====------------**%**---------------*%%%%%%%%%%%%%%%%%==**%%%%%%%%%%%%%***==
+=====*%%%%%%%%%%%%%%%%%%%-----*****%%%%%%%%%*------------------*%%%%%%%***--------**%%%%%%%%%%%%%%%%
 ```
 
-PIPEDREAM (brightness map of the raw frame near fill — thick interlocking tubes;
-the brightest cells are the glossy elbow balls; every generation reseeds from a
-new static camera angle):
+KINSTEIN 3D (`shot 10 at 3.1` — the kill counter top left, oak planks overhead,
+coursed stone walls converging on a Grublin down the corridor, flagstones
+below, the pistol at the bottom):
 
 ```
-                  ####@@%%@@%%@@@@@@@#################@@@@@@@@@@@@@@**@@%%%****### %%%
-             ********#%%%%%%%@@@@#########@@########@@@#@@@@@@@@@@@@**@@%%% ***  ###%%
-             *+****   %%%%%%%@########################@#####@@@@@@@@@#@@%%  ***    ##
-             ++++**++ %@@%%###############@@########@@@#####@@@@@@@@@@@*%%  ****   #%%%
-            **++++   +%@%%%###@#########@@############@#######@@@@@@@##***%% *** %##%%%
-            ****++   %%%%%#@#########@@##@############@########@@@@@@@@@**** *** ##%
-            ######   %%%%%########@**%%%#@@@########@@@########@@@@@@@@@##**%%%%**#
-           %%%#### **%%%%**@#####****%%##@####@@@@@###@@@@@######@@@@@@@##***********
-           %%%****** %%%@##@#####**%%%%@@@@@##@@@@@#@@@#@@@@@####@@@@@***************  ###
-           ** %%%    %%%@#@@@####*********@@##@@@@@#@@@##########@@@@@@@@%%  @@@@*****++##
-          ***       %%%@@@@@@######@@@@@##@@@@@###@@@@@#####@@@###@@@@@@@@@@@@@######@+##
-          **       @@@@@@@@@@@#####@@@@@##########@@@@@###@@@@@###%%% @@@@@@@####@###@###+
+--======:.....                                         :::::::::.        .::::.       .....:======--
+--%:=**:*=%== % ....% ....===== .::::.=====.====+::::::.........::::.....................:======----
+--%=*..===% :.% ..::% ::::+=++::::::::% ++% :.:++ :::::::::::::::::::::::::::::.   ....:=====-------
+--* ==---=* ==* ....* ::::::..*.::::::*-..* :==..:::::::::::::::::::::::::::::::.....:=====---------
+--= --=.=----:+---- -----.----         ---  -----                       ....  .......===------------
+--------------=..+-..................   ...............................::::......-+..=--------------
+---------------..++++-...............    ......................:::......::....-++++..---------------
+..::-----------..=++++=-.............................   ....................-=++++=..-----------::..
+......::-------..====+===-................................................-===+====..-------::......
+..........::---..=========.:.....................................  .....:.=========..---::..........
+*---.........::..=========.--:.. .................................  ..:--.=========..::.........---*
+****...--........::===---=.----:.. ........  .................... ..:----.=---===::........--...****
+****...====---.......::---.--:::=:..         ..                 ..:=:::--.---::.......---====...****
++++*...========+---......:.--:::--=.......................... ...=--:::--.:......---+========...*+++
+++++...========++++++..-....:.::---.::: .                  . :::.---::.:....-..++++++========...++++
+++++...========++++++..+++---...::-.::- . ................ . -::.-::...---+++..++++++========...++++
+++++...==============..++++++.-:::....: .:.              .:. :....:::-.++++++..==============...++++
+====...--------======..======.---==-::: ......         ..... :::-==---.======..======--------...====
+====...--------======..======.:---=--:-:::... ..--=-:  ...:::-:--=---:.======..======--------...====
+====...--------======..======.::-----:::::.:  ++#+*=#-: :::::::-----::.======..======--------...====
+....................................... :....=+**#=*++:..:.: .......................................
+........................::.--::=---.--: :::..:----%:::...::: :--.---=::--.::........................
+.........------..=========.++===---.--: ...-=.......... ::.. :--.---===++.=========..------.........
+-**************..=====----.====-:::.::..::.......:........::..::.:::-====.----=====..**************-
+**************+..=====----.==---....::::....:...:...::.:::..::::....---==.----=====..+**************
+*******++++++++..====-----.=::...:=--::.:..:....:.::::.:::::.::--=:...::=.-----====..++++++++*******
++++++++++++++++..--------:....:-----::.:.::.:::::.::::-..::--.::-----:....:--------..+++++++++++++++
+++++++++++++++=..----::....-=.-:-:-..--.::............::.......---:-:-.=-....::----..=++++++++++++++
++++++++++======..::.....-====.:::.::::::::::::-=:.:----::-::---=:..:::.====-.....::..======+++++++++
+++++=========--........======.:-.----==::-------:::::--==:::------::-:.======........--=========++++
+==========--......-==..====--::::::-==..::::::..==**..:-==..:---------:--====..==-......--==========
+======--.......-=====..==----:::::-==..:------..==--..--==-..:-------------==..=====-.......--======
+==--........:========..---:------.....::------..==--..-----...-----------:---..========:........--==
+.........:===========..--::::---------------....==--....-------------===-..:-..===========:.........
+.......======--===---..:---------::::---::::..==**----..--------:::----===-....---===--======.......
+...-...====----=----::--------------------....==------....----===========+++-..:----=----====...-...
+-+++...=----------::----:::---------------..==**--------..================+++-...:----------=...+++-
+++++...---------:-++++++++++++++++++++++##..==----------..##+++++++++++++++++++-...:---------...++++
+++++...-------:.......................####..------------..####.......................:-------...++++
+++==...---------------=++++-....----########..--------..########-....==================------...==++
 ```
 
-KINSTEIN 3D (brightness map of the raw frame — a one-point-perspective corridor,
-full-height near slices at the edges stepping down to the vanishing point; the
-bright center column is a rainbow tracer mid-kill, the dots around it gib
-scatter where the Grublin stood, and the `-+-` at the bottom is the gun):
+DONUT (`shot 4 at 4` — the frosted torus, specular highlight on the icing):
 
 ```
-%%%%%%%%%%%%%%%%%#####..............................................#####%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++===---::       :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++===---:. .. .. :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++===---:....@...:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++===--......%.....-====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++===-.......+......====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++==.........=........==++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++++...........+..........++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******++.............#............++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######******...............@..............******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######****.................%................****#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%#######:::::::::::::::::::::+::::::::::::::::::::#######%%%%%%%%%%%%%%%%%%%%%%
+....................................................................................................
+....................................................................................................
+...............................................=------*******+*****-=---............................
+......................................-=--+****##%%%%%%##*#******+****%#**=--.......................
+.................................--******++++##%%@@@%%#%*#**+**#***********+++=:....................
+............................++#**+++==+=+=====**+*****++++++**+************+++++=:..................
+.........................==***+++=+===---==-----============++:+*****+****++++++==-.................
+.......................=+**++=+===---::::::::::::==-------=+=+********+*++++++++==--................
+.....................***%**+**+===--::...............--=-*##***********++*+++++==+--:...............
+...................=*********+*++++=------------##***********++******+++++**++====+-:...............
+..................**************%%*%%***********%%**********+******+++++++++++===---:...............
+.................*************%%********++**+++**@*********#**+++=+++++++++===+=---::...............
+................-******######%#############################%###**+++++++==-=-=----::. ..............
+................++***#####%%%%%%%%%%%%%%##%@@@@%%%%%%%%%#######**+++++======-----::.. ..............
+................++***####%%%%@@@@@@@@@@@@@@@@@@@@@@%%%%%%##*##*++++=======---:::::.. ...............
+................=+++**@%##%%%@@@@@@@@@@@@@@@@@@@@%%%%%#%#***+**=========--:-:::::.  ................
+................-++++++*####%%%%%%@@@@@@@@@@@@@%%%###***#*+==========---:--::::..  .................
+.................==*+*++++**#######%%%%%%%#%###*****++===+=======-------:::::..  ...................
+..................-==**+++++++***++*******++++++=========++==-------::::::...   ....................
+...................--============--====-================-==------::::::...    ......................
+....................:----=========-====::========------------:::::::...      .......................
+.......................::----::------------------------:--:::::.....      ..........................
+...........................:::::::::------::::::::::::::::.....        .............................
+................................::::::::::::::..:........          .................................
 ```
 
-FINALE afterglow (brightness map of the raw frame as the fire dies — the word
-stays lit in rainbow flame):
+FINALE afterglow (`shot 16 at 12` — the fire has died, the word stays white-hot):
 
 ```
-               ....#..#####..###..########....#####..###..#####. .#.
-               ....#..#####..###..#####.##....###.#..##...###.#  .#.
-               ...##..#####..###...####.##....####...###..####   .#.
-               ..###..#. .#..###...####.##....#.#....###..#.     .#.
-                #..# .#. .#..###...#..# #.##..#. #...###..#.     .#.
-                  ##   #   # ##### ####   #### #   # ##### #       #
+:::::::::::::::::::::-::::::::::::::::::::::::::::::::::::-:::::::::::::::::::::::::::::::::::::::::
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+:::::::::::::::::::::::::::::::--::::::::::::::::::-::-::::::-::::::::::::::::::::::::::::::::::::::
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+.*++=*++=*+.:.++=*++.:.+=*++=*++=.:.=*++=*++.:.+=*++=*+.=*++=*++.:.+=*++=*++=.++=*++=*.. *++=*++=*+
+::::::.+=...=*.::::.=*.:::.+=.:::.++.::=::::.*+.:::::::.=*.::::.=*.:::.+=.:::.++.::::.++ . ..*+
+::::::.+= :.=*.::::.=*.:::.+=.:::.++.:::::-:.*+.:::::::.=*.::::.=*.:::.+=.:::.++.::::.++     *+ .
+::::::.+= :.=*++=*++=*.:::.+=.:::::.=*++=*.:.*+.:::::::.=*++=*++.:::::.+-.:::.+==*++=*.    . *+ .
+.*+.::.+= :.=*.    .=*.:::.+=.:::::::::::.++.*+.:::::::.=*  =*.:::::::.+=.:::.++ .   :     . *+
+ *+ ::.+= . =*     .=*.:::.+=.:::::::::::.++ *+.:::::::.=*    ++.:::::.+=.:::.++.            *+
+   +=*+     =*      =* +=*+-=*++= ++=*++=*     +=*++=*+ =*      =* +=*++=*++= ++             *+
+                                                                                              .
+                            -
+                                       -                               -        .
 ```
-
-SPONGEWORKS (brightness map of the raw frame — the raymarched Menger sponge
-mid-orbit: the perforated top face catches the light, the recesses fall into
-SDF-probe shadow, and the darkest cells are rays that spent their step budget
-deep in a crevice):
-
-```
-        ..                                ==========
-        ..                                ==========
-                ..        ********....**************  ****......**************
-                ..        ********....**************  ****......**************
-        **********..  ..######  ####..........  ..  ..........################**********....
-        **********..  ..######  ####..........  ..  ..........################**********....
-      ........################....  ....##########......  ######........##########........
-      ........################....  ....##########......  ######........##########........
-      ....................####################  ############################..............
-      ....................####################  ############################..............
-        ................  ............######################  ######................  ..
-        ................  ............######################  ######................  ..
-        ....--##........  ........................@@@@@@  @@@@..........................
-        ....--##........  ........................@@@@@@  @@@@..........................
-          ................  ....................................::..........##..........
-          ................  ....................................::..........##..........
-```
-
-BANNERFALL (brightness map of the raw frame just after the hoist seam starts
-to tear — the banner streams right of the bare pole segment it has already
-peeled from; in color it is a rainbow weave carrying the gold JAI sigil):
-
-```
-
-              %
-              :
-              =                                             --
-              :                                           ==---
-              =                                          -++***
-              :                                         .--++++
-..............=.......................................-==-==---.....................................
-..............:...................................==---==*==***.....................................
-..............=............:++++++...........::--.=+===**--=***.....................................
-..............:........::::==+***===......::-::..::+==++==+****.....................................
-..............=......====+++++++***=.==:::::-:-----**=++==***+++....................................
-..............:....=========--.==----%%%--::**---%%***++******+++...................................
-..............=***@==--++%%%-++**----**:--::%%--%%%--==+******+++...................................
-..............:****.++++++%++==**----**:::::%%-------++++*****+++...................................
-..............=*******++==-------------:::--------===++++*****......................................
-..............:***********++++-------------:------===+++++..........................................
-```
-
-(PLASMA / JULIA / FIRE / POWDER / CANYONRUN are solid background-color scenes —
-stripping the ANSI leaves only spaces, and CANYONRUN's drama is entirely in its
-truecolor terrain bands and distance haze, so they don't caption well in text.
-Run the reel.)
 
 ## Language feedback (dogfooding notes — recorded honestly)
 
@@ -382,10 +402,10 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 
 > **Triage update (2026-07-05, VM-perf `b5c118de..`):** every finding below was
 > reproduced (or bisected) at HEAD and resolved; pinning regression tests live in
-> `source/tests/language/demoreel_regression_tests.cpp`. The reel itself now
-> exercises the fixed paths: the graveyard is gone (scenes are destroyed at every
-> transition), `render_rows` declares `prev` in the loop body again, and plasma
-> passes raw `c[0], c[1], c[2]` element args into typed params.
+> `source/tests/language/demoreel_regression_tests.cpp`. The reel of that day
+> exercised the fixed paths: the graveyard was gone (scenes are destroyed at
+> every transition), `render_rows` declared `prev` in the loop body again, and
+> plasma passed raw `c[0], c[1], c[2]` element args into typed params.
 
 1. **FIXED** (`53526626`: frame exit clears only the frame's OWN method env).
    ~~Free-function / lambda calls inside class methods poison implicit-self~~
@@ -478,6 +498,17 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
     ```
     Workaround (ships in kinstein.jai): read into a declared local, then assign.
 
+11. **NEW (2026-09-26, VM only; open).** Found while rewriting DONUT (its splat
+    version): inside a large render method of an IMPORTED unit (the shim's
+    `import "scenes/donut.jai"`), the fused int expression
+    `mt[mrow + i] + itrunc(d * 15.99) * 4 + itrunc(s16 * s8 * 3.99)` (`itrunc`
+    a script function defined by the importing file) evaluated to a wrong value
+    on the VM — 17,908 wrong evaluations a frame against 0 on the interpreter.
+    The same program pasted into one file is correct, and splitting the
+    expression into three typed locals is correct. The sphere-traced DONUT no
+    longer has the shape; the three-file reproduction (a host stub, `util.jai`,
+    the reduced scene) was handed to the engine side.
+
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,
 surprising the first time); no script-side float→int cast.
@@ -533,5 +564,7 @@ save/load worked on the first try, including cross-engine symbol relocation.
 switch-on-string, and the builtin container methods (`push`, `join`, `clear`,
 `repeat`, `substr`) are pleasant, and `dynamic_binder` made the seeded rng a
 one-liner per method. A full scripted render pipeline — simulation, palette
-lookup, run-length escape assembly, string join — moves 4,000 truecolor cells at
-~25 fps on the VM.
+lookup, half-block run-length escape assembly, string join — moves 8,000
+truecolor pixels in about 3.5 ms a frame on the VM, and `parallel_transform`
+spreads the five heaviest scenes across the cores without costing a byte of
+parity.

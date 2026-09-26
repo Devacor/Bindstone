@@ -1502,6 +1502,12 @@ namespace jai::vm {
                 }
             }
         }
+        // a store the checker resolved to a field of the method's class (no local of the name, no user accessor, not a global-tier
+        // name): no environment cell can take the name, so the entry's walk-miss proof holds whatever the epoch
+        bool stamped_this_field_store(const frame& f, uint64_t sym) const {
+            const identifier_expr* id = ident_node_at(f);
+            return id && id->this_field && id->symbol_id == sym;
+        }
         // Store-side this-field IC (bare method-field writes): the read proof plus the
         // arm-time facts of the store landing. Returns the live cell, or null for the ladder.
         script_value* this_field_store_probe(frame& f, size_t cache_slot, uint64_t sym, type_info*& declared_out) {
@@ -1511,7 +1517,7 @@ namespace jai::vm {
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
             if (entry.this_store_state != 1 || entry.this_field_sym != sym) { return nullptr; }
-            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
+            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f) && !stamped_this_field_store(f, sym)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto* oh = this_val.unchecked_get_object_storage().get();

@@ -328,6 +328,8 @@ function sk_trace(dx, dy, dz, px, py, cand) {
 	}
 	local hit = false;
 	local inside = ::sk_world(ox, oy, oz) < 0.0;
+	local ds_last = 0.0;
+	local t_last = 0.0;
 	local i = 0;
 	while (i < 64) {
 		local x = ox + dx * t;
@@ -345,9 +347,16 @@ function sk_trace(dx, dy, dz, px, py, cand) {
 		}
 		local d = dw;
 		if (near) {
-			local ds = ::sk_spider(x, y, z, groups, cand, nc);
-			glow = ds < glow ? ds : glow;
-			d = dw < ds ? dw : ds;
+			// the creature's distance is 1.18-Lipschitz: skipped while its last distance, less what the ray has closed
+			// since, stays above the wall and above the glow so far or the aura's reach (0.5)
+			local bound = ds_last - (t - t_last) * 1.2 - 0.001;
+			if (bound < dw || (bound < glow && bound < 0.5)) {
+				local ds = ::sk_spider(x, y, z, groups, cand, nc);
+				glow = ds < glow ? ds : glow;
+				d = dw < ds ? dw : ds;
+				ds_last = ds;
+				t_last = t;
+			}
 		}
 		if (d < 0.001 + t * 0.0015) {
 			hit = true;

@@ -334,6 +334,8 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	bool hit = false;
 	float g0 = sk_field(ox, oy, oz);
 	bool inside = sk_shell(g0) < 0.0;
+	float ds_last = 0.0;
+	float t_last = 0.0;
 	int i = 0;
 	while (i < 64) {
 		float x = ox + dx * t;
@@ -352,9 +354,17 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		}
 		float d = dw;
 		if (near) {
-			float ds = sk_spider(x, y, z, groups, cand, nc);
-			glow = ds < glow ? ds : glow;
-			d = dw < ds ? dw : ds;
+			// the creature's distance is 1.18-Lipschitz (the skull's long axis): while its last distance, less what the ray
+			// has closed since, stays above the wall's distance and above the glow so far or the aura's reach (0.5), it
+			// can change neither the step nor the aura
+			float bound = ds_last - (t - t_last) * 1.2 - 0.001;
+			if (bound < dw || (bound < glow && bound < 0.5)) {
+				float ds = sk_spider(x, y, z, groups, cand, nc);
+				glow = ds < glow ? ds : glow;
+				d = dw < ds ? dw : ds;
+				ds_last = ds;
+				t_last = t;
+			}
 		}
 		if (d < 0.001 + t * 0.0015) {
 			hit = true;

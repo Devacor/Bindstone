@@ -190,14 +190,13 @@ function sk_body(x, y, z) {
 	return dt + (da - dt) * hh - k * hh * (1.0 - hh);
 }
 
-function sk_crown(x, y, z) {
+// the crown's ring; its flames are the capsules [SK_CROWN0, SK_NC)
+function sk_ring(x, y, z) {
 	local ox = x - ::SK_CRX, oy = y - ::SK_CRY, oz = z - ::SK_CRZ;
 	local cu = ox * ::SK_PUX + oy * ::SK_PUY + oz * ::SK_PUZ;
 	local px = ox - ::SK_PUX * cu, py = oy - ::SK_PUY * cu, pz = oz - ::SK_PUZ * cu;
 	local ring = ::sqrt(px * px + py * py + pz * pz) - 0.2;
-	local d = ::sqrt(ring * ring + cu * cu) - 0.028;
-	local ds = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, 99.0);
-	return d < ds ? d : ds;
+	return ::sqrt(ring * ring + cu * cu) - 0.028;
 }
 
 function sk_gem(x, y, z) {
@@ -218,8 +217,9 @@ function sk_spider(x, y, z, groups, cand, nc) {
 	if ((groups & 2) != 0) {
 		local ds = ::sk_skull(x, y, z);
 		d = d < ds ? d : ds;
-		local dr = ::sk_crown(x, y, z);
+		local dr = ::sk_ring(x, y, z);
 		d = d < dr ? d : dr;
+		d = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, d);
 		local dg = ::sk_gem(x, y, z);
 		d = d < dg ? d : dg;
 	}
@@ -261,26 +261,25 @@ function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
 }
 
-// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby
+// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule run starts
+// from the best so far, so a capsule that cannot win costs only its bounding test
 function sk_material(x, y, z) {
-	local dw = ::sk_world(x, y, z);
-	local ds = ::sk_skull(x, y, z);
-	local dj = ::sk_capsules(x, y, z, 0, ::SK_NBONE, 99.0);
-	local bone = ds < dj ? ds : dj;
-	local de = ::sk_glows(x, y, z);
-	local dcr = ::sk_crown(x, y, z);
-	de = de < dcr ? de : dcr;
-	local dgm = ::sk_gem(x, y, z);
-	local db = ::sk_body(x, y, z);
-	local dl = ::sk_capsules(x, y, z, ::SK_NBONE, ::SK_CROWN0, 99.0);
-	local chit = db < dl ? db : dl;
+	local best = ::sk_world(x, y, z);
 	local m = 0;
-	local best = dw;
+	local ds = ::sk_skull(x, y, z);
+	local bone = ::sk_capsules(x, y, z, 0, ::SK_NBONE, ds < best ? ds : best);
 	if (bone < best) { best = bone; m = 1; }
+	local db = ::sk_body(x, y, z);
+	local chit = ::sk_capsules(x, y, z, ::SK_NBONE, ::SK_CROWN0, db < best ? db : best);
 	if (chit < best) { best = chit; m = 2; }
+	local de = ::sk_glows(x, y, z);
+	local dr = ::sk_ring(x, y, z);
+	de = de < dr ? de : dr;
+	de = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, de < best ? de : best);
 	if (de < best) { best = de; m = 3; }
+	local dgm = ::sk_gem(x, y, z);
 	if (dgm < best) { best = dgm; m = 5; }
-	if (m == 2 && db <= dl) {
+	if (m == 2 && chit == db) {
 		local ax = x - ::SK_AX, ay = y - ::SK_AY, az = z - ::SK_AZ;
 		local au = ax * ::SK_PUX + ay * ::SK_PUY + az * ::SK_PUZ;
 		local ar = ax * ::SK_PRX + ay * ::SK_PRY + az * ::SK_PRZ;

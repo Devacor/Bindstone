@@ -276,6 +276,7 @@ namespace jai::vm {
         op_size_temp,       // a = frame slot (a compiler temp), b = call site (a slot receiver, no arguments), c = the proven kind (1 string, 2 array, 3 map): the receiver's size into the temp, else op_call_method's result
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
+        op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code
         op_halt,
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
@@ -537,6 +538,7 @@ namespace jai::vm {
             case opcode::op_t_load: return "T_LOAD";
             case opcode::op_call_builtin: return "CALL_BUILTIN";
             case opcode::op_concat_append: return "CONCAT_APPEND";
+            case opcode::op_deref_top: return "DEREF_TOP";
             case opcode::op_size_temp: return "SIZE_TEMP";
             case opcode::op_c_size: return "C_SIZE";
             case opcode::op_halt: return "HALT";

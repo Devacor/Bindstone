@@ -115,6 +115,7 @@ namespace jai::vm {
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
         bool unary_temp_operand(const expression* e);
         void compile_unary_into_temp(const expression_ptr& e, fused_operand& out);
+        void deref_ahead_of(const expression* pushed, const expression* later);
         bool ternary_temp_operand(const expression* e);
         void compile_ternary_into_temp(const expression_ptr& e, fused_operand& out);
         void land_ternary_in_temp(const ternary_expr* t, uint32_t dst);

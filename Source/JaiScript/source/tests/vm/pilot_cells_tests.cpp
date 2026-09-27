@@ -3616,7 +3616,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("a_global_read_before_a_writing_callee_is_not_hoisted", [this]() {
 			// row 152: `s + G + bump()` reads G before the call on both backends (the operand spills into a temp ahead of the graft); a bare
-			// global before the call of a body that writes one keeps the statement on the general form (no graft), so the order holds
+			// global before the call of a body that writes one is taken into a temp ahead of the graft (row 203), so the order holds
 			const std::string prelude =
 				"int G = 1;\n"
 				"int bump() { G = G + 1; return G; }\n"
@@ -3624,7 +3624,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + bump(); s = G + bump() + s; s = s + G + pure(i); } return s; };\n";
 			both(prelude + "run(8);", "", "a global read before a writing callee");
 			const std::string l = listing_run(prelude + "run(8);");
-			check_true(l.find("a global before the call the body writes") != std::string::npos, "bump is kept after a bare global read: " + l);
+			const size_t first = l.find("-- inlined bump");
+			check_true(first != std::string::npos && l.find("-- inlined bump", first + 1) != std::string::npos && l.find("OPERAND_TEMP") != std::string::npos, "bump grafts behind the bare global's snapshot: " + l);
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure is inlined after a global read: " + l);
 		});
 		test("string_and_var_parameters_at_the_grafts_edge", [this]() {
@@ -4577,6 +4578,127 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// row 203: a graft is an observing point for the names read to its left, as the real call is: a name a write anywhere may reach (a
+		// local a closure captures by reference, a reference declaration) keeps the call when the body writes a global, a field or an element
+		// row 203: an element read that a later operand's user code may write is read before that operand runs (a binary's left operand,
+		// an earlier element or entry of a container literal), as the interpreter reads it; a call argument binds late on both backends
+		test("an_element_read_ahead_of_a_writing_call_reads_first", [this]() {
+			const std::string src = "array<int> GA = [1, 2, 3];\n"
+				"int G2 = 1;\n"
+				"class B { int f = 1; }\n"
+				"B GB = B();\n"
+				"function wp() -> int { to_string(1); GA[1] = 100; return 1; }\n"
+				"function wg() -> int { to_string(1); G2 = 100; return 1; }\n"
+				"function wb() -> int { to_string(1); GB.f = 100; return 1; }\n"
+				"function add2(int a, int b) -> int { to_string(1); return a + b; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    int i = 1;\n"
+				"    GA[1] = 2; int r1 = GA[i] + wp(); out += to_string(r1) + \" \";\n"
+				"    G2 = 1; var& ref = G2; int r2 = ref + wg(); out += to_string(r2) + \" \";\n"
+				"    GB.f = 1; int r3 = GB.f + wb(); out += to_string(r3) + \" \";\n"
+				"    GA[1] = 2; bool r4 = GA[i] < wp() + 50; out += to_string(r4) + \" \";\n"
+				"    GA[1] = 2; int r5 = add2(GA[i], wp()); out += to_string(r5) + \" \";\n"
+				"    GA[1] = 2; int r6 = GA[1] + wp(); out += to_string(r6) + \" \";\n"
+				"    GA[1] = 2; var t = [GA[i], wp()]; out += to_json(t) + \" \";\n"
+				"    GA[1] = 2; var mm = {\"a\": GA[i], \"b\": wp()}; out += to_string(mm[\"a\"]) + \" \";\n"
+				"    GA[1] = 2; int r8 = GA[i]; r8 += wp(); out += to_string(r8) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "3 2 2 true 101 3 [2,1] 2 3 | 3 2 2 true 101 3 [2,1] 2 3 | ";
+			both(src, expected, "an element read ahead of a writing call");
+			both(src, expected, "an element read ahead of a writing call, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("a_graft_that_writes_keeps_captured_and_reference_names_to_its_left", [this]() {
+			const std::string src = "int G = 1;\n"
+				"array<int> GA = [1, 2, 3];\n"
+				"function bumpg() -> int { G = 100; return 1; }\n"
+				"function bumpa() -> int { GA[1] = 100; return 1; }\n"
+				"class C { int f = 1; int m() { f = 100; return 1; } int t() { return f + m(); } int t2() { return this.f + m(); } }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    int x = 1; var bump = [&]() { x = 100; return 1; };\n"
+				"    int r1 = x + bump(); out += to_string(r1) + \" \";\n"
+				"    x = 1; x += bump(); out += to_string(x) + \" \";\n"
+				"    x = 1; int r3 = x * 2 + bump(); out += to_string(r3) + \" \";\n"
+				"    int y = 1; var& ry = y; var bumpy = [&]() { y = 100; return 1; }; int r5 = ry + bumpy(); out += to_string(r5) + \" \";\n"
+				"    G = 1; int r6 = G + bumpg(); out += to_string(r6) + \" \";\n"
+				"    int i = 1; array<int> a = [1, 2, 3]; var bumpe = [&]() { a[1] = 100; return 1; }; int r7 = a[i] + bumpe(); out += to_string(r7) + \" \";\n"
+				"    GA[1] = 2; var& rg = GA[1]; int r8 = rg + bumpa(); out += to_string(r8) + \" \";\n"
+				"    C c = C(); out += to_string(c.t()) + \" \"; C c2 = C(); out += to_string(c2.t2()) + \" \";\n"
+				"    int z = 1; var bz = [&]() { z = 100; return 1; }; int r9 = z + (bz() + 1); out += to_string(r9) + \" \";\n"
+				"    int w = 1; G = 1; int r10 = w + bumpg(); out += to_string(r10) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "2 101 3 2 2 3 3 2 2 3 2 | 2 101 3 2 2 3 3 2 2 3 2 | ";
+			both(src, expected, "names left of a writing graft");
+			both(src, expected, "names left of a writing graft, proofs off", false);
+			const std::string l = listing_run(src);
+			check_true(l.find("-- inlined bumpg") != std::string::npos, "a private local left of a writing graft still grafts: " + l.substr(0, 400));
+			const std::string loop = "int G = 0;\n"
+				"function tick(int v) -> int { G = G + v; return v * 2; }\n"
+				"function run(int n) -> string { int acc = 0; int s = 0; var& rs = s;\n"
+				"  for (int i = 0; i < n; ++i) { int d = i & 3; acc = acc + tick(d); s = s + 1; int e = rs + tick(1); acc = acc + e; }\n"
+				"  return to_string(acc) + \" \" + to_string(G) + \" \" + to_string(s); }\n"
+				"run(40) + \",\" + run(3);";
+			both(loop, "", "a writing graft in a loop");
+			both(loop, "", "a writing graft in a loop, proofs off", false);
+			const std::string more = "array<int> GA = [1, 2, 3, 4];\n"
+				"function inner2() -> int { GA[2] = 100; return 1; }\n"
+				"function outer2(var& r) -> int { int k = r + inner2(); return k; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    int j = 0; array<int> a = [0, 0, 0]; var bumpj = [&]() { j = 2; return 7; }; a[j] = bumpj(); out += to_json(a) + \" \";\n"
+				"    GA[2] = 3; var& rg3 = GA[2]; int r11 = outer2(rg3); out += to_string(r11) + \" \";\n"
+				"    int q = 5; var bq = [&]() { q = 50; return 1; }; int r12 = q - bq(); out += to_string(r12) + \" \";\n"
+				"    int u = 1; var bu = [&]() { u = 100; return 2; }; int r13 = u * bu() + u; out += to_string(r13) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			both(more, "[0,0,7] 4 4 102 | [0,0,7] 4 4 102 | ", "a store target, a nested graft through a reference, and arithmetic around a writing graft");
+			both(more, "[0,0,7] 4 4 102 | [0,0,7] 4 4 102 | ", "a store target, a nested graft through a reference, and arithmetic around a writing graft, proofs off", false);
+			// a grafted lambda reads its captures through the definition's bindings: a closure over an environment takes the fallback call
+			const std::string scope = "int GX = 3;\n"
+				"function mk() -> var { int x = 5; return [&]() { return x; }; }\n"
+				"function mkv() -> var { int x = 6; return [=]() { return x; }; }\n"
+				"function callit(var fn) -> int { int x = 900; int r = fn() + 0; return r; }\n"
+				"function callit2(var fn) -> int { int GX = 800; int r = fn() + 0; return r; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    int x = 1; var f = [&]() { return x; }; var fv = [=]() { return x; };\n"
+				"    { int x = 50; int a = f() + 0; int b = fv() + 0; out += to_string(a) + \" \" + to_string(b) + \" \"; }\n"
+				"    for (int x = 7; x < 8; ++x) { int c = f() + 0; int d = fv() + 0; out += to_string(c) + \" \" + to_string(d) + \" \"; }\n"
+				"    var g = mk(); var gv = mkv(); { int x = 100; int e = g() + 0; int e2 = gv() + 0; out += to_string(e) + \" \" + to_string(e2) + \" \"; }\n"
+				"    int y = 2; var h = [&]() { return x; }; h = [&]() { return y; }; int hh = h() + 0; out += to_string(hh) + \" \";\n"
+				"    int p = callit(f); out += to_string(p) + \" \";\n"
+				"    var gl = [&]() { return GX; }; { int GX = 44; int q = gl() + 0; out += to_string(q) + \" \"; }\n"
+				"    int q2 = callit2(gl); out += to_string(q2) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			both(scope, "1 1 1 1 5 6 2 1 3 3 | 1 1 1 1 5 6 2 1 3 3 | ", "a lambda's captures across shadows, returns, reassignment and parameters");
+			both(scope, "1 1 1 1 5 6 2 1 3 3 | 1 1 1 1 5 6 2 1 3 3 | ", "a lambda's captures across shadows, returns, reassignment and parameters, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (const std::string* p : { &src, &more, &scope, &loop }) {
+				const std::string oracle = run_on(false, *p);
+				for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+					auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+					std::string got;
+					try { got = e->execute(*p).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+					check_eq(oracle, got, "a miss at every " + std::to_string(every));
+				}
 			}
 		});
 	}

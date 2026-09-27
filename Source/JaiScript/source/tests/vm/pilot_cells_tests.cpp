@@ -4976,6 +4976,31 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// `auto x = e;` holds e's value as it is: a typed use that fixed the local's cell to another kind (a speculative `s += x` on an int s)
+		// is a contract the landing meets or misses, never a declared type it converts to (the ordering fuzz band's metamorphic variant, seed 12176)
+		test("an_auto_declaration_lands_its_values_own_kind_in_a_block", [this]() {
+			const std::string src = "function rec(int n) -> int { if (n <= 0) { return 0; } return rec(n - 1); }\n"
+				"function half() { rec(1); return -0.5; }\n"
+				"function run() -> string {\n"
+				"  var L = [=]() { rec(1); return -0.5; };\n"
+				"  int s = 13; int t = 13; float f = 0.25; float g = 0.0;\n"
+				"  for (int i = 0; i < 3; i++) { auto m = L(); s += m; }\n"
+				"  for (int i = 0; i < 3; i++) { auto h = half(); t += h; }\n"
+				"  for (int i = 0; i < 3; i++) { int n = 41 + i; auto k = n; f = f + k; g = g + k / 2; }\n"
+				"  return to_string(s) + \" \" + to_string(t) + \" \" + to_string(f) + \" \" + to_string(g); }\n"
+				"run();";
+			const std::string expected = "10 10 126.25 62.0";
+			both(src, expected, "auto from a call result in a block");
+			both(src, expected, "auto from a call result in a block, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

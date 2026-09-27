@@ -8346,7 +8346,7 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		// auto declaration takes any kind; the flush stamps it with the declaration's type); the cell's contract, which a typed use
 		// may have fixed, is checked after the landing
 		const type_info* ds = loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
-		const uint8_t declared = ds && ds->base_type == script_value_type::jai_any_type ? 0 : contract;
+		const uint8_t declared = !ds || ds->base_type == script_value_type::jai_any_type ? 0 : contract;
 		if (declared != 0 && declared != kind) {
 			if (declared == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = declared; }
 			else if (declared == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {

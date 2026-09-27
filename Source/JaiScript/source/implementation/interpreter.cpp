@@ -8126,8 +8126,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
 
         // Look for the method in the parent class (use pre-computed member_id from parser)
-        script_value method = parent_def->get_method(expr->member_id);
-        if (method.is_null()) {
+        script_value method = parent_def->get_method(expr->member_id, false);
+        if (method.is_invalid() || method.is_null()) {
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
                 "parent class {0} has no member '{1}'", parent_def->get_type_id(), expr->member_id);
         }

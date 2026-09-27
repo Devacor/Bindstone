@@ -1097,6 +1097,7 @@ private:
 				{"map", "var m = {\"a\": 1};", "m.foo();", "map has no member or key 'foo'", check_mode::off},
 				{"object", "class Vec2 { int y = 0; } var v = Vec2();", "v.nosuch();", "Vec2 has no member 'nosuch'", check_mode::off},
 				{"int", "var i = 1;", "var z = i.nosuch;", "int has no member 'nosuch'", check_mode::off},
+				{"super", "class Base { int b = 1; } class D : Base { var f() { return super::x(); } }", "var z = D().f();", "parent class Base has no member 'x'", check_mode::off},
 				{"static", "class C { static int s = 0; }", "var z = C::nope;", "class C has no static member 'nope'", check_mode::off},
 				{"call an instance", "class Vec2 { int y = 0; } var v = Vec2();", "v();", "Cannot call 'v': it is a Vec2, not a function", check_mode::off},
 				{"call a string", "var s = \"x\";", "s();", "Cannot call 's': it is a string, not a function", check_mode::off},

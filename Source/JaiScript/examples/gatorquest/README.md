@@ -37,13 +37,55 @@ ESC             clear target, then the menu (save, load, music, sound, zoom, qui
 In a list: up/down (or W/S) to choose, ENTER to act, ESC to close. In the backpack ENTER uses or equips and
 `D` drops. Shopkeepers offer Buy/Sell, healers heal (and resurrect ghosts for free), the banker keeps a box.
 
+## Saves
+
+The game saves by itself every five minutes of play, from the menu (ESC, Save game) and on Save and quit. Starting
+again loads the saved world, and typing the name of a saved gator (the title lists them; ENTER alone picks the last
+one played) brings it back where it stood, with its gear, skills, quests and bank box. A new name starts a new gator
+in the same world.
+
+Files live in `saves/` beside the game folder when it is writable, otherwise in the per-user data folder
+(`%LOCALAPPDATA%\GatorQuest\saves` on Windows):
+
+```
+saves/world.gqw            the world: seed, clock, every monster and npc, items on the ground, chests, weather
+saves/chars/<name>.gqc     one file per character
+*.bak                      the previous good save, used when the current one is damaged
+```
+
+Both are plain text owned by the scripts: a `GATORQUEST-WORLD 1` / `GATORQUEST-CHAR 1` first line, one `key values`
+record per line, and a last line `end <checksum>`. The terrain is not stored; it regenerates from the seed. A save is
+written to `.tmp`, read back and verified, the old file becomes `.bak`, then the real file is replaced. Loading falls
+back to `.bak` (then `.tmp`) when a file is missing, cut short, fails its checksum or comes from a newer version;
+unknown records are skipped and missing ones keep their defaults, so older saves keep loading.
+
+## Dev mode: hot reload
+
+```
+jaiscript scripts/gatorquest.jai -- dev
+```
+
+Edit any `gq_*.jai` script while playing and save it: within a second the file is re-run in place, and the HUD says
+what was reloaded (or why the edit was rejected, with the file and line). The world, your gator and every monster
+carry on. Functions pick up their new bodies everywhere, constants and content tables are re-evaluated (change a
+monster's line in `gq_data.jai` and the next spawn has the new stats), and classes gain or lose fields with live
+instances migrating. The convention that makes it safe: in a reloadable file, a top-level declaration with an
+initializer is a constant, one without an initializer is state and is never reset. `gq_state.jai`, `gq_cstate.jai`
+and `gq_enums.jai` are not reloaded. On `--backend=interp` a broken edit ends the session instead of being rejected
+(an engine bug, see DX_REPORT.md).
+
 ## Headless modes (tests and captures)
 
 ```
-jaiscript scripts/gatorquest.jai -- smoke ticks 3000 bots 2      # autopilot session, prints STATE_HASH
+jaiscript scripts/gatorquest.jai -- smoke ticks 3000 bots 2      # autopilot session with a save/load round trip, prints STATE_HASH
+jaiscript scripts/gatorquest.jai -- savetest                     # save robustness: missing, corrupt, truncated, newer, sparse files
+jaiscript scripts/gatorquest.jai -- hotreload                    # edits five scripts mid-session and checks the carry-over
+jaiscript --backend=interp scripts/gatorquest.jai -- hotreload interp
 jaiscript scripts/gatorquest.jai -- shot ticks 900 every 300     # frame captures (.ans, .txt sketch, .png)
 jaiscript scripts/gatorquest.jai -- demo frames 600              # the real play loop driven by a bot
 jaiscript scripts/gatorquest.jai -- sheet                        # every sprite and tile texture as a PNG
 ```
 
-The STATE_HASH is identical on `--backend=vm` and `--backend=interp` for the same seed and tick count.
+The STATE_HASH is identical on `--backend=vm` and `--backend=interp` for the same seed and tick count, and the same
+with or without the mid-session round trip (`noroundtrip`): saving and loading is invisible to the simulation.
+Test modes exit with the number of failures.

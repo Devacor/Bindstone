@@ -13995,6 +13995,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
+    // A native exception unwinding through this activation (a C++ callable, a removed-element reference, a bare rethrow
+    // with nothing to rethrow) pops the frame first and converts at the caller's call boundary (docs/EXCEPTION_DESIGN.md)
+    size_t last_body_idx = 0;
+    try {
     for (size_t i = 0; i < function.parameters().size(); ++i) {
         const auto& param = function.parameters()[i];
 
@@ -14150,7 +14154,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Execute function body without creating another environment
     // (since we already created one for the function call)
     // Track which declaration index we're at (needed for coroutine yield)
-    size_t last_body_idx = 0;
     for (size_t body_idx = 0; body_idx < function.body->declarations.size(); ++body_idx) {
         last_body_idx = body_idx;
         const auto& decl = function.body->declarations[body_idx];
@@ -14170,6 +14173,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (hasReturnValue_ || hasYieldRequest_ || is_unwinding_) {
             break;
         }
+    }
+    } catch (...) {
+        if (call_stack_.size() > frame_index) {
+            while (call_stack_.size() > frame_index + 1) { call_stack_.pop_back(); }   // frames an unwound callee left behind
+            cleanup();
+        }
+        throw;
     }
 
     // Get return value

@@ -1009,6 +1009,27 @@ private:
 				run();
 			)", "yxqp211");
 		});
+		test("a_fresh_coroutine_starts_with_no_active_exception", [this]() {
+			// docs/EXCEPTION_DESIGN.md addendum: a bare throw; in a fresh coroutine raises even when the resumer sits inside a catch
+			expect("coroutine rethrow", R"(
+				coroutine int c() { throw; yield 1; }
+				function run() -> string {
+					string r = "";
+					try { throw "outer"; } catch (e) { try { var h = c(); h.resume(); } catch (e2) { r = e2; } r += "|" + e; }
+					return r;
+				}
+				run();
+			)", "No exception to re-throw|outer");
+		});
+		test("a_native_exception_out_of_a_typed_callee_leaves_the_callers_frame_intact", [this]() {
+			// docs/EXCEPTION_DESIGN.md addendum: a native exception converts at the caller, the throwing frame popped first;
+			// the caller's own typed return still converts against the caller's declaration
+			expect("frame pop", R"(
+				function f() -> int { throw; }
+				function a() -> string { string r = ""; try { f(); } catch (e) { r = "caught:" + e; } return r; }
+				a();
+			)", "caught:No exception to re-throw");
+		});
 		test("a_finished_coroutine_restores_the_resumers_exception", [this]() {
 			expect("resumer trio", R"(
 				coroutine int g() { yield 1; }
@@ -1065,18 +1086,6 @@ private:
 	}
 
 	void known_bugs() {
-		test("a_fresh_coroutine_starts_with_no_active_exception", [this]() {
-			// docs/EXCEPTION_DESIGN.md addendum: a bare throw; in a fresh coroutine raises even when the resumer sits inside a catch
-			expect("coroutine rethrow", R"(
-				coroutine int c() { throw; yield 1; }
-				function run() -> string {
-					string r = "";
-					try { throw "outer"; } catch (e) { try { var h = c(); h.resume(); } catch (e2) { r = e2; } r += "|" + e; }
-					return r;
-				}
-				run();
-			)", "No exception to re-throw|outer");
-		});
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding
 			expect("top block", R"(

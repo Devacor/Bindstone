@@ -112,6 +112,7 @@ namespace {
 			case opcode::op_pop:
 			case opcode::op_dup:
 			case opcode::op_to_bool:
+			case opcode::op_deref_top:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -296,6 +297,7 @@ namespace {
 			case opcode::op_pop:
 			case opcode::op_dup:
 			case opcode::op_to_bool:
+			case opcode::op_deref_top:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -1909,17 +1911,30 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	}
 	case node_type::array_literal_expr: {
 		auto* arr = static_cast<array_literal_expr*>(expr.get());
-		for (const auto& el : arr->elements) {
-			compile_expression(el);
+		for (size_t k = 0; k < arr->elements.size(); ++k) {
+			compile_expression(arr->elements[k]);
+			for (size_t n = k + 1; n < arr->elements.size(); ++n) {
+				if (!detail::transient_read_marker::callout_free(arr->elements[n].get())) { deref_ahead_of(arr->elements[k].get(), arr->elements[n].get()); break; }
+			}
 		}
 		emit(opcode::op_array, static_cast<uint32_t>(arr->elements.size()));
 		return;
 	}
 	case node_type::map_literal_expr: {
 		auto* m = static_cast<map_literal_expr*>(expr.get());
-		for (const auto& kv : m->entries) {
-			compile_expression(kv.first);
-			compile_expression(kv.second);
+		auto later_callout = [&](size_t entry, bool from_value) -> const expression* {
+			if (!from_value && !detail::transient_read_marker::callout_free(m->entries[entry].second.get())) return m->entries[entry].second.get();
+			for (size_t n = entry + 1; n < m->entries.size(); ++n) {
+				if (!detail::transient_read_marker::callout_free(m->entries[n].first.get())) return m->entries[n].first.get();
+				if (!detail::transient_read_marker::callout_free(m->entries[n].second.get())) return m->entries[n].second.get();
+			}
+			return nullptr;
+		};
+		for (size_t k = 0; k < m->entries.size(); ++k) {
+			compile_expression(m->entries[k].first);
+			if (const expression* later = later_callout(k, false)) { deref_ahead_of(m->entries[k].first.get(), later); }
+			compile_expression(m->entries[k].second);
+			if (const expression* later = later_callout(k, true)) { deref_ahead_of(m->entries[k].second.get(), later); }
 		}
 		emit(opcode::op_map, static_cast<uint32_t>(m->entries.size()));
 		return;
@@ -4873,6 +4888,14 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
 }
 
+// an element read pushed as a reference whose consumer reads it only after a later operand that may run user code: its value is
+// taken now, as the interpreter reads an operand before evaluating the next
+void vm_compiler::deref_ahead_of(const expression* pushed, const expression* later) {
+	if (!pushed || pushed->get_type() != node_type::binary_expr || static_cast<const binary_expr*>(pushed)->op.type != token_type::left_bracket) return;
+	if (static_cast<const binary_expr*>(pushed)->transient_element_read || detail::transient_read_marker::callout_free(later)) return;
+	emit(opcode::op_deref_top);
+}
+
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		compile_expression(expr->left);
@@ -5085,6 +5108,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	}
 
 	compile_expression(expr->left);
+	deref_ahead_of(expr->left.get(), expr->right.get());
 	compile_expression(expr->right);
 	emit(opcode::op_binary, static_cast<uint32_t>(expr->op.type), binary_shape_none);
 }

@@ -17585,6 +17585,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				stack_.push_back(script_value(is_truthy(v), engine_));
 				break;
 			}
+			case opcode::op_deref_top:
+				if (stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE) { script_value v = stack_.back().deref(); stack_.back() = std::move(v); }
+				break;
 
 			case opcode::op_load: VM_TRY_OP(exec_load(f, ins)); break;
 			case opcode::op_store:

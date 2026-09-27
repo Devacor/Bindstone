@@ -563,8 +563,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 }
 
 // the first call the statement runs is a leaf the graft takes, in an unconditional position, with every operand evaluated before
-// it a literal, an identifier the body leaves alone, or a stamped subtree that spills into a typed temp. Any other first call ends
-// the statement's hoisting: a call after it would run behind an effect.
+// it a literal, a private local the body leaves alone, a name any write may reach taken into a temp, or a stamped subtree that
+// spills into a typed temp. Any other first call ends the statement's hoisting: a call after it would run behind an effect.
 bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out) {
 	land_ctx plain; plain.eng = engine_;
 	std::vector<std::shared_ptr<call_expr>> events; bool unsupported = false;
@@ -609,6 +609,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	std::vector<expression_ptr> path;
 	if (!find_path(root, call.get(), path)) { out.why = "a position the graft does not take"; return false; }
 	std::vector<expression_ptr> pre;
+	std::vector<const expression*> callee_names;   // an outer call's callee name resolves where it stands
 	for (size_t k = 0; k + 1 < path.size(); ++k) {
 		const expression_ptr& a = path[k]; const expression* x = path[k + 1].get();
 		switch (a->get_type()) {
@@ -624,7 +625,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			if (x == ce->callee.get()) break;
 			if (!ce->callee) { out.why = "a callee that is not a name"; return false; }
 			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
-			else if (ce->callee->get_type() == node_type::identifier_expr) { pre.push_back(ce->callee); }
+			else if (ce->callee->get_type() == node_type::identifier_expr) { pre.push_back(ce->callee); callee_names.push_back(ce->callee.get()); }
 			else { out.why = "an argument of a computed callee"; return false; }
 			for (const auto& arg : ce->arguments) { if (arg.get() == x) break; pre.push_back(arg); }
 			break;
@@ -634,11 +635,23 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 	}
 	out.spills.clear();
-	bool free_identifier = false, free_global = false;
+	bool free_identifier = false, in_place = false, free_global = false;
 	for (const expression_ptr& p : pre) {
 		switch (p->get_type()) {
 		case node_type::literal_expr: break;
-		case node_type::identifier_expr: { free_identifier = true; if (static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX) { free_global = true; } break; }
+		case node_type::identifier_expr: {
+			free_identifier = true;
+			const bool global = static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX;
+			if ((global || !private_local(p.get())) && std::find(callee_names.begin(), callee_names.end(), p.get()) == callee_names.end()) {
+				// a global, a closure's by-reference capture or a reference: the call (the graft, or the fallback's callee, whatever the name binds
+				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it
+				out.spills.emplace_back(p, script_value_type::jai_any_type);
+				break;
+			}
+			in_place = true;
+			if (global) { free_global = true; }
+			break;
+		}
 		default: {
 			const script_value_type kind = spill_kind(p.get());
 			if (kind == script_value_type::jai_null_type || !landable(p.get(), &plain)) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
@@ -647,7 +660,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 		}
 	}
-	if (free_identifier && probe.writes_ref) { out.why = "a name before the call the body may write through its reference"; return false; }   // an identifier before the call may be the referent
+	if (in_place && probe.writes_ref) { out.why = "a name before the call the body may write through its reference"; return false; }   // an identifier before the call may be the referent
 	if (free_global && (probe.writes_global || probe.writes_member)) { out.why = "a global before the call the body writes"; return false; }
 	if (out.receiver && free_identifier && probe.writes_member) { out.why = "a name before the call a method may write"; return false; }   // an identifier before the call may alias the receiver's instance
 	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
@@ -716,6 +729,14 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	sc.budget = SIZE_MAX;
 	for (const auto& [sub, kind] : plan.spills) {
 		auto tid = inline_temp(sub->location);
+		if (kind == script_value_type::jai_any_type) {   // a name's value as it stands
+			fused_binary_proto p;
+			p.left = make_fused_operand(sub);
+			chunk_->fused_binary_protos.push_back(std::move(p));
+			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), static_cast<uint32_t>(tid->slot_index), 0);
+			sc.spills.emplace_back(sub.get(), tid);
+			continue;
+		}
 		auto sd = std::make_shared<variable_decl>(sub->location, inline_type(kind), std::string_view("\x01inl"), inline_symbol_, sub);
 		sd->slot_index = tid->slot_index; sd->static_init_proof = proof_same_type;
 		chunk_->nodes.push_back(sd);

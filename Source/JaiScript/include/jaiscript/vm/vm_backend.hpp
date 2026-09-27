@@ -109,6 +109,7 @@ namespace jai::vm {
             std::string file;
             std::vector<uint32_t> lines;
             std::vector<chunk::cell_refusal> refusals;   // the loops the translation refused (copied once from the chunk)
+            std::vector<chunk::inline_refusal> inline_refusals;   // the calls the inliner kept (copied once: the chunk may be gone by the dump)
             size_t closed_loops = 0;
             std::vector<uint64_t> ip_cycles;
             std::vector<uint64_t> ip_counts;

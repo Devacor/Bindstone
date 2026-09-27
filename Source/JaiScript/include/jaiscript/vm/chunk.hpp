@@ -393,7 +393,7 @@ namespace jai::vm {
             // flush stamps with decl_stamp, the declaration's type, whatever later stores land)
             // string_borrow: a temp that may hold a borrowed string node, because its only consumer replays from the producer on a miss
             // (the append pair); any other temp refuses a string element, since a miss at its consumer reads the temp's slot
-            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; bool iter_index = false; };   // iter_index: a range-for block's index, the iteration state's (never a slot's)
+            struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; bool iter_index = false; bool open_def = false; };   // iter_index: a range-for block's index, the iteration state's (never a slot's); open_def: a compiler value with a definition of no declared kind (a kind a typed read fixed converts none of its landings)
             uint32_t head, back, copy_head, copy_back, exit_ip;
             // a straight-line region (no back edge): entered at head by op_cells_enter, left at back by the copy's last exit; the trampoline
             // holds the instruction the entry replaced and a jump to head + 1, where a refusal or a miss at head resumes the general form
@@ -500,7 +500,8 @@ namespace jai::vm {
             std::shared_ptr<const function_decl> decl;   // the callee, pinned: the trace names it, and body stays a live identity for the guard (no address reuse)
             const ast_node* call_stmt = nullptr;   // the caller's statement: the trace's line for the caller's frame
             uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
-            bool method = false;                   // a method graft: the receiver slot's instance resolves member_id to the body
+            uint32_t result_slot = k_invalid_u32;  // the result temp (every return defines it, the join reads it); k_invalid_u32: a void callee
+            bool method = false;                  // a method graft: the receiver slot's instance resolves member_id to the body
             uint32_t receiver_slot = k_invalid_u32;
             uint64_t member_id = 0;
             const class_definition* field_class = nullptr;   // the class of the bare fields the body names (the receiver's exact class); null: none

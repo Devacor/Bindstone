@@ -8375,7 +8375,9 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		}
 	} else if (loop.cells[dk].temp && contract != 0 && kind != contract) {
 		// a compiler value under a declared type (a graft's parameter, local or result): the declaration's conversion, as a local's; the
-		// copy's operations read the cell by its contract, so a kind the contract does not hold never lands
+		// copy's operations read the cell by its contract, so a kind the contract does not hold never lands. A definition of no declared kind
+		// converts nothing: its contract is a typed read's, and the value misses onto the general form
+		if (loop.cells[dk].open_def) return false;
 		if (contract == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = contract; }
 		else if (contract == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
 			const script_float d = cell_float_of_bits(bits);

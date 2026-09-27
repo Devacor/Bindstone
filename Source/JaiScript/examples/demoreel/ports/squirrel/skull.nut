@@ -310,7 +310,7 @@ function sk_material(x, y, z) {
 }
 
 // a pixel's palette index plus its depth (0..255) above bit 10, for the particle pass
-function sk_trace(dx, dy, dz, px, py, cand) {
+function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 	local ox = ::SK_EX;
 	local oy = ::SK_EY;
 	local oz = ::SK_EZ;
@@ -318,18 +318,19 @@ function sk_trace(dx, dy, dz, px, py, cand) {
 	local nc = 0;
 	if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_BGX, ::SK_BGY, ::SK_BGZ, 0.62)) { groups = 1; }
 	if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_HGX, ::SK_HGY, ::SK_HGZ, 0.74)) { groups = groups + 2; }
-	local crown0 = ::SK_CROWN0;
-	for (local c = 0; c < crown0; ++c) {
-		if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_CMX[c], ::SK_CMY[c], ::SK_CMZ[c], ::SK_CB[c] + 0.01)) {
-			cand[nc] = c;
-			nc = nc + 1;
-		}
-	}
-	local ng = ::SK_NG;
-	for (local g = 3; g < ng; ++g) {
-		if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_GX[g], ::SK_GY[g], ::SK_GZ[g], ::SK_GR[g] + 0.01)) {
-			cand[nc] = 100 + g;
-			nc = nc + 1;
+	for (local k = 0; k < nrow; ++k) {
+		local c = row[k];
+		if (c < 100) {
+			if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_CMX[c], ::SK_CMY[c], ::SK_CMZ[c], ::SK_CB[c] + 0.01)) {
+				cand[nc] = c;
+				nc = nc + 1;
+			}
+		} else {
+			local g = c - 100;
+			if (::sk_ray_near(ox, oy, oz, dx, dy, dz, ::SK_GX[g], ::SK_GY[g], ::SK_GZ[g], ::SK_GR[g] + 0.01)) {
+				cand[nc] = c;
+				nc = nc + 1;
+			}
 		}
 	}
 	local near = groups != 0 || nc != 0;
@@ -527,13 +528,30 @@ function sk_row(y) {
 	local half_h = ::SK_H * 0.5;
 	local zoom = 0.6 / half_h;
 	local v = (half_h - y - 0.5) * zoom;
+	// the row's rays all lie in the plane through the eye spanned by R and F + U v: a capsule (0..SK_CROWN0) or a leg glow
+	// (100 + g) farther from that plane than its reach passes near none of them, so the pixels test only the rest
+	local ax = ::SK_FX + ::SK_UX * v, ay = ::SK_FY + ::SK_UY * v, az = ::SK_FZ + ::SK_UZ * v;
+	local nx = ::SK_RY * az - ::SK_RZ * ay;
+	local ny = ::SK_RZ * ax - ::SK_RX * az;
+	local nz = ::SK_RX * ay - ::SK_RY * ax;
+	local nl = 1.0 / ::sqrt(nx * nx + ny * ny + nz * nz);
+	local row = [];
+	for (local c = 0; c < ::SK_CROWN0; ++c) {
+		local off = ((::SK_CMX[c] - ::SK_EX) * nx + (::SK_CMY[c] - ::SK_EY) * ny + (::SK_CMZ[c] - ::SK_EZ) * nz) * nl;
+		if (::fabs(off) < ::SK_CB[c] + 0.02) { row.push(c); }
+	}
+	for (local g = 3; g < ::SK_NG; ++g) {
+		local off = ((::SK_GX[g] - ::SK_EX) * nx + (::SK_GY[g] - ::SK_EY) * ny + (::SK_GZ[g] - ::SK_EZ) * nz) * nl;
+		if (::fabs(off) < ::SK_GR[g] + 0.02) { row.push(100 + g); }
+	}
+	local nrow = row.len();
 	for (local x = 0; x < ww; ++x) {
 		local u = (x + 0.5 - ww * 0.5) * zoom;
 		local dx = ::SK_FX + ::SK_RX * u + ::SK_UX * v;
 		local dy = ::SK_FY + ::SK_RY * u + ::SK_UY * v;
 		local dz = ::SK_FZ + ::SK_RZ * u + ::SK_UZ * v;
 		local il = 1.0 / ::sqrt(dx * dx + dy * dy + dz * dz);
-		out.push(::sk_trace(dx * il, dy * il, dz * il, x, y, cand));
+		out.push(::sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow));
 	}
 	return out;
 }

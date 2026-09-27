@@ -275,7 +275,7 @@ local function sk_material(x, y, z)
 end
 
 -- a pixel's palette index plus its depth (0..255) above bit 10, for the particle pass
-local function sk_trace(dx, dy, dz, px, py, cand)
+local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 	local ox = SK_EX
 	local oy = SK_EY
 	local oz = SK_EZ
@@ -283,16 +283,20 @@ local function sk_trace(dx, dy, dz, px, py, cand)
 	local nc = 0
 	if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_BGX, SK_BGY, SK_BGZ, 0.62) then groups = 1 end
 	if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_HGX, SK_HGY, SK_HGZ, 0.74) then groups = groups + 2 end
-	for c = 1, SK_CROWN0 do
-		if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[c], SK_CMY[c], SK_CMZ[c], SK_CB[c] + 0.01) then
-			nc = nc + 1
-			cand[nc] = c - 1
-		end
-	end
-	for g = 4, SK_NG do
-		if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_GX[g], SK_GY[g], SK_GZ[g], SK_GR[g] + 0.01) then
-			nc = nc + 1
-			cand[nc] = 99 + g
+	for k = 1, nrow do
+		local c = row[k]
+		if c < 100 then
+			local ci = c + 1
+			if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[ci], SK_CMY[ci], SK_CMZ[ci], SK_CB[ci] + 0.01) then
+				nc = nc + 1
+				cand[nc] = c
+			end
+		else
+			local g = c - 99
+			if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_GX[g], SK_GY[g], SK_GZ[g], SK_GR[g] + 0.01) then
+				nc = nc + 1
+				cand[nc] = c
+			end
 		end
 	end
 	local near = groups ~= 0 or nc ~= 0
@@ -493,6 +497,22 @@ local function sk_row(y, out, cand)
 	local zoom = 0.6 / half_h
 	local v = (half_h - y - 0.5) * zoom
 	local fx, fy, fz, rx, ry, rz, ux, uy, uz = SK_FX, SK_FY, SK_FZ, SK_RX, SK_RY, SK_RZ, SK_UX, SK_UY, SK_UZ
+	-- the row's rays all lie in the plane through the eye spanned by R and F + U v: a capsule or a leg glow farther from
+	-- that plane than its reach passes near none of them, so the pixels test only the rest
+	local ax = fx + ux * v; local ay = fy + uy * v; local az = fz + uz * v
+	local nx = ry * az - rz * ay
+	local ny = rz * ax - rx * az
+	local nz = rx * ay - ry * ax
+	local nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz)
+	local row, nrow = {}, 0
+	for c = 1, SK_CROWN0 do
+		local off = ((SK_CMX[c] - SK_EX) * nx + (SK_CMY[c] - SK_EY) * ny + (SK_CMZ[c] - SK_EZ) * nz) * nl
+		if math.abs(off) < SK_CB[c] + 0.02 then nrow = nrow + 1; row[nrow] = c - 1 end
+	end
+	for g = 4, SK_NG do
+		local off = ((SK_GX[g] - SK_EX) * nx + (SK_GY[g] - SK_EY) * ny + (SK_GZ[g] - SK_EZ) * nz) * nl
+		if math.abs(off) < SK_GR[g] + 0.02 then nrow = nrow + 1; row[nrow] = 99 + g end
+	end
 	local base = y * ww
 	for x = 0, ww - 1 do
 		local u = (x + 0.5 - ww * 0.5) * zoom
@@ -500,7 +520,7 @@ local function sk_row(y, out, cand)
 		local dy = fy + ry * u + uy * v
 		local dz = fz + rz * u + uz * v
 		local il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz)
-		out[base + x + 1] = sk_trace(dx * il, dy * il, dz * il, x, y, cand)
+		out[base + x + 1] = sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow)
 	end
 end
 

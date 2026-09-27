@@ -212,12 +212,9 @@ function sk_ring(float x, float y, float z) -> float {
 
 function sk_gem(float x, float y, float z) -> float {
 	float ox = x - SK_GMX; float oy = y - SK_GMY; float oz = z - SK_GMZ;
-	float a = ox * SK_GAX + oy * SK_GAY + oz * SK_GAZ;
-	float b = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ;
-	float c = ox * SK_GBX + oy * SK_GBY + oz * SK_GBZ;
-	a = a < 0.0 ? -a : a;
-	b = b < 0.0 ? -b : b;
-	c = c < 0.0 ? -c : c;
+	float a = math::abs(ox * SK_GAX + oy * SK_GAY + oz * SK_GAZ);
+	float b = math::abs(ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ);
+	float c = math::abs(ox * SK_GBX + oy * SK_GBY + oz * SK_GBZ);
 	return (a + b * 0.62 + c - 0.075) * 0.54;
 }
 
@@ -316,8 +313,8 @@ function sk_material(float x, float y, float z) -> int {
 	return m;
 }
 
-// a pixel's palette index plus its depth (0..255) above bit 10, for the particle pass
-function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand) -> int {
+// a pixel's palette index plus its depth (0..255) above bit 10, for the particle pass; row: the row's candidate parts (see sk_row)
+function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand, array<int>& row, int nrow) -> int {
 	float ox = SK_EX;
 	float oy = SK_EY;
 	float oz = SK_EZ;
@@ -325,16 +322,19 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	int nc = 0;
 	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_BGX, SK_BGY, SK_BGZ, 0.62)) { groups = 1; }
 	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_HGX, SK_HGY, SK_HGZ, 0.74)) { groups = groups + 2; }
-	for (int c = 0; c < SK_CROWN0; ++c) {
-		if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[c], SK_CMY[c], SK_CMZ[c], SK_CB[c] + 0.01)) {
-			cand[nc] = c;
-			nc = nc + 1;
-		}
-	}
-	for (int g = 3; g < SK_NG; ++g) {
-		if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_GX[g], SK_GY[g], SK_GZ[g], SK_GR[g] + 0.01)) {
-			cand[nc] = 100 + g;
-			nc = nc + 1;
+	for (int k = 0; k < nrow; ++k) {
+		int c = row[k];
+		if (c < 100) {
+			if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[c], SK_CMY[c], SK_CMZ[c], SK_CB[c] + 0.01)) {
+				cand[nc] = c;
+				nc = nc + 1;
+			}
+		} else {
+			int g = c - 100;
+			if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_GX[g], SK_GY[g], SK_GZ[g], SK_GR[g] + 0.01)) {
+				cand[nc] = c;
+				nc = nc + 1;
+			}
 		}
 	}
 	bool near = groups != 0 || nc != 0;
@@ -536,13 +536,32 @@ function sk_row(int y) -> array<int> {
 	float half_h = SK_H * 0.5;
 	float zoom = 0.6 / half_h;
 	float v = (half_h - y - 0.5) * zoom;
+	// the row's rays all lie in the plane through the eye spanned by R and F + U v: a capsule (0..SK_CROWN0) or a leg glow
+	// (100 + g) farther from that plane than its reach passes near none of them, so the pixels test only the rest
+	float ax = SK_FX + SK_UX * v;
+	float ay = SK_FY + SK_UY * v;
+	float az = SK_FZ + SK_UZ * v;
+	float nx = SK_RY * az - SK_RZ * ay;
+	float ny = SK_RZ * ax - SK_RX * az;
+	float nz = SK_RX * ay - SK_RY * ax;
+	float nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz);
+	array<int> row = [];
+	for (int c = 0; c < SK_CROWN0; ++c) {
+		float off = ((SK_CMX[c] - SK_EX) * nx + (SK_CMY[c] - SK_EY) * ny + (SK_CMZ[c] - SK_EZ) * nz) * nl;
+		if (math::abs(off) < SK_CB[c] + 0.02) { row.push(c); }
+	}
+	for (int g = 3; g < SK_NG; ++g) {
+		float off = ((SK_GX[g] - SK_EX) * nx + (SK_GY[g] - SK_EY) * ny + (SK_GZ[g] - SK_EZ) * nz) * nl;
+		if (math::abs(off) < SK_GR[g] + 0.02) { row.push(100 + g); }
+	}
+	int nrow = row.size();
 	for (int x = 0; x < ww; ++x) {
 		float u = (x + 0.5 - ww * 0.5) * zoom;
 		float dx = SK_FX + SK_RX * u + SK_UX * v;
 		float dy = SK_FY + SK_RY * u + SK_UY * v;
 		float dz = SK_FZ + SK_RZ * u + SK_UZ * v;
 		float il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
-		out.push(sk_trace(dx * il, dy * il, dz * il, x, y, cand));
+		out.push(sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow));
 	}
 	return out;
 }

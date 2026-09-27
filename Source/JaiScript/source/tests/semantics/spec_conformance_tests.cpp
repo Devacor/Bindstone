@@ -697,6 +697,24 @@ private:
 
 	// docs/grammar.md forStatement, CLAUDE.md operators ("and compound assigns"), docs/integer_semantics.md
 	void grammar_and_operators() {
+		test("a_for_initializer_may_be_an_expression", [this]() {
+			// docs/grammar.md: forStatement = "for" "(" (variableDeclaration | expression)? ";" ...
+			expect("for init", R"(
+				class P { int x = 0; P(int v) { x = v; } }
+				function run() -> string {
+					int i = 0; int s = 0;
+					for (i = 0; i < 3; i++) { s += i; }
+					var o = [0];
+					for (o[0] = 1; o[0] < 3; o[0]++) { s += 10; }
+					int j = 5;
+					for (j += 1; j < 8; j++) { s += 100; }
+					for (++j; j < 11; j++) { s += 1000; }
+					for (P p = P(2); p.x < 4; p.x++) { s += 10000; }
+					return "" + i + "," + s + "," + o[0] + "," + j;
+				}
+				run();
+			)", "3,22223,3,11");
+		});
 		test("binary_minus_overflow_follows_the_build_policy", [this]() {
 			auto probe = engine::make();
 			const std::string expected = probe->throw_on_overflow() ? "Integer overflow in '-'" : "9223372036854775807";
@@ -1018,22 +1036,6 @@ private:
 				}
 				run();
 			)", "No exception to re-throw|outer");
-		});
-		test("a_for_initializer_may_be_an_expression", [this]() {
-			// docs/grammar.md: forStatement = "for" "(" (variableDeclaration | expression)? ";" ...
-			expect("for init", R"(
-				function run() -> string {
-					int i = 0; int s = 0;
-					for (i = 0; i < 3; i++) { s += i; }
-					var o = [0];
-					for (o[0] = 1; o[0] < 3; o[0]++) { s += 10; }
-					int j = 5;
-					for (j += 1; j < 8; j++) { s += 100; }
-					for (++j; j < 11; j++) { s += 1000; }
-					return "" + i + "," + s + "," + o[0] + "," + j;
-				}
-				run();
-			)", "3,2223,3,11");
 		});
 		test("a_namespace_variable_may_be_reference_declared", [this]() {
 			// docs/namespaces.md Variables: a namespace variable takes the spellings a program-scope variable takes, a reference included

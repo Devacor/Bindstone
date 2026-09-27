@@ -185,6 +185,25 @@ Every scene holds 30 fps on the VM with room to spare (mean 2.8 ms, worst
   re-binds them on the next frame; a reload mid-transition cancels the
   transition (the live scene rebuilds), so no scene reads a reset buffer.
 
+### Scoreboard
+
+`scenes/skull_natural.jai` is OSSUARY written the way a user would write it:
+the same algorithms and the same frames as `skull.jai` (scene hash
+`1aba3d7537895828`), without the spellings chosen to fit the VM's fast paths
+(one `sk_world`, the warp's amplitude read left of its sine, ternary folds,
+one `sk_crown` holding its flames, the row pushing `sk_trace`'s result). The
+ratio of the two files' serial OSSUARY rows, natural over shaped, measures how
+general the VM's fast path is: at 1.0 plain code runs as fast as code written
+for the VM. The host loads `skull.jai` only, so run the natural file from a
+copy of the scenes directory:
+
+```
+cp -r scenes /tmp/natural_scenes
+cp scenes/skull_natural.jai /tmp/natural_scenes/skull.jai
+jai_demoreel --perf 30 --backend vm --workers 1                               # shaped
+jai_demoreel --perf 30 --backend vm --workers 1 --scenes /tmp/natural_scenes  # natural
+```
+
 ## Console performance
 
 Half-block frames carry two colors per cell, so a frame is bigger than the old

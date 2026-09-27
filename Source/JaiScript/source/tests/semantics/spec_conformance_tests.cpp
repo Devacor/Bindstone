@@ -121,13 +121,16 @@ public:
 		callback_errors();
 		user_assignment_operator();
 		textless_errors();
+		checker_verdicts();
+		instance_variable_overlays();
+		file_locations();
+		privilege_order();
+		guide_examples();
+		parallel_contracts();
+		native_exceptions();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
-#endif
-#ifdef JAISCRIPT_SPEC_PENDING_RULINGS
-		// open questions for Dev (docs/spec_conformance.md): the expected values follow the likeliest reading and wait for the ruling
-		pending_rulings();
 #endif
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
@@ -1409,21 +1412,229 @@ private:
 		});
 	}
 
-	void pending_rulings() {
-		test("bitwise_compound_assignments_on_every_lvalue", [this]() {
-			// CLAUDE.md lists "& | ^ << >> ... and compound assigns"; the bitwise compound forms do not parse today
-			expect("bitwise compound", R"(
-				class C { int f = 5; }
-				function run() -> string {
-					int x = 6; x &= 3; x |= 8; x ^= 1; x <<= 2; x >>= 1;
-					int y = 1; string err = "";
-					try { y <<= 64; } catch (e) { err = e; }
-					array<int> a = [12]; a[0] &= 10;
-					C c = C(); c.f ^= 3;
-					return "" + x + "|" + err + "|" + y + "|" + a[0] + "|" + c.f;
-				}
-				run();
-			)", "22|Shift amount must be between 0 and 63|1|8|6");
+	// docs/static_checking.md rule table and precision map: load verdicts (engine::check reports, nothing runs)
+	void checker_verdicts() {
+		test("checker_verdicts_follow_the_rule_table", [this]() {
+			struct row { const char* label; const char* src; size_t errors; };
+			const row rows[] = {
+				{"map into int", "int x = {\"k\": 1};", 1},
+				{"typed array into string array", "array<int> a = [1]; array<string> b = a;", 1},
+				{"typed array into float array", "array<int> a = [1]; array<float> c = a;", 0},
+				{"containers and callables into a class slot", "class C { int v = 0; } C a = [1]; C b = {\"k\": 1}; C d = [](){ return 1; };", 3},
+				{"auto from null stays dynamic", "auto x = null; x = 1; x = \"s\";", 0},
+				{"reference parameters are lenient", "function f(int& r) { } string s = \"x\"; f(s);", 0},
+				{"itrunc is int", "char c = math::itrunc(1.5);", 1},
+				{"sin is float", "char c = math::sin(1.0);", 1},
+				{"sin into int converts", "int i = math::sin(1.0);", 0},
+				{"abs and max follow their operands", "char a = math::abs(1); char b = math::abs(1.5); char c = math::max(1, 2.5);", 2},
+				{"random_seed is unknown", "char c = math::random_seed(1);", 0},
+				{"math arity is a runtime error", "var z = math::pow(2);", 0},
+				{"namespace paths are lenient", "namespace a::b { int c = 1; } var x = a::b::zzz;", 0},
+				{"handle builtins on any object", "class C { int v = 0; } C c = C(); int n = c.use_count(); bool u = c.unique(); c.reset();", 0},
+				{"a class method wins over the handle builtin", "class D { string use_count() { return \"m\"; } } int n = D().use_count();", 1},
+				{"builtin results stay lenient", "map<string, int> m = {\"a\": 1}; var k = m.keys()[0].to_upper();", 0},
+				{"element stores through a range reference are runtime", "array<int> a = [1]; for (auto& x : a) { x = \"s\"; }", 0},
+				{"out of bounds is runtime", "array<int> a = [1]; int x = a[5];", 0},
+				{"namespace variables are dynamic reads", "namespace ns { int x = 1; } char c = ns::x;", 0},
+				{"missing map key is runtime", "map<string, int> m = {\"a\": 1}; int x = m[\"missing\"];", 0},
+			};
+			for (const auto& r : rows) {
+				every_config(r.label, std::to_string(r.errors), [&](engine& e) { return std::to_string(e.check(r.src).error_count()); });
+			}
+		});
+		test("a_bare_return_in_a_typed_function_is_a_warning_not_an_error", [this]() {
+			every_config("bare return", "0|1", [](engine& e) {
+				const auto rep = e.check("function f() -> int { return; }");
+				size_t warnings = 0;
+				for (const auto& d : rep.diagnostics) { if (d.severity != check_diagnostic::level::error) { ++warnings; } }
+				return std::to_string(rep.error_count()) + "|" + std::to_string(warnings > 0 ? 1 : 0);
+			});
+		});
+		test("a_host_global_types_its_uses", [this]() {
+			every_config("host global", "1", [](engine& e) {
+				e.add_global("g", script_value(script_int(5), &e));
+				return std::to_string(e.check("char c = g;").error_count());
+			});
+		});
+		test("strict_loads_value_dependent_failures_and_the_runtime_raises_them", [this]() {
+			expect("runtime", R"(
+				map<string, int> m = {"a": 1};
+				string r = "";
+				try { int x = m["missing"]; } catch (e) { r += e + "|"; }
+				array<int> a = [1];
+				try { for (auto& x : a) { x = "s"; } } catch (e) { r += "raised|"; }
+				try { int y = a[5]; } catch (e) { r += e; }
+				r;
+			)", "Cannot initialize 'x' (declared int) with null|raised|Array index 5 out of bounds for array of size 1");
+		});
+		test("bitwise_compound_assignment_forms_are_not_in_the_grammar", [this]() {
+			// docs/grammar.md assignmentOperator: the bitwise compound forms (|= &= ^= <<= >>=) are deliberately omitted
+			every_config("bitwise compound", "parse error", [](engine& e) {
+				try { e.execute("int x = 6; x &= 3;"); return std::string("accepted"); }
+				catch (const std::exception& ex) { return std::string(std::string(ex.what()).find("Parse error") != std::string::npos ? "parse error" : ex.what()); }
+			});
+		});
+	}
+
+	// docs/LOCAL_VARIABLES_BEHAVIOR.md: instance variables are an overlay for one execution, not dynamic scope
+	void instance_variable_overlays() {
+		test("an_instance_variable_overlay_lives_for_one_execution", [this]() {
+			every_config("overlay", "5|1|raised|raised|5", [](engine& e) {
+				e.static_checking(check_mode::off);
+				e.add_global("G", script_value(script_int(1), &e));
+				instance_variables five{{"G", script_value(script_int(5), &e)}};
+				std::string out = std::to_string(e.execute("G", five).as_int());
+				out += "|" + std::to_string(e.execute("G").as_int());
+				instance_variables n0{{"n", script_value(script_int(0), &e)}};
+				e.execute("var temp = 1;", n0);
+				try { e.execute("temp"); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
+				try { e.execute("n"); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
+				instance_variables n5{{"n", script_value(script_int(5), &e)}};
+				out += "|" + std::to_string(e.execute("function f8() { return n; } f8()", n5).as_int());
+				return out;
+			});
+		});
+	}
+
+	// CLAUDE.md "Files and locations"
+	void file_locations() {
+		test("file_name_is_lexical_and_parent_dir_canonicalizes", [this]() {
+			expect("locations", R"(
+				string d = working_dir();
+				"" + file_name("no/such/dir/x.jai") + "|" + to_string(parent_dir(d + "/x.jai") == parent_dir(d + "/sub/../x.jai"));
+			)", "x.jai|true");
+		});
+		test("a_bare_engine_has_no_host_file_functions", [this]() {
+			every_config("bare engine", "Undefined variable 'read_file'", [](engine&) {
+				auto bare = engine::make();
+				bare->static_checking(check_mode::off);
+				return bare->execute("var r = \"\"; try { read_file(\"x\"); } catch (e) { r = e; } r;").as_string();
+			});
+		});
+		test("a_spliced_include_keeps_its_declarations_in_the_function_and_a_computed_include_sees_globals", [this]() {
+			const auto dir = jai::foundry::test_temp_directory() / "spec_conformance_includes";
+			std::filesystem::create_directories(dir);
+			std::ofstream(dir / "twice.jai") << "function twice(int v) -> int { return v * 2; }\n";
+			std::ofstream(dir / "reads_g.jai") << "G * 2;\n";
+			every_config("includes", "2|Undefined variable 'twice'|8", [&](engine& e) {
+				e.add_include_path(dir.string());
+				e.static_checking(check_mode::off);
+				std::string out = std::to_string(e.execute("function run(int x) { include \"twice.jai\"; return twice(x); } run(1);").as_int());
+				out += "|" + e.execute("var r = \"\"; try { twice(3); } catch (err) { r = err; } r;").as_string();
+				out += "|" + std::to_string(e.execute("var G = 4; function run2() { var p = \"reads_g.jai\"; return include(p); } run2();").as_int());
+				return out;
+			});
+		});
+	}
+
+	// CLAUDE.md "Custom permissions": the first missing built-in, then custom names in registration order
+	void privilege_order() {
+		test("a_denial_names_the_first_missing_permission_in_registration_order", [this]() {
+			every_config("denial order", "Insufficient privilege: app.b.|Insufficient privilege: filesystem.", [](engine& e) {
+				e.register_privilege("app.b");
+				e.register_privilege("app.a");
+				e.add_function("f", []() -> script_int { return 1; }, {"app.a", "app.b"});
+				e.add_function("g2", []() -> script_int { return 2; }, {"filesystem", "app.a"});
+				e.disable(jai::filesystem);
+				std::string out = e.execute("var r = \"\"; try { f(); } catch (x) { r = x; } r;").as_string();
+				out += "|" + e.execute("var r2 = \"\"; try { g2(); } catch (x) { r2 = x; } r2;").as_string();
+				return out;
+			});
+		});
+	}
+
+	// docs/site/guide examples with their stated outputs
+	void guide_examples() {
+		test("guide_operator_precedence_and_associativity", [this]() {
+			// docs/grammar.md precedence (lowest to highest): assignment (right), ternary (right), ||, &&, |, ^, &, equality, relational, shift, additive
+			expect("precedence", R"(
+				var a = 0; var b = 0; a = b = 5;
+				"" + a + b + "|" + to_string(true || false && false) + "|" + (1 | 2 ^ 3) + "|" + to_string(1 < 2 == true) + "|" + (1 << 2 + 1) + "|" +
+				(-2 * 3) + "|" + to_string(!false == true) + "|" + (2 | 1 ^ 3 & 1) + "|" + (8 >> 1 + 1) + "|" + (true ? 1 : false ? 2 : 3) + (false ? 1 : true ? 2 : 3);
+			)", "55|true|1|true|8|-6|true|2|2|12");
+		});
+		test("guide_function_and_lambda_examples", [this]() {
+			expect("functions", R"(
+				var mul4(var a, var b) { return a * b; }
+				var pick(bool flag) { return flag ? 42 : "none"; }
+				auto ops = {"double": [](x) { return x * 2; }, "square": [](x) { return x * x; }};
+				function g(int x) { return x > 0 ? x : throw "neg"; }
+				function f() -> int { int a = 1; int m = 10; auto h = [&, m]() { a = 7; }; h(); return a * 100 + m; }
+				string e = ""; try { g(-1); } catch (x) { e = x; }
+				"" + mul4(2.5, 2) + "|" + pick(true) + "|" + pick(false) + "|" + ops["square"](7) + "|" + g(2) + "|" + e + "|" + f();
+			)", "5.0|42|none|49|2|neg|710");
+		});
+		test("guide_class_examples", [this]() {
+			expect("classes", R"(
+				class Cat { int a = 0; } class Tiger : Cat { int stripes = 12; }
+				int g = 5;
+				class C { int m() { int a = g; int g = 9; return a * 10 + g; } }
+				class S { int f = 3; static int s = 4; int use() { return f + s; } static int st() { return s; } }
+				class A { int v = 1; };
+				class Vec { float x = 0.0; Vec(float a) { x = a; } Vec operator+(Vec o) { return Vec(x + o.x); } }
+				string err = ""; try { var t = cast<Tiger&>(Cat()).stripes; } catch (x) { err = x; }
+				"" + err + "|" + C().m() + "|" + S().use() + " " + S::st() + "|" + A().v + "|" + (Vec(1.0) + Vec{3.0}).x;
+			)", "Cannot cast 'Cat' to 'Tiger&'|59|7 4|1|4.0");
+		});
+		test("guide_container_and_string_examples", [this]() {
+			expect("containers", R"(
+				auto g = [1, 2, 3];
+				string c = "";
+				try { g.push("s"); } catch (e) { } try { g.push("t"); } catch (e) { c = e; }
+				map<var, int> anything = {}; anything[5] = 1; anything["five"] = 5;
+				var s = "Jai\x21"; var word = (s[0] + 0) | ((s[1] + 0) << 8);
+				var e = ""; try { var z = 10 / 0; } catch (x) { e = x; }
+				c + "|" + to_json(g) + "|" + to_json(anything) + "|" + "b".compare("a") + "|" + word + "|" + e + "|" + `[${"ab":^5}] [${7:*^4}]`;
+			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"5\":1,\"five\":5}|1|24906|Division by zero in integer operation|[ ab  ] [*7**]");
+		});
+		test("guide_parallel_transform_rows", [this]() {
+			expect("transform", R"(
+				var rows = [[1, 10], [2, 20]];
+				var f(var p) { return [p[1], p[0] * 2]; }
+				to_json(parallel_transform(rows, f));
+			)", "[[10,2],[20,4]]");
+		});
+	}
+
+	// docs/parallel_design.md contracts
+	void parallel_contracts() {
+		test("a_helper_that_writes_a_global_hits_the_parallel_write_wall", [this]() {
+			// docs/parallel_design.md section 1: a callee that mutates a global hits the same wall; the source is unchanged
+			expect("transitive write", R"(
+				var g = 0;
+				function helper(int v) -> int { g = v; return v; }
+				array<int> a = [1, 2, 3];
+				string r = "ok";
+				try { parallel_for (auto& x : a) { x = helper(x); } } catch (e) { r = e; }
+				to_string(r.contains("enclosing state 'g'")) + "|" + to_json(a) + "|" + g;
+			)", "true|[1,2,3]|0");
+		});
+		test("cells_in_a_parallel_worker_match_the_serial_rows", [this]() {
+			expect("worker cells", R"(
+				array<int> G = [3, 1, 4, 1, 5, 9, 2, 6];
+				function f(int row) -> int { int acc = 0; for (int k = 0; k < 8; ++k) { acc = acc + G[(row + k) % 8] * k; } return acc; }
+				var rows = []; for (int i = 0; i < 64; i++) { rows.push(i); }
+				var par = parallel_transform(rows, f);
+				int bad = 0; for (int i = 0; i < 64; i++) { if (par[i] != f(i)) { bad++; } }
+				"" + bad + "|" + par[0];
+			)", "0|131");
+		});
+		test("parallel_for_iterates_arrays_only", [this]() {
+			expect("map range", R"(
+				var m = {"a": 1};
+				string r = "ran";
+				try { parallel_for (auto& kv : m) { } } catch (e) { r = "raised"; }
+				r;
+			)", "raised");
+		});
+	}
+
+	void native_exceptions() {
+		test("a_host_script_exception_is_catchable_with_its_message", [this]() {
+			every_config("host script_exception", "Random failure!", [](engine& e) {
+				e.add_function("raise_it", []() -> script_int { throw jai::script_exception("Random failure!"); });
+				return e.execute("var r = \"\"; try { raise_it(); } catch (x) { r = x; } r;").as_string();
+			});
 		});
 	}
 

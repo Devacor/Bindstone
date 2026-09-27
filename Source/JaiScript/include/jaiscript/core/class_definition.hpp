@@ -3006,6 +3006,45 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
         member_id, declarer->get_type_id());
 }
 
+// operator= on a plain store (docs/static_checking.md rule table; C++ assignment): a destination holding a class
+// instance whose class (or an in-script base) declares operator= takes a source that is not that class, a subclass, a
+// handle to one, or null through the operator, on the held instance. nullopt when it does not apply. A parallel region
+// never dispatches it (the operator-dispatch verdict). KEEP the one kernel for every plain-store site of both backends.
+inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng) {
+    if (!eng) { return std::nullopt; }
+    const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
+    if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    auto holder = const_cast<script_value&>(current).get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    auto* instance = static_cast<class_instance*>(holder->data.get());
+    const class_definition* def = instance->get_class_definition();
+    if (!def) { return std::nullopt; }
+    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+    if (value.is_null()) { return std::nullopt; }
+    const size_t vi = value.raw_storage_index();
+    if (vi == script_value::TYPEID_OBJECT || vi == script_value::TYPEID_SHARED_PTR) {
+        auto source_holder = const_cast<script_value&>(value).get_object_holder();
+        if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
+            const class_definition* source_def = static_cast<class_instance*>(source_holder->data.get())->get_class_definition();
+            if (source_def && (source_def == def || source_def->derives_from(def))) { return std::nullopt; }
+        }
+    }
+    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    script_value method = instance->get_method(assign_id, false);
+    if (!method.is_function()) { return std::nullopt; }
+    if (eng->parallel_region_active()) {
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "custom operator dispatch on class instances is not admitted in a parallel body");
+    }
+    std::vector<script_value> args{current, value};
+    auto result = method.as_function()(args);
+    if (!result) {
+        checked_result<void> failed = result.error_value();
+        return failed;
+    }
+    return checked_result<void>();
+}
+
 } // namespace detail
 
 inline checked_result<script_value> class_instance::enforce_field_write(uint64_t id, script_value value) const {
@@ -3024,6 +3063,14 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
         declared = tag;
     } else if (declared->base_type == script_value_type::jai_any_type) {
         return std::move(value);
+    }
+    if (declared->base_type == script_value_type::jai_object_type) {
+        if (const script_value* current = find_field_value(id)) {
+            if (auto assigned = detail::user_assign_operator(*current, value, engine_)) {
+                if (!*assigned) { return assigned->error_value(); }
+                return *current;   // the operator wrote the held instance: the store keeps it
+            }
+        }
     }
     return detail::field_store_convert(value, declared, engine_, id, class_def_);
 }
@@ -3044,6 +3091,14 @@ inline checked_result<script_value> class_definition::enforce_static_write(uint6
         declared = tag;
     } else if (declared->base_type == script_value_type::jai_any_type) {
         return std::move(value);
+    }
+    if (declared->base_type == script_value_type::jai_object_type) {
+        if (const script_value* current = get_static_field_ptr(id)) {
+            if (auto assigned = detail::user_assign_operator(*current, value, engine_)) {
+                if (!*assigned) { return assigned->error_value(); }
+                return *current;   // the operator wrote the held instance: the store keeps it
+            }
+        }
     }
     return detail::field_store_convert(value, declared, engine_, id, this, true);
 }

@@ -309,4 +309,4 @@ covered by that parser counter.
 | script layers | `Script layer 'C' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object`, `Cannot copy an instance of nocopy class 'C'`, `No copy constructor available for class C` | keep |
 | static stores | `Static member assignment requires a class name`, `'C' is not a class`, `'C' is not a valid class`, `Cannot assign to static member: field 's' not found` | `Cannot assign to static member: field 's' not found` -> family B's `class C has no static member 's'` (same fact, second spelling) |
 | casts | `Cannot cast 'X' to 'T'`, char range texts (`detail/cast_kernel.hpp`) | keep; the quoted-type spelling is this family's own contract (documented in CLAUDE.md) |
-| internal | `Unknown expression type in dispatch_expr`, `Unknown callable kind`, `Complex assignment targets not yet implemented`, `this_id_ mismatch with symbolizer`, `operator= failed` | internal invariants; keep |
+| internal | `Unknown expression type in dispatch_expr`, `Unknown callable kind`, `Complex assignment targets not yet implemented`, `this_id_ mismatch with symbolizer` | internal invariants; keep |

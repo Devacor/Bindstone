@@ -7,6 +7,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/stdlib/math.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -56,6 +57,7 @@ namespace jai::fuzz {
 	struct program {
 		uint64_t seed = 0;
 		std::vector<std::string> segments;
+		bool stdlib_math = false;   // the engine registers the stdlib math functions (the bare aliases sqrt, abs, floor)
 
 		std::string joined() const {
 			std::string out;
@@ -207,6 +209,7 @@ namespace jai::fuzz {
 		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
+		if (p.stdlib_math) { stdlib::register_math_functions(*eng); }
 
 		auto printed = std::make_shared<std::string>();
 		const size_t cap = cfg.print_cap;

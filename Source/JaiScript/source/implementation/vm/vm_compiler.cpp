@@ -2983,7 +2983,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_binary_fused_decl || st.op == opcode::op_binary_fused_temp || st.op == opcode::op_binary_fused_store) {
 				// arith the typed lowering left general (an environment value or an unclassed operand): kinds at run time, landing in
 				// a stamped scalar decl, a compiler value or a no-result frame-slot store
-				uint32_t bidx = st.a, dst = k_invalid_u32, env_dst = k_invalid_u32; uint8_t landing = k_typed_dst_temp; type_info* stamp = nullptr;
+				uint32_t bidx = st.a, dst = k_invalid_u32, env_dst = k_invalid_u32; uint8_t landing = k_typed_dst_temp, declared = 0; type_info* stamp = nullptr;
 				if (st.op == opcode::op_binary_fused_temp) { dst = st.b; }
 				else if (st.a < c.fused_binary_dst_protos.size()) {
 					const fused_binary_dst_proto& dp = c.fused_binary_dst_protos[st.a];
@@ -2993,7 +2993,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						stamp = decl ? decl->type.get() : nullptr;
 						if (!decl || (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX) { refuse(chunk::cell_refusal_representation, ip); break; }
 						if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }   // a string, bool or class local
-						dst = static_cast<uint32_t>(decl->slot_index); landing = decl_landing(dst); if (landing == k_typed_dst_temp) { stamp = nullptr; }
+						dst = static_cast<uint32_t>(decl->slot_index); landing = decl_landing(dst); declared = stamp_kind(stamp);
+						if (landing == k_typed_dst_temp) { stamp = nullptr; }   // a compiler value under a declared type (a graft's parameter, local or result) keeps the declaration's kind as its contract
 					} else {
 						if (dp.flags & store_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`: the global environment only, a binding the block does not hold
 						if (dp.flags & store_flag_ref_alias) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -3008,7 +3009,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!arith_tok(bp.op) && !is_cmp) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (env_dst != k_invalid_u32) { op.kind = is_cmp ? ir::cmpval : ir::arith; op.tok = bp.op; op.a = k_ir_env_bit | env_dst; }
-				else { use_slot(dst, is_cmp && landing == k_typed_dst_temp ? kbool : stamp_kind(stamp), true, landing, stamp, ip); op.kind = is_cmp ? ir::cmpval : ir::arith; op.tok = bp.op; op.a = dst; op.writes = dst; }
+				else { use_slot(dst, is_cmp && landing == k_typed_dst_temp ? kbool : landing == k_typed_dst_temp ? declared : stamp_kind(stamp), true, landing, stamp, ip); op.kind = is_cmp ? ir::cmpval : ir::arith; op.tok = bp.op; op.a = dst; op.writes = dst; }
 			} else if (st.op == opcode::op_t_store_const || st.op == opcode::op_t_store_mov || st.op == opcode::op_t_decl_mov || st.op == opcode::op_t_decl_const) {
 				// mov: the source's payload into a stamped scalar decl or a no-result frame-slot store
 				const bool decl = st.op == opcode::op_t_decl_mov || st.op == opcode::op_t_decl_const;

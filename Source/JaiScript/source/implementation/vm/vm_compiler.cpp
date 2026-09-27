@@ -113,6 +113,7 @@ namespace {
 			case opcode::op_dup:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
+			case opcode::op_capture_arg:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -298,6 +299,7 @@ namespace {
 			case opcode::op_dup:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
+			case opcode::op_capture_arg:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -4896,6 +4898,13 @@ void vm_compiler::deref_ahead_of(const expression* pushed, const expression* lat
 	emit(opcode::op_deref_top);
 }
 
+// argument k's value is taken now when a later argument may write what it read (the stamp's kernel); a private local proven
+// primitive loads as a plain value and needs nothing
+size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_t k, const expression* arg, uint32_t where, uint32_t form) {
+	if (k >= captures.size() || captures[k] == 0 || primitive_local(arg)) return SIZE_MAX;
+	return emit(opcode::op_capture_arg, where, static_cast<uint32_t>(k), captures[k] | (form << 2));
+}
+
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		compile_expression(expr->left);
@@ -5512,8 +5521,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		if (member->is_static) {
 			const detail::math_fn fn = detail::math_intrinsic_for_call(member.get());
 			if (fn != detail::math_fn::none && expr->arguments.size() <= 8) {
-				for (const auto& arg : expr->arguments) {
-					compile_expression(arg);
+				std::vector<uint8_t> captures;
+				detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
+				for (size_t k = 0; k < expr->arguments.size(); ++k) {
+					compile_expression(expr->arguments[k]);
+					emit_arg_capture(captures, k, expr->arguments[k].get(), 0, capture_form_opaque);
 				}
 				emit(opcode::op_math, static_cast<uint32_t>(fn), static_cast<uint32_t>(expr->arguments.size()));
 				return;
@@ -5555,8 +5567,12 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			}
 			site.arg_symbols.reserve(expr->arguments.size());
 			site.arg_slots.reserve(expr->arguments.size());
+			std::vector<uint8_t> captures;
+			detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
+			std::vector<size_t> capture_ips;
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
-			for (const auto& arg : expr->arguments) {
+			for (size_t k = 0; k < expr->arguments.size(); ++k) {
+				const auto& arg = expr->arguments[k];
 				if (arg->get_type() == node_type::identifier_expr) {
 					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 					site.arg_symbols.push_back(arg_ident->symbol_id);
@@ -5574,6 +5590,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					}
 				}
 				compile_expression(arg);
+				if (const size_t ip = emit_arg_capture(captures, k, arg.get(), 0, capture_form_method); ip != SIZE_MAX) { capture_ips.push_back(ip); }
 			}
 			if (!expr->arguments.empty()) {
 				chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
@@ -5582,6 +5599,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			if (probe_ip != SIZE_MAX) {
 				chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 			}
+			for (const size_t ip : capture_ips) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
 			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin
 			if (builtins_ && !member->null_safe && expr->builtin_receiver != 0) {
 				const call_site& cs = chunk_->call_sites.back();
@@ -5658,8 +5676,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	}
 	site.arg_symbols.reserve(expr->arguments.size());
 	site.arg_slots.reserve(expr->arguments.size());
+	std::vector<uint8_t> captures;
+	detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
-	for (const auto& arg : expr->arguments) {
+	for (size_t k = 0; k < expr->arguments.size(); ++k) {
+		const auto& arg = expr->arguments[k];
 		if (arg->get_type() == node_type::identifier_expr) {
 			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 			site.arg_symbols.push_back(arg_ident->symbol_id);
@@ -5677,6 +5698,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			}
 		}
 		compile_expression(arg);
+		emit_arg_capture(captures, k, arg.get(), 0, probe_callee ? capture_form_probe : capture_form_stack);
 	}
 	if (!expr->arguments.empty()) {
 		chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
@@ -5743,10 +5765,14 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 		emit(opcode::op_null);
 		return;
 	}
-	for (const auto& arg : expr->arguments) {
-		compile_expression(arg);
+	std::vector<uint8_t> captures;
+	detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
+	const uint32_t node = add_node(expr);
+	for (size_t k = 0; k < expr->arguments.size(); ++k) {
+		compile_expression(expr->arguments[k]);
+		emit_arg_capture(captures, k, expr->arguments[k].get(), node, capture_form_new);
 	}
-	emit(opcode::op_new, add_node(expr), static_cast<uint32_t>(expr->arguments.size()));
+	emit(opcode::op_new, node, static_cast<uint32_t>(expr->arguments.size()));
 }
 
 // Operand shape decided by the shared kernel (the interpreter takes the same branch at

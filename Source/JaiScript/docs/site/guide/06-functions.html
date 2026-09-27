@@ -200,6 +200,22 @@ print(f(swap()));
 print(f(2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">old lambda got 1
 new lambda got 2</code></pre></div>
+<p>Each argument takes its value as it is evaluated. The callee receives what the argument was at that point, even when a later argument changes it before the call runs. The rule covers functions, lambdas, methods, constructors and <code>new</code>, and every kind of value: an array argument followed by an argument that pushes onto that array binds the array as it was. A conversion the binding runs, such as a converting constructor for one parameter, runs after every argument has been taken. A constructor takes its arguments before its field initializers and initializer list run, and the arguments of <code>: super(...)</code> and <code>: this(...)</code> take their values as they are evaluated. A coroutine takes its arguments at the call and binds them when it first resumes. A reference parameter binds the caller&#x27;s storage instead, so it sees every write made before the body runs:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var queue = [1, 2, 3];
+function drain() { queue.push(4); return 0; }
+function count(q, extra) { return q.size() + extra; }
+function count_ref(var&amp; q, extra) { return q.size() + extra; }
+print(count(queue, drain()));
+print(count_ref(queue, drain()));
+coroutine function later(x) { yield x; }
+var h = later(queue[0]);
+queue[0] = 100;
+print(h.resume());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3
+5
+1</code></pre></div>
+<p>A host (C++) function receives each scalar, string and element argument as its value at evaluation too. A class instance, array or map argument reaches it as the object the argument named, because the C++ parameter decides what happens to it: a <code>T&amp;</code> or <code>bound_array&lt;T&gt;&amp;</code> parameter works on that object, and a by-value C++ parameter copies it when the function is entered.</p>
+<p>Taking the value costs nothing unless it could matter. An argument is taken early only when a later argument may run code that could write it (a call, a member read that may run a getter, an assignment). A <code>math::</code> intrinsic runs no user code, so it does not count. Otherwise the arguments bind exactly as they were evaluated, with no extra step.</p>
 <p>The <a href="../guide/04-operators.html">Operators chapter</a> covers evaluation order in general. Every call entry is also a point where the <a href="../guide/05-control-flow.html#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">execution budget</a> is checked.</p>
 <h2 id="initializer-lists-are-constructor-only">Initializer lists are constructor-only<a class="hlink" href="#initializer-lists-are-constructor-only" aria-label="link">&#8203;</a></h2>
 <p><code>: super(&hellip;)</code> / <code>: this(&hellip;)</code> delegation belongs to constructors (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>

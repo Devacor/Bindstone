@@ -14,6 +14,7 @@
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
+#include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/utf8_text.hpp>
@@ -39,6 +40,8 @@
 namespace jai {
 
 namespace {
+    using detail::capture_call_argument;
+
     // Local helper: error result for an overflowing integer op in the inlined
     // fast paths below (mirrors interpreter_dispatch.cpp's handlers).
     inline checked_result<void> int_overflow_v(const char* msg) {
@@ -7099,37 +7102,37 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
             const detail::math_fn fn = detail::math_intrinsic_for_call(member_callee);
             if (fn != detail::math_fn::none && expr->arguments.size() <= 8) {
                 const size_t argc = expr->arguments.size();
+                // the operands leave the value stack as they are evaluated: a later operand's call runs statements, which
+                // drop what the stack holds at their boundaries
+                std::optional<script_value> margs[8];
                 size_t math_start = 0;
                 if constexpr (Replaying) {
-                    // args evaluated before the yield are re-pushed in order, never re-run
-                    if (rs) { for (const auto& v : rs->partial) push_value(script_value(v)); math_start = rs->partial.size(); }
+                    // args evaluated before the yield are restored in order, never re-run
+                    if (rs) { for (const auto& v : rs->partial) margs[math_start++].emplace(v); }
                 }
                 for (size_t ai = math_start; ai < argc; ++ai) {
-                    auto stacked = [&]() {   // the args already on the stack, in evaluation order (cold: park only)
+                    auto stacked = [&]() {   // the args already evaluated, in evaluation order (cold: park only)
                         std::vector<script_value> done;
-                        for (size_t k = 0; k < ai; ++k) done.push_back(valueStack_.peek(ai - 1 - k));
+                        for (size_t k = 0; k < ai; ++k) done.push_back(*margs[k]);
                         return done;
                     };
                     JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_call_math, ai, stacked());
+                    margs[ai].emplace(pop_value());
                     if (is_unwinding_) {
                         push_value(make_value());
                         return {};
                     }
+                    capture_call_argument(expr->arg_captures, ai, *margs[ai], [] { return detail::arg_binding::opaque; });
                 }
-                // Args sit on the value stack in order; point the kernel at them deref'd
                 const script_value* argp[8] = {};
                 for (size_t i = 0; i < argc; ++i) {
-                    argp[i] = &valueStack_.peek(argc - 1 - i).deref();
+                    argp[i] = &margs[i]->deref();
                 }
                 auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_, engine_->math_rng());
                 if (!result) {
                     return result.error_value();
                 }
-                script_value out = std::move(result.value());
-                for (size_t i = 0; i < argc; ++i) {
-                    valueStack_.discard();
-                }
-                push_value(std::move(out));
+                push_value(std::move(result.value()));
                 return {};
             }
         }
@@ -7211,6 +7214,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             push_value(make_value());
                             return {};
                         }
+                        capture_call_argument(expr->arg_captures, ai, arguments.back(), [] { return detail::arg_binding::opaque; });
                     }
                     if (pre_args) {
                         recv_cell = string_receiver_cell(ident);
@@ -7407,6 +7411,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             push_value(make_value());
                             return {};
                         }
+                        capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
+                            return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
+                                                     : detail::method_binding(cls_pin.get(), dispatch->name_id, ai);
+                        });
                     } catch (const script_exception& e) {
                         active_exception_value_ = make_value(std::string(e.what()));
                         current_exception_ = e;
@@ -7607,6 +7615,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 push_value(make_value());
                 return {};
             }
+            capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai); });
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
             active_exception_value_ = make_value(std::string(e.what()));
@@ -9356,6 +9365,10 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(std::move(pop_value()));
+            capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+                auto ctor = environment_->get(innerTypeName);
+                return ctor ? detail::callee_binding(ctor.value(), ai) : detail::arg_binding::opaque;
+            });
         }
 
         // Look up T's constructor
@@ -9389,6 +9402,10 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(std::move(pop_value()));
+        capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+            auto ctor = environment_->get(className);
+            return ctor ? detail::callee_binding(ctor.value(), ai) : detail::arg_binding::opaque;
+        });
     }
 
     // Look for a constructor function registered with this class name
@@ -12925,8 +12942,20 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
         return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
             "Constructor parameter count mismatch");
     }
-    for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
-        init_env->define(matching_ctor->parameters[i].name, args[i]);
+    // the construction runs code ahead of the body (an initializer list, a non-literal field initializer): the call's
+    // arguments are taken first, as the body's parameters (KEEP BYTE-PARALLEL with vm_backend::construct_instance_pre_body)
+    std::vector<script_value> held_args;
+    const std::vector<script_value>* argv = &args;
+    if (detail::construction_runs_code(*class_def, *matching_ctor) &&
+        detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
+        held_args = args;
+        for (size_t j = 0; j < held_args.size(); ++j) {
+            detail::capture_argument(held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
+        }
+        argv = &held_args;
+    }
+    for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
+        init_env->define(matching_ctor->parameters[i].name, (*argv)[i]);
     }
 
     // Track whether the iterative multi-level loop handled parent field initializers
@@ -12962,6 +12991,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                             "Failed to evaluate constructor initializer argument");
                     }
                     init_args.push_back(pop_value());
+                    detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
+                                                         [&] { return detail::constructor_binding(class_def->get_parent().get(), init_args.size() - 1); });
                 }
 
                 // Restore environment
@@ -13038,6 +13069,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                                         "Failed to evaluate super() argument");
                                                 }
                                                 ancestor_args.push_back(pop_value());
+                                                detail::capture_initializer_argument(init, ancestor_args.size() - 1, !class_def->chain_initializers_all_literal(), ancestor_args.back(),
+                                                                                     [&] { return detail::constructor_binding(ancestor.get(), ancestor_args.size() - 1); });
                                             }
                                             environment_ = old_env;
 
@@ -13208,6 +13241,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                         "Failed to evaluate constructor initializer argument");
                 }
                 init_args.push_back(pop_value());
+                detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
+                                                     [&] { return detail::constructor_binding(class_def.get(), init_args.size() - 1); });
             }
 
             // Restore environment
@@ -13281,7 +13316,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // The constructor implicitly returns 'this', so use that return value
     // instead of creating a new script_value (which would be a duplicate reference)
     initializer_depth.reset();
-    auto result = execute_method_ast(matching_ctor, method_env.get(), args);
+    auto result = execute_method_ast(matching_ctor, method_env.get(), *argv);
     if (!result) { return result; }
     return this_value;   // a constructor call yields its instance (a bare `return;` ends the body early)
 }
@@ -13860,6 +13895,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Parameters go into the call frame for fast lookup.
     // Reference parameters still need special handling.
 
+    std::vector<script_value> held_args;
+    const std::vector<script_value>* argv = &args;
     for (size_t i = 0; i < function.parameters().size(); ++i) {
         const auto& param = function.parameters()[i];
 
@@ -13880,7 +13917,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         }
 
-        const auto& arg = args[i];
+        const auto& arg = (*argv)[i];
 
         // Use pre-cached symbol ID (parameter binding optimization)
         // Symbol IDs are cached at function definition time in visit_function_decl
@@ -13958,6 +13995,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 converted_arg = (!untyped_param && param.type->base_type == script_value_type::jai_object_type)
                                 ? script_value(arg.deref()) : script_value(arg);
             } else {
+                if (argv == &args && i + 1 < args.size() && detail::binding_may_run_code(arg, param.type.get()) &&
+                    detail::later_capture_candidate(i + 1, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) [[unlikely]] {
+                    held_args = args;
+                    for (size_t j = i + 1; j < held_args.size(); ++j) {
+                        detail::capture_argument(held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
+                    }
+                    argv = &held_args;
+                }
                 auto convert_result = try_convert_for_parameter(arg, param.type,
                     detail::slot_site{detail::slot_kind::parameter, param.name, function.name});
                 if (!convert_result) {

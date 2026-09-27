@@ -329,6 +329,7 @@ namespace jai {
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;
         mutable std::weak_ptr<const class function_decl> proven_method_decl;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
         mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
+        std::vector<uint8_t> arg_captures;   // per argument, the capture its value needs before a later argument runs (detail::arg_capture_kind); empty = none
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };
@@ -451,6 +452,7 @@ namespace jai {
     public:
         type_info_ptr type;
         std::vector<expression_ptr> arguments;
+        std::vector<uint8_t> arg_captures;
 
         new_expr(const source_location& loc, type_info_ptr t, std::vector<expression_ptr> args)
             : expression(loc, node_type::new_expr), type(t), arguments(std::move(args)) {}    };
@@ -818,7 +820,8 @@ namespace jai {
     struct constructor_initializer {
         std::string target; // "super" or "this"
         std::vector<expression_ptr> arguments;
-        
+        std::vector<uint8_t> arg_captures;
+
         constructor_initializer(const std::string& t, std::vector<expression_ptr> args)
             : target(t), arguments(std::move(args)) {}
     };

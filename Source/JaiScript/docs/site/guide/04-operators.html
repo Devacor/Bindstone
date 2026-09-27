@@ -84,6 +84,16 @@ argument a
 argument b
 sum = 3</code></pre></div>
 <p>Why it matters: a callee expression that reads a global runs before an argument that changes it, and a side effect in argument two never precedes one in argument one. You can rely on that, in either backend, rather than hoping.</p>
+<p>Each argument also takes its value when it is evaluated, as in Lua, Python and JavaScript. A later argument that writes a variable, an element or an object an earlier argument read does not change what the callee receives. A reference parameter binds the storage itself, so it sees the write:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var scores = [10, 20, 30];
+function bump() { scores[1] = 99; return 1; }
+function add(x, y) { return x + y; }
+function add_ref(int&amp; x, y) { return x + y; }
+print(&quot;by value:     &quot;, add(scores[1], bump()));
+scores[1] = 20;
+print(&quot;by reference: &quot;, add_ref(scores[1], bump()));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">by value:     21
+by reference: 100</code></pre></div>
 <h2 id="bitwise">Bitwise<a class="hlink" href="#bitwise" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;6 &amp; 3  = {}&quot;, 6 &amp; 3);
 print(&quot;6 | 3  = {}&quot;, 6 | 3);

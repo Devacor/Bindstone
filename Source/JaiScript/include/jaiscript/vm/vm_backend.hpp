@@ -1112,7 +1112,8 @@ namespace jai::vm {
                                              chunk* caller_code,
                                              const uint8_t* arg_proofs,
                                              const script_defined_function* alias_fn,
-                                             unit_stamp caller_unit);   // a by-reference argument resolves under the caller's unit
+                                             unit_stamp caller_unit,   // a by-reference argument resolves under the caller's unit
+                                             size_t first_param = 0, bool later_taken = false);   // a resumed bind (the arguments after a user-code conversion taken)
         // V-C1: the call site's per-argument same_type proofs, valid only when the site's
         // call_expr was proven against THIS callee body with THIS arity (null otherwise)
         const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,
@@ -1300,11 +1301,13 @@ namespace jai::vm {
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args);
         // Everything before the ctor body (overload resolve, instance, init_env + binds,
-        // initializer chains, field inits); success value = the new instance ('this')
+        // initializer chains, field inits); success value = the new instance ('this');
+        // captured_out = the arguments taken ahead of that code, when it runs any (the body binds them)
         checked_result<script_value> construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
                                                         const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
-                                                        std::shared_ptr<function_decl>& matching_ctor_out);
+                                                        std::shared_ptr<function_decl>& matching_ctor_out,
+                                                        std::vector<script_value>& captured_out);
         // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct
         // ctor calls); result_stamp = the shared_ptr arm's post-call type stamp
         op_status enter_constructor_in_loop(frame& f,
@@ -1934,6 +1937,10 @@ namespace jai::vm {
         op_status exec_call(frame& f, const vm_instruction& ins);
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)
         op_status exec_probe_callee(frame& f, const vm_instruction& ins, bool* observed = nullptr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        void capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage (op_capture_arg)
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         // Callee-first probe for member / computed callees (op_probe_member)
         op_status exec_probe_member(frame& f, const vm_instruction& ins);

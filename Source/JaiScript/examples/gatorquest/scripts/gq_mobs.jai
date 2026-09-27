@@ -65,6 +65,11 @@ int mob_alloc() {
 	for (int i = 0; i < MOB_KIND.size(); ++i) {
 		if (MOB_KIND[i] < 0) { return i; }
 	}
+	return mob_push();
+}
+
+// a new free slot at the end of the pool
+int mob_push() {
 	int i = MOB_KIND.size();
 	MOB_KIND.push(-1);
 	MOB_SER.push(0);

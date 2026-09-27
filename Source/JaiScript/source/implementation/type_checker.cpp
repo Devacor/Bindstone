@@ -1280,7 +1280,7 @@ private:
             for (const auto& p : fn->parameters) { if (p.is_reference) { by_value = false; } }
             if (!ok) { fn = nullptr; }
         }
-        c->proven_callee_decl = fn && free_callee ? fn : nullptr;
+        c->proven_callee_decl = fn && free_callee ? fn->weak_from_this() : std::weak_ptr<const function_decl>();
         if (!fn) {
             c->static_arg_proofs.clear();
             c->proven_callee_body = nullptr;
@@ -2159,7 +2159,8 @@ private:
                 if (!m->is_static && !m->null_safe && recv && recv->slot_index != SIZE_MAX && !recv->global_qualified &&
                     fn->body && !fn->is_coroutine && !fn->is_static && lo == c->arguments.size() && hi == c->arguments.size()) { md = fn; }
             }
-            stamp(c->proven_method_decl, md, static_cast<const function_decl*>(nullptr));
+            if (proofs_ == proof_mode::stamp) { c->proven_method_decl = md ? md->weak_from_this() : std::weak_ptr<const function_decl>(); }
+            else if (proofs_ == proof_mode::clear) { c->proven_method_decl.reset(); }
         }
         if (ov) {
             // a map key passed where every viable overload binds the parameter by reference

@@ -542,6 +542,7 @@ namespace jai {
         mutable uint64_t alias_proof_epoch = 0;
         mutable uint32_t alias_proof_mask = 0;
         unit_stamp unit{};   // the unit and the execution that declared it (docs/global_shadowing.md)
+        std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
 

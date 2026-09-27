@@ -489,7 +489,7 @@ namespace jai::vm {
             fused_operand callee;                 // the callee identifier, resolved as the probe resolves it
             uint32_t name_symbol = k_invalid_u32;
             const block_stmt* body = nullptr;
-            const function_decl* decl = nullptr;   // the callee: its name for the trace
+            std::shared_ptr<const function_decl> decl;   // the callee, pinned: the trace names it, and body stays a live identity for the guard (no address reuse)
             const ast_node* call_stmt = nullptr;   // the caller's statement: the trace's line for the caller's frame
             uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
             bool method = false;                   // a method graft: the receiver slot's instance resolves member_id to the body

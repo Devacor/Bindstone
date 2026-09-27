@@ -234,10 +234,10 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
 		n->static_arg_proofs = ce->static_arg_proofs; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
 		// a replaced argument is the hoisted leaf's result temp, a slot of its return type: the outer call's proof for it is the types' agreement
-		if (c.replace && c.result && c.result_type && ce->proven_callee_decl) {
-			for (size_t i = 0; i < ce->arguments.size() && i < ce->proven_callee_decl->parameters.size(); ++i) {
+		if (auto callee_decl = c.replace && c.result && c.result_type ? ce->proven_callee_decl.lock() : nullptr) {
+			for (size_t i = 0; i < ce->arguments.size() && i < callee_decl->parameters.size(); ++i) {
 				if (ce->arguments[i].get() != c.replace) continue;
-				const parameter& p = ce->proven_callee_decl->parameters[i];
+				const parameter& p = callee_decl->parameters[i];
 				if (p.is_reference || !p.type || !scalar_type(p.type.get()) || p.type->base_type != c.result_type->base_type) continue;
 				if (n->static_arg_proofs.size() < ce->arguments.size()) { n->static_arg_proofs.resize(ce->arguments.size(), proof_none); }
 				n->static_arg_proofs[i] = proof_same_type;
@@ -447,6 +447,11 @@ bool find_path(const expression_ptr& root, const expression* target, std::vector
 	return found;
 }
 
+// a stamp the checker made, live or not (an empty weak_ptr shares no owner with the empty one)
+bool ever_stamped(const std::weak_ptr<const function_decl>& w) {
+	return w.owner_before(std::weak_ptr<const function_decl>()) || std::weak_ptr<const function_decl>().owner_before(w);
+}
+
 // the type a spilled operand's temp takes, from the checker's operand class: a comparison or a logical operator yields bool, an
 // element read its proven kind, arithmetic the class's result; jai_null_type when the subtree is no spill
 script_value_type spill_kind(const expression* e) {
@@ -531,21 +536,23 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	const std::shared_ptr<call_expr>& call = events.front();
 	out.call = call;   // the call the plan is about, named with the rule that keeps it when the plan fails
 	if (unsupported) { out.why = "a statement the graft does not take"; return false; }
-	const function_decl* fn = nullptr;
+	std::shared_ptr<const function_decl> fn;
 	out.receiver = nullptr;
-	if (call->callee && call->callee->get_type() == node_type::member_expr && call->proven_method_decl) {
+	if (call->callee && call->callee->get_type() == node_type::member_expr && ever_stamped(call->proven_method_decl)) {
 		auto* m = static_cast<const member_expr*>(call->callee.get());
 		auto* recv = static_cast<identifier_expr*>(m->object.get());
 		const uint32_t rs = identifier_slot_operand(recv);
 		if (rs == k_invalid_u32 || rs >= k_typed_slot_mask) { out.why = "a receiver that is not a local"; return false; }
-		fn = call->proven_method_decl;
+		fn = call->proven_method_decl.lock();
+		if (!fn) { out.why = "a callee whose declaration is gone"; return false; }
 		out.receiver = std::static_pointer_cast<identifier_expr>(m->object);
 	} else {
 		if (!call->callee || call->callee->get_type() != node_type::identifier_expr) { out.why = "a callee that is not a name"; return false; }
-		if (!call->proven_callee_decl) { out.why = "an unresolved callee"; return false; }
-		fn = call->proven_callee_decl;
+		if (!ever_stamped(call->proven_callee_decl)) { out.why = "an unresolved callee"; return false; }
+		fn = call->proven_callee_decl.lock();
+		if (!fn) { out.why = "a callee whose declaration is gone"; return false; }
 	}
-	if (const char* why = inline_eligible(call.get(), fn)) { out.why = why; return false; }
+	if (const char* why = inline_eligible(call.get(), fn.get())) { out.why = why; return false; }
 	if (void_type(fn->return_type.get()) && !(statement_position && root.get() == call.get())) { out.why = "a void result used as a value"; return false; }   // a void result is a value nowhere but alone in a statement
 	// the body clones, and its writes decide what may stand before the call
 	bool in_loop = false;
@@ -553,7 +560,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
 		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get())) { out.why = "an argument the block cannot land"; return false; } }
 	}
-	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn); probe.callee_name = fn->name; probe.in_loop = in_loop;
+	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
 	probe.ref_slots.assign(fn->local_count, 0);
@@ -635,7 +642,7 @@ std::shared_ptr<identifier_expr> vm_compiler::inline_temp(const source_location&
 
 // the spills, the graft into the result temp, the statement rewritten over the temps
 expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expression_ptr& root) {
-	const function_decl* fn = plan.fn; const std::shared_ptr<call_expr>& call = plan.call;
+	const function_decl* fn = plan.fn.get(); const std::shared_ptr<call_expr>& call = plan.call;
 	const bool was_off = inlining_off_;
 	inlining_off_ = true;   // the spills, the graft's statements and the fallback compile plainly
 	inline_context sc;      // the statement's clone: the spilled operands and the call become temps
@@ -663,7 +670,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		site.name_symbol = add_symbol(static_cast<identifier_expr*>(call->callee.get())->symbol_id);
 	}
 	site.body = fn->body.get();
-	site.decl = fn;
+	site.decl = plan.fn;
 	site.call_stmt = current_stmt_;
 	const uint32_t site_index = static_cast<uint32_t>(chunk_->inline_sites.size());
 	chunk_->inline_sites.push_back(site);
@@ -756,7 +763,7 @@ expression_ptr vm_compiler::hoist_leaf_calls(const expression_ptr& e, bool state
 		if (!plan_hoist(cur, statement_position && round == 0, plan)) {
 			if (plan.why && plan.call && plan.call->callee && plan.call->callee->get_type() == node_type::identifier_expr) {   // the kept call, named for the listing and the profile
 				chunk_->inline_refusals.push_back({std::string(static_cast<const identifier_expr*>(plan.call->callee.get())->name), plan.why, static_cast<uint32_t>(plan.call->location.line)});
-			} else if (plan.why && plan.call && plan.call->proven_method_decl && plan.call->callee->get_type() == node_type::member_expr) {
+			} else if (plan.why && plan.call && ever_stamped(plan.call->proven_method_decl) && plan.call->callee->get_type() == node_type::member_expr) {
 				chunk_->inline_refusals.push_back({"." + std::string(static_cast<const member_expr*>(plan.call->callee.get())->member), plan.why, static_cast<uint32_t>(plan.call->location.line)});
 			}
 			break;

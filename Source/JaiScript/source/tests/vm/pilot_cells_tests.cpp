@@ -4950,6 +4950,32 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// `auto x = y;` takes y's declared type: from a var (a body declaration, a live-in local, a global) the local is a var, so a block
+		// lands any kind in it and flushes it with the var's stamp, as the general form's declaration copies the stamp (the ordering fuzz band)
+		test("an_auto_declaration_from_a_var_is_a_var_in_a_block", [this]() {
+			const std::string src = "var GV = 1;\n"
+				"function run() -> string { float a = 0.0; float b = 0.0; float c = 0.0; float d = 0.0;\n"
+				"  var vv = 41;\n"
+				"  for (int i = 0; i < 3; i++) {\n"
+				"    var v4 = 41; auto e = v4; e += 1.5; a = a + e;\n"
+				"    auto e2 = GV; e2 += 1.5; b = b + e2;\n"
+				"    auto e3 = vv; e3 += 1.5; c = c + e3;\n"
+				"    int n = 41; auto e4 = n; e4 += 1.5; d = d + e4;\n"
+				"  }\n"
+				"  return to_string(a) + \" \" + to_string(b) + \" \" + to_string(c) + \" \" + to_string(d); }\n"
+				"run();";
+			const std::string expected = "127.5 7.5 127.5 126.0";
+			both(src, expected, "auto from a var in a block");
+			both(src, expected, "auto from a var in a block, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

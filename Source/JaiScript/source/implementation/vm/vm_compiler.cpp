@@ -3036,6 +3036,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t mov_landing = decl ? decl_landing(st.a) : k_typed_dst_store;
 				use_slot(st.a, dst_kind, true, mov_landing, mov_landing == k_typed_dst_temp ? nullptr : stamp, ip);
 				op.kind = ir::mov; op.a = st.a; op.writes = st.a;
+				if (decl && !from_const && !stamp) { op.tok = 1; }   // `auto x = y;` takes y's declared type: a var source makes x a var
 			} else if (st.op == opcode::op_set_member_value && st.a < c.member_store_protos.size()) {
 				// `base.member = operand;` onto a frame-slot instance (an alias included): a store site whose field the entry or the rebind
 				// resolves; the value a cell or a constant of a scalar kind (an environment value keeps the general form)
@@ -3341,6 +3342,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip + 1); break; }   // a string or class local
 					{ const uint8_t ld = decl_landing(static_cast<uint32_t>(decl->slot_index)); use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, ip + 1); }
 					op.a = static_cast<uint32_t>(decl->slot_index); op.writes = op.a;
+					if (!stamp && st.op == opcode::op_load) { op.tok = 1; }   // an auto declaration from a name takes its declared type
 				} else if (sn.b == k_invalid_u32) { op.a = k_ir_env_bit | env_written(sn.a, k_typed_dst_store, ip + 1); }
 				else { use_slot(sn.b, 0, true, k_typed_dst_store, nullptr, ip + 1); op.a = sn.b; op.writes = sn.b; }
 				if (st.op == opcode::op_const) { op.b = k_typed_const_bit | st.a; }
@@ -3687,7 +3689,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
 				break;
-			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), 0}, ip); break;
+			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), op.tok}, ip); break;
 			case ir::cmp: {
 				const uint32_t bits = op.sense ? 0x80000000u : 0u;
 				if (!op.head) { fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 1, op.target, bits }); }   // an interior target: patched to its copy position

@@ -7047,7 +7047,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	script_value* s = frame_slot(f, cl.slot);
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 		const script_int v = static_cast<script_int>(cs.payload[k]);
-		type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_int_);
+		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_int_);
 		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
 		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); return; }
@@ -7057,7 +7057,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 		frame_slot_set(f, cl.slot, std::move(nv));
 	} else if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
 		const script_float v = cell_float_of_bits(cs.payload[k]);
-		type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_float_);
+		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_float_);
 		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
 		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); return; }
@@ -7067,7 +7067,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 		frame_slot_set(f, cl.slot, std::move(nv));
 	} else {
 		const bool v = cs.payload[k] != 0;
-		type_info* stamp = cl.kind == 0 && cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_bool_);
+		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_bool_);
 		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_BOOL && s->get_engine() == engine_ && s->type_info_raw() == stamp;
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_bool_payload(v); return; }
 		JAI_CELLS_COUNT(9);
@@ -7877,7 +7877,7 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 			}
 			if (cs.dirty.test(k) && !cl.temp && cl.env_operand == k_invalid_u32) { cell_flush_one(f, loop, k); cs.dirty.clear(k); }
 			script_value v = kind == kint ? script_value(static_cast<script_int>(cs.payload[k]), engine_) : kind == kflt ? script_value(cell_float_of_bits(cs.payload[k]), engine_) : script_value(cs.payload[k] != 0, engine_);
-			if (cl.kind == 0 && cs.stamp[k]) { v.set_type_info(type_info_ptr{cs.stamp[k]}); }
+			if (cs.stamp[k]) { v.set_type_info(type_info_ptr{cs.stamp[k]}); }
 			stack_.push_back(std::move(v));
 		} else {
 			const vm_instruction& oi = f.code->code[a.v];
@@ -8746,6 +8746,13 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, size_t& ip, const vm_
 		bits = cr.payload[ins.b];
 	}
 	if (!cell_land(f, loop, ins.a, kind, bits)) { cells_miss_ip(f, ip, loop, original_ip(), 1); return {}; }
+	if (ins.c == 1 && !(ins.b & k_typed_const_bit)) {
+		// an auto declaration from a name takes the name's declared type: a var's any stamp makes the local a var for its later landings and its flush
+		cell_state& cs = *f.cells;
+		const chunk::cell_loop::cell& src = loop.cells[ins.b];
+		type_info* st = cs.stamp[ins.b] ? cs.stamp[ins.b] : src.first_decl ? src.decl_stamp : nullptr;
+		cs.stamp[ins.a] = st && st->base_type == script_value_type::jai_any_type ? st : nullptr;
+	}
 	++ip;
 	return {};
 }

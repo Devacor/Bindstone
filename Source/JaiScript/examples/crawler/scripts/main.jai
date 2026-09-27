@@ -94,6 +94,7 @@ function creation_screen() -> var {
 function crawler_main() -> void {
 	RNG = Rng(HOST_SEED);
 	G = Game();
+	PILOT_CO = null;   // a second run in the same engine (the REPL) starts a fresh pilot, not the last game's
 	G.smoke = HOST_SMOKE;
 	G.autopilot = HOST_SMOKE;
 

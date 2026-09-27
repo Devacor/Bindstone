@@ -120,6 +120,7 @@ public:
 		diagnostic_texts();
 		callback_errors();
 		user_assignment_operator();
+		textless_errors();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1369,6 +1370,29 @@ private:
 			expect_texts({
 				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5;", "Cannot assign 'int' to element of type 'OK2'", check_mode::warn},
 			});
+		});
+	}
+
+	// docs/diagnostics.md: every runtime error a catch sees has a text; one raised without its own reads as its code's
+	// message, the text the host boundary shows (`what()` of the uncaught error)
+	void textless_errors() {
+		test("a_compound_error_on_a_variable_has_a_text", [this]() {
+			expect_texts({
+				{"local /= 0", "", "function f() { int x = 5; int z = 0; x /= z; } f();", "Division by zero", check_mode::warn},
+				{"global /= 0", "int gx = 5; int gz = 0;", "gx /= gz;", "Division by zero", check_mode::warn},
+				{"local -= string", "", "function f() { int x = 5; var s = \"s\"; x -= s; } f();", "Type mismatch", check_mode::warn},
+				{"string += int", "", "function f() { string s = \"a\"; s += 5; } f();", "Type mismatch", check_mode::warn},
+				{"bool += int", "", "function f() { bool b = true; b += 1; } f();", "Type mismatch", check_mode::warn},
+			});
+		});
+		test("the_catch_text_matches_the_uncaught_text", [this]() {
+			every_config("host text", "Type mismatch|Type mismatch", [](engine& e) {
+				e.static_checking(check_mode::warn);
+				const std::string caught = e.execute("string r = \"\"; function f() { string s = \"a\"; s += 5; } try { f(); } catch (x) { r = x; } r;").as_string();
+				std::string uncaught;
+				try { e.execute("f();"); } catch (const std::exception& ex) { uncaught = ex.what(); }
+				return caught + "|" + uncaught.substr(0, caught.size());
+			}, check_mode::warn);
 		});
 	}
 

@@ -152,6 +152,9 @@ namespace jai::vm {
                                // (c = fn | 0x80 guarded | (call site + 1) << 8): the kernel while the callee binds the registered
                                // builtin and the argument is a number, then past the op_call_temp that follows; otherwise the
                                // real call through the site, whose result that op_call_temp lands
+        op_call_typed,         // op_call_from_scratch's word (a=argc, b=site index): the call whose result a declaration or a compiler temp takes;
+                               // an int or float result lands there by typed_sites[ip] (operands[0] = the landing word, stamp = the declaration's
+                               // type) and the consumer that follows is skipped, any other result takes the consumer
         op_math_guard,         // a=call site, b=the alias's temp, c=math_fn: the alias's callee resolves at the callee-first point
                                // ahead of its argument code: the builtin marks the temp float, anything else is the probe's
                                // outcome (a raise, or the callee parked for the real call) and marks it int
@@ -490,6 +493,7 @@ namespace jai::vm {
             case opcode::op_call_temp: return "CALL_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";
             case opcode::op_math_guard: return "MATH_GUARD";
+            case opcode::op_call_typed: return "CALL_TYPED";
             case opcode::op_unary_temp: return "UNARY_TEMP";
             case opcode::op_parallel_advance: return "PARALLEL_ADVANCE";
             case opcode::op_parallel_element: return "PARALLEL_ELEMENT";

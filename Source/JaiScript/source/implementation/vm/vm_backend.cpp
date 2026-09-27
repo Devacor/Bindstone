@@ -10396,6 +10396,23 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 // an inlined leaf's guard (docs/typed_regions_design.md, Inlined leaves): the site's name binds the function the graft was made from,
 // read through the name's own cache row without running a getter (a binding that is a property or an element reference takes the
 // fallback), and no debugger is armed; otherwise the fallback runs the original statement with its real call
+// a call's int or float result into the declaration or the compiler temp its consumer would fill: a declaration takes its own kind only
+// (the consumer converts anything else), a temp takes either
+bool vm_backend::call_typed_land(frame& caller, const script_value& v) {
+	const chunk::typed_site& site = caller.code->typed_sites[caller.ip];
+	const uint32_t dst = site.operands[0];
+	const size_t k = v.raw_storage_index();
+	if ((dst >> k_typed_dst_shift) == k_typed_dst_temp) {
+		if (k == script_value::TYPEID_INT) return typed_land_int(caller, dst, v.unchecked_as_int());
+		if (k == script_value::TYPEID_FLOAT) return typed_land_float(caller, dst, v.unchecked_as_float());
+		return false;
+	}
+	const script_value_type want = site.stamp ? site.stamp->base_type : script_value_type::jai_any_type;
+	if (k == script_value::TYPEID_INT && want == script_value_type::jai_int_type) return typed_land_int(caller, dst, v.unchecked_as_int());
+	if (k == script_value::TYPEID_FLOAT && want == script_value_type::jai_float_type) return typed_land_float(caller, dst, v.unchecked_as_float());
+	return false;
+}
+
 // a stdlib alias's name resolves (the non-raising resolver the entry uses) to the registered builtin
 bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& ms) {
 	if (debug_hook_ || !math_alias_rows_ || !math_alias_rows_[ms.fn].identity || ms.site >= f.code->call_sites.size()) return false;
@@ -11000,18 +11017,44 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	frames_.push_back(&rec.f);
 	JAI_CALL_PUSH_SECTION(3);
 
-	op_status bound{};
-	try {
-		bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
-	} catch (...) {
-		pop_script_frame_core(rec);
-		throw;
+	if (function.backend_lean_bind == 0) {
+		uint8_t lean = 1;
+		const auto& ps = function.parameters();
+		for (size_t i = 0; i < ps.size(); ++i) {
+			const parameter& p = ps[i];
+			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
+			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
+			    (bt != script_value_type::jai_any_type && bt != script_value_type::jai_int_type && bt != script_value_type::jai_float_type &&
+			     bt != script_value_type::jai_bool_type && bt != script_value_type::jai_char_type)) { lean = 2; break; }
+		}
+		function.backend_lean_bind = lean;
 	}
-	if (bound == op_status::failed) {
-		pop_script_frame_core(rec);
-		return bound;
+	// bind_parameters' in-place row for every parameter: a primitive argument whose storage matches its by-value slot is already the slot
+	bool bound_in_place = function.backend_lean_bind == 1 && argc == function.parameters().size();
+	for (size_t i = 0; bound_in_place && i < argc; ++i) {
+		const script_value& a = stack_[args_base + i];
+		const size_t ri = a.raw_storage_index();
+		const type_info* pt = function.parameters()[i].type.get();
+		const script_value_type bt = pt ? pt->base_type : script_value_type::jai_any_type;
+		bound_in_place = (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT || ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR) &&
+		                 (bt == script_value_type::jai_any_type ||
+		                  (bt == script_value_type::jai_int_type && ri == script_value::TYPEID_INT) || (bt == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
+		                  (bt == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) || (bt == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR));
+	}
+	if (!bound_in_place) {
+		op_status bound{};
+		try {
+			bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
+			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+			                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
+		} catch (...) {
+			pop_script_frame_core(rec);
+			throw;
+		}
+		if (bound == op_status::failed) {
+			pop_script_frame_core(rec);
+			return bound;
+		}
 	}
 	JAI_CALL_PUSH_SECTION(4);
 	assert(stack_.size() == args_base + argc);
@@ -17527,6 +17570,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_probe_member:
 				VM_TRY_OP_SHARED(exec_probe_member(f, ins));
+				break;
+			case opcode::op_call_typed:
+				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (!is_unwinding_ && call_typed_land(f, stack_.back())) { stack_.pop_back(); ++f.ip; }   // a native callee's result: the consumer is skipped
 				break;
 			case opcode::op_call_from_scratch:
 				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));

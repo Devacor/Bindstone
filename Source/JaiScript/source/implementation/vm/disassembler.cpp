@@ -184,6 +184,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				out << " site=" << ins.a << " argc=" << ins.b;
 				break;
 			case opcode::op_call_from_scratch:
+			case opcode::op_call_typed:
 				out << " argc=" << ins.a << " site=" << ins.b;
 				break;
 			case opcode::op_probe_member:

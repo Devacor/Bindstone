@@ -4182,6 +4182,28 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
 			check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, "the loop closes: " + fl);
 		});
+		// row 192: a call's int or float result lands in the declaration or temp its consumer fills; any other result takes the consumer
+		test("typed_call_results_land_in_their_consumer", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function fi(int a, int b) -> int { return a * b + 1; }\n"
+				"function ff(float a, bool neg, char c) -> float { float r = a * 2.0; if (neg) { r = -r; } return r + cast<int>(c); }\n"
+				"function fv(var v) { return v; }\n"
+				"function thr(int n) -> int { if (n > 2) { throw \"big \" + to_string(n); } return n; }\n"
+				"function rec(int n) -> int { if (n < 2) { return n; } int a = rec(n - 1); int b = rec(n - 2); return a + b; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  int a = fi(3, 4); float b = ff(1.5, true, 'a'); float c = fv(2); int d = fv(7); float e = max(2.5, 1.0) + ff(0.5, false, 'b');\n"
+				"  int g = rec(12); float h = fi(2, 2); out += to_string(a) + \" \" + to_string(b) + \" \" + to_string(c) + \" \" + type_of(c) + \" \" + to_string(d) + \" \" + to_string(e) + \" \" + to_string(g) + \" \" + to_string(h) + \" \" + type_of(h);\n"
+				"  for (int i = 0; i < 5; ++i) { try { int t = thr(i); out += \" t\" + to_string(t); } catch (err) { out += \" E:\" + err; } }\n"
+				"  try { int s = fv(\"str\"); out += \" s\" + to_string(s); } catch (err) { out += \" E2:\" + err; }\n"
+				"  float x = 1.0; float y = x + ff(x, false, 'c') * fi(1, 1); out += \" \" + to_string(y);\n"
+				"  return out; }\n"
+				"run();";
+			both(src, "", "typed call landings");
+			both(src, "", "typed call landings, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			check_true(l.find("CALL_TYPED") != std::string::npos, "the calls land typed: " + l.substr(0, 2000));
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

@@ -2707,7 +2707,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip) return s.call_stmt; }
 			return stmt_of(at);
 		};
-		auto last_def_stmt = [&](int k) -> const ast_node* { for (size_t d = defs.size(); d-- > 0;) { if (defs[d].second == static_cast<uint32_t>(k)) return caller_stmt_of(defs[d].first); } return nullptr; };
+		// the statement a compiler value's definition belongs to: inside a graft its own statement (the caller's temps reuse the graft's slots
+		// after the join), the graft itself for its parameters and its result (every return defines the result the join reads)
+		auto def_site_of = [&](size_t at, uint32_t slot) -> const void* {
+			const chunk::inline_site* in = nullptr;
+			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip && (!in || s.guard_ip > in->guard_ip)) { in = &s; } }
+			const ast_node* st = stmt_of(at);
+			if (!in) return st;
+			return slot == in->result_slot || st == in->call_stmt ? static_cast<const void*>(in) : static_cast<const void*>(st);
+		};
+		auto last_def_site = [&](int k) -> const void* { for (size_t d = defs.size(); d-- > 0;) { if (defs[d].second == static_cast<uint32_t>(k)) return def_site_of(defs[d].first, cells[k].slot); } return nullptr; };
 		std::vector<uint32_t> alias_slots;   // the slots of the body's element aliases (rebinds), in order
 		auto is_alias = [&](uint32_t slot) -> bool { for (const uint32_t s : alias_slots) { if (s == slot) return true; } return false; };
 		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp, size_t at) {
@@ -2717,11 +2726,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (k < 0) {
 				chunk::cell_loop::cell nc{ slot, kind, 0, !is_write, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
-			} else if (is_write && landing == k_typed_dst_temp && cells[k].temp && (cells[k].kind != kind || (kind == 0 && last_def_stmt(k) != caller_stmt_of(at)))) {
+			} else if (is_write && landing == k_typed_dst_temp && cells[k].temp && (cells[k].kind != kind || (kind == 0 && last_def_site(k) != def_site_of(at, slot)))) {
 				// a compiler value is a definition, not a slot: a temp redefined with another kind (the compiler reuses temp
 				// slots across statements) is a new cell of the same slot; reads bind to the latest definition. An untyped
 				// definition in another statement is one too: a typed read there fixes that statement's cell only (the arms of
-				// one statement's ternary share theirs)
+				// one statement's ternary share theirs, and an untyped landing in a fixed cell misses: cell_land)
 				chunk::cell_loop::cell nc{ slot, kind, 0, false, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
 			} else if (cells[k].kind == 0) { cells[k].kind = kind; }   // an adopted kind takes the first typed use's
@@ -2729,7 +2738,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (is_write) {
 				if (!cells[k].defined && !cells[k].live_in && landing == k_typed_dst_decl) { cells[k].first_decl = true; cells[k].decl_stamp = stamp; }   // declared by the body
 				cells[k].defined = true; cells[k].landing = landing; cells[k].stamp = stamp;
-				if (landing == k_typed_dst_temp) { cells[k].temp = true; defs.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(k)); }
+				if (landing == k_typed_dst_temp) { cells[k].temp = true; cells[k].open_def = cells[k].open_def || kind == 0; defs.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(k)); }
 			}
 		};
 		auto env_cell = [&](const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at) -> uint32_t {

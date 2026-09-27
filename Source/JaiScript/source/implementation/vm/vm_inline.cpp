@@ -787,6 +787,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	site.body = fn->body.get();
 	site.decl = plan.fn;
 	site.call_stmt = current_stmt_;
+	site.result_slot = result ? static_cast<uint32_t>(result->slot_index) : k_invalid_u32;
 	const uint32_t site_index = static_cast<uint32_t>(chunk_->inline_sites.size());
 	chunk_->inline_sites.push_back(site);
 	const size_t guard_ip = emit(opcode::op_inline_guard, site_index, 0, 0);

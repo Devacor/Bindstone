@@ -132,13 +132,14 @@ string sfx_samples(string name) {
 	if (name == "groan") { return synth(1, 120.0, 90.0, 0.6, 45, 0.3, 70); }
 	if (name == "screech") { return synth(1, 2200.0, 1500.0, 0.2, 35, 0.1, 71); }
 	if (name == "rumble") { return synth(3, 150.0, 60.0, 0.5, 60, 0.2, 72); }
+	if (name == "heartbeat") { return synth(2, 70.0, 45.0, 0.1, 80, 0.1, 73) + silence(0.08) + synth(2, 60.0, 40.0, 0.12, 60, 0.1, 74); }
 	return synth(2, 660.0, 660.0, 0.05, 30, 0.1, 99);
 }
 
 array<string> SFX_NAMES = ["hit", "crit", "swing", "bow", "arrowhit", "zap", "fire", "thunder", "boom", "heal", "chime", "quest", "coin",
 	"pickup", "drink", "eat", "die", "bossdie", "death", "res", "levelup", "victory", "splash", "clink", "clang", "chop", "hammer", "craft",
 	"sizzle", "warp", "roar", "squeak", "kazoo", "fizzle", "chest", "ribbit", "buzz", "howl", "oink", "hiss", "snap", "squish", "groan",
-	"screech", "rumble"];
+	"screech", "rumble", "heartbeat"];
 
 // build any missing wavs; true when the cache is complete
 bool audio_prepare(string dir) {

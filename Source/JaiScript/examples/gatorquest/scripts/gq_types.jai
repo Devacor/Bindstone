@@ -166,6 +166,7 @@ class Character {
 	int action_x = 0;
 	int action_y = 0;
 	int action_arg = 0;
+	int potion_t = 0;          // tick the next potion may be drunk
 	int buff_night = 0;
 	int buff_fire = 0;
 	int buff_str = 0;

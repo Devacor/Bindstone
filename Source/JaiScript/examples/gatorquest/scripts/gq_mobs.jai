@@ -228,7 +228,8 @@ bool mob_can_enter(int m, int x, int y) {
 	if (k == 2) {
 		if (mv == 1) { return false; }
 	} else if (k == 3) {
-		if (mv != 4 && MOB_PLAYER[m] < 0) { return false; }
+		// only flyers cross open sky, and a boss never leaves solid ground (players must be able to reach it)
+		if (MOB_PLAYER[m] < 0 && (mv != 4 || (MOB_FLAGS[m] & MF_BOSS) != 0)) { return false; }
 	} else {
 		if (mv == 2) { return false; }
 		if (k == 5 && MOB_PLAYER[m] < 0 && !MONS[MOB_KIND[m]].fireproof) { return false; }

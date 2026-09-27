@@ -90,6 +90,12 @@ array<string> NH_TXT;
 int NET_BYTES_OUT = 0;
 int NET_SNAPS_OUT = 0;
 
+// ---- delta snapshots: per player slot, the last record sent for each visible mobile and item
+array<map<int, string>> SNAP_MOBS;
+array<map<int, string>> SNAP_ITEMS;
+array<int> SNAP_WORLD;
+bool SNAP_DELTAS = true;
+
 // ---- networking: client sessions (the game uses one; the net test drives several)
 array<shared_ptr<NetChannel>> NCS_CH;
 array<array<string>> NCS_INBOX;

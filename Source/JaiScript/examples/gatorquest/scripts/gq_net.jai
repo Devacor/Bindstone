@@ -91,6 +91,7 @@ void net_host_hello(int cid, array<string>& f) {
 	string welcome = join_character(slot, name, hue);
 	ensure_slot(slot);
 	NET_SHEET_SENT[slot] = -1;
+	snap_reset(slot);
 	NET_SLOT_OF[cid] = slot;
 	NET_CID_OF[slot] = cid;
 	net_send(cid, `WELCOME|${NET_PROTO}|${slot}|${SEED}|${TICK}|${clean_text(welcome)}`);

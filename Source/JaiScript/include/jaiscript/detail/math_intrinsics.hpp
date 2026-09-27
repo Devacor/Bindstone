@@ -149,17 +149,19 @@ namespace jai::detail {
 
     // A stdlib math builtin the VM may evaluate here while its name binds the registered function (engine::register_math_alias):
     // the one-argument float family, whose stdlib (script_float) -> script_float bodies are these expressions verbatim, so an
-    // int or float argument yields the same bits either way
+    // int or float argument yields the same bits either way (abs is the stdlib's float abs: an int argument converts first, unlike
+    // math::abs)
     inline bool math_alias_kernel(math_fn fn) noexcept {
         switch (fn) {
         case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
-        case math_fn::radians_to_degrees: case math_fn::degrees_to_radians:
+        case math_fn::radians_to_degrees: case math_fn::degrees_to_radians: case math_fn::abs_:
             return true;
         default: return false;
         }
     }
     inline script_float eval_math_alias(math_fn fn, script_float x) noexcept {
         switch (fn) {
+        case math_fn::abs_: return std::fabs(x);
         case math_fn::floor_: return std::floor(x);
         case math_fn::ceil_: return std::ceil(x);
         case math_fn::sqrt_: return std::sqrt(x);

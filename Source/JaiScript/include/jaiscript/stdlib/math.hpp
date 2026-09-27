@@ -298,6 +298,7 @@ namespace stdlib {
             return dist(*rng);
         });
 
+        eng_ref.register_math_alias("abs", "abs");
         eng_ref.register_math_alias("floor", "floor");
         eng_ref.register_math_alias("ceil", "ceil");
         eng_ref.register_math_alias("sqrt", "sqrt");

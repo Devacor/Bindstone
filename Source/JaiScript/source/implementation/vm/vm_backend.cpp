@@ -8675,14 +8675,16 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, size_t& ip, const vm_
 JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
-	const detail::math_fn fn = static_cast<detail::math_fn>(ins.a >> k_cell_op_shift);
+	const uint32_t tok = ins.a >> k_cell_op_shift;
+	const detail::math_fn fn = static_cast<detail::math_fn>(tok & ~k_cell_math_float_arg);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
 	const uint8_t sk = cr.kinds[ins.b];
-	const bool is_int = sk == static_cast<uint8_t>(script_value::TYPEID_INT);
-	if (!is_int && sk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
+	const bool int_arg = sk == static_cast<uint8_t>(script_value::TYPEID_INT);
+	if (!int_arg && sk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
 	const script_int xi = static_cast<script_int>(cr.payload[ins.b]);
-	const script_float xd = is_int ? static_cast<script_float>(xi) : cell_float_of_bits(cr.payload[ins.b]);
+	const script_float xd = int_arg ? static_cast<script_float>(xi) : cell_float_of_bits(cr.payload[ins.b]);
+	const bool is_int = int_arg && !(tok & k_cell_math_float_arg);
 	uint8_t kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	int64_t bits;
 	switch (fn) {

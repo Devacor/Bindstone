@@ -3140,8 +3140,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = tk == token_type::minus ? ir::neg : tk == token_type::tilde ? ir::bnot : ir::lnot; op.a = st.b; op.writes = st.b;
 			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {
 				// math: a pure one-argument intrinsic of a value into a compiler value (the kernel's rows run in the block): itrunc
-				// and ifloor land an int, abs the argument's kind, the float family a float; a stdlib alias is the kernel while its
-				// name holds (a site of the entry and the landings) and its real call's landing has no copy
+				// and ifloor land an int, abs the argument's kind (the stdlib alias a float), the float family a float; a stdlib alias
+				// is the kernel while its name holds (a site of the entry and the landings) and its real call's landing has no copy
 				const bool alias = st.c > 0xFF;
 				const detail::math_fn fn = static_cast<detail::math_fn>(alias ? st.c & 0x3F : st.c);
 				const fused_operand& src = c.fused_binary_protos[st.a].left;
@@ -3149,7 +3149,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				uint8_t rk = kflt;
 				switch (fn) {
 				case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
-				case detail::math_fn::abs_: rk = 0; break;
+				case detail::math_fn::abs_: rk = alias ? kflt : 0; break;
 				case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
 				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: break;
 				default: refuse(chunk::cell_refusal_translation, ip); break;
@@ -3158,7 +3158,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!direct_slot(src)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(src.slot, 0, false, 0, nullptr, ip);
 				use_slot(st.b, rk, true, k_typed_dst_temp, nullptr, ip);
-				op.kind = ir::math; op.tok = static_cast<uint8_t>(fn); op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
+				op.kind = ir::math; op.tok = static_cast<uint8_t>(static_cast<uint32_t>(fn) | (alias ? k_cell_math_float_arg : 0u)); op.a = st.b; op.b = src.slot; op.writes = st.b; slot_read(op, src.slot);
 				if (alias) {
 					if (!(st.c & 0x80)) { loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ (st.c >> 8) - 1, static_cast<uint8_t>(fn), static_cast<uint32_t>(ip * 3 + 1) }); }
 					else {

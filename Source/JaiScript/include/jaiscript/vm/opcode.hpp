@@ -280,6 +280,7 @@ namespace jai::vm {
     };
     inline constexpr uint32_t k_cell_op_shift = 24;
     inline constexpr uint32_t k_cell_index_mask = (1u << k_cell_op_shift) - 1;
+    inline constexpr uint32_t k_cell_math_float_arg = 0x40;   // op_c_math's math_fn bit: a stdlib alias, whose int argument converts to float first
 
     inline constexpr uint32_t k_typed_const_bit = 0x80000000u;
     inline constexpr uint32_t k_typed_dst_shift = 30;

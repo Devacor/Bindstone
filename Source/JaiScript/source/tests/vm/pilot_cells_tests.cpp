@@ -4443,6 +4443,38 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// G6: bare abs is a stdlib alias (the float abs: an int argument converts first, as the builtin's float parameter converts it)
+		test("stdlib_abs_alias_is_the_float_builtin", [this]() {
+			const std::string src = "function r(var v) -> string { return to_string(abs(v)) + \":\" + type_of(abs(v)); }\n"
+				"function k(int i) -> string { return to_string(abs(i)) + \" \" + to_string(abs(i * 1)); }\n"
+				"function x(float f) -> string { float y = abs(f) + 0.0; return to_string(y) + \" \" + to_string(abs(f * 1.0)); }\n"
+				"r(4) + \"|\" + r(-2.25) + \"|\" + r(-0.0) + \"|\" + r(9007199254740993) + \"|\" + k(-7) + \"|\" + k(-9223372036854775807 - 1) + \"|\" + x(-0.0) + \"|\" + x(-INF)"
+				" + \"|\" + x(NAN_VALUE) + \"|\" + x(-NAN_VALUE) + \"|\" + to_string(abs(-3) == 3.0);";
+			both(src, "", "int, float and edge arguments");
+			both(src, "", "int, float and edge arguments, proofs off", false);
+			check_true(run_on(true, src).rfind("4.0:float|2.25:float|0.0:float|", 0) == 0, "the builtin's numbers: " + run_on(true, src));
+			const std::string loop = "array<float> XS = [0.5, -1.5, 2.5, -3.5, -0.0, 5.5, -6.5, 7.5];\n"
+				"function mag(float v) -> float { float a = abs(v); return a * 2.0; }\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = XS[i & 7]; int j = i - 5; float mq = mag(q); s += abs(q) + abs(j) + mq; } return s; }\n"
+				"to_string(run(64)) + \",\" + to_string(run(3));";
+			both(loop, "", "an abs loop");
+			both(loop, "", "an abs loop, proofs off", false);
+			const std::string l = listing_run(loop);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("C_MATH") != std::string::npos && fl.find("-- inlined mag") != std::string::npos, "the loop closes over abs and grafts its leaf: " + fl);
+			const std::string rebind = "[[warn_mode]]\nvar ABS0 = abs;\nfunction f(float x) -> float { return abs(x * 2.0) + abs(x); }\n"
+				"string out = to_string(f(-8.0)); abs = function(float v) { return v + 100.0; }; out += \",\" + to_string(f(-8.0)); abs = ABS0; out += \",\" + to_string(f(-8.0)); out;";
+			both(rebind, "24.0,176.0,24.0", "a rebinding");
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, loop);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(loop).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

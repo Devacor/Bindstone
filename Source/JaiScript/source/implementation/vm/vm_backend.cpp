@@ -15893,14 +15893,14 @@ op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 	rec.pending_size = pending_callees_.size();
 	rec.entry_env = environment_;
 
-	// Inside a catch block the exception state survives so a bare rethrow works
+	// Inside a catch block the exception state survives so a bare rethrow works; a try block inside a handler is still inside
+	// that handler (C++), so the in-catch marker carries into it (KEEP BYTE-PARALLEL with the interpreter's visit_try_stmt)
 	if (current_catch_var_id_ == 0) {
 		current_exception_.reset();
 		active_exception_value_ = make_null();
 	}
 	is_unwinding_ = false;
 	trace_captured_ = false;
-	current_catch_var_id_ = 0;
 
 	try_records_.push_back(std::move(rec));
 	return {};
@@ -15926,8 +15926,15 @@ op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
 	}
 	current_catch_var_id_ = 0;
 	if (!is_unwinding_) {
-		current_exception_.reset();
-		active_exception_value_ = make_null();
+		// A completed handler hands the current exception back to the enclosing handler when this try sits inside one (C++:
+		// the handled exception reverts, so a later bare `throw;` rethrows it) (KEEP BYTE-PARALLEL with the interpreter's visit_try_stmt)
+		if (rec.saved_catch_var_id != 0) {
+			current_exception_ = rec.saved_exception;
+			active_exception_value_ = rec.saved_exception_value;
+		} else {
+			current_exception_.reset();
+			active_exception_value_ = make_null();
+		}
 	} else if (rec.saved_unwinding) {
 		current_exception_ = rec.saved_exception;
 		active_exception_value_ = rec.saved_exception_value;

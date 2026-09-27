@@ -995,6 +995,20 @@ private:
 				return std::string("no error");
 			});
 		});
+		test("rethrow_after_a_nested_try_inside_a_catch_rethrows_the_outer_exception", [this]() {
+			// docs/EXCEPTION_DESIGN.md addendum: a nested try inside a catch keeps the caught exception live for throw;
+			// (C++: a completed inner handler hands the exception back to the enclosing one)
+			expect("rethrow", R"(
+				function run() -> string {
+					string r = "";
+					try { try { throw "x"; } catch (e) { try { throw "y"; } catch (e2) { r += e2; } throw; } } catch (z) { r += z; }
+					try { try { throw "p"; } catch { try { throw "q"; } catch (e3) { r += e3; } throw; } } catch (z2) { r += z2; }
+					try { try { throw 1; } catch (e) { try { try { throw 2; } catch (e4) { r += "" + e4; } throw; } catch (e5) { r += "" + e5; } throw; } } catch (z3) { r += "" + z3; }
+					return r;
+				}
+				run();
+			)", "yxqp211");
+		});
 		test("a_finished_coroutine_restores_the_resumers_exception", [this]() {
 			expect("resumer trio", R"(
 				coroutine int g() { yield 1; }
@@ -1051,13 +1065,6 @@ private:
 	}
 
 	void known_bugs() {
-		test("rethrow_after_a_nested_try_inside_a_catch_rethrows_the_outer_exception", [this]() {
-			// docs/EXCEPTION_DESIGN.md addendum: a nested try inside a catch keeps the caught exception live for throw; (C++)
-			expect("rethrow", R"(
-				function run() -> string { string r = ""; try { try { throw "x"; } catch (e) { try { throw "y"; } catch (e2) { r += e2; } throw; } } catch (z) { r += z; } return r; }
-				run();
-			)", "yx");
-		});
 		test("a_fresh_coroutine_starts_with_no_active_exception", [this]() {
 			// docs/EXCEPTION_DESIGN.md addendum: a bare throw; in a fresh coroutine raises even when the resumer sits inside a catch
 			expect("coroutine rethrow", R"(

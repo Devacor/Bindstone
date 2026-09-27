@@ -195,14 +195,13 @@ function sk_body(float x, float y, float z) -> float {
 	return dt + (da - dt) * hh - k * hh * (1.0 - hh);
 }
 
-function sk_crown(float x, float y, float z) -> float {
+// the crown's ring; its flames are the capsules [SK_CROWN0, SK_NC)
+function sk_ring(float x, float y, float z) -> float {
 	float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
 	float cu = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ;
 	float px = ox - SK_PUX * cu; float py = oy - SK_PUY * cu; float pz = oz - SK_PUZ * cu;
 	float ring = sqrt(px * px + py * py + pz * pz) - 0.2;
-	float d = sqrt(ring * ring + cu * cu) - 0.028;
-	float ds = sk_capsules(x, y, z, SK_CROWN0, SK_NC, 99.0);
-	return d < ds ? d : ds;
+	return sqrt(ring * ring + cu * cu) - 0.028;
 }
 
 function sk_gem(float x, float y, float z) -> float {
@@ -224,8 +223,9 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 	if ((groups & 2) != 0) {
 		float ds = sk_skull(x, y, z);
 		d = d < ds ? d : ds;
-		float dr = sk_crown(x, y, z);
+		float dr = sk_ring(x, y, z);
 		d = d < dr ? d : dr;
+		d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d);
 		float dg = sk_gem(x, y, z);
 		d = d < dg ? d : dg;
 	}
@@ -267,27 +267,26 @@ function sk_ray_near(float ox, float oy, float oz, float dx, float dy, float dz,
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
 }
 
-// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby
+// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule run starts
+// from the best so far, so a capsule that cannot win costs only its bounding test
 function sk_material(float x, float y, float z) -> int {
 	float g = sk_field(x, y, z);
-	float dw = sk_shell(g);
-	float ds = sk_skull(x, y, z);
-	float dj = sk_capsules(x, y, z, 0, SK_NBONE, 99.0);
-	float bone = ds < dj ? ds : dj;
-	float de = sk_glows(x, y, z);
-	float dcr = sk_crown(x, y, z);
-	de = de < dcr ? de : dcr;
-	float dgm = sk_gem(x, y, z);
-	float db = sk_body(x, y, z);
-	float dl = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, 99.0);
-	float chit = db < dl ? db : dl;
+	float best = sk_shell(g);
 	int m = 0;
-	float best = dw;
+	float ds = sk_skull(x, y, z);
+	float bone = sk_capsules(x, y, z, 0, SK_NBONE, ds < best ? ds : best);
 	if (bone < best) { best = bone; m = 1; }
+	float db = sk_body(x, y, z);
+	float chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best ? db : best);
 	if (chit < best) { best = chit; m = 2; }
+	float de = sk_glows(x, y, z);
+	float dr = sk_ring(x, y, z);
+	de = de < dr ? de : dr;
+	de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de < best ? de : best);
 	if (de < best) { best = de; m = 3; }
+	float dgm = sk_gem(x, y, z);
 	if (dgm < best) { best = dgm; m = 5; }
-	if (m == 2 && db <= dl) {
+	if (m == 2 && chit == db) {
 		float ax = x - SK_AX; float ay = y - SK_AY; float az = z - SK_AZ;
 		float au = ax * SK_PUX + ay * SK_PUY + az * SK_PUZ;
 		float ar = ax * SK_PRX + ay * SK_PRY + az * SK_PRZ;

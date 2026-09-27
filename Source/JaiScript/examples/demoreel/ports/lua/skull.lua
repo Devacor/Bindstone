@@ -152,14 +152,13 @@ local function sk_body(x, y, z)
 	return dt + (da - dt) * hh - k * hh * (1.0 - hh)
 end
 
-local function sk_crown(x, y, z)
+-- the crown's ring; its flames are the capsules [SK_CROWN0, SK_NC)
+local function sk_ring(x, y, z)
 	local ox = x - SK_CRX; local oy = y - SK_CRY; local oz = z - SK_CRZ
 	local cu = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ
 	local px = ox - SK_PUX * cu; local py = oy - SK_PUY * cu; local pz = oz - SK_PUZ * cu
 	local ring = sqrt(px * px + py * py + pz * pz) - 0.2
-	local d = sqrt(ring * ring + cu * cu) - 0.028
-	local ds = sk_capsules(x, y, z, SK_CROWN0, SK_NC, 99.0)
-	return d < ds and d or ds
+	return sqrt(ring * ring + cu * cu) - 0.028
 end
 
 local function sk_gem(x, y, z)
@@ -182,8 +181,9 @@ local function sk_spider(x, y, z, groups, cand, nc)
 	if (groups & 2) ~= 0 then
 		local ds = sk_skull(x, y, z)
 		d = d < ds and d or ds
-		local dr = sk_crown(x, y, z)
+		local dr = sk_ring(x, y, z)
 		d = d < dr and d or dr
+		d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d)
 		local dg = sk_gem(x, y, z)
 		d = d < dg and d or dg
 	end
@@ -226,26 +226,25 @@ local function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r)
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r
 end
 
--- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby
+-- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule
+-- run starts from the best so far, so a capsule that cannot win costs only its bounding test
 local function sk_material(x, y, z)
-	local dw = sk_world(x, y, z)
-	local ds = sk_skull(x, y, z)
-	local dj = sk_capsules(x, y, z, 0, SK_NBONE, 99.0)
-	local bone = ds < dj and ds or dj
-	local de = sk_glows(x, y, z)
-	local dcr = sk_crown(x, y, z)
-	de = de < dcr and de or dcr
-	local dgm = sk_gem(x, y, z)
-	local db = sk_body(x, y, z)
-	local dl = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, 99.0)
-	local chit = db < dl and db or dl
+	local best = sk_world(x, y, z)
 	local m = 0
-	local best = dw
+	local ds = sk_skull(x, y, z)
+	local bone = sk_capsules(x, y, z, 0, SK_NBONE, ds < best and ds or best)
 	if bone < best then best = bone; m = 1 end
+	local db = sk_body(x, y, z)
+	local chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best and db or best)
 	if chit < best then best = chit; m = 2 end
+	local de = sk_glows(x, y, z)
+	local dr = sk_ring(x, y, z)
+	de = de < dr and de or dr
+	de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de < best and de or best)
 	if de < best then best = de; m = 3 end
+	local dgm = sk_gem(x, y, z)
 	if dgm < best then best = dgm; m = 5 end
-	if m == 2 and db <= dl then
+	if m == 2 and chit == db then
 		local ax = x - SK_AX; local ay = y - SK_AY; local az = z - SK_AZ
 		local au = ax * SK_PUX + ay * SK_PUY + az * SK_PUZ
 		local ar = ax * SK_PRX + ay * SK_PRY + az * SK_PRZ

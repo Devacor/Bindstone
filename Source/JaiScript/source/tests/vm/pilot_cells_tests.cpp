@@ -3512,6 +3512,30 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(iv, vv, "the reload takes the fallback on the vm");
 			check_eq(std::string("30|51"), vv, "the values before and after the reload");
 		});
+		test("a_dropped_jaibite_leaves_its_stamps_resolvable_or_expired", [this]() {
+			// the checker's callee stamps outlive the program they name: a host that executes a jaibite and drops it (the demoreel)
+			// keeps the leaf graftable while its function lives, and a leaf whose declaration died keeps the call (a stamp read
+			// after free crashed the demoreel's first frames)
+			const std::string program =
+				"int leaf(int a) { return a * 2 + 1; }\n"
+				"int caller(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = leaf(i); s = s + v; } return s; }\n";
+			auto sequence = [&](bool vm, bool redefine, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				try {
+					{ auto bite = e->jaibite(program); bite.execute(); }
+					if (redefine) { e->execute("int leaf(int a) { return a * 3; }"); }
+					return e->execute("caller(6);").to_string();
+				} catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			std::string kept_listing, gone_listing;
+			check_eq(sequence(false, false, nullptr), sequence(true, false, &kept_listing), "the live leaf: both backends");
+			check_eq(std::string("36"), sequence(true, false, nullptr), "the live leaf's value");
+			check_true(kept_listing.find("-- inlined leaf") != std::string::npos, "the leaf grafts after its jaibite is gone: " + kept_listing);
+			check_eq(sequence(false, true, nullptr), sequence(true, true, &gone_listing), "the redefined leaf: both backends");
+			check_eq(std::string("45"), sequence(true, true, nullptr), "the redefined leaf's value");
+			check_true(gone_listing.find("-- call kept leaf line 2: a callee whose declaration is gone") != std::string::npos, "the dead declaration keeps the call: " + gone_listing);
+		});
 		test("a_raise_inside_an_inlined_body_names_the_callee", [this]() {
 			// row 152: an inlined body that raises keeps the text and the trace's first frame is the callee, as the interpreter's is
 			const std::string prelude =

@@ -325,8 +325,9 @@ namespace jai {
         // (identified by body); empty = unproven call
         mutable std::vector<uint8_t> static_arg_proofs;
         mutable const block_stmt* proven_callee_body = nullptr;
-        mutable const class function_decl* proven_callee_decl = nullptr;
-        mutable const class function_decl* proven_method_decl = nullptr;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
+        // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
+        mutable std::weak_ptr<const class function_decl> proven_callee_decl;
+        mutable std::weak_ptr<const class function_decl> proven_method_decl;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
         mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
@@ -823,7 +824,7 @@ namespace jai {
     };
 
     // Function declaration
-    class function_decl : public declaration {
+    class function_decl : public declaration, public std::enable_shared_from_this<function_decl> {
     public:
         std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t name_id = UINT64_MAX;  // Interned ID for the function name

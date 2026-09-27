@@ -5571,6 +5571,7 @@ void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& de
 		proto.fn = std::make_shared<script_defined_function>(
 			decl->name, decl->parameters, decl->return_type, decl->body, nullptr, decl->local_count);
 		proto.fn->alias_candidate = true;
+		proto.fn->decl = decl;
 	} else if (decl->outer_slot_plan_built) {
 		// Saved interpreter state has already replaced these identifiers' slots.
 		proto.outer_slot_plan = decl->outer_slot_plan;

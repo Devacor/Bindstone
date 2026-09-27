@@ -11263,14 +11263,14 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     }
 
     // Reset state for try block
-    // Don't reset exception state if we're in a catch block (allows re-throw)
+    // Don't reset exception state if we're in a catch block (allows re-throw); a try block inside a handler is still
+    // inside that handler (C++), so the in-catch marker carries into it and a nested try keeps the handled exception
     if (!resuming_catch) {
         if (current_catch_var_id_ == 0) {
             current_exception_.reset();
             active_exception_value_ = make_value();
         }
         is_unwinding_ = false; trace_captured_ = false;
-        current_catch_var_id_ = 0;
     }
 
     // Execute try block (a catch resume skips it: it completed before the suspension)
@@ -11356,10 +11356,17 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // Clear the in-catch marker
         current_catch_var_id_ = 0;
 
-        // Only clear exception if it wasn't re-thrown
+        // A completed handler hands the current exception back to the enclosing handler when this try sits inside one (C++:
+        // the handled exception reverts, so a later bare `throw;` rethrows it); otherwise none is current
+        // (KEEP BYTE-PARALLEL with vm_backend::exec_catch_end)
         if (!is_unwinding_) {
-            current_exception_.reset();
-            active_exception_value_ = make_value();
+            if (saved_catch_var_id != 0) {
+                current_exception_ = saved_exception;
+                active_exception_value_ = saved_exception_value;
+            } else {
+                current_exception_.reset();
+                active_exception_value_ = make_value();
+            }
         }
     }
 

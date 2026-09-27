@@ -532,6 +532,8 @@ namespace jai::vm {
             bool guard_always = false;             // fused_index_proto::guard_always, flattened
         };
         std::vector<typed_site> typed_sites;
+        // the environment operands of typed ops (k_typed_env_bit): resolved as the replaced instruction resolved them, at its cache slots
+        std::vector<fused_operand> typed_env_operands;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

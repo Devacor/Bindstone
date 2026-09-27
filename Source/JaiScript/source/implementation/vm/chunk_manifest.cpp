@@ -184,6 +184,11 @@ namespace {
 				out << static_cast<int>(s.fold_count) << " expect=" << static_cast<int>(s.decl_expect) << " proto=" << u(s.index_proto) << " temp=" << b(s.temp) << " spec=" << b(s.speculative)
 				    << " guard=" << u(s.guard_temp) << " always=" << b(s.guard_always) << "\n";
 			}
+			if (!ch.typed_env_operands.empty()) {
+				out << pre << "typed_env_operands";
+				for (const auto& o : ch.typed_env_operands) { out << " " << operand(ch, o); }
+				out << "\n";
+			}
 			out << pre << "inline_sites " << ch.inline_sites.size() << "\n";
 			for (size_t i = 0; i < ch.inline_sites.size(); ++i) {
 				const chunk::inline_site& s = ch.inline_sites[i];

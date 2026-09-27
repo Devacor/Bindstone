@@ -283,6 +283,7 @@ namespace jai::vm {
     inline constexpr uint32_t k_typed_dst_decl = 1;
     inline constexpr uint32_t k_typed_dst_store = 2;
     inline constexpr uint32_t k_typed_dst_compound = 3;   // `x op= y` on an int-holding slot: in place, int rows only
+    inline constexpr uint32_t k_typed_env_bit = 0x40000000u;   // an operand that is an environment value: the bit | its chunk::typed_env_operands index
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<

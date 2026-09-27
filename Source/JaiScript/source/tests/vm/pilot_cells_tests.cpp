@@ -4077,6 +4077,34 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "", "a rebinding call inside the loop");
 			both(src, "", "a rebinding call inside the loop, proofs off", false);
 		});
+		// row 189: a typed global in arithmetic or a declaration is a typed row's environment operand
+		test("typed_globals_are_typed_row_operands", [this]() {
+			const std::string src = "float G = 1.5; float H = 2.0; int N = 7;\n"
+				"function f(float x, int k) -> float { float a = x - G; float b = a * H + G; float s = G; int m = k * N + N; return b + s + m; }\n"
+				"string out = to_string(f(3.0, 2)); G = 4.25; N = -3; out += \",\" + to_string(f(1.0, 5)); out;";
+			both(src, "", "typed globals");
+			both(src, "", "typed globals, proofs off", false);
+			const std::string all = listing_run(src);
+			const size_t fbeg = all.find("== f ");
+			const std::string l = fbeg == std::string::npos ? all : all.substr(fbeg, all.find("\n== ", fbeg + 1) - fbeg);
+			check_true(l.find("BINARY_FUSED_") == std::string::npos && l.find("DECL_VAR") == std::string::npos && l.find("T_DECL_MOV") != std::string::npos, "the global reads are typed rows: " + l);
+		});
+		test("typed_global_rows_fall_back_to_the_general_form", [this]() {
+			// a global read before its declaration ran (the typed null placeholder), a member of the global's name inside a method, a
+			// global another unit redeclares with another kind, a loop over the rows; the same values and texts on both backends
+			const std::string src = "[[warn_mode]]\nfloat G = 1.5;\n"
+				"function f(float x) -> float { float a = x - G; float s = G; return a * s; }\n"
+				"float E = 0.0;\n"
+				"class C { float G = 10.0; float g(float x) { float a = x - G; float s = G; return a + s; } }\n"
+				"function loop(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += i * G - G; float w = G; t += w; } return t; }\n"
+				"string out = to_string(f(3.0)) + \",\" + to_string(C().g(4.0)) + \",\" + to_string(loop(40));\n"
+				"G = 0.25; out += \",\" + to_string(f(3.0)) + \",\" + to_string(loop(7)); out;";
+			both(src, "", "typed global fallbacks");
+			both(src, "", "typed global fallbacks, proofs off", false);
+			const std::string pre = "float P = f0();\nfunction f0() -> float { return g0(2.0); }\nfunction g0(float x) -> float { try { float a = x - Q; return a; } catch (e) { return -1.0; } }\nfloat Q = 3.0;\n"
+				"function h(float x) -> float { float a = x * P; return a; }\nto_string(P) + \",\" + to_string(h(2.0));";
+			both(pre, "", "a global read ahead of its declaration");
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

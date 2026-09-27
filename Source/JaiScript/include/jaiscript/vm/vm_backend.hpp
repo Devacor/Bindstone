@@ -1696,9 +1696,18 @@ namespace jai::vm {
         static bool lane_deref_silent(const script_value& v) noexcept;
         // Typed scalar set (opcode.hpp op_t_*): guarded fast paths over frame slots, the
         // original instruction from chunk::typed_sites on any miss
-        const script_value* typed_right(frame& f, uint32_t c) noexcept {
+        const script_value* typed_right(frame& f, uint32_t c) {
             if (c & k_typed_const_bit) { return &f.code->constants[c & ~k_typed_const_bit]; }
+            if (c & k_typed_env_bit) { return typed_env(f, c, 1); }
             return frame_slot(f, c);
+        }
+        const script_value* typed_left(frame& f, uint32_t b) {
+            if (b & k_typed_env_bit) { return typed_env(f, b, 0); }
+            return frame_slot(f, b);
+        }
+        // an environment operand through the replaced instruction's nullable fast head and cache slot (null: its general form)
+        const script_value* typed_env(frame& f, uint32_t v, uint32_t side) {
+            return fused_cmp_operand(f, f.code->typed_env_operands[v & k_typed_slot_mask], f.ip * 3 + side);
         }
         bool typed_land_int(frame& f, uint32_t a, script_int v);
         bool typed_land_float(frame& f, uint32_t a, script_float v);

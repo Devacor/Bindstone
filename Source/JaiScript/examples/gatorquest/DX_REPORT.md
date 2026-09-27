@@ -27,7 +27,7 @@ menu gained Host this game, Stop hosting and Leave to title, and sessions now en
 predicted: it moves on the key press, steps go to the host with sequence numbers, the host acknowledges them in every
 snapshot, and the client replays what is still in flight and glides the rare correction. Other gators and monsters are
 drawn ~100 ms behind a smoothed host clock. A network simulator (`lag`, `jitter`, `loss`) and two new headless tests
-(`predtest`, `menutest`, 37 checks) run green on both backends, with every earlier gate unchanged (smoke STATE_HASH
+(`predtest`, and `menutest` with 37 checks) run green on both backends, with every earlier gate unchanged (smoke STATE_HASH
 3237070200, endgame 61631680).
 
 Corrections measured by `predtest` (64 s of walking per round trip, VM; the interpreter's run matches within one):

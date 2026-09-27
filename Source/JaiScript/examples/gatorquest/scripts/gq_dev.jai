@@ -39,12 +39,11 @@ string ident_before(string s, int at) {
 
 // the stub text for one source file; function names land in `fns`, counts in `stats` [functions, constants, state]
 string reload_stub(string src, array<string>& fns, array<int>& stats) {
-	array<string> lines = src.split("\n");
+	array<string> lines = src.lines();       // \n or \r\n, blank lines kept (the stub's line numbers must match)
 	string out = "";
 	stats = [0, 0, 0];
 	for (int i = 0; i < lines.size(); ++i) {
 		string line = lines[i];
-		if (line.ends_with("\r")) { line = line.substr(0, line.size() - 1); }
 		string keep = line;
 		bool top = line.size() > 0 && line[0] != ' ' && line[0] != '\t';
 		if (top && !line.starts_with("//") && !line.starts_with("}") && !line.starts_with("]") && !line.starts_with(")")
@@ -136,7 +135,9 @@ array<string> dev_poll() {
 			msgs.push("Reloaded " + DEV_LAST);
 			dev_after_reload(file_name(f));
 		} else {
-			msgs.push("Reload FAILED, old code kept: " + err.split("\n")[0] + (err.split("\n").size() > 1 ? " " + err.split("\n")[1].trim() : ""));
+			array<string> el = err.lines();
+			string first = el.size() > 0 ? el[0] : err;
+			msgs.push("Reload FAILED, old code kept: " + first + (el.size() > 1 ? " " + string::trim(el[1]) : ""));
 		}
 	}
 	return msgs;

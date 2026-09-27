@@ -59,6 +59,11 @@ int run_savetest(string base_dir) {
 	int gold0 = CHARS[0].gold;
 	check(save_roundtrip(dir), "round trip keeps the exact state hash");
 	string first = read_file(world_path());
+	string crlf = first;
+	crlf.replace_all("\n", "\r\n");
+	write_file(world_path(), crlf);
+	check(load_sealed(world_path(), WORLD_MAGIC) != "" && SAVE_NOTE == "", "a save whose line endings a tool converted to CRLF still verifies");
+	write_file(world_path(), first);
 	for (int t = 0; t < 200; ++t) { bots_tick(); sim_tick(); }
 	int hash2 = state_hash();
 	int tick2 = TICK;
@@ -115,10 +120,17 @@ int run_savetest(string base_dir) {
 }
 
 // ------------------------------------------------------------ hot reload ---
+// an edit in the file's own line endings (a Windows checkout has \r\n)
 string replace_once(string text, string from, string to) {
-	int at = text.find(from);
+	string f = from;
+	string t = to;
+	if (text.contains("\r\n")) {
+		f.replace_all("\n", "\r\n");
+		t.replace_all("\n", "\r\n");
+	}
+	int at = text.find(f);
 	if (at < 0) { print("  (edit target not found: " + from + ")"); return text; }
-	return text.substr(0, at) + to + text.substr(at + from.size(), text.size() - at - from.size());
+	return text.substr(0, at) + t + text.substr(at + f.size(), text.size() - at - f.size());
 }
 
 int count_frog_targets(int player_mob) {
@@ -149,9 +161,13 @@ int run_hotreload(string base_dir, bool strict_catchable) {
 	string src = current_script_dir();
 	array<string> names = ["gq_types.jai", "gq_items.jai", "gq_ai.jai", "gq_actions.jai", "gq_data.jai"];
 	array<string> copies;
+	// whatever the checkout did, two copies get \r\n and three get \n: both paths always run
 	for (int i = 0; i < names.size(); ++i) {
 		string p = dir + "/" + names[i];
-		write_file(p, read_file(src + "/" + names[i]));
+		string text = read_file(src + "/" + names[i]);
+		text.replace_all("\r\n", "\n");
+		if (i == 0 || i == 2) { text.replace_all("\n", "\r\n"); }
+		write_file(p, text);
 		copies.push(p);
 	}
 	print("hot reload:");

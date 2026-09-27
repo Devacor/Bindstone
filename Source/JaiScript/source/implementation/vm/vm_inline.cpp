@@ -26,6 +26,7 @@ namespace {
 
 constexpr size_t k_inline_max_nodes = 512;   // the cloned body and the cloned statement together
 constexpr size_t k_inline_max_hoists = 8;    // calls hoisted out of one statement
+constexpr size_t k_inline_max_tree = 4096;   // the cloned bodies of one outermost graft and every graft compiled inside it, at any depth
 
 struct inline_context {
 	size_t slot_offset = 0;                                        // the callee's slots move above the caller's frame
@@ -718,6 +719,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (!void_type(fn->return_type.get())) { auto r = std::make_shared<identifier_expr>(fn->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 	(void)clone_body(fn->body->declarations, probe, true);
 	if (!probe.ok) { out.why = probe.why ? probe.why : "a body the graft does not take"; return false; }
+	if (graft_nesting_ > 0 && graft_tree_nodes_ + probe.nodes > k_inline_max_tree) { out.why = "a graft tree too large"; return false; }
 	// a reference parameter renamed to the caller's variable turns a store through it into a store of the variable, which enforces the
 	// variable's declared type where the reference's store does not: equal when the variable is a reference or untyped, or declared a
 	// scalar type with every store proven to land that type
@@ -810,16 +812,18 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	return true;
 }
 
-// what fn's body may call when fn grafts: the stdlib aliases, and (fn's graft being outermost) a plain leaf the graft's compile grafts in turn:
-// eligible by itself, never fn or an enclosing graft, its guard and fallback inside fn's graft
+// what fn's body may call when fn grafts: the stdlib aliases, and a plain leaf the graft's compile grafts in turn, at any depth the tree's node
+// budget allows: eligible by itself, never fn or an enclosing graft, its guard and fallback inside fn's graft. A call's verdict is kept for
+// the chunk (its body's shape decides it; a recursion the memo misses is refused again where the graft compiles)
 land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 	land_ctx lc;
 	lc.eng = engine_;
-	if (graft_bodies_.empty()) {
+	{
 		lc.nested = [this, fn](const call_expr* ce) {
 			if (!ce->callee || ce->callee->get_type() != node_type::identifier_expr || !ever_stamped(ce->proven_callee_decl)) return false;
 			const std::shared_ptr<const function_decl> inner = ce->proven_callee_decl.lock();
 			if (!inner || !inner->body || inner->body.get() == fn->body.get()) return false;
+			if (auto memo = nested_land_memo_.find(ce); memo != nested_land_memo_.end()) return memo->second;
 			graft_bodies_.push_back(fn->body.get());
 			bool ok = inline_eligible(ce, inner.get()) == nullptr;
 			if (ok) {
@@ -834,6 +838,7 @@ land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 				ok = probe.ok;
 			}
 			graft_bodies_.pop_back();
+			nested_land_memo_[ce] = ok;
 			return ok;
 		};
 	}
@@ -879,6 +884,7 @@ std::shared_ptr<identifier_expr> vm_compiler::inline_temp(const source_location&
 // the spills, the graft into the result temp, the statement rewritten over the temps
 expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expression_ptr& root) {
 	const function_decl* fn = plan.fn.get(); const std::shared_ptr<call_expr>& call = plan.call;
+	if (graft_nesting_++ == 0) { graft_tree_nodes_ = 0; }
 	const bool was_off = inlining_off_;
 	inlining_off_ = true;   // the spills, the graft's statements and the fallback compile plainly
 	inline_context sc;      // the statement's clone: the spilled operands and the call become temps
@@ -981,6 +987,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		params.push_back(d);
 	}
 	std::vector<declaration_ptr> body = clone_body(fn->body->declarations, ctx, true);
+	graft_tree_nodes_ += ctx.nodes;
 	chunk_->inline_sites[site_index].field_class = ctx.field_class;
 	chunk_->inline_sites[site_index].field_ids = ctx.field_ids;
 	chunk_->inline_sites[site_index].env_reads = ctx.reads_env && !plan.receiver;
@@ -998,7 +1005,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	current_stmt_ = site.call_stmt;
 	chunk_->inline_sites[site_index].begin_ip = static_cast<uint32_t>(chunk_->code.size());   // the arguments are the caller's (a raise there names no callee)
 	graft_bodies_.push_back(fn->body.get());
-	inlining_off_ = graft_bodies_.size() > 1;   // a leaf the body calls grafts here, one level down
+	inlining_off_ = false;   // a leaf the body calls grafts here, a level down, within the tree's node budget
 	for (const auto& d : body) { compile_declaration(d, false); }
 	inlining_off_ = true;
 	graft_bodies_.pop_back();
@@ -1032,6 +1039,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	expression_ptr replaced = clone_expr(root, sc);
 	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); }   // moved to the clone's node when the clone holds it
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
+	--graft_nesting_;
 	return sc.ok ? replaced : nullptr;
 }
 

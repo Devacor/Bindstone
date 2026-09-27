@@ -761,6 +761,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		if (k == 0 || p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i) { frame_eligible_ = false; break; }
 		frame_param_kinds_.push_back(k);
 	}
+	nested_land_memo_.clear();
 	for (const auto& p : parameters) {
 		uint64_t id = p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name);
 		callable_.declared.insert(id);

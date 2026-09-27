@@ -223,7 +223,9 @@ declaration leaves that enum unchanged, and the checker says so at warning sever
 `enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its
 values` (`in a block`, `in a lambda`). A file run by an `include` inside a function or a block
 declares its enums there too; that include's report (`last_check_diagnostics()`) carries the same
-warning, path-qualified, for each enum the file declares under a program-scope name.
+warning, path-qualified, for each enum the file declares under a program-scope name, and so does the
+host's warning channel (`engine::report_script_warning`, stderr unless the host sets a handler),
+since a run-time include has no load listing to print.
 
 **Map keys** — the pair variable of a range-for over a statically known map (`map<K,V> m`,
 an `auto` map literal; a `var` map is dynamic) carries a read-only `first` - C++

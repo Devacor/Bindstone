@@ -3672,6 +3672,32 @@ public:
             check_eq(std::string("2.0|3.0|3|-2|4.0|1024.0|7|3|9|10"), r.as_string());
         });
 
+        // an evaluated argument survives a later argument's call, whose statements clear the interpreter's value stack at their
+        // boundaries (the ordering fuzz band's probes: the interpreter read the callee's last statement value in its place)
+        test("an_argument_survives_a_later_arguments_call", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                int G = 1; int H = 5; array<int> A = [1, 2];
+                function wg() -> int { G = G + 100; return 1; }
+                function wh() -> int { H = H + 1000; return 1; }
+                function wa() -> int { A[1] = A[1] + 100; return 1; }
+                function run() -> string {
+                    string out = "";
+                    G = 1; out += to_string(math::max(G, wg())) + " ";
+                    G = 1; out += to_string(math::max(G, wh())) + " ";
+                    out += to_string(math::max(-50, wa())) + " ";
+                    out += to_string(math::max(A[0] * 3, wa())) + " ";
+                    int x = 7; out += to_string(math::max(x, wa())) + " ";
+                    G = 1; out += to_string(math::clamp(G, wg(), 1000)) + " ";
+                    out += to_string(math::lerp(-50, wa(), 0.0));
+                    return out;
+                }
+                run() + " | " + to_string(math::max(-50, wa()));
+            )");
+            check_eq(std::string("1 1 1 3 7 1 -50.0 | 1"), r.as_string());
+        });
+
         test("trig_and_distance", [this]() {
             auto e = make_engine();
             check_near(0.0, e->execute("math::sin(0.0)").as_float(), 1e-12);

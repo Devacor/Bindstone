@@ -1153,8 +1153,8 @@ namespace jai::vm {
         script_value make_null() const;
         bool is_truthy(const script_value& value);
         bool object_to_bool_via_method(const script_value& value);
-        std::string value_to_string_with_method(const script_value& val);
-        script_string concat_text(const script_value& left, const script_value& right);
+        checked_result<std::string> value_to_string_with_method(const script_value& val);
+        checked_result<script_string> concat_text(const script_value& left, const script_value& right);
         script_value materialize_constant(const script_value& tmpl);
         script_value materialize_constant(const chunk& code, uint32_t const_index);
         // A string literal's value: the main engine shares the AST node (string copies share
@@ -1199,9 +1199,10 @@ namespace jai::vm {
             }
         }
         bool object_defines_custom_equality(const script_value& v) const;
-        std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
-        std::optional<bool> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<script_value> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        // user operator methods: nullopt when the operand defines none, else the method's result or the runtime error it raised
+        std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
+        std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
 
         struct member_target {
             std::shared_ptr<class_instance> instance;

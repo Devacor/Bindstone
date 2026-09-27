@@ -1324,7 +1324,15 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 	const script_function& method = bound.as_function();
 	std::vector<script_value> no_args;
 	auto result = method(no_args);
-	if (result.has_value() && result.value().is_bool()) {
+	if (!result) {
+		// truthiness has no error channel: the runtime error travels as the script exception its text would throw (a
+		// terminal error keeps its latch) (KEEP BYTE-PARALLEL with interpreter::object_to_bool_via_method)
+		if (!is_unwinding_ && !limits_->terminal_error) {
+			raise_script_exception(format_error(result, *symbolizer_), source_location{});
+		}
+		return false;
+	}
+	if (result.value().is_bool()) {
 		return result.value().unchecked_as_bool();
 	}
 	return true;
@@ -1366,33 +1374,34 @@ bool vm_backend::is_truthy(const script_value& value) {
 	}
 }
 
-// String + x (either side a string): the text of each operand joined, as value_to_string_with_method + value_to_string_with_method
-// gives it; a string operand appends its bytes and an int its digits without an intermediate copy. Two operands that would both run
-// a to_string method keep the original expression (its operand order).
-script_string vm_backend::concat_text(const script_value& left, const script_value& right) {
-	auto direct = [](size_t k) { return k == script_value::TYPEID_STRING || k == script_value::TYPEID_INT; };
-	const size_t lk = left.raw_storage_index(), rk = right.raw_storage_index();
-	if (!direct(lk) && !direct(rk)) {
-		return value_to_string_with_method(left) + value_to_string_with_method(right);
-	}
-	auto append = [this](script_string& out, const script_value& v, size_t k) {
+// String + x (either side a string): the text of each operand joined, the left operand's first (the interpreter's
+// concat_with_methods); a string operand appends its bytes and an int its digits without an intermediate copy, and a
+// failing to_string() is the expression's error.
+checked_result<script_string> vm_backend::concat_text(const script_value& left, const script_value& right) {
+	auto append = [this](script_string& out, const script_value& v, size_t k) -> checked_result<void> {
 		if (k == script_value::TYPEID_STRING) { out += v.unchecked_as_string(); }
 		else if (k == script_value::TYPEID_INT) {
 			char buf[24];
 			auto res = std::to_chars(buf, buf + sizeof(buf), v.unchecked_as_int());
 			out.append(buf, res.ptr);
-		} else { out += value_to_string_with_method(v); }
+		} else {
+			auto text = value_to_string_with_method(v);
+			if (!text) { return text.error_value(); }
+			out += text.value();
+		}
+		return {};
 	};
+	const size_t lk = left.raw_storage_index(), rk = right.raw_storage_index();
 	script_string out;
 	if (lk == script_value::TYPEID_STRING && rk == script_value::TYPEID_STRING) {
 		out.reserve(left.unchecked_as_string().size() + right.unchecked_as_string().size());
 	}
-	append(out, left, lk);
-	append(out, right, rk);
+	if (auto l = append(out, left, lk); !l) { return l.error_value(); }
+	if (auto r = append(out, right, rk); !r) { return r.error_value(); }
 	return out;
 }
 
-std::string vm_backend::value_to_string_with_method(const script_value& val) {
+checked_result<std::string> vm_backend::value_to_string_with_method(const script_value& val) {
 	if (val.type() == script_value_type::jai_object_type) {
 		auto target = resolve_member_target(val);
 		if (target) {
@@ -1402,8 +1411,11 @@ std::string vm_backend::value_to_string_with_method(const script_value& val) {
 				const script_function& method = bound.as_function();
 				std::vector<script_value> no_args;
 				auto result = method(no_args);
-				if (result.has_value() && result.value().is_string()) {
-					return result.value().unchecked_as_string();
+				if (!result) {
+					return result.error_value();   // KEEP BYTE-PARALLEL with interpreter::value_to_string_with_method
+				}
+				if (result.value().is_string()) {
+					return std::string(result.value().unchecked_as_string());
 				}
 			}
 		}
@@ -1420,7 +1432,7 @@ bool vm_backend::object_defines_custom_equality(const script_value& v) const {
 	return cd && cd->defines_method(eq_method_id_);
 }
 
-std::optional<bool> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
+std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
 	// Safe-mode workers never dispatch operator methods: the method-value copy and the
 	// bound-method invocation both race shared state (increment B; handle_equal raises
 	// the verdict before the structural fallback could silently diverge)
@@ -1445,13 +1457,14 @@ std::optional<bool> vm_backend::object_equality_via_method(const script_value& l
 	std::vector<script_value> args;
 	args.push_back(right);
 	auto result = method(args);
+	if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }   // the method's runtime error is the operation's (a script throw in flight keeps travelling on its own)
 	if (result.has_value() && result.value().is_bool()) {
-		return result.value().unchecked_as_bool();
+		return checked_result<bool>(result.value().unchecked_as_bool());
 	}
 	return std::nullopt;
 }
 
-std::optional<bool> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
 	// fallback is loud, so no divergence gate is needed here
 	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
@@ -1475,13 +1488,14 @@ std::optional<bool> vm_backend::object_comparison_via_method(const script_value&
 	std::vector<script_value> args;
 	args.push_back(right);
 	auto result = method(args);
+	if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }   // the method's runtime error is the operation's (a script throw in flight keeps travelling on its own)
 	if (result.has_value() && result.value().is_bool()) {
-		return result.value().unchecked_as_bool();
+		return checked_result<bool>(result.value().unchecked_as_bool());
 	}
 	return std::nullopt;
 }
 
-std::optional<script_value> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
 	// fallback is loud, so no divergence gate is needed here
 	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
@@ -1505,8 +1519,9 @@ std::optional<script_value> vm_backend::object_arithmetic_via_method(const scrip
 	std::vector<script_value> args;
 	args.push_back(right);
 	auto result = method(args);
+	if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
 	if (result.has_value()) {
-		return result.value();
+		return checked_result<script_value>(std::move(result.value()));
 	}
 	return std::nullopt;
 }
@@ -1921,12 +1936,13 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 			return script_value(lf + rf, engine_);
 		}
 		if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-			script_string joined = concat_text(left, right);
+			auto joined = concat_text(left, right);
+			if (!joined) { return joined.error_value(); }
 			// engine::memory_cap chokepoint: deny the concat result before it exists
-			if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+			if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
 				return detail::raise_memory_cap(*limits_);
 			}
-			return script_value(std::move(joined), engine_);
+			return script_value(std::move(joined.value()), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
 	}
@@ -1952,12 +1968,13 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 	}
 
 	if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-		script_string joined = concat_text(unwrapped_left, unwrapped_right);
+		auto joined = concat_text(unwrapped_left, unwrapped_right);
+		if (!joined) { return joined.error_value(); }
 		// engine::memory_cap chokepoint: deny the concat result before it exists
-		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+		if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
 			return detail::raise_memory_cap(*limits_);
 		}
-		return script_value(std::move(joined), engine_);
+		return script_value(std::move(joined.value()), engine_);
 	}
 
 	auto custom_result = object_arithmetic_via_method(left, right, op_plus_id_);
@@ -2271,7 +2288,8 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 
 	auto custom_result = object_comparison_via_method(left, right, op_less_id_);
 	if (custom_result.has_value()) {
-		return script_value(custom_result.value(), engine_);
+		if (!*custom_result) { return custom_result->error_value(); }
+		return script_value(custom_result->value(), engine_);
 	}
 	// A script throw inside the operator method is in flight: don't replace it with
 	// the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -2333,7 +2351,8 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 
 	auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
 	if (custom_result.has_value()) {
-		return script_value(custom_result.value(), engine_);
+		if (!*custom_result) { return custom_result->error_value(); }
+		return script_value(custom_result->value(), engine_);
 	}
 	// A script throw inside the operator method is in flight: don't replace it with
 	// the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -2395,7 +2414,8 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 
 	auto custom_result = object_comparison_via_method(left, right, op_greater_id_);
 	if (custom_result.has_value()) {
-		return script_value(custom_result.value(), engine_);
+		if (!*custom_result) { return custom_result->error_value(); }
+		return script_value(custom_result->value(), engine_);
 	}
 	// A script throw inside the operator method is in flight: don't replace it with
 	// the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -2457,7 +2477,8 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 
 	auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
 	if (custom_result.has_value()) {
-		return script_value(custom_result.value(), engine_);
+		if (!*custom_result) { return custom_result->error_value(); }
+		return script_value(custom_result->value(), engine_);
 	}
 	// A script throw inside the operator method is in flight: don't replace it with
 	// the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -2546,7 +2567,8 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	}
 	auto custom_result = object_equality_via_method(left, right);
 	if (custom_result.has_value()) {
-		return script_value(custom_result.value(), engine_);
+		if (!*custom_result) { return custom_result->error_value(); }
+		return script_value(custom_result->value(), engine_);
 	}
 
 	// Script class instances: same class, fieldwise (a user operator== was consulted above)
@@ -2910,12 +2932,13 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-		script_string joined = concat_text(left, right);
+		auto joined = concat_text(left, right);
+		if (!joined) { return joined.error_value(); }
 		// engine::memory_cap chokepoint: deny the concat result before it exists
-		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+		if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
 			return detail::raise_memory_cap(*limits_);
 		}
-		return script_value(std::move(joined), engine_);
+		return script_value(std::move(joined.value()), engine_);
 	}
 
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -3738,7 +3761,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 						args.push_back(std::move(value));
 						auto call_result = func(args);
 						if (!call_result) {
-							return raise_(call_result.error(), "operator= failed");
+							return raise_from(call_result);   // the operator's own error, never a stand-in text
 						}
 					} else {
 						// No operator=: family D's assignment shape names the handle variable
@@ -4022,7 +4045,10 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				default: break;
 			}
 			if (op_symbol_id != 0) {
-				auto custom_result = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+				auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+				if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+				std::optional<script_value> custom_result;
+				if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 				if (custom_result.has_value()) {
 					target = std::move(custom_result.value());
 					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
@@ -4306,7 +4332,10 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			default: break;
 		}
 		if (op_symbol_id != 0) {
-			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+			std::optional<script_value> custom_result;
+			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 			if (custom_result.has_value()) {
 				if (prop_setter) {
 					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
@@ -5613,7 +5642,13 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	}
 	script_value cond = std::move(stack_.back());
 	stack_.pop_back();
-	const bool truthy = ins.c ? cond.unchecked_as_bool() : is_truthy(cond);
+	bool truthy;
+	if (ins.c) {
+		truthy = cond.unchecked_as_bool();
+	} else {
+		truthy = is_truthy(cond);
+		if (is_unwinding_) [[unlikely]] { return {}; }   // a raising to_bool(): the dispatch case unwinds before any jump
+	}
 	f.ip = truthy ? f.ip + 1 : ins.a;
 	return {};
 }
@@ -13144,7 +13179,10 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 			default: break;
 		}
 		if (op_symbol_id != 0) {
-			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
+			std::optional<script_value> custom_result;
+			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 			if (custom_result.has_value()) {
 				if (member->is_static) {
 					script_value stored_static = make_null();
@@ -18037,7 +18075,13 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_jump_if_false: {
 				script_value cond = std::move(stack_.back());
 				stack_.pop_back();
-				const bool truthy = ins.b ? cond.unchecked_as_bool() : is_truthy(cond);
+				bool truthy;
+				if (ins.b) {
+					truthy = cond.unchecked_as_bool();
+				} else {
+					truthy = is_truthy(cond);
+					if (is_unwinding_) [[unlikely]] { break; }   // a raising to_bool(): the unwind runs before any jump
+				}
 				if (!truthy) {
 					f.ip = ins.a;
 					continue;
@@ -18048,7 +18092,13 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_jump_if_true: {
 				script_value cond = std::move(stack_.back());
 				stack_.pop_back();
-				const bool truthy = ins.b ? cond.unchecked_as_bool() : is_truthy(cond);
+				bool truthy;
+				if (ins.b) {
+					truthy = cond.unchecked_as_bool();
+				} else {
+					truthy = is_truthy(cond);
+					if (is_unwinding_) [[unlikely]] { break; }   // a raising to_bool(): the unwind runs before any jump
+				}
 				if (truthy) {
 					f.ip = ins.a;
 					continue;

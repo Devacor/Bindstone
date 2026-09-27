@@ -661,11 +661,28 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
             }
             const auto& comparator = args[0].unchecked_as_function();
-            std::sort(tmp.begin(), tmp.end(), [&comparator](const script_value& a, const script_value& b) {
+            auto* backend = ctx.get_engine()->get_execution_backend();
+            std::optional<error_propagator> comparator_error;
+            bool comparator_threw = false;
+            std::sort(tmp.begin(), tmp.end(), [&](const script_value& a, const script_value& b) {
+                if (comparator_error || comparator_threw) return false;   // the first failure ends the calls; the array stays as it was
                 auto result = comparator({a, b});
-                if (!result) return false;
+                if (!result) {
+                    comparator_error = result.error_value();
+                    return false;
+                }
+                if (backend && backend->is_unwinding()) {
+                    comparator_threw = true;
+                    return false;
+                }
                 return result.value().is_bool() && result.value().unchecked_as_bool();
             });
+            if (comparator_error) {
+                return *comparator_error;
+            }
+            if (comparator_threw) {
+                return ctx.make_value();
+            }
         }
         if (node.is_typed()) {
             // snapshot wins wholesale (matches the hetero write-back below)
@@ -2328,7 +2345,18 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     const script_function& method = bound.as_function();
     std::vector<script_value> no_args;
     auto result = method(no_args);
-    if (result.has_value() && result.value().is_bool()) {
+    if (!result) {
+        // truthiness has no error channel: the runtime error travels as the script exception its text would throw (a
+        // terminal error keeps its latch) (KEEP BYTE-PARALLEL with vm_backend::object_to_bool_via_method)
+        if (!is_unwinding_ && !limits_->terminal_error) {
+            const std::string message = format_error(result, *string_symbolizer_);
+            active_exception_value_ = make_value(message);
+            current_exception_ = script_exception(message);
+            is_unwinding_ = true;
+        }
+        return false;
+    }
+    if (result.value().is_bool()) {
         return result.value().unchecked_as_bool();
     }
     return true;  // Method didn't return a valid bool - treat as truthy
@@ -2345,7 +2373,7 @@ bool interpreter::object_defines_custom_equality(const script_value& v) const {
     return cd && cd->defines_method(eq_method_id_);
 }
 
-std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
+std::optional<checked_result<bool>> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
     // Safe-mode workers never dispatch operator methods (increment B twin of the vm's
     // gate; handle_equal raises the verdict before the structural fallback diverges)
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
@@ -2376,15 +2404,17 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
     args.push_back(right);  // Push by copy (const ref)
 
     auto result = method(args);
+    // the method's runtime error is the comparison's (a script throw in flight keeps travelling on its own)
+    if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
     if (result.has_value() && result.value().is_bool()) {
-        return result.value().unchecked_as_bool();
+        return checked_result<bool>(result.value().unchecked_as_bool());
     }
     // Method didn't return a valid bool - fall back to reference comparison
     return std::nullopt;
 }
 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
-std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<bool>> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
@@ -2413,14 +2443,15 @@ std::optional<bool> interpreter::object_comparison_via_method(const script_value
     args.push_back(right);
 
     auto result = method(args);
+    if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
     if (result.has_value() && result.value().is_bool()) {
-        return result.value().unchecked_as_bool();
+        return checked_result<bool>(result.value().unchecked_as_bool());
     }
     return std::nullopt;
 }
 
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
-std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
@@ -2449,8 +2480,9 @@ std::optional<script_value> interpreter::object_arithmetic_via_method(const scri
     args.push_back(right);
 
     auto result = method(args);
+    if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
     if (result.has_value()) {
-        return result.value();
+        return checked_result<script_value>(std::move(result.value()));
     }
     return std::nullopt;
 }
@@ -4532,7 +4564,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         default: break;
                     }
                     if (op_symbol_id != 0) {
-                        auto custom_result = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+                        auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+                        if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                        std::optional<script_value> custom_result;
+                        if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                         if (custom_result.has_value()) {
                             target = std::move(custom_result.value());
                             push_value(expression_result_needed_ ? target.clone() : target);
@@ -4848,7 +4883,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         default: break;
                     }
                     if (op_symbol_id != 0) {
-                        auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                        auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                        if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                        std::optional<script_value> custom_result;
+                        if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                         if (custom_result.has_value()) {
                             if (prop_setter) {
                                 JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
@@ -5039,7 +5077,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     default: break;
                 }
                 if (op_symbol_id != 0) {
-                    auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                    auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                    if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                    std::optional<script_value> custom_result;
+                    if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                     if (custom_result.has_value()) {
                         if (memberExpr->is_static) {
                             script_value stored_static;
@@ -5829,7 +5870,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 // Operator= succeeded - underlying object was modified in place
                                 return checked_result<void>();
                             }
-                            return checked_result<void>(result.error(), "operator= failed");
+                            return result.error_value();   // the operator's own error, never a stand-in text
                         }
 
                         // No operator=: family D's assignment shape names the handle variable
@@ -6983,7 +7024,7 @@ checked_result<void> interpreter::compound_typed_store_back(script_value& target
 }
 
 // Helper to convert value to string, checking for to_string() method on objects
-std::string interpreter::value_to_string_with_method(const script_value& val) {
+checked_result<std::string> interpreter::value_to_string_with_method(const script_value& val) {
     if (val.type() == script_value_type::jai_object_type) {
         auto target = resolve_member_target(val);
         if (target) {
@@ -6994,13 +7035,31 @@ std::string interpreter::value_to_string_with_method(const script_value& val) {
                 const script_function& method = bound.as_function();
                 std::vector<script_value> no_args;
                 auto result = method(no_args);
-                if (result.has_value() && result.value().is_string()) {
-                    return result.value().unchecked_as_string();
+                if (!result) {
+                    return result.error_value();   // KEEP BYTE-PARALLEL with vm_backend::value_to_string_with_method
+                }
+                if (result.value().is_string()) {
+                    return std::string(result.value().unchecked_as_string());
                 }
             }
         }
     }
     return val.to_string();
+}
+
+// String + x: each operand's text, the left operand's to_string() first; a failing to_string() is the expression's error
+checked_result<script_value> interpreter::concat_with_methods(const script_value& left, const script_value& right) {
+    auto left_text = value_to_string_with_method(left);
+    if (!left_text) { return left_text.error_value(); }
+    auto right_text = value_to_string_with_method(right);
+    if (!right_text) { return right_text.error_value(); }
+    script_string joined = std::move(left_text.value());
+    joined += right_text.value();
+    // engine::memory_cap chokepoint: deny the concat result before it exists
+    if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+        return detail::raise_memory_cap(*limits_);
+    }
+    return make_value(std::move(joined));
 }
 
 // Binary operation helpers
@@ -7028,12 +7087,7 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-        script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
-        // engine::memory_cap chokepoint: deny the concat result before it exists
-        if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
-            return detail::raise_memory_cap(*limits_);
-        }
-        return make_value(std::move(joined));
+        return concat_with_methods(left, right);
     }
 
     // Fast path for pure integer arithmetic (avoid float conversion)

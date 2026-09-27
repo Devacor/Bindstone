@@ -50,7 +50,10 @@ namespace jai::detail {
                         script_value bound = make_bound_method(v, method);
                         std::vector<script_value> no_args;
                         auto result = bound.as_function()(no_args);
-                        if (result.has_value() && result.value().is_bool()) {
+                        if (!result) {
+                            return result.error_value();   // to_bool()'s runtime error is the conversion's, like to_int()'s below
+                        }
+                        if (result.value().is_bool()) {
                             truthy = result.value().unchecked_as_bool();
                         }
                     }

@@ -1313,6 +1313,18 @@ namespace jai::vm {
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
                                                         std::vector<script_value>& captured_out);
+        // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
+        // whole delegated-to constructor) and then the field initializers; the body is the caller's. captured_out (the
+        // outermost constructor only): the arguments taken ahead of that code, when it runs any
+        checked_result<script_value> initialize_members(const std::shared_ptr<script_class_definition>& class_def,
+                                                        const std::shared_ptr<environment>& definition_env,
+                                                        const std::shared_ptr<class_instance>& instance,
+                                                        const script_value& this_value,
+                                                        const std::shared_ptr<function_decl>& matching_ctor,
+                                                        const std::vector<script_value>& args,
+                                                        std::optional<detail::call_depth_guard>& initializer_depth,
+                                                        size_t delegation_depth,
+                                                        std::vector<script_value>* captured_out);
         // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct
         // ctor calls); result_stamp = the shared_ptr arm's post-call type stamp
         op_status enter_constructor_in_loop(frame& f,

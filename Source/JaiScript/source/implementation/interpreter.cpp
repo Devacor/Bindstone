@@ -12889,116 +12889,18 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
     return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
 }
 
-checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
-                                                              std::shared_ptr<environment> definition_env,
-                                                              const std::vector<script_value>& args) {
-    // Initializers execute before call_function owns the constructor's activation.
-    // Hand the same depth back before each body call rather than counting it twice.
-    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
-        return detail::raise_call_depth();
+checked_result<script_value> interpreter::initialize_members(const std::shared_ptr<script_class_definition>& class_def,
+                                                             const std::shared_ptr<environment>& definition_env,
+                                                             const std::shared_ptr<class_instance>& instance,
+                                                             const script_value& this_value,
+                                                             const std::shared_ptr<function_decl>& matching_ctor,
+                                                             const std::vector<script_value>& args,
+                                                             std::optional<detail::call_depth_guard>& initializer_depth,
+                                                             size_t delegation_depth,
+                                                             std::vector<script_value>* captured_out) {
+    if (delegation_depth > detail::k_max_constructor_delegation_depth || detail::native_stack_low()) {
+        return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
     }
-    std::optional<detail::call_depth_guard> initializer_depth;
-    initializer_depth.emplace(current_call_depth_);
-    struct construction_env_restore {
-        interpreter* self;
-        std::shared_ptr<environment> previous_env;
-        ~construction_env_restore() { self->environment_ = std::move(previous_env); }
-    } env_restore{this, environment_};
-
-    // Get all constructor ASTs
-    const auto& ctor_asts = class_def->get_constructor_asts();
-
-    // Find constructor with matching parameter count AND types (trailing defaults open
-    // the arity window; within a tier the ctor using FEWER defaults wins)
-    // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
-    std::shared_ptr<function_decl> exact_match_ctor;
-    std::shared_ptr<function_decl> convertible_match_ctor;
-    std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
-    size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
-
-    for (const auto& ctor_ast : ctor_asts) {
-        if (!arity_accepts(ctor_ast->parameters, args.size())) {
-            continue;
-        }
-        const size_t defaults_used = ctor_ast->parameters.size() - args.size();
-
-        if (defaults_used < arity_defaults) {
-            arity_match_ctor = ctor_ast;
-            arity_defaults = defaults_used;
-        }
-
-        // Check if all parameter types match exactly
-        bool exact_match = true;
-        bool convertible_match = true;
-        for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
-            const auto& param = ctor_ast->parameters[i];
-            if (param.type && !param.type->type_name.empty()) {
-                // Parameter has explicit type - check if arg is compatible
-                auto arg_type = args[i].type();
-                if (arg_type == script_value_type::jai_object_type) {
-                    // For objects, check class name
-                    auto resolved = resolve_member_target(args[i]);
-                    if (resolved) {
-                        if (resolved.class_name() != param.type->type_name) {
-                            exact_match = false;
-                            convertible_match = false;
-                        }
-                    } else {
-                        exact_match = false;
-                        convertible_match = false;
-                    }
-                } else {
-                    // For primitives, check base type
-                    if (arg_type != param.type->base_type) {
-                        exact_match = false;
-                        // Check if numeric conversion is allowed
-                        bool is_numeric_conversion =
-                            (arg_type == script_value_type::jai_int_type &&
-                             param.type->base_type == script_value_type::jai_float_type) ||
-                            (arg_type == script_value_type::jai_float_type &&
-                             param.type->base_type == script_value_type::jai_int_type);
-                        if (!is_numeric_conversion) {
-                            convertible_match = false;
-                        }
-                    }
-                }
-            }
-            // If param has no type, it accepts anything
-        }
-
-        if (exact_match && defaults_used < exact_defaults) {
-            exact_match_ctor = ctor_ast;
-            exact_defaults = defaults_used;
-        }
-        if (convertible_match && defaults_used < convertible_defaults) {
-            convertible_match_ctor = ctor_ast;
-            convertible_defaults = defaults_used;
-        }
-    }
-
-    // Select best matching constructor: exact > convertible > arity fallback
-    std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
-    if (!matching_ctor) {
-        matching_ctor = convertible_match_ctor;
-    }
-    if (!matching_ctor) {
-        matching_ctor = arity_match_ctor;
-    }
-
-    if (!matching_ctor) {
-        return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-            class_def->get_type_id(), args.data(), args.size(), engine_, true);
-    }
-
-    // Create instance
-    auto instance = class_def->create_instance();
-    // Instance created
-
-    // Create 'this' value using the class_def's registered name and type_id
-    // This ensures we use the exact name/id that was registered (e.g., with namespace)
-    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-    auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-
     // Create a regular environment for field initializers and constructor initializer arguments
     // Use the captured definition environment as the parent
     auto init_env = std::make_shared<environment>(definition_env, string_symbolizer_);
@@ -13015,16 +12917,16 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             "Constructor parameter count mismatch");
     }
     // the construction runs code ahead of the body (an initializer list, a non-literal field initializer): the call's
-    // arguments are taken first, as the body's parameters (KEEP BYTE-PARALLEL with vm_backend::construct_instance_pre_body)
-    std::vector<script_value> held_args;
+    // arguments are taken first, as the body's parameters (KEEP BYTE-PARALLEL with vm_backend::initialize_members); a
+    // delegated-to constructor's arguments were taken as they evaluated
     const std::vector<script_value>* argv = &args;
-    if (detail::construction_runs_code(*class_def, *matching_ctor) &&
+    if (captured_out && detail::construction_runs_code(*class_def, *matching_ctor) &&
         detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
-        held_args = args;
-        for (size_t j = 0; j < held_args.size(); ++j) {
-            detail::capture_argument(held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
+        *captured_out = args;
+        for (size_t j = 0; j < captured_out->size(); ++j) {
+            detail::capture_argument((*captured_out)[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
         }
-        argv = &held_args;
+        argv = captured_out;
     }
     for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
         init_env->define(matching_ctor->parameters[i].name, (*argv)[i]);
@@ -13337,11 +13239,11 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                     class_def->get_type_id(), init_args.data(), init_args.size(), engine_, true);
             }
             
-            // Apply this class's field initializers (declared defaults) BEFORE the
-            // delegated-to ctor body, so the target can override them. Suppress the
-            // post-loop re-run below so they are not applied twice (the clobber bug).
-            auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
-            if (!initialized) { return initialized.error_value(); }
+            // C++ delegation: the target constructor runs whole - its own initializer list (a base constructor or a further
+            // delegation), the members, then its body; the delegating constructor re-runs no field initializer afterward
+            auto target_members = initialize_members(class_def, definition_env, instance, this_value, target_ctor, init_args,
+                                                     initializer_depth, delegation_depth + 1, nullptr);
+            if (!target_members) { return target_members; }
             delegated_to_this = true;
 
             // Call the target constructor on this instance with method environment
@@ -13374,6 +13276,123 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
         if (!initialized) { return initialized.error_value(); }
     }
 
+    return this_value;
+}
+
+checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
+                                                              std::shared_ptr<environment> definition_env,
+                                                              const std::vector<script_value>& args) {
+    // Initializers execute before call_function owns the constructor's activation.
+    // Hand the same depth back before each body call rather than counting it twice.
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+        return detail::raise_call_depth();
+    }
+    std::optional<detail::call_depth_guard> initializer_depth;
+    initializer_depth.emplace(current_call_depth_);
+    struct construction_env_restore {
+        interpreter* self;
+        std::shared_ptr<environment> previous_env;
+        ~construction_env_restore() { self->environment_ = std::move(previous_env); }
+    } env_restore{this, environment_};
+
+    // Get all constructor ASTs
+    const auto& ctor_asts = class_def->get_constructor_asts();
+
+    // Find constructor with matching parameter count AND types (trailing defaults open
+    // the arity window; within a tier the ctor using FEWER defaults wins)
+    // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
+    std::shared_ptr<function_decl> exact_match_ctor;
+    std::shared_ptr<function_decl> convertible_match_ctor;
+    std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
+    size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
+
+    for (const auto& ctor_ast : ctor_asts) {
+        if (!arity_accepts(ctor_ast->parameters, args.size())) {
+            continue;
+        }
+        const size_t defaults_used = ctor_ast->parameters.size() - args.size();
+
+        if (defaults_used < arity_defaults) {
+            arity_match_ctor = ctor_ast;
+            arity_defaults = defaults_used;
+        }
+
+        // Check if all parameter types match exactly
+        bool exact_match = true;
+        bool convertible_match = true;
+        for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
+            const auto& param = ctor_ast->parameters[i];
+            if (param.type && !param.type->type_name.empty()) {
+                // Parameter has explicit type - check if arg is compatible
+                auto arg_type = args[i].type();
+                if (arg_type == script_value_type::jai_object_type) {
+                    // For objects, check class name
+                    auto resolved = resolve_member_target(args[i]);
+                    if (resolved) {
+                        if (resolved.class_name() != param.type->type_name) {
+                            exact_match = false;
+                            convertible_match = false;
+                        }
+                    } else {
+                        exact_match = false;
+                        convertible_match = false;
+                    }
+                } else {
+                    // For primitives, check base type
+                    if (arg_type != param.type->base_type) {
+                        exact_match = false;
+                        // Check if numeric conversion is allowed
+                        bool is_numeric_conversion =
+                            (arg_type == script_value_type::jai_int_type &&
+                             param.type->base_type == script_value_type::jai_float_type) ||
+                            (arg_type == script_value_type::jai_float_type &&
+                             param.type->base_type == script_value_type::jai_int_type);
+                        if (!is_numeric_conversion) {
+                            convertible_match = false;
+                        }
+                    }
+                }
+            }
+            // If param has no type, it accepts anything
+        }
+
+        if (exact_match && defaults_used < exact_defaults) {
+            exact_match_ctor = ctor_ast;
+            exact_defaults = defaults_used;
+        }
+        if (convertible_match && defaults_used < convertible_defaults) {
+            convertible_match_ctor = ctor_ast;
+            convertible_defaults = defaults_used;
+        }
+    }
+
+    // Select best matching constructor: exact > convertible > arity fallback
+    std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
+    if (!matching_ctor) {
+        matching_ctor = convertible_match_ctor;
+    }
+    if (!matching_ctor) {
+        matching_ctor = arity_match_ctor;
+    }
+
+    if (!matching_ctor) {
+        return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+            class_def->get_type_id(), args.data(), args.size(), engine_, true);
+    }
+
+    // Create instance
+    auto instance = class_def->create_instance();
+    // Instance created
+
+    // Create 'this' value using the class_def's registered name and type_id
+    // This ensures we use the exact name/id that was registered (e.g., with namespace)
+    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+    auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+
+    std::vector<script_value> captured;
+    auto members = initialize_members(class_def, definition_env, instance, this_value, matching_ctor, args, initializer_depth, 0, &captured);
+    if (!members) { return members; }
+
     // Execute the matching constructor with method environment
     // Create a method environment that provides implicit 'this' field access
     // Use definition_env as parent
@@ -13388,7 +13407,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // The constructor implicitly returns 'this', so use that return value
     // instead of creating a new script_value (which would be a duplicate reference)
     initializer_depth.reset();
-    auto result = execute_method_ast(matching_ctor, method_env.get(), *argv);
+    auto result = execute_method_ast(matching_ctor, method_env.get(), captured.empty() ? args : captured);
     if (!result) { return result; }
     return this_value;   // a constructor call yields its instance (a bare `return;` ends the body early)
 }

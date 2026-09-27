@@ -71,6 +71,9 @@ namespace jai::detail {
 			"Maximum recursion depth exceeded - possible infinite recursion" };
 	}
 
+	// A `: this(...)` chain deeper than this is a delegation cycle (ill-formed in C++): both backends raise the recursion text
+	inline constexpr size_t k_max_constructor_delegation_depth = 256;
+
 	struct call_depth_guard {
 		int& depth;
 		explicit call_depth_guard(int& value) noexcept : depth(value) { ++depth; }

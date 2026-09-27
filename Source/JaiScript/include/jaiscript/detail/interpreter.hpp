@@ -600,6 +600,17 @@ namespace jai {
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args);
+        // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
+        // whole delegated-to constructor) and then the field initializers; the body is the caller's
+        checked_result<script_value> initialize_members(const std::shared_ptr<script_class_definition>& class_def,
+                                                        const std::shared_ptr<environment>& definition_env,
+                                                        const std::shared_ptr<class_instance>& instance,
+                                                        const script_value& this_value,
+                                                        const std::shared_ptr<function_decl>& matching_ctor,
+                                                        const std::vector<script_value>& args,
+                                                        std::optional<detail::call_depth_guard>& initializer_depth,
+                                                        size_t delegation_depth,
+                                                        std::vector<script_value>* captured_out);
         checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                 const std::vector<script_value>& args);
 

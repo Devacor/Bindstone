@@ -652,6 +652,11 @@ void net_set_nonblocking(net_socket s) {
 	u_long mode = 1;
 	::ioctlsocket(s, FIONBIO, &mode);
 }
+// Windows' SO_REUSEADDR lets a second listener take a port that is in use; exclusive use makes that bind fail
+void net_listen_options(net_socket s) {
+	BOOL yes = TRUE;
+	::setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
+}
 #else
 using net_socket = int;
 constexpr net_socket net_bad_socket = -1;
@@ -659,6 +664,10 @@ bool net_ready() { return true; }
 bool net_would_block() { return errno == EWOULDBLOCK || errno == EAGAIN || errno == EINPROGRESS; }
 void net_close_socket(net_socket s) { ::close(s); }
 void net_set_nonblocking(net_socket s) { ::fcntl(s, F_SETFL, ::fcntl(s, F_GETFL, 0) | O_NONBLOCK); }
+void net_listen_options(net_socket s) {
+	int yes = 1;
+	::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+}
 #endif
 
 class net_channel : public jai::property_owner<net_channel> {
@@ -680,8 +689,7 @@ public:
 		drop_sockets();
 		listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 		if (listener_ == net_bad_socket) { return fail("socket() failed"); }
-		int yes = 1;
-		::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+		net_listen_options(listener_);
 		sockaddr_in address{};
 		address.sin_family = AF_INET;
 		address.sin_port = htons(static_cast<unsigned short>(port));
@@ -873,8 +881,7 @@ public:
 		close();
 		listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 		if (listener_ == net_bad_socket) { return false; }
-		int yes = 1;
-		::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+		net_listen_options(listener_);
 		sockaddr_in address{};
 		address.sin_family = AF_INET;
 		address.sin_port = htons(static_cast<unsigned short>(port));

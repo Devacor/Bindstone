@@ -20,7 +20,6 @@ int VIEW_TY0 = 0;
 int TITLE_X = 0;
 int TITLE_Y = 0;
 string TITLE_LAST = "";        // the last gator played (the title's default name)
-string TITLE_NOTE = "";        // "HOSTING ON PORT n" / "JOINING host:n" under the logo
 
 // ---- particles (tile-unit positions)
 array<float> P_X;

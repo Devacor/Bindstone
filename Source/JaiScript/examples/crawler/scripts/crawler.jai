@@ -10,8 +10,8 @@
 //   jaiscript.exe --backend=interp crawler.jai -- smoke backend interp
 //
 // Flags mirror main.cpp (leading dashes optional): seed N, smoke, turns/frames N, input KEYS,
-// quiet, dev, god, load, save PATH, backend LABEL. Shim-only: view N (first-person view rows),
-// dump PATH (smoke frames + FRAME_HASH), shots N, bench N.
+// quiet, dev, god, load, save PATH, backend LABEL. Shim-only: view N (forward view rows),
+// layout single|multi, screen CxR, dump PATH (smoke frames + FRAME_HASH), shots N, bench N.
 //
 // Runner-keyboard differences from the C++ host's blocking _getch console:
 //   - uppercase commands (E M S Q R) = shift+letter (the runner reports lowercase edges;
@@ -40,7 +40,10 @@ var SHIM_INPUT = "";
 var SHIM_DUMP = "";         // dump PATH: every smoke turn's frame -> PATH.ans (+ FRAME_HASH)
 var SHIM_BENCH = 0;         // bench N: re-render the final smoke view N times, print ms/frame
 var SHIM_SHOT_EVERY = 0;    // shots N (with dump): also PATH_tT.bmp/.txt every N turns
-var SHIM_VIEW_ROWS = 0;     // view N: an N-row first-person view, 16:5 like the default 64x20 (0 = fit the console)
+var SHIM_VIEW_ROWS = 0;     // view N: an N-row forward view, 16:5 like the default 64x20 (0 = fit the console)
+var SHIM_LAYOUT = -1;       // layout single|multi: 0 the forward view alone, 1 multi-view (-1 = fit the console)
+var SHIM_SCREEN_COLS = 0;   // screen CxR: size the view as if the console were C x R (headless runs too)
+var SHIM_SCREEN_ROWS = 0;
 
 function shim_flag_name(string a) -> string {
 	int i = 0;
@@ -76,6 +79,15 @@ function shim_parse_int(string text, int fallback) -> int {
 		else if (flag == "dump") { SHIM_DUMP = value; HOST_SMOKE = true; i = i + 2; }
 		else if (flag == "shots") { SHIM_SHOT_EVERY = shim_parse_int(value, 0); i = i + 2; }
 		else if (flag == "view") { SHIM_VIEW_ROWS = shim_parse_int(value, 20); i = i + 2; }
+		else if (flag == "layout") { SHIM_LAYOUT = value == "single" ? 0 : 1; i = i + 2; }
+		else if (flag == "screen") {
+			int x = value.find("x");
+			if (x > 0) {
+				SHIM_SCREEN_COLS = shim_parse_int(value.substr(0, x), 0);
+				SHIM_SCREEN_ROWS = shim_parse_int(value.substr(x + 1, value.size() - x - 1), 0);
+			}
+			i = i + 2;
+		}
 		else if (flag == "bench") { SHIM_BENCH = shim_parse_int(value, 200); HOST_SMOKE = true; i = i + 2; }
 		else if (flag == "smoke") { HOST_SMOKE = true; i = i + 1; }
 		else if (flag == "quiet") { SHIM_QUIET = true; i = i + 1; }
@@ -83,7 +95,7 @@ function shim_parse_int(string text, int fallback) -> int {
 		else if (flag == "god") { HOST_GOD = true; i = i + 1; }
 		else if (flag == "load") { HOST_LOAD = true; i = i + 1; }
 		else {
-			print("crawler shim: unknown arg '" + ARGS[i] + "' (seed/turns/input/save/backend/smoke/quiet/dev/god/load/view/dump/shots/bench)");
+			print("crawler shim: unknown arg '" + ARGS[i] + "' (seed/turns/input/save/backend/smoke/quiet/dev/god/load/view/layout/screen/dump/shots/bench)");
 			i = i + 1;
 		}
 	}
@@ -241,27 +253,35 @@ function shim_le(int v, int bytes) -> string {
 	return out;
 }
 
-// the last rendered view as ground truth: a 24-bit BMP and a luminance sketch
+// the last rendered canvas as ground truth: a 24-bit BMP and a sketch (pane
+// pixels as luminance, frames and labels as their text)
 function shim_dump_view(string base) -> void {
-	int pad = (4 - (PW * 3) % 4) % 4;
-	int stride = PW * 3 + pad;
-	string bmp = "BM" + shim_le(54 + stride * PH, 4) + shim_le(0, 4) + shim_le(54, 4);
-	bmp += shim_le(40, 4) + shim_le(PW, 4) + shim_le(PH, 4) + shim_le(1, 2) + shim_le(24, 2) + shim_le(0, 4);
-	bmp += shim_le(stride * PH, 4) + shim_le(2835, 4) + shim_le(2835, 4) + shim_le(0, 4) + shim_le(0, 4);
+	int cw = STRIDE;
+	int ch = CANVAS_H * 2;
+	int pad = (4 - (cw * 3) % 4) % 4;
+	int stride = cw * 3 + pad;
+	string bmp = "BM" + shim_le(54 + stride * ch, 4) + shim_le(0, 4) + shim_le(54, 4);
+	bmp += shim_le(40, 4) + shim_le(cw, 4) + shim_le(ch, 4) + shim_le(1, 2) + shim_le(24, 2) + shim_le(0, 4);
+	bmp += shim_le(stride * ch, 4) + shim_le(2835, 4) + shim_le(2835, 4) + shim_le(0, 4) + shim_le(0, 4);
 	string ramp = " .:-=+*#%@";
 	var sketch = [];
-	for (int y = PH - 1; y >= 0; --y) {
-		for (int x = 0; x < PW; ++x) {
-			int rgb = VPAL_RGB[VPIX[y * PW + x]];
+	for (int y = ch - 1; y >= 0; --y) {
+		for (int x = 0; x < cw; ++x) {
+			int rgb = VPAL_RGB[VPIX[y * cw + x]];
 			bmp += "" + to_char(rgb & 255) + to_char((rgb >> 8) & 255) + to_char((rgb >> 16) & 255);
 		}
 		bmp += shim_le(0, pad);
 	}
-	for (int y = 0; y < PH; y += 2) {
+	for (int y = 0; y < ch; y += 2) {
 		string row = "";
-		for (int x = 0; x < PW; ++x) {
-			int a = VPAL_RGB[VPIX[y * PW + x]];
-			int b = VPAL_RGB[VPIX[(y + 1) * PW + x]];
+		for (int x = 0; x < cw; ++x) {
+			int cell = (y / 2) * cw + x;
+			if (CHROME_KIND[cell] >= 0) {
+				row += CHROME_CH[cell];
+				continue;
+			}
+			int a = VPAL_RGB[VPIX[y * cw + x]];
+			int b = VPAL_RGB[VPIX[(y + 1) * cw + x]];
 			int lum = ((a >> 16) & 255) * 2 + ((a >> 8) & 255) * 3 + (a & 255) + ((b >> 16) & 255) * 2 + ((b >> 8) & 255) * 3 + (b & 255);
 			row += ramp.substr(imin(9, lum / 250), 1);
 		}
@@ -289,13 +309,19 @@ function shim_probe_report() -> void {
 }
 
 if (SHIM_DUMP != "") { VIEW_PROBE = shim_view_probe; }
-if (SHIM_VIEW_ROWS == 0 && !SHIM_QUIET && !HOST_SCRIPTED) {
-	// a big console gets a big view: title + view + 5 log lines tall, panel beside it
-	SHIM_VIEW_ROWS = imin(48, imin(term_rows() - 8, ((term_cols() - 18) * 5) / 16));
-}
 if (SHIM_VIEW_ROWS > 20) {
-	VIEW_H = SHIM_VIEW_ROWS;
-	VIEW_W = SHIM_VIEW_ROWS * 16 / 5;
+	VIEW_ROWS_FIXED = SHIM_VIEW_ROWS;
+	set_view_rows(SHIM_VIEW_ROWS);
+}
+if (SHIM_SCREEN_COLS > 0 || (!SHIM_QUIET && !HOST_SCRIPTED)) {
+	// a big console gets a big view, and the multi-view when it fits
+	SCREEN_COLS = SHIM_SCREEN_COLS > 0 ? SHIM_SCREEN_COLS : term_cols();
+	SCREEN_ROWS = SHIM_SCREEN_COLS > 0 ? SHIM_SCREEN_ROWS : term_rows();
+	fit_screen();
+}
+if (SHIM_LAYOUT >= 0) {
+	VIEW_LAYOUT = SHIM_LAYOUT;
+	if (SCREEN_COLS > 0 && VIEW_ROWS_FIXED == 0) { set_view_rows(imax(20, fit_rows(VIEW_LAYOUT))); }
 }
 if (!SHIM_QUIET) { print(ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline); }
 try {

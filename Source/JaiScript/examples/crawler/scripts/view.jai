@@ -3,10 +3,14 @@
 // method: each cell is an upper-half block, fg = top pixel, bg = bottom pixel,
 // escapes only when a color changes along the row). Procedural textures per
 // wall material, floor/ceiling casting with fog, billboard pixel-art sprites
-// behind a per-column z-buffer, and the torch you are holding.
+// behind a per-column z-buffer, and the torch you are holding. The multi-view
+// runs the same caster once per pane: ahead, and smaller left, right, behind.
 
-int VIEW_W = 64;            // text cells; the framebuffer is VIEW_W x VIEW_H*2
+int VIEW_W = 64;            // the forward view in text cells (VIEW_W x VIEW_H*2 pixels)
 int VIEW_H = 20;
+int LAYOUT_SINGLE = 0;      // the forward view alone
+int LAYOUT_MULTI = 1;       // the forward view plus LEFT, RIGHT and BEHIND panes
+int VIEW_LAYOUT = 1;
 float PLANE_LEN = 0.9;      // half-FOV tangent: 0.9 ~ 84 degrees
 float WALL_K = 1.3;         // wall height at distance 1, in framebuffer heights
 float SPRITE_RANGE = 14.0;  // torchlight: sprites past this are swallowed by dark
@@ -65,8 +69,14 @@ function theme_name(int floor) -> string {
 }
 
 // ---------------------------------------------------------- framebuffer ----
+// One pixel canvas holds every pane of the layout, each rendered into its own
+// rectangle. PW/PH/PBASE/WALL_KPX describe the pane being drawn.
+int CANVAS_W = 0;           // text cells; the canvas is CANVAS_W x CANVAS_H*2 pixels
+int CANVAS_H = 0;
+int STRIDE = 0;
 int PW = 0;
 int PH = 0;
+int PBASE = 0;
 float WALL_KPX = 0.0;
 array<int> VPIX = [];
 array<float> ZBUF = [];
@@ -464,9 +474,9 @@ function fresh_codes() -> array<int> {
 }
 
 // ------------------------------------------------------------ view cache ---
-// Rebuilt whenever the floor or view size changes (or after a hot reload /
-// load wipes it): theme ramps, baked textures, per-tile wall and floor
-// variants, landmark sprites, per-row floor distances.
+// Rebuilt whenever the floor changes (or after a hot reload / load wipes
+// it): theme ramps, baked textures, per-tile wall and floor variants,
+// landmark sprites.
 int VC_FLOOR = -1;
 array<int> ROLE_RAMP = [];
 array<int> FLASH_TAB = [];
@@ -501,35 +511,246 @@ function apply_decals() -> void {
 	}
 }
 
-function build_frame_buffers() -> void {
-	PW = VIEW_W;
-	PH = VIEW_H * 2;
-	WALL_KPX = WALL_K * PH;
+// --------------------------------------------------------------- layout ----
+// Panes are inner rectangles in cells; pane 0 is always the forward view. A
+// framed pane has a one-cell border with its label in the top edge.
+array<int> PANE_X = [];
+array<int> PANE_Y = [];
+array<int> PANE_W = [];
+array<int> PANE_H = [];
+array<int> PANE_ROT = [];   // quarter turns clockwise from the facing: 0 ahead, 1 right, 2 behind, 3 left
+array<bool> PANE_FRAMED = [];
+array<int> PANE_ROFF = [];  // the pane's first row in ROW_DIST/ROW_LIGHT
+int LAYOUT_KEY = -1;
+
+function layout_key() -> int { return (VIEW_LAYOUT * 1000 + VIEW_W) * 1000 + VIEW_H; }
+
+function add_pane(int x, int y, int w, int h, int rot, bool framed) -> void {
+	PANE_X.push(x);
+	PANE_Y.push(y);
+	PANE_W.push(w);
+	PANE_H.push(h);
+	PANE_ROT.push(rot);
+	PANE_FRAMED.push(framed);
+}
+
+// Places the panes around an fw x fh forward view and sizes the canvas. The
+// multi-view is a cockpit: LEFT and RIGHT at half scale beside the forward
+// view on its horizon (the three read as one panorama), BEHIND above it like a
+// rear-view mirror.
+function layout_panes(int mode, int fw, int fh) -> void {
+	PANE_X = [];
+	PANE_Y = [];
+	PANE_W = [];
+	PANE_H = [];
+	PANE_ROT = [];
+	PANE_FRAMED = [];
+	if (mode == LAYOUT_SINGLE) {
+		add_pane(0, 0, fw, fh, 0, false);
+		CANVAS_W = fw;
+		CANVAS_H = fh;
+		return;
+	}
+	int sh = fh / 2;
+	int sw = sh * 16 / 5;
+	int fx = sw + 3;
+	int fy = sh + 3;
+	int side_y = fy + (fh - sh) / 2;
+	add_pane(fx, fy, fw, fh, 0, true);
+	add_pane(1, side_y, sw, sh, 3, true);
+	add_pane(fx + fw + 2, side_y, sw, sh, 1, true);
+	add_pane(fx + (fw - sw) / 2, 1, sw, sh, 2, true);
+	CANVAS_W = 2 * (sw + 2) + fw + 2;
+	CANVAS_H = fh + sh + 4;
+}
+
+function build_layout() -> void {
+	layout_panes(VIEW_LAYOUT, VIEW_W, VIEW_H);
+	LAYOUT_KEY = layout_key();
+	STRIDE = CANVAS_W;
 	VPIX = [];
-	for (int i = 0; i < PW * PH; ++i) { VPIX.push(0); }
+	for (int i = 0; i < CANVAS_W * CANVAS_H * 2; ++i) { VPIX.push(0); }
 	ZBUF = [];
-	for (int i = 0; i < PW; ++i) { ZBUF.push(0.0); }
+	for (int i = 0; i < VIEW_W; ++i) { ZBUF.push(0.0); }
 	VROWS = [];
-	for (int r = 0; r < VIEW_H; ++r) { VROWS.push(r); }
+	for (int r = 0; r < CANVAS_H; ++r) { VROWS.push(r); }
 	ROW_DIST = [];
 	ROW_LIGHT = [];
-	for (int y = 0; y < PH; ++y) {
-		float off = y + 0.5 - PH * 0.5;
-		if (off < 0.0) { off = -off; }
-		float d = WALL_KPX * 0.5 / off;
-		ROW_DIST.push(d);
-		ROW_LIGHT.push(lightf(d) * 15.0);
+	PANE_ROFF = [];
+	for (int p = 0; p < PANE_H.size(); ++p) {
+		PANE_ROFF.push(ROW_DIST.size());
+		int ph = PANE_H[p] * 2;
+		float kpx = WALL_K * ph;
+		for (int y = 0; y < ph; ++y) {
+			float off = y + 0.5 - ph * 0.5;
+			if (off < 0.0) { off = -off; }
+			float d = kpx * 0.5 / off;
+			ROW_DIST.push(d);
+			ROW_LIGHT.push(lightf(d) * 15.0);
+		}
 	}
 	BAYER = [];
 	var order = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 	for (int i = 0; i < 16; ++i) { int o = order[i]; BAYER.push((o + 0.5) / 16.0); }
 	VRESET = ESC + "[0m";
 	HALF_BLOCK = utf8_char(0x2580);
-	VIEW_WORKERS = PW >= 160 ? 1 : 0;
+	VIEW_WORKERS = CANVAS_W >= 160 ? 1 : 0;
+	CHROME_FLOOR = -1;
+}
+
+// ---------------------------------------------------------------- chrome ---
+// Everything on the canvas that is not a pane pixel is text: frames, labels,
+// gaps. Per cell: CHROME_KIND -1 pane pixel, 0 gap, 1 frame, 2 label. Each
+// canvas row is a list of segments, a pixel run or a prebuilt text run.
+array<int> CHROME_KIND = [];
+array<string> CHROME_CH = [];
+array<int> SEG_START = [];  // per canvas row, its first segment; one extra entry closes the last row
+array<int> SEG_PIX = [];    // 1 pixel run, 0 text
+array<int> SEG_X0 = [];
+array<int> SEG_X1 = [];
+array<string> SEG_TEXT = [];
+int CHROME_FLOOR = -1;
+int CHROME_FACING = -1;
+string FRAME_FG = "";
+string LABEL_FG = "";
+string BOX_H = "";
+string MIDDOT = "";
+var PANE_NAMES = ["AHEAD", "RIGHT", "BEHIND", "LEFT"];
+
+function chrome_put(int x, int y, string ch, int kind) -> void {
+	int i = y * CANVAS_W + x;
+	CHROME_CH[i] = ch;
+	CHROME_KIND[i] = kind;
+}
+
+function chrome_text(int cy, int x0, int x1) -> string {
+	string s = "";
+	int cur = 0;
+	for (int x = x0; x < x1; ++x) {
+		int i = cy * CANVAS_W + x;
+		int k = CHROME_KIND[i];
+		if (k != cur) {
+			s += k == 1 ? FRAME_FG : (k == 2 ? LABEL_FG : VRESET);
+			cur = k;
+		}
+		s += CHROME_CH[i];
+	}
+	if (cur != 0) { s += VRESET; }
+	return s;
+}
+
+// the top edge reads "- LEFT . W ---": the pane, and the compass heading it shows
+function draw_pane_label(int p) -> void {
+	if (!PANE_FRAMED[p]) { return; }
+	int y = PANE_Y[p] - 1;
+	int x0 = PANE_X[p];
+	int x1 = x0 + PANE_W[p];
+	for (int x = x0; x < x1; ++x) { chrome_put(x, y, BOX_H, 1); }
+	string name = PANE_NAMES[PANE_ROT[p]];
+	array<string> cells = [" "];
+	for (int c = 0; c < name.size(); ++c) { cells.push(name.substr(c, 1)); }
+	cells.push(" ");
+	cells.push(MIDDOT);
+	cells.push(" ");
+	cells.push(FACE_LETTER[(G.facing + PANE_ROT[p]) % 4]);
+	cells.push(" ");
+	for (int c = 0; c < cells.size() && x0 + 1 + c < x1 - 1; ++c) {
+		chrome_put(x0 + 1 + c, y, cells[c], cells[c] == " " ? 1 : 2);
+	}
+}
+
+function build_chrome_segments() -> void {
+	SEG_START = [];
+	SEG_PIX = [];
+	SEG_X0 = [];
+	SEG_X1 = [];
+	SEG_TEXT = [];
+	for (int cy = 0; cy < CANVAS_H; ++cy) {
+		SEG_START.push(SEG_PIX.size());
+		int x = 0;
+		while (x < CANVAS_W) {
+			bool pix = CHROME_KIND[cy * CANVAS_W + x] < 0;
+			int x1 = x + 1;
+			while (x1 < CANVAS_W && (CHROME_KIND[cy * CANVAS_W + x1] < 0) == pix) { x1 = x1 + 1; }
+			SEG_PIX.push(pix ? 1 : 0);
+			SEG_X0.push(x);
+			SEG_X1.push(x1);
+			SEG_TEXT.push(pix ? "" : chrome_text(cy, x, x1));
+			x = x1;
+		}
+	}
+	SEG_START.push(SEG_PIX.size());
+}
+
+function refresh_labels() -> void {
+	CHROME_FACING = G.facing;
+	for (int p = 0; p < PANE_ROT.size(); ++p) {
+		if (!PANE_FRAMED[p]) { continue; }
+		draw_pane_label(p);
+		int cy = PANE_Y[p] - 1;
+		for (int s = SEG_START[cy]; s < SEG_START[cy + 1]; ++s) {
+			if (SEG_PIX[s] == 0) { SEG_TEXT[s] = chrome_text(cy, SEG_X0[s], SEG_X1[s]); }
+		}
+	}
+}
+
+// Frames take the floor's colors: the wall tone dimmed, labels in its glow.
+function build_chrome() -> void {
+	CHROME_FLOOR = G.floor;
+	var theme = DEPTH_THEMES[theme_index(G.floor)];
+	int frame_rgb = scale_rgb(theme["wall"], 0.7);
+	int label_rgb = theme["glow"];
+	int frame_pal = pal((frame_rgb >> 16) & 255, (frame_rgb >> 8) & 255, frame_rgb & 255);
+	int label_pal = pal((label_rgb >> 16) & 255, (label_rgb >> 8) & 255, label_rgb & 255);
+	int gap_pal = pal(12, 12, 12);
+	FRAME_FG = VPAL_FG[frame_pal];
+	LABEL_FG = VPAL_FG[label_pal];
+	BOX_H = utf8_char(0x2500);
+	MIDDOT = utf8_char(0x00B7);
+	string box_v = utf8_char(0x2502);
+	CHROME_KIND = [];
+	CHROME_CH = [];
+	for (int i = 0; i < CANVAS_W * CANVAS_H; ++i) {
+		CHROME_KIND.push(0);
+		CHROME_CH.push(" ");
+	}
+	for (int p = 0; p < PANE_X.size(); ++p) {
+		int x0 = PANE_X[p];
+		int y0 = PANE_Y[p];
+		int x1 = x0 + PANE_W[p];
+		int y1 = y0 + PANE_H[p];
+		for (int y = y0; y < y1; ++y) {
+			for (int x = x0; x < x1; ++x) { chrome_put(x, y, "", -1); }
+		}
+		if (!PANE_FRAMED[p]) { continue; }
+		for (int x = x0; x < x1; ++x) {
+			chrome_put(x, y0 - 1, BOX_H, 1);
+			chrome_put(x, y1, BOX_H, 1);
+		}
+		for (int y = y0; y < y1; ++y) {
+			chrome_put(x0 - 1, y, box_v, 1);
+			chrome_put(x1, y, box_v, 1);
+		}
+		chrome_put(x0 - 1, y0 - 1, utf8_char(0x250C), 1);
+		chrome_put(x1, y0 - 1, utf8_char(0x2510), 1);
+		chrome_put(x0 - 1, y1, utf8_char(0x2514), 1);
+		chrome_put(x1, y1, utf8_char(0x2518), 1);
+		draw_pane_label(p);
+	}
+	CHROME_FACING = G.facing;
+	// the canvas under the text, for dumps: frame and label cells in their colors
+	for (int i = 0; i < CANVAS_W * CANVAS_H; ++i) {
+		int k = CHROME_KIND[i];
+		if (k < 0) { continue; }
+		int c = k == 1 ? frame_pal : (k == 2 ? label_pal : gap_pal);
+		int top = (i / CANVAS_W) * 2 * STRIDE + i % CANVAS_W;
+		VPIX[top] = c;
+		VPIX[top + STRIDE] = c;
+	}
+	build_chrome_segments();
 }
 
 function build_view_cache() -> void {
-	if (PW != VIEW_W || PH != VIEW_H * 2) { build_frame_buffers(); }
 	if (ART_W.size() == 0) { build_art(); }
 	VC_FLOOR = G.floor;
 	int ti = theme_index(G.floor);
@@ -802,11 +1023,37 @@ float CAM_POSY = 0.0;
 float CAM_INVDET = 0.0;
 
 // ------------------------------------------------------------ the caster ---
-// Renders the viewport for an arbitrary heading (the turn animation sweeps
-// through non-cardinal headings; gameplay only ever calls it with cardinals).
-// Returns VIEW_H fully-colored row strings.
+// Renders every pane for an arbitrary heading (the turn animation sweeps
+// through non-cardinal headings; gameplay only ever calls it with cardinals),
+// each pane turned its quarter turns from it. Returns CANVAS_H fully-colored
+// row strings.
 function render_view(float dirx, float diry) -> var {
-	if (VC_FLOOR != G.floor || PW != VIEW_W || PH != VIEW_H * 2) { build_view_cache(); }
+	if (LAYOUT_KEY != layout_key()) { build_layout(); }
+	if (VC_FLOOR != G.floor) { build_view_cache(); }
+	if (CHROME_FLOOR != G.floor) { build_chrome(); }
+	if (CHROME_FACING != G.facing) { refresh_labels(); }
+	for (int p = 0; p < PANE_ROT.size(); ++p) {
+		int rot = PANE_ROT[p];
+		if (rot == 0) { render_pane(p, dirx, diry); }
+		else if (rot == 1) { render_pane(p, 0.0 - diry, dirx); }
+		else if (rot == 2) { render_pane(p, 0.0 - dirx, 0.0 - diry); }
+		else { render_pane(p, diry, 0.0 - dirx); }
+	}
+
+	var lines = [];
+	if (VIEW_WORKERS != 0) {
+		lines = parallel_transform(VROWS, view_row_half);
+	} else {
+		for (int cy = 0; cy < CANVAS_H; ++cy) { lines.push(view_row_half(cy)); }
+	}
+	return lines;
+}
+
+function render_pane(int p, float dirx, float diry) -> void {
+	PW = PANE_W[p];
+	PH = PANE_H[p] * 2;
+	PBASE = PANE_Y[p] * 2 * STRIDE + PANE_X[p];
+	WALL_KPX = WALL_K * PH;
 	float planex = 0.0 - diry * PLANE_LEN;
 	float planey = dirx * PLANE_LEN;
 	int ppx = G.player.x;
@@ -821,6 +1068,9 @@ function render_view(float dirx, float diry) -> var {
 	CAM_POSY = posy;
 	int pw = PW;
 	int ph = PH;
+	int stride = STRIDE;
+	int base = PBASE;
+	int roff = PANE_ROFF[p];
 	float kpx = WALL_KPX;
 	int turn = G.turn;
 	int mapw = MAP_W;
@@ -888,15 +1138,16 @@ function render_view(float dirx, float diry) -> var {
 		int vstep = 2097152 / lineh;
 		int v = (y0 - ytop) * vstep;
 		int bx = x & 3;
+		int cb = base + x;
 		for (int y = y0; y < y1; ++y) {
 			int l = lf + bayer[((y & 3) << 2) + bx];
-			pix[y * pw + x] = ramps[wtex[tb + ((v >> 16) & 31) * 32] + l];
+			pix[y * stride + cb] = ramps[wtex[tb + ((v >> 16) & 31) * 32] + l];
 			v += vstep;
 		}
 
 		int ystart = y1 < ph - y0 ? y1 : ph - y0;
 		for (int y = ystart; y < ph; ++y) {
-			float d = rowd[y];
+			float d = rowd[roff + y];
 			float fx = posx + d * rdx;
 			float fy = posy + d * rdy;
 			int ix = fx;
@@ -906,50 +1157,54 @@ function render_view(float dirx, float diry) -> var {
 			int texel = (tv & 31) * 32 + (tu & 31);
 			if (ix < 0) { ix = 0; } else if (ix >= mapw) { ix = mapw - 1; }
 			if (iy < 0) { iy = 0; } else if (iy >= maph) { iy = maph - 1; }
-			float fl = rowl[y] * flicker;
+			float fl = rowl[roff + y] * flicker;
 			if (fl > 15.0) { fl = 15.0; }
 			if (y >= y1) {
 				int l = fl + bayer[((y & 3) << 2) + bx];
-				pix[y * pw + x] = ramps[ftex[fkind[iy * mapw + ix] + texel] + l];
+				pix[y * stride + cb] = ramps[ftex[fkind[iy * mapw + ix] + texel] + l];
 			}
 			int cy = ph - 1 - y;
 			if (cy < y0) {
 				int l = fl * 0.8 + bayer[((cy & 3) << 2) + bx];
-				pix[cy * pw + x] = ramps[ctex[texel] + l];
+				pix[cy * stride + cb] = ramps[ctex[texel] + l];
 			}
 		}
 	}
 
 	draw_sprites();
-	draw_hands();
-	if (G.last_dmg > 0) { draw_hurt(); }
-
-	var lines = [];
-	if (VIEW_WORKERS != 0) {
-		lines = parallel_transform(VROWS, view_row_half);
-	} else {
-		for (int cy = 0; cy < VIEW_H; ++cy) { lines.push(view_row_half(cy)); }
+	if (p == 0) {
+		draw_hands();
+		if (G.last_dmg > 0) { draw_hurt(); }
 	}
-	return lines;
 }
 
-// One glyph row: fg = top pixel, bg = bottom pixel, escapes only on change.
-// Also the parallel_transform body, so it reads the globals directly.
+// One canvas row: pixel runs as half blocks (fg = top pixel, bg = bottom
+// pixel, escapes only on change) between the chrome's text runs. Also the
+// parallel_transform body, so it reads the globals directly.
 function view_row_half(int cy) -> string {
 	string row = "";
-	int pw = PW;
-	int fg = -1;
-	int bg = -1;
-	int ti = cy * 2 * pw;
-	int bi = ti + pw;
-	for (int x = 0; x < pw; ++x) {
-		int top = VPIX[ti + x];
-		int bot = VPIX[bi + x];
-		if (top != fg) { row += VPAL_FG[top]; fg = top; }
-		if (bot != bg) { row += VPAL_BG[bot]; bg = bot; }
-		row += HALF_BLOCK;
+	int stride = STRIDE;
+	int ti = cy * 2 * stride;
+	int bi = ti + stride;
+	int s1 = SEG_START[cy + 1];
+	for (int s = SEG_START[cy]; s < s1; ++s) {
+		if (SEG_PIX[s] == 0) {
+			row += SEG_TEXT[s];
+			continue;
+		}
+		int fg = -1;
+		int bg = -1;
+		int x1 = SEG_X1[s];
+		for (int x = SEG_X0[s]; x < x1; ++x) {
+			int top = VPIX[ti + x];
+			int bot = VPIX[bi + x];
+			if (top != fg) { row += VPAL_FG[top]; fg = top; }
+			if (bot != bg) { row += VPAL_BG[bot]; bg = bot; }
+			row += HALF_BLOCK;
+		}
+		row += VRESET;
 	}
-	return row + VRESET;
+	return row;
 }
 
 // --------------------------------------------------------------- sprites ---
@@ -1087,7 +1342,7 @@ function draw_hp_bar(int x0, int y, int w, int per_mille, float depth) -> void {
 	int full = (bw * per_mille + 999) / 1000;
 	for (int x = imax(0, bx); x < imin(PW, bx + bw); ++x) {
 		if (depth >= ZBUF[x]) { continue; }
-		VPIX[y * PW + x] = x - bx < full ? BAR_GOOD : BAR_BAD;
+		VPIX[PBASE + y * STRIDE + x] = x - bx < full ? BAR_GOOD : BAR_BAD;
 	}
 }
 
@@ -1111,16 +1366,18 @@ function draw_art(int a, int rgb, int x0, int y0, int w, int h, int lvl, float d
 	int sx1 = x0 + w > PW ? PW : x0 + w;
 	int sy0 = y0 < 0 ? 0 : y0;
 	int sy1 = y0 + h > PH ? PH : y0 + h;
-	int pw = PW;
+	int stride = STRIDE;
+	int base = PBASE;
 	var& pix = VPIX;
 	var& ramps = RAMP;
 	var& texels = ART_TEX;
 	for (int sx = sx0; sx < sx1; ++sx) {
 		if (depth > 0.0 && depth >= ZBUF[sx]) { continue; }
 		int col = off + ((sx - x0) * aw) / w;
+		int cb = base + sx;
 		for (int sy = sy0; sy < sy1; ++sy) {
 			int code = texels[col + (((sy - y0) * ah) / h) * aw];
-			if (code >= 0) { pix[sy * pw + sx] = ramps[tab[code] + lvl]; }
+			if (code >= 0) { pix[sy * stride + cb] = ramps[tab[code] + lvl]; }
 		}
 	}
 }
@@ -1145,7 +1402,7 @@ function draw_hurt() -> void {
 	for (int y = 0; y < PH; ++y) {
 		for (int x = 0; x < PW; ++x) {
 			int e = imin(imin(x, PW - 1 - x), imin(y, PH - 1 - y));
-			if (e == 0 || (e == 1 && (x + y) % 2 == 0) || (e == 2 && (x * 3 + y) % 5 == 0)) { VPIX[y * PW + x] = c; }
+			if (e == 0 || (e == 1 && (x + y) % 2 == 0) || (e == 2 && (x * 3 + y) % 5 == 0)) { VPIX[PBASE + y * STRIDE + x] = c; }
 		}
 	}
 }

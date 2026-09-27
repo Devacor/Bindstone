@@ -384,8 +384,8 @@ Where I did not measure something I say so.
   162x110-pixel view, ~1.2 ms to compose the frame, ~5.5 ms for sixteen network snapshots. The interpreter is about 6x
   slower and still playable. Costs were predictable from the code; the only surprises were copies and my own
   algorithms (a 5,000-node BFS per tick per bot). No GC pauses (reference counting).
-- C++ would be one to two orders of magnitude faster on the per-pixel loops; C# (JIT) several times faster, with GC
-  pauses to manage. Plain Lua I did not measure here (the repository's GLOOM and JaiDOOM ports carry Lua comparisons);
+- C++ would very likely be an order of magnitude or more faster on the per-pixel loops, and C# (JIT) several times
+  faster with GC pauses to manage (estimates, not measured for this game). Plain Lua I did not measure here (the repository's GLOOM and JaiDOOM ports carry Lua comparisons);
   LuaJIT would likely beat this VM on the numeric loops.
 
 **Tooling.** C# is far ahead (IDE, debugger, profiler, refactoring). JaiScript gives a runner, a strict checker with
@@ -398,8 +398,10 @@ reload in the running game. The frozen-harness workflow (never rebuilding the ru
 edit and run.
 
 **Hot reload.** Class reload with live instance migration is better than any of the three out of the box: C# Hot
-Reload refuses many edits to live types (adding a field to a class with live instances is not reliably supported), C++
-needs a third-party tool, and in Lua you patch metatables and migrate instances by hand. Functions and constants needed
+Reload handles method-body edits well, but support for changing the shape of types with live instances (adding
+fields, changing a base) has been partial and depends on the runtime version (my knowledge here is not current, so
+treat this as approximate), C++ needs a third-party tool, and in Lua you patch metatables and migrate instances by
+hand. Functions and constants needed
 my stub generator (Lua does that part natively by re-running a module that assigns into a shared table); Dev's
 import-anywhere with the re-run rule should close that gap.
 

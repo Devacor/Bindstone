@@ -2799,11 +2799,13 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         bool saved_has_return = false;
         detail::member_scope_ctx saved_member_scope{};
         unit_stamp saved_run_unit{};
+        const ast_node* saved_top_level_node = nullptr;
 
         reentry_isolation(interpreter* interp, bool textual_run) : self(interp), reentrant(interp->is_executing()), textual(textual_run) {
             saved_run_unit = self->run_unit_;
             self->run_unit_ = self->string_symbolizer_->current_unit();   // the run's stamp: the derived unit of its top-level code
             if (reentrant) {
+                saved_top_level_node = self->top_level_node_;
                 saved_env = self->environment_;
                 saved_call_stack = std::move(self->call_stack_);
                 self->call_stack_.clear();
@@ -2825,6 +2827,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         ~reentry_isolation() {
             self->run_unit_ = saved_run_unit;
             if (reentrant) {
+                self->top_level_node_ = saved_top_level_node;
                 self->environment_ = std::move(saved_env);
                 self->call_stack_ = std::move(saved_call_stack);
                 self->valueStack_ = std::move(saved_values);
@@ -2850,10 +2853,12 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         // std::cerr << "  Declaration " << i << " type: " << typeid(*decl).name() << "\n";
 
         // Execute declaration with exception handling
+        run_error_.reset();
         try {
             // std::cerr << "  About to visit declaration " << i << "\n";
             auto result = entry_result ? dispatch_decl(decl) : entry_result;
             if (!result) [[unlikely]] {
+                run_error_ = result.error_value();
                 // Convert error code to exception at boundary
                 // Include the custom error message if available, formatted with symbol resolution
                 if (!result.message().empty()) {
@@ -2868,6 +2873,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             // std::cerr << "  Finished visiting declaration " << i << "\n";
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
+            run_error_.reset();
             active_exception_value_ = make_value(std::string(e.what()));
             current_exception_ = e;
             is_unwinding_ = true;
@@ -12605,10 +12611,14 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
 
     // Execute the included file. Pass the resolved path so every node in the included
     // unit is stamped with its real filename (stack traces / breakpoints name the file).
-    auto result = engine_ptr->execute_include_source(resolved_path, content);
-
-    // Push the result onto the value stack
-    push_value(std::move(result));
+    nested_failure_.parked = false;
+    try {
+        push_value(engine_ptr->execute_include_source(resolved_path, content));
+    } catch (...) {
+        absorb_nested_trace();
+        nested_failure_.parked = false;
+        throw;
+    }
     return {};
 }
 
@@ -12653,11 +12663,14 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     }
     std::string resolved_path = std::move(resolve_result.value());
 
-    // Use the engine's public API to handle import with tracking
-    auto result = engine_ptr->execute_import(resolved_path);
-
-    // Push the result onto the value stack
-    push_value(std::move(result));
+    nested_failure_.parked = false;
+    try {
+        push_value(engine_ptr->execute_import(resolved_path));
+    } catch (...) {
+        absorb_nested_trace();
+        nested_failure_.parked = false;
+        throw;
+    }
     return {};
 }
 
@@ -14915,6 +14928,23 @@ void interpreter::capture_stack_trace() {
         top_level_node_ ? top_level_node_->location.line : 0
     });
     trace_captured_ = true;
+}
+
+// KEEP BYTE-PARALLEL with vm_backend::park_nested_failure / absorb_nested_trace
+void interpreter::park_nested_failure() {
+    nested_failure_.parked = true;
+    nested_failure_.error = run_error_;
+    nested_failure_.value = active_exception_value_;
+    nested_failure_.exception = current_exception_;
+    nested_failure_.trace = captured_trace_;
+}
+
+void interpreter::absorb_nested_trace() {
+    if (!nested_failure_.parked) { return; }
+    std::vector<stack_trace_entry> inner = std::move(nested_failure_.trace);
+    nested_failure_.trace.clear();
+    capture_stack_trace();
+    captured_trace_.insert(captured_trace_.begin(), inner.begin(), inner.end());
 }
 
 std::string interpreter::current_source_file() const {

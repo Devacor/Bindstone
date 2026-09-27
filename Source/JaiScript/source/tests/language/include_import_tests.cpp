@@ -901,6 +901,48 @@ public:
                 std::filesystem::remove(sibling_of(src));
             }
         });
+
+        // A trace with each frame's directory dropped: "  at f (c.jai:1)\n..."
+        auto trace_files = [](const std::string& trace) {
+            std::string out;
+            size_t start = 0;
+            while (start < trace.size()) {
+                size_t end = trace.find('\n', start);
+                if (end == std::string::npos) { end = trace.size(); }
+                std::string line = trace.substr(start, end - start);
+                size_t open = line.find('(');
+                size_t colon = line.rfind(':');
+                if (open != std::string::npos && colon != std::string::npos && colon > open) {
+                    size_t sep = line.find_last_of("/\\", colon);
+                    if (sep != std::string::npos && sep > open) { line.erase(open + 1, sep - open); }
+                }
+                out += line + "\n";
+                start = end + 1;
+            }
+            return out;
+        };
+
+        test("an_error_in_an_imported_top_level_names_the_imported_frames_and_the_import_chain", [=, this]() {
+            // the imported unit's frames lead, the importer's frame at the import follows, byte-identical on both backends
+            create_temp_file("imp_err_c.jai", "int boom() { array<int> a = [1]; return a[5]; }\nint X = boom();\n");
+            create_temp_file("imp_err_d.jai", "import \"imp_err_c.jai\";\n");
+            create_temp_file("imp_err_t.jai", "var pad = 1;\nthrow \"from the top\";\n");
+            create_temp_file("imp_err_u.jai", "function run(string p) {\n\tinclude(p);\n}\nrun(\"imp_err_t.jai\");\n");
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            std::string what;
+            try { eng->execute("var before = 1;\nimport \"imp_err_d.jai\";\n"); } catch (const std::exception& ex) { what = ex.what(); }
+            check_eq(std::string("Array index 5 out of bounds for array of size 1: Array index out of bounds"), what);
+            check_eq(std::string("  at boom (imp_err_c.jai:1)\n  at <script> (imp_err_c.jai:2)\n  at <script> (imp_err_d.jai:1)\n  at <script> (<script>:2)\n"),
+                     trace_files(eng->format_stack_trace()));
+            what.clear();
+            try { eng->execute("include \"imp_err_u.jai\";\n"); } catch (const std::exception& ex) { what = ex.what(); }
+            check_eq(std::string("from the top"), what);
+            check_eq(std::string("  at <script> (imp_err_t.jai:2)\n  at run (imp_err_u.jai:2)\n  at <script> (imp_err_u.jai:4)\n  at <script> (<script>:1)\n"),
+                     trace_files(eng->format_stack_trace()));
+            for (const char* f : {"imp_err_c.jai", "imp_err_d.jai", "imp_err_t.jai", "imp_err_u.jai"}) { cleanup_temp_file((jai::foundry::test_temp_directory() / f).string()); }
+        });
     }
 };
 

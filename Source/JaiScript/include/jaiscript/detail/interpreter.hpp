@@ -389,6 +389,7 @@ namespace jai {
         const std::vector<stack_trace_entry>& last_stack_trace() const { return captured_trace_; }
         std::string format_stack_trace() const;
         std::string current_source_file() const;
+        void park_nested_failure();
 
         // Resume a suspended (or start a created) coroutine on this interpreter.
         // Reached via execution_backend::resume_coroutine; the handle's opaque
@@ -800,6 +801,10 @@ namespace jai {
         bool trace_captured_ = false;
         const ast_node* top_level_node_ = nullptr;
         void capture_stack_trace();
+
+        std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
+        detail::nested_failure nested_failure_;
+        void absorb_nested_trace();
 
         // Class parsing context - tracks unresolved identifiers in methods
         struct class_context {

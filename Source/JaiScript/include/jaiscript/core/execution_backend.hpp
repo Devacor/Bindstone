@@ -77,7 +77,20 @@ struct script_method_dispatch {
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 
-namespace detail { struct parallel_method_pin_table; }
+namespace detail {
+    struct parallel_method_pin_table;
+
+    // A nested run's failure (an include or import started by the running code), parked by the backend before the engine
+    // turns it into a C++ exception and taken back by the op that started the run: the runtime error itself or the thrown
+    // value, and the frames the nested run captured (its own level only; the op adds the frames at its site)
+    struct nested_failure {
+        bool parked = false;
+        std::optional<error_propagator> error;
+        std::optional<script_value> value;
+        std::optional<script_exception> exception;
+        std::vector<stack_frame> trace;
+    };
+}
 
 /**
  * Abstract interface for script execution backends.
@@ -187,6 +200,10 @@ public:
     // sync_unit re-aligns it with the executing frame after a nested run.
     virtual unit_stamp current_unit() const { return unit_stamp{}; }
     virtual void sync_unit() {}
+
+    // A nested run (an include or import started by the running code) that ends unwinding parks its failure here before
+    // the engine turns it into a C++ exception; the include/import op that started it takes it back into the outer run
+    virtual void park_nested_failure() {}
 
     // Stack trace captured at the last unwind (empty if the backend doesn't track one)
     virtual std::vector<stack_frame> last_stack_trace() const { return {}; }

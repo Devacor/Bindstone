@@ -1929,12 +1929,9 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 
         script_value result = textual ? be->execute_textual(declarations, compiled_slot) : be->execute(declarations, compiled_slot);
 
-        // Check for unhandled script exception
         if (be->is_unwinding()) {
-            const auto& exception = be->get_current_exception();
-
-
-            throw exception;
+            if (be->is_executing()) { be->park_nested_failure(); }
+            throw be->get_current_exception();
         }
 
         // No need to sync globals - they're already in the shared environment!

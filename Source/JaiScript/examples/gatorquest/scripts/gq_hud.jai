@@ -6,8 +6,8 @@ import "gq_audio.jai";
 
 // ---- minimap
 array<int> MINI;
-int MINI_W = 32;
-int MINI_H = 16;
+int MINI_W;
+int MINI_H;
 array<int> MINI_COL;          // map color per tile type
 
 void minimap_init() {

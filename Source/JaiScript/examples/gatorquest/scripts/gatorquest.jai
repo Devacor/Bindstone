@@ -5,7 +5,11 @@
 //                                                    headless autopilot session, prints STATE_HASH
 //   jaiscript gatorquest.jai -- shot [ticks N] [every N] [screen 150x44] [out DIR] [keys "i down enter"]
 //                                                    headless frame captures (.ans + .txt sketch)
+//   jaiscript gatorquest.jai -- savetest             save robustness suite
+//   jaiscript gatorquest.jai -- hotreload [interp]   hot-reload test (pass interp on --backend=interp)
+//   jaiscript gatorquest.jai -- dev                  play with live script reload
 
+import "gq_enums.jai";
 import "gq_types.jai";
 import "gq_state.jai";
 import "gq_cstate.jai";
@@ -33,6 +37,8 @@ import "gq_net.jai";
 import "gq_save.jai";
 import "gq_title.jai";
 import "gq_png.jai";
+import "gq_dev.jai";
+import "gq_tests.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -86,7 +92,15 @@ int run_smoke() {
 		bot_add(b);
 	}
 	int logs = 0;
+	// a save/load round trip mid-session (the rest of the run continues from the loaded state)
+	int roundtrip = arg_flag("noroundtrip") ? -1 : arg_value("roundtrip", to_string(ticks / 2)).to_int(ticks / 2);
+	int fails = 0;
 	for (int t = 0; t < ticks; ++t) {
+		if (t == roundtrip && t > 0) {
+			bool same = save_roundtrip(data_root() + "/saves/smoke");
+			print(same ? `ROUNDTRIP: ok at tick ${TICK}` : `ROUNDTRIP: FAIL at tick ${TICK}`);
+			if (!same) { fails = fails + 1; }
+		}
 		bots_tick();
 		sim_tick();
 		for (int e = 0; e < EV_KIND.size(); ++e) {
@@ -103,7 +117,7 @@ int run_smoke() {
 		print("  plan: " + BOTS[b].log);
 	}
 	print(`STATE_HASH: ${state_hash()}`);
-	return 0;
+	return fails;
 }
 
 int run_play() {
@@ -114,24 +128,34 @@ int run_play() {
 		FORCE_COLS = wh[0].to_int(0);
 		FORCE_ROWS = wh.size() > 1 ? wh[1].to_int(0) : 0;
 	}
-	sim_init(seed);
+	bool demo = arg_flag("demo");
+	// demos and timed runs never touch the player's saves
+	SAVES_ON = !demo && arg_value("frames", "0") == "0";
+	string last = SAVES_ON ? last_player_name() : "";
+	bool resumed = SAVES_ON && load_world_for_session();
+	if (!resumed) { sim_init(seed); }
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);
 	layout(screen_cols(), screen_rows());
-	bool demo = arg_flag("demo");
 	MAX_FRAMES = arg_value("frames", "0").to_int(0);
 	AUDIO_ON = !arg_flag("mute") && audio_prepare(data_root() + "/cache");
-	if (!title_screen(false, demo ? 45 : 0)) {
+	TITLE_LAST = last;
+	if (!title_screen(resumed, demo ? 45 : 0)) {
 		print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
 		return 0;
 	}
 	CAMERA_W = -1;
-	player_create(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
+	string welcome = join_character(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
 	CV = new ClientView();
 	CV.slot = LOCAL_SLOT;
 	BOTS = [];
 	if (demo) { bot_add(LOCAL_SLOT); }
-	say_to(LOCAL_SLOT, `Welcome to Swampton, ${CHOSEN_NAME}! Talk to the townsfolk (bump them) for work. Press ? for help.`, C_YELLOW);
-	music_play(0);
+	if (arg_flag("dev")) {
+		dev_watch_dir(current_script_dir());
+		DEV_ON = true;
+		welcome = welcome + ` Dev mode: watching ${DEV_FILES.size()} scripts for changes.`;
+	}
+	say_to(LOCAL_SLOT, welcome, C_YELLOW);
+	music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
 	play_loop();
 	if (MAX_FRAMES > 0) {
 		int n = imax(1, STAT_FRAMES);
@@ -191,6 +215,8 @@ int main() {
 	if (arg_flag("sheet")) { return run_sheet(); }
 	if (arg_flag("smoke")) { return run_smoke(); }
 	if (arg_flag("shot")) { return run_shots(); }
+	if (arg_flag("savetest")) { return run_savetest(data_root() + "/saves"); }
+	if (arg_flag("hotreload")) { return run_hotreload(data_root() + "/saves", !arg_flag("interp")); }
 	return run_play();
 }
 main();

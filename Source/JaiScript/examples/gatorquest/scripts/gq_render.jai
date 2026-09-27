@@ -59,10 +59,10 @@ string time_label(ClientView& v) {
 
 // ---- the light grid: one level per tile over the view (plus a margin), 16x fixed point
 array<int> LG;
-int LG_W = 0;
-int LG_H = 0;
-int LG_X0 = 0;
-int LG_Y0 = 0;
+int LG_W;
+int LG_H;
+int LG_X0;
+int LG_Y0;
 
 void light_emit(float ex, float ey, float r, int strength) {
 	int x0 = imax(0, math::itrunc(ex - r) - LG_X0);

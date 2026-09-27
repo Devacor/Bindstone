@@ -1,0 +1,266 @@
+// Gator Quest - headless tests: the save round trip inside the smoke, the save
+// robustness suite, and the hot-reload test. Each prints ok/FAIL lines and a
+// summary; the exit code is the number of failures.
+
+import "gq_dev.jai";
+
+int TEST_FAILS;
+int TEST_PASSES;
+
+void check(bool ok, string what) {
+	if (ok) {
+		TEST_PASSES = TEST_PASSES + 1;
+		print("  ok    " + what);
+	} else {
+		TEST_FAILS = TEST_FAILS + 1;
+		print("  FAIL  " + what);
+	}
+}
+
+// save everything, wipe the sim, load it back; true when the state hash is unchanged
+bool save_roundtrip(string dir) {
+	SAVE_DIR = dir;
+	int before = state_hash();
+	int t0 = clock_ms();
+	string msg = save_world_and_chars();
+	int t1 = clock_ms();
+	string back = load_world_and_chars();
+	int t2 = clock_ms();
+	int after = state_hash();
+	print(`  save: ${msg} (${t1 - t0} ms, ${read_file(world_path()).size()} bytes)  load: ${back} (${t2 - t1} ms)  hash ${before} -> ${after}`);
+	return before == after;
+}
+
+// ------------------------------------------------------------ savetest ---
+string corrupt(string text) {
+	int at = text.size() / 2;
+	string ch = text.substr(at, 1) == "7" ? "8" : "7";
+	return text.substr(0, at) + ch + text.substr(at + 1, text.size() - at - 1);
+}
+
+int run_savetest(string base_dir) {
+	string dir = base_dir + "/savetest";
+	SAVE_DIR = dir;
+	make_dirs(dir + "/chars");
+	array<string> old = list_dir(dir);
+	for (int i = 0; i < old.size(); ++i) { delete_file(dir + "/" + old[i]); }
+	array<string> oldc = list_dir(dir + "/chars");
+	for (int i = 0; i < oldc.size(); ++i) { delete_file(dir + "/chars/" + oldc[i]); }
+	print("save robustness:");
+	// missing
+	check(load_sealed(world_path(), WORLD_MAGIC) == "" && SAVE_NOTE == "missing", "a missing world file is reported as missing");
+	check(!load_world_for_session(), "no world file: a fresh world starts");
+	// a session to save
+	sim_init(3);
+	BOTS = [];
+	player_create(0, "Tester", 2);
+	bot_add(0);
+	for (int t = 0; t < 400; ++t) { bots_tick(); sim_tick(); }
+	int gold0 = CHARS[0].gold;
+	check(save_roundtrip(dir), "round trip keeps the exact state hash");
+	string first = read_file(world_path());
+	for (int t = 0; t < 200; ++t) { bots_tick(); sim_tick(); }
+	int hash2 = state_hash();
+	int tick2 = TICK;
+	save_world_and_chars();
+	check(file_exists(world_path() + ".bak") && read_file(world_path() + ".bak") == first, "the second save keeps the first as .bak");
+	check(!file_exists(world_path() + ".tmp"), "no .tmp left behind after a good save");
+	// corrupt the main file: the loader falls back to the backup
+	write_file(world_path(), corrupt(read_file(world_path())));
+	string msg = load_world_and_chars();
+	check(TICK == 400 && msg.contains("restored from world.gqw.bak"), `corrupt world file falls back to the backup (${msg})`);
+	// truncated file
+	string good = seal(unseal(first, WORLD_MAGIC));
+	write_file(world_path(), good.substr(0, good.size() / 3));
+	check(load_sealed(world_path(), WORLD_MAGIC) != "" && SAVE_NOTE.contains("truncated"), `truncated world file is detected (${SAVE_NOTE})`);
+	// a newer format is refused, the backup is used
+	string body = unseal(good, WORLD_MAGIC);
+	string future = WORLD_MAGIC + " 99" + body.substr(body.find("\n"), body.size() - body.find("\n"));
+	write_file(world_path(), seal(future));
+	string fb = load_sealed(world_path(), WORLD_MAGIC);
+	check(fb != "" && SAVE_NOTE.contains("newer Gator Quest"), `a newer save format is refused (${SAVE_NOTE})`);
+	delete_file(world_path() + ".bak");
+	check(load_sealed(world_path(), WORLD_MAGIC) == "" && SAVE_NOTE.contains("newer"), "with no backup the newer file is not loaded");
+	// an old, sparse character file: every missing field keeps its default
+	string sparse = seal(CHAR_MAGIC + " 1\nname Old Timer\ngold 77\nskills 500,400\n");
+	write_file(char_path("Old Timer"), sparse);
+	sim_init(3);
+	string welcome = join_character(0, "Old Timer", 0);
+	Character& c = CHARS[0];
+	check(c.name == "Old Timer" && c.gold == 77 && c.skill[0] == 500 && c.skill.size() == Sk.count && c.worn.size() == Slot.count, `a sparse character file loads with defaults (${welcome})`);
+	check(mob_live(c.mob) && MOB_WORLD[c.mob] == c.home_world && MOB_HP[c.mob] == MOB_HPMAX[c.mob], "it enters the world at home with full health");
+	// a character keeps its gear, skills and place across a restart
+	sim_init(3);
+	BOTS = [];
+	player_create(0, "Roundtrip", 4);
+	CHARS[0].gold = 1234;
+	CHARS[0].skill[Sk.fishing] = 777;
+	pack_add(0, make_item(I_RUBBERDUCK, 1));
+	mob_place(CHARS[0].mob, 1, W_ARRIVE_X[1], W_ARRIVE_Y[1]);
+	MOB_HP[CHARS[0].mob] = 20;
+	save_world_and_chars();
+	check(load_world_for_session() && MOB_LIVE > 100, "the saved world loads for a new session without its players");
+	string back = join_character(0, "Roundtrip", 0);
+	Character& r = CHARS[0];
+	int rm = r.mob;
+	check(r.gold == 1234 && r.skill[Sk.fishing] == 777 && pack_has(0, I_RUBBERDUCK, 1), "gold, skills and backpack survive a restart");
+	check(MOB_WORLD[rm] == 1 && MOB_HP[rm] == 20, `position and health survive a restart (${WORLDS[MOB_WORLD[rm]].name}, hp ${MOB_HP[rm]})`);
+	// a character file that is corrupt, with no backup: a new gator starts
+	write_file(char_path("Broken"), corrupt(char_text(0)));
+	sim_init(3);
+	string nb = join_character(0, "Broken", 1);
+	check(nb.starts_with("Welcome to Swampton") && CHARS[0].gold == 50, "a corrupt character file with no backup starts a new gator");
+	print(`savetest: ${TEST_PASSES} passed, ${TEST_FAILS} failed`);
+	return TEST_FAILS;
+}
+
+// ------------------------------------------------------------ hot reload ---
+string replace_once(string text, string from, string to) {
+	int at = text.find(from);
+	if (at < 0) { print("  (edit target not found: " + from + ")"); return text; }
+	return text.substr(0, at) + to + text.substr(at + from.size(), text.size() - at - from.size());
+}
+
+int count_frog_targets(int player_mob) {
+	int n = 0;
+	for (int m = 0; m < MOB_KIND.size(); ++m) {
+		if (MOB_KIND[m] == mid("Frog") && MOB_TARGET[m] == player_mob) { n = n + 1; }
+	}
+	return n;
+}
+
+int spawn_frogs_around(int player_mob, int count) {
+	int w = MOB_WORLD[player_mob];
+	int made = 0;
+	for (int d = 0; d < 8 && made < count; ++d) {
+		int x = MOB_X[player_mob] + DX[d] * 2;
+		int y = MOB_Y[player_mob] + DY[d] * 2;
+		if (mob_at(w, x, y) < 0 && is_land(w, x, y)) {
+			mob_spawn(mid("Frog"), w, x, y);
+			made = made + 1;
+		}
+	}
+	return made;
+}
+
+int run_hotreload(string base_dir, bool strict_catchable) {
+	string dir = base_dir + "/hotreload";
+	make_dirs(dir);
+	string src = current_script_dir();
+	array<string> names = ["gq_types.jai", "gq_items.jai", "gq_ai.jai", "gq_actions.jai", "gq_data.jai"];
+	array<string> copies;
+	for (int i = 0; i < names.size(); ++i) {
+		string p = dir + "/" + names[i];
+		write_file(p, read_file(src + "/" + names[i]));
+		copies.push(p);
+	}
+	print("hot reload:");
+	sim_init(5);
+	BOTS = [];
+	player_create(0, "Reloady", 6);
+	bot_add(0);
+	for (int t = 0; t < 300; ++t) { bots_tick(); sim_tick(); }
+	int me = CHARS[0].mob;
+	intent_move(0, -1);
+	MOB_TARGET[me] = -1;
+	// before: frogs flee
+	int frogs = spawn_frogs_around(me, 3);
+	for (int t = 0; t < 30; ++t) { sim_tick(); }
+	check(frogs > 0 && count_frog_targets(me) == 0, `before: ${frogs} frogs next to the gator do not attack`);
+	dev_watch(copies);
+	check(dev_poll().size() == 0, "nothing reloads while nothing changed");
+	int tick0 = TICK;
+	int gold0 = CHARS[0].gold;
+	int sw0 = CHARS[0].skill[Sk.swords];
+	int mobs0 = MOB_LIVE;
+	int hash0 = state_hash();
+	// edit 1: a class gains a field and a method, a constant changes, a function in one file
+	// changes for callers in another, monster behavior and monster data change
+	string types = read_file(copies[0]);
+	types = replace_once(types, "class Character {\n", "class Character {\n\tint reload_marks = 7;\n\tint power() { return str * 2; }\n");
+	types = replace_once(types, "class Item {\n", "class Item {\n\tint shine = 3;\n");
+	write_file(copies[0], types);
+	write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = 40;", "int PACK_MAX = 60;"));
+	string ai = read_file(copies[2]);
+	ai = replace_once(ai, "int AGGRO = 7;", "int AGGRO = 9;");
+	ai = replace_once(ai, "void ai_critter(int m) {\n", "void ai_critter(int m) {\n\tai_melee(m);\n\treturn;\n");
+	write_file(copies[2], ai);
+	write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return imax(1, ITEMS[item].value * 11 / 10); }", "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }"));
+	write_file(copies[4], replace_once(read_file(copies[4]), "\"Swamp Rat|hp=10|", "\"Swamp Rat|hp=77|"));
+	array<string> msgs = dev_poll();
+	for (int i = 0; i < msgs.size(); ++i) { print("    " + msgs[i]); }
+	int failed = 0;
+	for (int i = 0; i < msgs.size(); ++i) {
+		if (msgs[i].contains("FAILED")) { failed = failed + 1; }
+	}
+	check(msgs.size() == 5 && failed == 0, `five changed files reloaded (${msgs.size()} messages, ${failed} failed)`);
+	// the world carried over
+	check(TICK == tick0 && CHARS[0].gold == gold0 && CHARS[0].skill[Sk.swords] == sw0 && CHARS[0].mob == me, "tick, gold, skills and the player's mobile carried over");
+	check(MOB_LIVE == mobs0 && state_hash() == hash0, `the whole sim state is untouched by the reload (${MOB_LIVE} mobiles, hash ${state_hash()})`);
+	// the class change migrated the live instances
+	var& live = CHARS[0];
+	check(live.reload_marks == 7, "Character gained reload_marks = 7 on the live instance");
+	check(live.power() == CHARS[0].str * 2, `a new method runs on the live instance (power ${live.power()})`);
+	var& first_item = CHARS[0].pack[0];
+	check(first_item.shine == 3, "items already in the backpack gained the new field");
+	Character fresh = Character();
+	var fv = fresh;
+	check(fv.reload_marks == 7, "new instances get the new field too");
+	// the constant, seen from files that were not reloaded
+	check(PACK_MAX == 60, "PACK_MAX reads 60 everywhere");
+	while (CHARS[0].pack.size() < 45) { CHARS[0].pack.push(make_item(I_OLDBOOT, 1)); }
+	check(pack_add(0, make_item(I_TINCAN, 1)), "pack_add uses the new limit (46th item fits)");
+	// the function, from its own file and from another
+	int price = ITEMS[I_BREAD].value * 2;
+	check(buy_price(I_BREAD) == price, `buy_price changed (bread ${buy_price(I_BREAD)})`);
+	int npc = find_role_npc(0, R_PROVISIONER);
+	mob_place(me, 0, MOB_X[npc], MOB_Y[npc] + 1);
+	CHARS[0].gold = 500;
+	int gold_before = CHARS[0].gold;
+	CHARS[0].pack = [];
+	int idx = SHOPS[ROLES[R_PROVISIONER].shop].index_of(I_BREAD);
+	shop_buy(0, npc, idx);
+	check(CHARS[0].gold == gold_before - price, `shop_buy charges the new price (${gold_before - CHARS[0].gold} gold)`);
+	check(AGGRO == 9, "AGGRO changed to 9");
+	check(MONS[mid("Swamp Rat")].hp == 77, "the monster table re-ran: Swamp Rats have 77 hp");
+	int rat = mob_spawn(mid("Swamp Rat"), 0, MOB_X[me] + 5, MOB_Y[me]);
+	check(MOB_HPMAX[rat] == 77, "a Swamp Rat spawned after the reload has 77 hp");
+	mob_free(rat);
+	// the behavior change: frogs attack now
+	mob_place(me, 0, W_ARRIVE_X[0] + 12, W_ARRIVE_Y[0] + 12);
+	spawn_frogs_around(me, 3);
+	for (int t = 0; t < 40; ++t) { sim_tick(); }
+	check(count_frog_targets(me) > 0, `after: frogs attack the gator (${count_frog_targets(me)} targeting)`);
+	// edit 2: change the method again; the field keeps the value we give it now
+	live.reload_marks = 42;
+	write_file(copies[0], replace_once(read_file(copies[0]), "int power() { return str * 2; }", "int power() { return str * 3; }"));
+	msgs = dev_poll();
+	check(msgs.size() == 1 && !msgs[0].contains("FAILED"), "the second edit reloads");
+	var& live2 = CHARS[0];
+	check(live2.power() == CHARS[0].str * 3 && live2.reload_marks == 42, "the method changed again and the field kept its live value (42)");
+	// edit 3: broken edits are rejected and the old code keeps running (VM only: on the
+	// interpreter an error inside include() escapes the try around it; DX_REPORT bug 3)
+	if (strict_catchable) {
+		// (a) a bad constant: the stub fails at run time
+		write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = 60;", "int PACK_MAX = \"lots\";"));
+		msgs = dev_poll();
+		check(msgs.size() == 1 && msgs[0].contains("FAILED") && PACK_MAX == 60, `a bad constant is rejected, PACK_MAX stays 60 (${msgs.size() > 0 ? msgs[0] : ""})`);
+		write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = \"lots\";", "int PACK_MAX = 60;"));
+		msgs = dev_poll();
+		check(msgs.size() == 1 && !msgs[0].contains("FAILED"), "fixing the constant reloads cleanly");
+		// (b) a type error inside a function: the checker rejects the stub before it runs
+		write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }", "int buy_price(int item) { return \"free\"; }"));
+		msgs = dev_poll();
+		check(msgs.size() == 1 && msgs[0].contains("FAILED") && buy_price(I_BREAD) == price, `a static type error is rejected, buy_price unchanged (${msgs.size() > 0 ? msgs[0] : ""})`);
+		write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return \"free\"; }", "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }"));
+		dev_poll();
+	} else {
+		print("  skip  broken-edit rejection (on the interpreter an error inside include() is not catchable; DX_REPORT bug 3)");
+	}
+	// keep playing on the new code
+	BOTS[0].phase_t = TICK;
+	for (int t = 0; t < 600; ++t) { bots_tick(); sim_tick(); }
+	check(mob_live(CHARS[0].mob) && TICK == tick0 + 40 + 600, "600 more ticks on the reloaded code without errors");
+	print(`hotreload: ${TEST_PASSES} passed, ${TEST_FAILS} failed, STATE_HASH ${state_hash()}`);
+	return TEST_FAILS;
+}

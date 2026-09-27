@@ -782,8 +782,8 @@ void world_generate(int seed) {
 	set_tile(W_SEWERS, 3, 3, T_STAIRS_UP);
 }
 
-int STAIRS_X = 0;
-int STAIRS_Y = 0;
+int STAIRS_X;
+int STAIRS_Y;
 int gate_x_of_stairs() { find_stairs(); return STAIRS_X; }
 int gate_y_of_stairs() { find_stairs(); return STAIRS_Y; }
 void find_stairs() {

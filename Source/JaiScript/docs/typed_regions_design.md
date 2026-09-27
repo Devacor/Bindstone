@@ -75,9 +75,8 @@ builds wrap, through the same `jai::ints` helpers.
 
 A frame keeps its `script_value` slots and adds a typed area of raw 8-byte cells. The
 compiler assigns each typed slot one cell; the general slot for the same variable exists
-only if the variable ever crosses a boundary. Coroutine fibers save the typed area with the
-frame. The parallel workers' frames are ordinary frames, so a region inside a parallel body
-runs unchanged on a worker.
+only if the variable ever crosses a boundary. The frame program, the raw frame's layout and
+where its values become `script_value`s again are in "Raw typed frames" below.
 
 ## Invalidation
 
@@ -91,8 +90,9 @@ affected function, which the `parameter_alias` machinery already does for its pr
 
 A call is typed when the checker resolves the callee to one script function whose parameter
 and return types are declared scalars, and the call site's arguments are typed slots or
-literals. `call_typed` writes the arguments into the callee's typed cells and enters the
-frame without an environment; the callee's return lands in the caller's typed slot. Methods
+literals. The raw call writes the arguments into the callee's typed cells and enters the
+frame without an environment; the callee's return lands in the caller's typed cell ("Raw
+typed frames" below has the protocol). Methods
 qualify with `this` as a record pointer once stage 3 exists. Small proven callees inline at
 compile time: the body is grafted into the caller's region the way `parallel_transform`
 grafts its function body today, with the callee's slots renamed into the caller's frame.
@@ -726,3 +726,173 @@ value read their left operand as a cell. The emission normalizes: a comparison (
 with a literal on the left is emitted as its mirror (`5 < i` as `i > 5`, never the negation, since a NaN fails both orders), a
 commutative typed arithmetic swaps its operands, and any other arithmetic with a literal on the left takes the any-kind form.
 Two literals in a comparison and a literal argument of a math operation have no encoding, and the translation refuses them.
+
+## Raw typed frames
+
+A frame whose parameters and locals the checker proves scalar keeps those values as raw cells for the whole
+activation, and a call between two such frames passes its arguments and its result raw. The universal 32-byte
+`script_value` stays the one value of the language and of every boundary (each value carries its engine: the
+multi-engine invariant); a raw cell is an 8-byte payload and a kind byte inside a frame, and nothing outside the frame
+ever sees one.
+
+### The frame program
+
+A function body compiles to one cell region spanning it whole, its frame program, when its body has no loop (the first
+form; a switch, a try or a nested declaration counts as one), every parameter is a by-value `int`, `float` or `bool` in its
+own slot without a default (the declared type is the proof), and at least one call in the body can be raw: it resolves (the
+checker's `proven_callee_decl`) to a function of the same shape with a scalar result that is the function itself or a
+loop-free function that forms a frame program by the same rule (a cycle of such functions forms programs all round; a leaf,
+or a function whose calls reach only loops, has none, and a call to one stays the general call). A tail call keeps its
+splice. The region is the
+straight-line region of the cell blocks with three differences: its span is the body from its first instruction to its
+`HALT`, whatever its amount of work; a `return` is a ret operation rather than an exit (its value a cell or a constant; a
+returned binary lands in an argument value first, and the ret reads the binary's operands so a miss at it re-runs the tail
+whole); and a call is the door of the loop blocks, raw when its callee is. A refusal leaves the body its ordinary spans, and
+so does a region without a raw call, since its entry would cost a general caller more than the dispatches it saves.
+
+A parameter is a live-in cell pinned to its declared kind. A frame program is raw-enterable when its entry reads nothing but
+its parameters: no environment value, no container site, no graft or stdlib-alias guard, no string cell. Its general entry is
+the region's `CELLS_ENTER` at the first instruction, whose guards take a parameter slot holding its declared kind with no stamp
+(an argument pushed as a literal or a temp): the flush stamps it with the declared type.
+
+### Frame layout
+
+A raw-entered frame is a call record like any other: `frames_`, the depth, the budget tick, the unit and the pin are the
+general push's; the environment is untouched (a frame program has no closure and no scope of its own), and there is no
+binder and no argument vector. Its window of `script_value` slots is reserved where it would sit if every raw frame below it
+had built its own, and it is built (null placeholders to the chunk's local count, the parameters live) the first time the
+general form needs it: a flush (a miss, a planned bail, an exit, a raise), a door call's pushes, a boxed return. Nothing else
+sits above an unbuilt window (a raw frame pushes nothing and its callees truncate back to it), so the build is the push's fill
+and every window keeps one place. The parameters' cells are dirty from the entry, so a flush writes them where the general
+form reads them.
+
+### The typed call protocol
+
+- **The site.** A call inside any cell region whose checked callee has the raw shape keeps the door's four instructions. The
+  probe reads the callee name's binding through its own lookup-cache row by the fast head (a plain environment cell, so no
+  getter runs and no cell instruction between the probe and the arguments can rebind it), in a frame whose member scope cannot
+  shadow the name; when the binding is the site's cached script function without a closure and its body has a raw-enterable
+  frame program of the call's arity, nothing is parked. The arguments instruction then checks each argument's kind (a cell's
+  kind byte, a constant's storage) against its parameter cell's kind, pushes the callee's record, writes the payloads into the
+  parameter cells and runs the callee's frame program from its head in the same block loop; the caller parks on its call
+  instruction, exactly where the door leaves it. Any other case parks the callee as the general probe parks it and runs the door
+  (the binder converts, the general call runs).
+- **A miss before the arguments instruction** (an argument value's miss, an injected miss) parks the callee first, so the
+  general form resumes inside the argument zone with the pending register it expects.
+- **Limits.** The raw entry checks the depth limit and ticks the budget as the general push does; a hit raises at the caller's
+  call instruction after the caller's flush, with the general call's frame chain.
+- **The return.** A ret in a raw-entered frame whose value kind is its declared return kind pops the record (the window
+  truncated, the pin released; nothing else moved) and lands the payload in the caller's destination cell by the declared-type
+  rule; the caller continues past its landing. When a general call ran during the raw call (the door counter the entry
+  records) or the landing converts, the door's landing runs with the boxed result and re-validates what the callee could have
+  reached. In any other frame (entered by a general call, a native entry, a kind the declared type converts) the ret boxes its
+  value and runs the general `op_return` at a pad after the copy, which converts, pops and lands as a general return.
+- **A callee that leaves its cells** (a miss) flushes and continues on the general form; its general return lands on the
+  caller's parked call instruction, and the door's landing re-validates and lands the result without checking the arguments'
+  slots (by-value scalar parameters bind nothing of the caller's).
+- **Order and texts.** The callee resolves before its arguments, the arguments evaluate in order, and nothing observable runs
+  between the argument values and the entry: the general call's order. Every raise happens on the general form, so the texts
+  are the catalog's and the interpreter stays the oracle.
+
+A raw call and a raw return hand the block loop the other frame: the run returns to the raw chain, which runs that frame next
+(a frame program in the raw loop, whose switch carries the probe, the arguments and the return; any other block in the block
+loop, whose switch is the scalar operations' alone), and the dispatcher takes whichever frame the chain ends in (a C++
+exception converts at that frame too). A block that makes no raw call pays one pointer test per door instruction.
+
+### Where a raw value becomes a `script_value`
+
+- **The host**: a door call to a host function boxes its arguments at the door; `execute`'s result, a callback's arguments and
+  results, `get_global` and `as<T>` see only `script_value`s, since a global is an environment value, never a raw cell.
+- **A miss, a bail, an exit**: the flush writes the dirty cells (the parameters included) into the window.
+- **Errors**: raised by the general executor after the flush, so the value an error text names is the slot's.
+- **References and captures**: a slot a reference, a capture or an escape could reach is never a raw cell (reference
+  declarations, lambdas and `&` parameters are refusals of the translation, so such a body has no frame program).
+- **`var`**: a `var` slot is an adopted cell or a window slot, never a pinned raw cell; a store into it lands by its own rule.
+- **The debugger**: an armed session makes every cell entry and every raw entry take the general form; a frame already raw runs
+  to its return or its first miss, and the statement hook fires on the general form.
+- **Coroutines**: a coroutine body runs on its fiber frame, which never runs cells, and a yield exists only in that body, so no
+  raw frame lives across a yield; a raw chain a coroutine starts ends before its next yield.
+- **Hot reload**: the probe reads the callee's binding at every call; a running frame keeps its function pinned; a reload that
+  changes a parameter's kind fails the kind check and takes the door.
+- **Parallel workers**: a worker takes the door (a worker's function copies are compiled at the barrier; raw entry there is a
+  later step).
+
+### How raw frames and cell blocks compose
+
+A frame program is a cell region, so a raw frame's values are the block machinery's cells: the raw entry writes the parameters'
+payloads into them directly and the region runs from its first instruction, with no guard and no unboxing. A raw call from any
+block (a loop in a general function, a program-scope loop, another frame program) parks the block exactly as the door does and
+resumes it past the landing, re-validating nothing when no general code ran. A frame program's own loops are the next form:
+inside a raw frame a loop's cells are the frame's, so the loop needs no entry and no flush of its own.
+
+### Typed locals fast everywhere
+
+The cell blocks made typed code fast by admission: a loop runs as a block only when every construct in it has a cell form, and
+one construct without one drops the whole loop to the general form. Raw frames are the structural answer.
+
+- **What becomes unnecessary for typed scalar code.** With a frame's proven slots raw from its call, the per-loop entry (the
+  guards of every live-in slot, the unboxing, the refusal valve), the per-loop exit flush, the trampoline of a straight-line
+  region and its minimum-work threshold all go: the frame program is entered once, raw from a raw caller, and its loops are
+  jumps with the budget poll. What stays is the miss protocol for what a cell operation cannot do exactly (an overflow, a bound,
+  a kind an adopted cell does not hold), and it becomes per operation (below).
+- **Graceful degradation.** An instruction the typed path does not cover is a boundary operation of the frame program, not a
+  refusal: it boxes the raw slots it reads into the window, runs the general executor at its own ip, and lands the raw slots it
+  writes back into their cells (the compiler knows each instruction's slot reads and writes; the census computes the same sets).
+  Its cost is its own general execution plus one box per slot it names. A failing cell guard likewise runs that one
+  instruction's general form over boxed operands and lands its result (an error raises from the general executor with the frame
+  materialized), instead of leaving the cells for the rest of the frame. A slot whose kind the checker cannot pin (a `var`) is an
+  adopted cell, and a slot a reference reaches is a window slot; neither takes the function out of the raw form.
+- **The rule of thumb.** Declared `int`, `float` and `bool` locals and parameters are raw: every operation between them runs at
+  cell speed, and a call between functions of such signatures is a raw call. An operation on a `var`, a string, an object or a
+  host function costs its own general dispatch plus boxing the typed values it touches, where it occurs, and nowhere else. Taking
+  a typed local's address (`&`) or capturing it takes that one slot out of the raw form.
+
+### The call floor
+
+A call that stays a call pays for bookkeeping, not for work: on `fib_recursive` the general call costs about 245 cycles to
+push, 250 to return and 45 to resolve the callee, against about 60 cycles of body (Lua's whole call is under a quarter of
+that). The rule is the campaign's: every decision the compiler and the checker can make is made once, at compile time, and
+the run time keeps only the guards that keep those decisions safe against rebinding and hot reload.
+
+- **The frame's shape is the chunk's.** The compiler knows whether a body has a try, a range-for, a counted-for state, a
+  closure environment, a member scope, a unit other than its caller's, a debugger statement table; the record's push writes
+  the hot header (code, ip, caller, window base, depth) and touches a cold field only when the chunk's flags name it. A raw
+  entry is the first instance: no environment, no binder, no argument vector, no window fill.
+- **The site holds the plan.** A call site caches its callee's identity and the definition epoch it was resolved under, with
+  the plan compiled for that pair: the window size, the bind plan (which parameters need a conversion, which a reference
+  bind, which nothing), the return conversion. One compare against the site's identity replaces resolution and per-call
+  classification; a rebinding or a reload fails the compare and re-plans. Arguments the checker proves of the parameter's type
+  bind with no check (a raw site's arguments are such arguments: their kinds are the cells' pinned kinds).
+- **Initialization is proven, not filled.** A slot the compiler proves written before read is not initialized; only the slots
+  a read can reach before their write take the null placeholder (a raw frame fills nothing; its window is built only when the
+  general form needs it).
+- **The result goes where it is used.** The call instruction names its destination (a cell, a slot, the stack); the callee's
+  return writes there, with the conversion the compiler resolved when the declared types prove it (a raw return lands its
+  payload in the caller's destination cell and skips the landing).
+- **Typed values travel raw** between frames whose signatures are proven scalar (the protocol above).
+- **One slow-path flag.** The depth limit, the budget tick and the debugger's hook share one armed test on the call's path; the
+  budget's exhaustion and a debugger attach arm it, and the call's fast path tests nothing else.
+- **Callbacks and host calls.** A builtin that calls script repeatedly (a sort comparator, a `map`/`filter` lambda) runs the
+  callee on one reused frame, re-binding only the arguments; a host function whose signature is scalar is called through a
+  typed thunk that takes and returns raw values, with no `script_value` built on either side.
+
+The target is a typed call and return within about 1.5x of Lua's. The scoreboard, each increment measured interleaved
+against master and compared with Lua where a port exists: `fib_recursive` typed and dynamic, `tree`, a method-call micro, a
+closure-call micro, a sort-with-comparator micro and a host-call micro (each with the call kept a call), plus OSSUARY, GLOOM
+and JaiDOOM.
+
+### Order of increments
+
+1. Frame programs for loop-free bodies, raw calls from any block, raw returns (the call protocol above).
+2. The lean raw entry: the site's cached plan (identity and epoch, the callee's frame program, the parameter kinds checked at
+   compile time against the argument cells' pinned kinds), the record's hot header only, one armed flag for depth, budget and
+   debugger, and the probe folded into the arguments instruction when nothing between them can run.
+3. Loops inside frame programs: the loop's cells are the frame's; no entry, no flush.
+4. Boundary operations: an instruction without a cell form boxes and lands only the slots it names, so a frame program covers the
+   whole body whatever it holds.
+5. Raw entry of frame programs with environment values, container sites and graft guards (the entry's reads as the loop entry
+   has them, without the parameters' unboxing).
+6. The general call floor: compile-time frame shapes and site plans for every script call (`CALL_TYPED` to a frame program from
+   the general form included), destination-directed returns, proven initialization; then reused callback frames and typed host
+   thunks, and raw calls on parallel workers.
+7. Flat records (stage 3): `this` and typed fields as raw cells of a record.

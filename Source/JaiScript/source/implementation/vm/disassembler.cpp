@@ -211,8 +211,15 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 	}
 
 	for (const auto& loop : ch.cell_loops) {
-		out << (loop.straight ? "-- cell region " : "-- cell loop ") << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "");
-		if (!loop.calls.empty()) { out << " (calls " << loop.calls.size() << ")"; }
+		out << (loop.frame_program ? "-- frame program " : loop.straight ? "-- cell region " : "-- cell loop ") << loop.head << ".." << loop.back << " -> copy " << loop.copy_head << ".." << loop.copy_back << (loop.counted != k_invalid_u32 ? " (counted)" : "");
+		if (loop.frame_program) { out << (loop.raw_enterable ? " (raw entry)" : " (general entry only)"); }
+		if (!loop.calls.empty()) {
+			size_t raw = 0;
+			for (const auto& cc : loop.calls) { if (cc.raw) { ++raw; } }
+			out << " (calls " << loop.calls.size();
+			if (raw) { out << ", raw " << raw; }
+			out << ")";
+		}
 		out << " cells";
 		for (const auto& cl : loop.cells) { out << " " << (cl.env_operand != k_invalid_u32 ? "env" : cl.temp ? "t" : "s") << cl.slot << ":" << static_cast<unsigned>(cl.kind); }   // slot:kind (kinds: 0 adopted, 1 int, 2 float, 5 bool)
 		out << "\n";

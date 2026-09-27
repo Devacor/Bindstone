@@ -440,11 +440,21 @@ namespace jai::vm {
             // holds no cell for). The consumer lands the result into dst by the declared-type rule (1 = a scalar declaration,
             // 2 = a no-result store, 3 = a compiler temp: op_call_temp, the expression around the call reads it as a slot) or drops it (0 = a statement).
             struct call_arg { uint8_t kind; uint32_t v; uint32_t ip; };   // kind 0 = a slot (a cell or verbatim, decided at emission), 1 = cell v, 2 = the push at ip verbatim
-            struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; };
+            // raw: the checker resolved the callee to a free script function with scalar by-value parameters and a scalar result, and every
+            // argument is a cell or a constant; at run time the arguments instruction enters the callee's frame program raw when the parked
+            // callee has one whose parameter kinds are the arguments' kinds (docs/typed_regions_design.md "Raw typed frames")
+            struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; uint8_t raw = 0; };
             std::vector<cell_call> calls;
+            // a frame program: the region covers the whole function body from its first instruction to its final HALT, its returns are ret
+            // operations (C_RET), and raw_enterable says a raw call may enter it at copy_head with the parameters written into param_cells
+            // (one per parameter, by slot): its entry reads nothing but the parameters (no environment value, no site, no guard of a graft)
+            bool frame_program = false;
+            bool raw_enterable = false;
+            std::vector<uint32_t> param_cells;
             std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
         };
         std::vector<cell_loop> cell_loops;
+        uint32_t frame_program = k_invalid_u32;   // the cell_loops index of the body's frame program (k_invalid_u32: none)
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
         // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
         // translation does not normalize yet, a coverage gap rather than a limit of the model

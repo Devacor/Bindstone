@@ -198,7 +198,7 @@ namespace {
 			for (size_t i = 0; i < ch.cell_loops.size(); ++i) {
 				const chunk::cell_loop& l = ch.cell_loops[i];
 				out << pre << " " << i << " head=" << l.head << " back=" << l.back << " copy=" << l.copy_head << ".." << l.copy_back << " exit=" << l.exit_ip << " counted=" << u(l.counted)
-				    << " straight=" << b(l.straight) << " trampoline=" << u(l.trampoline)
+				    << " straight=" << b(l.straight) << " trampoline=" << u(l.trampoline) << " frame=" << b(l.frame_program) << " raw_entry=" << b(l.raw_enterable)
 				    << " temp_mask=" << mask(l.temp_mask) << " env_mask=" << mask(l.env_mask) << " iter=" << u(l.iter_proto) << "/" << u(l.iter_index_cell) << "/" << u(l.iter_site) << "\n";
 				if (!l.rebinds.empty()) {
 					out << pre << "  rebinds";
@@ -212,6 +212,7 @@ namespace {
 				}
 				out << "\n" << pre << "  entry_cells";
 				for (uint32_t c : l.entry_cells) { out << " " << c; }
+				if (!l.param_cells.empty()) { out << "\n" << pre << "  param_cells"; for (uint32_t c : l.param_cells) { out << " " << c; } }
 				out << "\n" << pre << "  site_env_cache";
 				for (uint32_t c : l.site_env_cache) { out << " " << u(c); }
 				out << "\n" << pre << "  slot_to_cell";
@@ -226,7 +227,7 @@ namespace {
 				for (const auto& e : l.env_operands) { out << " " << operand(ch, e.operand) << "@" << e.cache_slot; }
 				out << "\n" << pre << "  calls";
 				for (const auto& c : l.calls) {
-					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " args=[";
+					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " raw=" << static_cast<int>(c.raw) << " args=[";
 					for (const auto& a : c.args) { out << "(" << static_cast<int>(a.kind) << " " << a.v << " " << a.ip << ")"; }
 					out << "])";
 				}

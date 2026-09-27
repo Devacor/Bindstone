@@ -87,6 +87,15 @@ namespace jai::vm {
         bool ir_listing_ = false;
         bool ir_passes_ = true;
         static constexpr size_t k_region_min_work = 16;   // a straight-line region's least number of operations it runs in place of dispatches (its entry and flush cost about ten)
+        // raw typed frames (docs/typed_regions_design.md "Raw typed frames"): each parameter's scalar kind when every parameter of the callable
+        // being compiled is a by-value int, float or bool in its own slot, without a default (frame_eligible_ false: the body gets no frame program)
+        std::vector<uint8_t> frame_param_kinds_;
+        bool frame_eligible_ = false;
+        static uint8_t raw_scalar_kind(const type_info* t);       // the cell kind of a declared int, float or bool; 0 otherwise
+        static bool raw_signature(const function_decl* fn);       // a free function a raw call may enter: scalar by-value parameters, a scalar result
+        bool raw_call_operand(const expression* e) const;         // a hoistable call whose checked callee has the raw signature and a frame program
+        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body);   // the callee is the function itself, or forms a frame program
+        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting);
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init);

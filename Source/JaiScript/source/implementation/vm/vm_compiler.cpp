@@ -182,6 +182,7 @@ namespace {
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
+			case opcode::op_c_ret:
 			case opcode::op_inline_guard:
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
@@ -368,6 +369,7 @@ namespace {
 			case opcode::op_c_rebind:
 			case opcode::op_c_bail:
 			case opcode::op_c_exit:
+			case opcode::op_c_ret:
 			case opcode::op_inline_guard:
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
@@ -708,6 +710,8 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 	return binary_shape_none;
 }
 
+static bool loop_free_body(const ast_node* n);
+
 std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations) {
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
@@ -749,6 +753,14 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	callable_ = {};
 	callable_.active = true;
 	callable_body_ = body.get();
+	frame_param_kinds_.clear();
+	frame_eligible_ = parameters.size() <= 8 && loop_free_body(body.get());
+	for (size_t i = 0; frame_eligible_ && i < parameters.size(); ++i) {
+		const parameter& p = parameters[i];
+		const uint8_t k = raw_scalar_kind(p.type.get());
+		if (k == 0 || p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i) { frame_eligible_ = false; break; }
+		frame_param_kinds_.push_back(k);
+	}
 	for (const auto& p : parameters) {
 		uint64_t id = p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name);
 		callable_.declared.insert(id);
@@ -795,9 +807,97 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		result->local_count = temp_high_;
 	}
 	lower_typed_ops(*result);
+	frame_param_kinds_.clear();
+	frame_eligible_ = false;
 	temps_active_ = false;
 	chunk_ = nullptr;
 	return result;
+}
+
+// a body the first form of a frame program covers: no loop anywhere (a switch, a try or a nested declaration counts as one: the region refuses them)
+static bool loop_free_body(const ast_node* n) {
+	if (!n) return true;
+	switch (n->get_type()) {
+	case node_type::block_stmt:
+		for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { if (!loop_free_body(d.get())) return false; }
+		return true;
+	case node_type::statement_decl: return loop_free_body(static_cast<const statement_decl*>(n)->statement.get());
+	case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); return loop_free_body(s->then_statement.get()) && loop_free_body(s->else_statement.get()); }
+	case node_type::expression_stmt: case node_type::return_stmt: case node_type::variable_decl: case node_type::expression_decl: return true;
+	default: return false;
+	}
+}
+
+// a call a frame program's body makes that can be raw at run time: to the function itself, or to a loop-free function of the raw shape that forms a
+// frame program itself (one of its own raw-signature calls reaches one; a cycle of such functions forms programs all round); a leaf, or a function
+// whose calls reach only loops, has no frame program, so a call to one stays the general call
+bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body) {
+	std::vector<const function_decl*> visiting;
+	return raw_call_reaches_program(callee, self_body, visiting);
+}
+bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting) {
+	if (!callee || !callee->body) return false;
+	if (callee->body.get() == self_body) return true;
+	if (!loop_free_body(callee->body.get())) return false;
+	if (std::find(visiting.begin(), visiting.end(), callee) != visiting.end()) return true;
+	if (visiting.size() >= 8) return false;
+	visiting.push_back(callee);
+	bool found = false;
+	auto visit_expr = [&](auto&& self, const expression* e) -> void {
+		if (!e || found) return;
+		switch (e->get_type()) {
+		case node_type::call_expr: {
+			const auto* c = static_cast<const call_expr*>(e);
+			const auto d = c->proven_callee_decl.lock();
+			if (d && raw_signature(d.get()) && c->arguments.size() == d->parameters.size() && raw_call_reaches_program(d.get(), callee->body.get(), visiting)) { found = true; return; }
+			for (const auto& a : c->arguments) { self(self, a.get()); }
+			return;
+		}
+		case node_type::binary_expr: { const auto* b = static_cast<const binary_expr*>(e); self(self, b->left.get()); self(self, b->right.get()); return; }
+		case node_type::unary_expr: self(self, static_cast<const unary_expr*>(e)->operand.get()); return;
+		case node_type::ternary_expr: { const auto* t = static_cast<const ternary_expr*>(e); self(self, t->condition.get()); self(self, t->then_expression.get()); self(self, t->else_expression.get()); return; }
+		case node_type::assignment_expr: self(self, static_cast<const assignment_expr*>(e)->value.get()); return;
+		case node_type::cast_expr: self(self, static_cast<const cast_expr*>(e)->operand.get()); return;
+		default: return;
+		}
+	};
+	std::vector<const ast_node*> stack{ callee->body.get() };
+	while (!stack.empty() && !found) {
+		const ast_node* n = stack.back();
+		stack.pop_back();
+		if (!n) continue;
+		switch (n->get_type()) {
+		case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { stack.push_back(d.get()); } break;
+		case node_type::statement_decl: stack.push_back(static_cast<const statement_decl*>(n)->statement.get()); break;
+		case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); visit_expr(visit_expr, s->condition.get()); stack.push_back(s->then_statement.get()); stack.push_back(s->else_statement.get()); break; }
+		case node_type::expression_stmt: visit_expr(visit_expr, static_cast<const expression_stmt*>(n)->expression.get()); break;
+		case node_type::expression_decl: visit_expr(visit_expr, static_cast<const expression_decl*>(n)->expression.get()); break;
+		case node_type::return_stmt: visit_expr(visit_expr, static_cast<const return_stmt*>(n)->value.get()); break;
+		case node_type::variable_decl: visit_expr(visit_expr, static_cast<const variable_decl*>(n)->initializer.get()); break;
+		default: break;
+		}
+	}
+	visiting.pop_back();
+	return found;
+}
+
+uint8_t vm_compiler::raw_scalar_kind(const type_info* t) {
+	if (!t) return 0;
+	switch (t->base_type) {
+	case script_value_type::jai_int_type: return static_cast<uint8_t>(script_value::TYPEID_INT);
+	case script_value_type::jai_float_type: return static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	case script_value_type::jai_bool_type: return static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	default: return 0;
+	}
+}
+
+bool vm_compiler::raw_signature(const function_decl* fn) {
+	if (!fn || !fn->body || fn->is_coroutine || fn->parameters.size() > 8 || raw_scalar_kind(fn->return_type.get()) == 0) return false;
+	for (size_t i = 0; i < fn->parameters.size(); ++i) {
+		const parameter& p = fn->parameters[i];
+		if (raw_scalar_kind(p.type.get()) == 0 || p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i) return false;
+	}
+	return true;
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expression_ptr& expr) {
@@ -2635,6 +2735,27 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return false;
 		}
 	};
+	// a frame program (docs/typed_regions_design.md "Raw typed frames"): a body whose parameters are all by-value scalars, with no loop and at least
+	// one call the checker resolved to a raw-signature function, is one region from its first instruction to its HALT; a refusal falls back to the
+	// body's spans
+	size_t fn_candidate = SIZE_MAX;
+	auto frame_program_candidate = [&]() -> bool {
+		if (!frame_eligible_ || !c.is_function_body || original_size < 2 || code[original_size - 1].op != opcode::op_halt || !c.cell_loops.empty()) return false;
+		bool raw_site = false;
+		for (size_t ip = 0; ip + 1 < original_size; ++ip) {
+			const vm_instruction& ins = code[ip];
+			if (ins.op == opcode::op_loop_back || ins.op == opcode::op_cfor_back || ins.op == opcode::op_cells_back || ins.op == opcode::op_cells_cfor_back || ins.op == opcode::op_iter_next) return false;
+			if (ins.op == opcode::op_jump && ins.a <= ip) return false;
+			if (ins.op == opcode::op_probe_callee && ins.a < c.call_sites.size() && c.call_sites[ins.a].call_node < c.nodes.size()) {
+				const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[ins.a].call_node].get());
+				const auto decl = ce->proven_callee_decl.lock();
+				if (decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) { raw_site = true; }
+			}
+		}
+		if (!raw_site) return false;
+		const vm_instruction& h = code[0];   // the trampoline runs it when the entry is refused: an instruction that looks at nothing after it
+		return entry_op(h) || (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || h.op == opcode::op_probe_callee || h.op == opcode::op_const || h.op == opcode::op_load;
+	};
 	// the spans [s, e) inside [lo, hi) worth a region: a statement boundary at each end, an entry instruction the trampoline runs, enough work
 	auto add_spans = [&](size_t lo, size_t hi) {
 		size_t at = lo;
@@ -2666,12 +2787,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					const size_t hi = cl.counted != k_invalid_u32 && cl.counted < c.counted_for_protos.size() ? c.counted_for_protos[cl.counted].exit_ip : cl.back + 1;
 					for (size_t k = cl.head; k < hi && k < excluded.size(); ++k) { excluded[k] = 1; }
 				}
-				add_spans(0, original_size);
+				if (frame_program_candidate()) { fn_candidate = straight.size(); straight.emplace_back(0u, static_cast<uint32_t>(original_size - 1)); }   // the whole body: its spans only if the frame program is refused
+				else { add_spans(0, original_size); }
 			}
 			if (cand - original_size >= straight.size()) break;
 			line_head = straight[cand - original_size].first; back = straight[cand - original_size].second;
 		}
 		const bool line = line_head != SIZE_MAX;
+		const bool fn_mode = line && cand >= original_size && cand - original_size == fn_candidate;   // the frame program: returns are rets, calls are doors (raw when the callee is)
 		const vm_instruction be = line ? vm_instruction{opcode::op_halt, 0, 0, 0} : code[back];
 		// a range-for's back edge: the jump to its ITER_NEXT, the exit jump after that, the pop after the back edge (a continue jumps
 		// there too, but not from the instruction before the pop)
@@ -2858,6 +2981,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a range-for head: the index a cell of its own (the iteration state's index at entry, stepped by the back edge, synced on a miss
 		// and at the exit), the loop variable a body-declared cell bound by the head's landing (by value: the element's own kind; by
 		// reference: a rebind of the element)
+		if (fn_mode) { for (size_t i = 0; i < frame_param_kinds_.size(); ++i) { use_slot(static_cast<uint32_t>(i), frame_param_kinds_[i], false, 0, nullptr, head); } }   // the parameters: cells of their declared kinds, live in
 		uint32_t range_index_slot = k_invalid_u32, range_var_slot = k_invalid_u32; bool range_byref = false;
 		if (refusal == chunk::cell_refusal_none && range_proto != k_invalid_u32) {
 			const iter_proto& ipr = c.iter_protos[range_proto];
@@ -2942,7 +3066,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// form runs the statement whole (its pushes, region exits, scope pops and the return or jump), so any expression may
 				// appear in it; the instructions it spans have no copy, and a jump to its first instruction lands on the exit
 				const ast_node* sn = ip < c.stmt_nodes.size() ? c.stmt_nodes[ip] : nullptr;
-				const bool is_return = sn && sn->get_type() == node_type::return_stmt;
+				const bool is_return = sn && sn->get_type() == node_type::return_stmt && !fn_mode;   // a frame program translates its returns (ret)
 				const bool is_break = sn && sn->get_type() == node_type::break_stmt;
 				if (is_return || is_break) {
 					size_t end = ip;
@@ -2971,6 +3095,57 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						continue;
 					}
 				}
+			}
+			if (fn_mode && (st.op == opcode::op_return_ident || st.op == opcode::op_return || st.op == opcode::op_return_binary ||
+			                (ip + 1 < back && code[ip + 1].op == opcode::op_return && (st.op == opcode::op_binary_fused || st.op == opcode::op_const || st.op == opcode::op_load)))) {
+				// a frame program's return: the value is a cell or a constant (a returned binary lands in an argument value first); a miss, or a
+				// return the raw protocol does not take, re-runs the return's tail from its first instruction, so the tail's operands stay live
+				ir_op ret; ret.kind = ir::ret; ret.origin = static_cast<uint32_t>(ip);
+				if (st.op == opcode::op_return_ident) {
+					if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || (st.c & (load_flag_type_ctor | load_flag_global_only))) { refuse(chunk::cell_refusal_translation, ip); break; }
+					use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
+					ret.proto = (st.c & load_flag_return_proven) ? 1u : 0u;
+					op = ret;
+				} else if (st.op == opcode::op_return || st.op == opcode::op_return_binary) {
+					refuse(chunk::cell_refusal_translation, ip); break;   // a value the stack carries
+				} else {
+					const vm_instruction& rn = code[ip + 1];
+					if (rn.a != 1) { refuse(chunk::cell_refusal_translation, ip + 1); break; }
+					ret.proto = rn.b;
+					if (st.op == opcode::op_const) {
+						const size_t ck = st.a < c.constants.size() && st.a < k_typed_slot_mask ? c.constants[st.a].raw_storage_index() : script_value::TYPEID_NULL;
+						if (ck != script_value::TYPEID_INT && ck != script_value::TYPEID_FLOAT && ck != script_value::TYPEID_BOOL) { refuse(chunk::cell_refusal_representation, ip); break; }
+						ret.a = k_typed_const_bit | st.a;
+						op.kind = ir::skip;
+					} else if (st.op == opcode::op_load) {
+						if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || st.c != 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+						use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
+						op.kind = ir::skip;
+					} else {
+						// the returned binary into an argument value (a synthetic slot, never flushed): the tail's own operands are the ret's reads
+						if (st.a >= c.fused_binary_protos.size()) { refuse(chunk::cell_refusal_representation, ip); break; }
+						const fused_binary_proto& bp = c.fused_binary_protos[st.a];
+						const bool is_cmp = cmp_tok(bp.op);
+						if (!arith_tok(bp.op) && !is_cmp) { refuse(chunk::cell_refusal_translation, ip); break; }
+						if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+						const uint32_t t = arg_temp_next++;
+						uint8_t tk = 0;
+						if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.b & k_ir_env_bit) && !(op.c & k_ir_env_bit)) {
+							const opcode fast = arith_op(static_cast<token_type>(bp.op), bp.typed_class);
+							if (fast != opcode::op_halt) { op.fast = fast; tk = bp.typed_class == 1 ? kint : kflt; use_slot(op.b, tk, false, 0, nullptr, ip); use_slot(op.c, tk, false, 0, nullptr, ip); }
+						}
+						use_slot(t, is_cmp ? kbool : tk, true, k_typed_dst_temp, nullptr, ip);
+						op.kind = is_cmp ? ir::cmpval : ir::arith; op.tok = bp.op; op.a = t; op.writes = t;
+						ret.a = t;
+						for (uint8_t x = 0; x < op.nreads; ++x) { ret.reads[ret.nreads++] = op.reads[x]; }
+					}
+					ops.push_back(op);
+					op = ret;
+					++ip;   // the op_return is the pair's second instruction
+				}
+				if (!alias_site(op, ip)) break;
+				ops.push_back(op);
+				continue;
 			}
 			if (st.op == opcode::op_math_guard) {   // a stdlib alias's guard: its name holds at the entry and after every effect point, no copy instruction
 				loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ st.a, static_cast<uint8_t>(st.c), static_cast<uint32_t>(ip * 3) });
@@ -3447,6 +3622,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (call_ip + 1 >= back || (code[call_ip].op != opcode::op_call_from_scratch && code[call_ip].op != opcode::op_call_typed) || code[call_ip].b != st.a || code[call_ip].c != 0) { refuse(chunk::cell_refusal_effect, ip); break; }
 				const size_t consumer_ip = call_ip + 1;
 				chunk::cell_loop::cell_call cc; cc.probe_ip = static_cast<uint32_t>(ip); cc.call_ip = static_cast<uint32_t>(call_ip); cc.consumer_ip = static_cast<uint32_t>(consumer_ip);
+				if (c.call_sites[st.a].call_node < c.nodes.size() && code[call_ip].c == 0) {   // a tail call keeps the general splice (no raw frame grows the chain)
+					const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[st.a].call_node].get());
+					const auto decl = ce->proven_callee_decl.lock();
+					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) { cc.raw = 1; }   // the arguments instruction may enter the callee's frame program raw
+				}
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
 				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size()); seq.push_back(probe_op);   // the probe runs first, at its own place: its resolution may run a getter, which no argument value may precede
 				ir_op call_op; call_op.kind = ir::call; call_op.a = static_cast<uint32_t>(calls.size());
@@ -3632,6 +3812,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// undefined is defined on every path to each of its reads; a snapshot's slot is written only by its own guard between the
 		// guard and its read. The must-define dataflow over the region's control flow graph is the rule every pass must keep
 		if (refusal == chunk::cell_refusal_none) { const region_verdict v = verify(region, cells); if (v.refusal != chunk::cell_refusal_none) { refuse(v.refusal, v.at); } }
+		if (fn_mode) {
+			// a frame program pays its entry only for its raw calls: without one (or refused) the body keeps its ordinary spans
+			bool any_raw = false;
+			for (const auto& rc : calls) { if (rc.raw) { any_raw = true; } }
+			if (refusal != chunk::cell_refusal_none || !any_raw) { add_spans(0, original_size); continue; }
+		}
 		if (refusal != chunk::cell_refusal_none) {
 			if (line) {
 				// the span splits around the refusing statement (the parts before and after it are spans of their own), or in halves when it
@@ -3720,6 +3906,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.inline_sites = loop_inline_sites;
 		loop.math_alias_sites = loop_alias_sites;
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
+		struct ret_pad { uint32_t at, proof, origin; };   // a C_RET's copy ip, the return's proof mode and the general ip of its tail
+		std::vector<ret_pad> ret_pads;
 		auto append = [&](vm_instruction ins, size_t from_ip) {
 			if (origin_override != SIZE_MAX) { from_ip = origin_override; }
 			code.push_back(ins);
@@ -3904,6 +4092,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::bail: append(vm_instruction{opcode::op_c_bail, op.target, 0, 0}, ip); break;   // a planned miss at its own origin
+			case ir::ret: ret_pads.push_back({ static_cast<uint32_t>(code.size()), op.proto, op.origin }); append(vm_instruction{opcode::op_c_ret, cell_of(op.a), 0, op.origin}, ip); break;   // the pad is patched after the copy
 			case ir::size: append(vm_instruction{opcode::op_c_size, dst_of(op.a), op.container, 0}, ip); break;   // the array site's live size
 			case ir::append: {
 				// a plus onto a cell pinned to int or float with an operand of the same pinned kind is the typed add (no string row can apply)
@@ -4051,6 +4240,26 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (cl.env_operand != k_invalid_u32 || cl.iter_index || !(cl.temp || cl.first_decl)) { loop.entry_cells.push_back(k); }
 			if (cl.env_operand != k_invalid_u32) { loop.env_cells.push_back(k); continue; }
 			if (!cl.temp && (cl.kind == 0 || cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING))) { loop.string_candidates.push_back(k); }
+		}
+		for (const ret_pad& rp : ret_pads) {
+			// the general return of a boxed result (a frame the raw protocol does not return from): its own statement for the trace
+			code[rp.at].b = static_cast<uint32_t>(code.size());
+			code.push_back(vm_instruction{opcode::op_return, 1, rp.proof, 0});
+			c.stmt_nodes.push_back(rp.origin < c.stmt_nodes.size() ? c.stmt_nodes[rp.origin] : nullptr);
+		}
+		if (fn_mode) {
+			// the frame program: a raw call enters it at copy_head with the parameters in their cells when nothing else needs reading at entry
+			loop.frame_program = true;
+			c.frame_program = loop_index;
+			bool enterable = loop.env_cells.empty() && loop.sites.empty() && loop.inline_sites.empty() && loop.math_alias_sites.empty() && loop.rebinds.empty() && loop.iter_proto == k_invalid_u32;
+			for (size_t i = 0; i < frame_param_kinds_.size(); ++i) {
+				const uint32_t k = i < loop.slot_to_cell.size() ? loop.slot_to_cell[i] : k_invalid_u32;
+				if (k == k_invalid_u32 || loop.cells[k].kind != frame_param_kinds_[i] || loop.cells[k].temp) { enterable = false; }
+				loop.param_cells.push_back(k);
+			}
+			for (const uint32_t k : loop.entry_cells) { if (std::find(loop.param_cells.begin(), loop.param_cells.end(), k) == loop.param_cells.end()) { enterable = false; } }
+			for (const auto& cl : loop.cells) { if (cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) { enterable = false; } }
+			loop.raw_enterable = enterable;
 		}
 		if (line) {
 			// the entry replaces the region's first instruction, which moves to the trampoline ahead of a jump to the next one
@@ -4722,10 +4931,18 @@ bool vm_compiler::call_temp_operand(const expression* e) const {
 bool vm_compiler::call_partner_ok(const expression* e, const expression* call) {
 	if (!e) return false;
 	if (e->get_type() == node_type::literal_expr) return true;
+	if (frame_eligible_ && raw_call_operand(e) && raw_call_operand(call)) return true;   // two raw calls in a frame program: both land in temps in source order, and the binary reads the temps
 	if (e->get_type() != node_type::identifier_expr || !private_local(e)) return false;
 	// a partner the call (or a call among its arguments) takes as an argument can be bound by reference and written before the binary reads
 	// it (`x + mutate(x)`, `x + f(mutate(x))`, mutate(int& v)): the plain binary's reads are left to right, so such a call keeps the stack form
 	return !read_ahead_of(e, call);
+}
+// a call a frame program can make raw: a hoistable call whose checked callee has the raw signature
+bool vm_compiler::raw_call_operand(const expression* e) const {
+	if (!call_temp_operand(e)) return false;
+	const auto* call = static_cast<const call_expr*>(e);
+	const auto decl = call->proven_callee_decl.lock();
+	return decl && raw_signature(decl.get()) && call->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_);
 }
 void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
 	compile_call(std::static_pointer_cast<call_expr>(e));

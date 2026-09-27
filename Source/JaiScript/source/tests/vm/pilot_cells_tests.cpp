@@ -5342,6 +5342,26 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
 			check_true(fl.find("-- inlined bumpf") != std::string::npos && fl.find("-- inlined incf") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "a proven float reference still grafts and the loop closes: " + fl);
 		});
+		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body
+		// resumes at the generic path's loop back (the var already stepped, never stepped twice), and a compiler value live where the inner
+		// loop's body begins (a graft's parameter over the graft's own loop) is flushed anywhere in that loop, since its back edge reads it again
+		test("a_miss_inside_an_inner_loop_resumes_where_the_general_form_reads_next", [this]() {
+			const std::string src = "float K = 0.5;\n"
+				"function nested(int n) -> int { int t = 0; for (int i = 0; i < n; ++i) { for (int j = 0; j < 4; ++j) { t += i * 10 + j; } } return t; }\n"
+				"function nestedf(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float s = 0.0; float x = i * 0.1; for (int j = 0; j < 3; ++j) { float y = x + j; float a = y * K + 1.0 - 2.0; a = a < 0.0 ? -a : a; s += a; } t += s; } return t; }\n"
+				"function owns(float x, int k) -> float { float s = 0.0; for (int j = 0; j < k; ++j) { float y = x + j; float a = y * K + 1.0 - 2.0; a = a < 0.0 ? -a : a; s += a; } return s; }\n"
+				"function grafted(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += owns(i * 0.1, 3); } return t; }\n"
+				"to_string(nested(20)) + \" \" + to_string(nestedf(20)) + \" \" + to_string(grafted(20));";
+			both(src, "", "inner loops");
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 40; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		// a leaf whose body evaluates a stdlib alias, as another leaf's argument: the outer leaf's guard stands in its callee's place, so the
 		// inner leaf grafts inside the outer's parameter and the loop closes; the alias rebound by a call in the loop, the outer rebound by
 		// the rebound alias, and a function no graft takes as the enclosing call keep the general form's values

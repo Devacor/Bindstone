@@ -109,6 +109,23 @@ std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<c
 		}
 		while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_end[defs[nd].second] = here_end; ++nd; }
 	}
+	// an inner loop's back edge (a backward jump, or an inner counted loop's compare back to its body) runs its body again: a compiler value
+	// live where the body begins (defined ahead of the loop and read inside it, a graft's parameter over the graft's own loop) stays live to
+	// the back edge, since the general form reads it again on the next pass
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (size_t k = 0; k < r.ops.size(); ++k) {
+			const ir_op& op = r.ops[k];
+			if ((op.kind != ir::jump && op.kind != ir::cmp) || op.head || op.target < r.first || op.target >= r.first + k) continue;
+			const size_t from = copy_at[op.target - r.head] - copy_head;
+			const size_t to = copy_at[r.first + k + 1 - r.head] - copy_head;
+			if (from >= live.size()) continue;
+			const chunk::cell_mask entering = live[from];
+			for (size_t m = from; m < to && m < live.size(); ++m) {
+				if ((entering & ~live[m]).any()) { live[m] |= entering; changed = true; }
+			}
+		}
+	}
 	return live;
 }
 

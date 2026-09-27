@@ -79,7 +79,8 @@ namespace jai::vm {
 	std::string listing(const region_ir& r);
 
 	// liveness of compiler values per copy instruction: a definition is live from the instruction after it through
-	// its last read (a miss there re-runs the read on the general form, which needs the slot to hold this value); a
+	// its last read, and through an inner loop's back edge when it is live where that loop's body begins (a miss there
+	// re-runs the read on the general form, which needs the slot to hold this value); a
 	// dead definition is never flushed, so it cannot overwrite the live one of the same slot. copy_at maps an original
 	// ip's offset from the head to its first copy instruction, defs lists (ip, cell) in program order, copy_count is
 	// the copy's length

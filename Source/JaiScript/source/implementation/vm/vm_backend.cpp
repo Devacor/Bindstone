@@ -1161,7 +1161,7 @@ void vm_backend::capture_stack_trace() {
 		const ast_node* node = fr->ip < fr->code->stmt_nodes.size() ? fr->code->stmt_nodes[fr->ip] : nullptr;
 		if (fr->top_level) {
 			top_node = node;
-			continue;
+			break;
 		}
 		for (const chunk::inline_site& s : fr->code->inline_sites) {   // an inlined leaf: the callee's frame as the interpreter has it, the caller's line the call's
 			if (fr->ip >= s.begin_ip && fr->ip < s.fallback_ip && s.decl) {
@@ -1182,6 +1182,23 @@ void vm_backend::capture_stack_trace() {
 		top_node ? top_node->location.line : 0
 	});
 	trace_captured_ = true;
+}
+
+// KEEP BYTE-PARALLEL with interpreter::park_nested_failure / absorb_nested_trace
+void vm_backend::park_nested_failure() {
+	nested_failure_.parked = true;
+	nested_failure_.error = run_error_;
+	nested_failure_.value = active_exception_value_;
+	nested_failure_.exception = current_exception_;
+	nested_failure_.trace = captured_trace_;
+}
+
+void vm_backend::absorb_nested_trace() {
+	if (!nested_failure_.parked) { return; }
+	std::vector<stack_frame> inner = std::move(nested_failure_.trace);
+	nested_failure_.trace.clear();
+	capture_stack_trace();
+	captured_trace_.insert(captured_trace_.begin(), inner.begin(), inner.end());
 }
 
 std::string vm_backend::current_source_file() const {
@@ -16286,6 +16303,7 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any
 	// running-coroutine state. An error in the included file surfaces as unwinding.
 	// Pass the resolved path so included nodes carry their real filename.
+	nested_failure_.parked = false;
 	try {
 		script_value result = engine_->execute_include_source(resolved_path, content);
 		stack_.push_back(std::move(result));
@@ -16294,12 +16312,15 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
+		absorb_nested_trace();
 	} catch (const std::exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
+		absorb_nested_trace();
 	}
+	nested_failure_.parked = false;
 	return {};
 }
 
@@ -16326,6 +16347,7 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	}
 	std::string resolved_path = std::move(resolve_result.value());
 
+	nested_failure_.parked = false;
 	try {
 		script_value result = engine_->execute_import(resolved_path);
 		stack_.push_back(std::move(result));
@@ -16334,12 +16356,15 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
+		absorb_nested_trace();
 	} catch (const std::exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
+		absorb_nested_trace();
 	}
+	nested_failure_.parked = false;
 	return {};
 }
 
@@ -18164,6 +18189,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	return_value_.reset();
 	captured_trace_.clear();
 	trace_captured_ = false;
+	run_error_.reset();
 
 	const int entry_call_depth = current_call_depth_;
 	(void)entry_call_depth;
@@ -18195,6 +18221,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 
 	if (!result) {
 		if (!trace_captured_) capture_stack_trace();
+		run_error_ = result.error_value();
 		// Interpreter boundary parity: checked errors become std::system_error text,
 		// which engine::execute then surfaces as a script_exception
 		std::string what;

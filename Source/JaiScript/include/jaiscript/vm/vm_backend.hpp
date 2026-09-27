@@ -320,6 +320,7 @@ namespace jai::vm {
         // detection): false only when no frames are live and depth is zero
         bool is_executing() const override { return current_call_depth_ != 0 || !frames_.empty(); }
 
+        void park_nested_failure() override;
         std::vector<stack_frame> last_stack_trace() const override { return captured_trace_; }
         std::string format_stack_trace() const override;
         std::string current_source_file() const override;
@@ -849,6 +850,8 @@ namespace jai::vm {
         bool is_unwinding_ = false;
         bool trace_captured_ = false;
         std::vector<stack_frame> captured_trace_;
+        std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
+        detail::nested_failure nested_failure_;
         // "Inside a catch block" marker of the rethrow protocol (the catch symbol, or the
         // unnamed catch's "" symbol) - the catch VARIABLE itself is a frame slot / scope
         // local bound at handler entry, never resolved through this. Parked per fiber
@@ -1144,6 +1147,7 @@ namespace jai::vm {
                                                             return_conv conv, bool proven, std::string_view callee = {});
 
         void capture_stack_trace();
+        void absorb_nested_trace();
 
         script_value make_null() const;
         bool is_truthy(const script_value& value);

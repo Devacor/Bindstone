@@ -126,6 +126,10 @@ public:
         return interpreter_->get_current_exception();
     }
 
+    void park_nested_failure() override {
+        interpreter_->park_nested_failure();
+    }
+
     std::vector<stack_frame> last_stack_trace() const override {
         return interpreter_->last_stack_trace();
     }

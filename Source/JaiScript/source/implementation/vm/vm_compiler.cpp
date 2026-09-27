@@ -2666,6 +2666,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
+		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
+		auto caller_stmt_of = [&](size_t at) -> const ast_node* {   // a graft's statements are the caller's statement's
+			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip) return s.call_stmt; }
+			return stmt_of(at);
+		};
+		auto last_def_stmt = [&](int k) -> const ast_node* { for (size_t d = defs.size(); d-- > 0;) { if (defs[d].second == static_cast<uint32_t>(k)) return caller_stmt_of(defs[d].first); } return nullptr; };
 		std::vector<uint32_t> alias_slots;   // the slots of the body's element aliases (rebinds), in order
 		auto is_alias = [&](uint32_t slot) -> bool { for (const uint32_t s : alias_slots) { if (s == slot) return true; } return false; };
 		auto use_slot = [&](uint32_t operand, uint8_t kind, bool is_write, uint8_t landing, type_info* stamp, size_t at) {
@@ -2675,9 +2681,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (k < 0) {
 				chunk::cell_loop::cell nc{ slot, kind, 0, !is_write, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
-			} else if (is_write && landing == k_typed_dst_temp && cells[k].temp && cells[k].kind != kind) {
+			} else if (is_write && landing == k_typed_dst_temp && cells[k].temp && (cells[k].kind != kind || (kind == 0 && last_def_stmt(k) != caller_stmt_of(at)))) {
 				// a compiler value is a definition, not a slot: a temp redefined with another kind (the compiler reuses temp
-				// slots across statements) is a new cell of the same slot; reads bind to the latest definition
+				// slots across statements) is a new cell of the same slot; reads bind to the latest definition. An untyped
+				// definition in another statement is one too: a typed read there fixes that statement's cell only (the arms of
+				// one statement's ternary share theirs)
 				chunk::cell_loop::cell nc{ slot, kind, 0, false, false, nullptr };
 				cells.push_back(nc); k = static_cast<int>(cells.size() - 1);
 			} else if (cells[k].kind == 0) { cells[k].kind = kind; }   // an adopted kind takes the first typed use's
@@ -2798,11 +2806,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// instead of a refusal of the loop: the general form runs the statement whole from there with the stack it expects, so the
 		// translation state is snapshotted at every statement start and restored, and the copy resumes at the end of the innermost arm
 		// holding the bail (nothing between a bail and the arm's end is reachable inside the block, so none of it leaves a cell)
-		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
-		auto caller_stmt_of = [&](size_t at) -> const ast_node* {   // a graft's statements are the caller's statement's
-			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip) return s.call_stmt; }
-			return stmt_of(at);
-		};
 		// a bail inside a caller's statement (a graft's statement, or the rest of the statement after a graft's join): the compiler values the
 		// statement defined before it (its spills, the grafts' parameters and results) are the general continuation's, so the bail flushes them
 		std::vector<std::pair<uint32_t, std::vector<uint32_t>>> bail_held;
@@ -4047,7 +4050,7 @@ bool vm_compiler::quiet_partner(const expression* e) {
 		auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
 		return !id->global_qualified && identifier_slot_operand(id) != k_invalid_u32;
 	}
-	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || member_temp_operand(e);   // a member read is hoisted in order like a subscript
+	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || member_temp_operand(e) || ternary_temp_operand(e);   // a member read or a ternary is hoisted in order like a subscript
 }
 
 // an identifier that is not a frame slot resolves in the environment inside a fused op, as a lifted binary's environment
@@ -4141,6 +4144,7 @@ bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expec
 	if (member_temp_operand(e.get())) { compile_member_into_temp(e, out); return true; }
 	if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, out); return true; }
 	if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, out); return true; }
+	if (ternary_temp_operand(e.get())) { compile_ternary_into_temp(e, out); return true; }
 	return fusable_index_expr(e.get()) && compile_subscript_into_temp(e, expect, out);
 }
 
@@ -4196,6 +4200,73 @@ bool vm_compiler::unary_temp_operand(const expression* e) {
 	if (o->get_type() == node_type::identifier_expr || o->get_type() == node_type::literal_expr) return true;
 	if (fusable_index_expr(o) || math_temp_operand(o) != detail::math_fn::none || unary_temp_operand(o)) return true;
 	return o->get_type() == node_type::binary_expr && binary_lands_fused(const_cast<binary_expr*>(static_cast<const binary_expr*>(o)));
+}
+
+// `c ? a : b` as an operand (an absolute value `(g < 0.0 ? -g : g) - k`, a clamp): the condition's jumps, then each arm's value
+// moved into one compiler temp, so the binary around it keeps a direct operand and a block takes the arms as moves; every arm lands
+// by the same move (a computed arm into a temp of its own first), so a block holds the temp as one cell whatever the arms' kinds
+bool vm_compiler::ternary_temp_operand(const expression* e) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (!e || e->get_type() != node_type::ternary_expr) return false;
+	const auto* t = static_cast<const ternary_expr*>(e);
+	auto arm_ok = [this](const expression* a) {
+		if (!a) return false;
+		if (a->get_type() == node_type::literal_expr) return true;
+		if (a->get_type() == node_type::identifier_expr) return !reference_slot_operand(a);
+		if (a->get_type() == node_type::ternary_expr) return ternary_temp_operand(a);
+		if (member_temp_operand(a) || math_temp_operand(a) != detail::math_fn::none || unary_temp_operand(a)) return true;
+		return a->get_type() == node_type::binary_expr && binary_lands_fused(const_cast<binary_expr*>(static_cast<const binary_expr*>(a)));
+	};
+	return t->condition && arm_ok(t->then_expression.get()) && arm_ok(t->else_expression.get());
+}
+
+void vm_compiler::compile_ternary_into_temp(const expression_ptr& e, fused_operand& out) {
+	const uint32_t dst = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	land_ternary_in_temp(static_cast<const ternary_expr*>(e.get()), dst);
+	out = fused_operand{};
+	out.slot = dst;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
+}
+
+void vm_compiler::land_ternary_in_temp(const ternary_expr* t, uint32_t dst) {
+	std::vector<size_t> false_jumps;
+	const size_t mark = temp_next_;
+	compile_branch_condition(t->condition, false_jumps);
+	temp_next_ = mark;   // the condition's temps die at its jumps
+	land_arm_in_temp(t->then_expression, dst);
+	const size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
+	for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
+	land_arm_in_temp(t->else_expression, dst);
+	patch_jump(jump_end, chunk_->code.size());
+}
+
+void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint32_t dst) {
+	if (arm->get_type() == node_type::ternary_expr) { land_ternary_in_temp(static_cast<const ternary_expr*>(arm.get()), dst); return; }
+	const size_t mark = temp_next_;
+	fused_binary_proto p;
+	if (arm->get_type() == node_type::identifier_expr || arm->get_type() == node_type::literal_expr) {
+		p.left = make_fused_operand(arm);
+	} else if (arm->get_type() == node_type::binary_expr) {
+		compile_expression(arm);
+		const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+		++temp_next_;
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		vm_instruction& last = chunk_->code.back();
+		if (last.op == opcode::op_binary_fused) { last.op = opcode::op_binary_fused_temp; last.b = t0; }
+		else { emit(opcode::op_call_temp, t0); }   // unreachable by construction (binary_lands_fused held): the value is on the stack
+		p.left = fused_operand{};
+		p.left.slot = t0;
+		p.left.symbol = temp_symbol_index();
+		p.left.direct = true;
+	} else {
+		compile_value_into_temp(arm, 0xFF, p.left);
+	}
+	chunk_->fused_binary_protos.push_back(p);
+	emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), dst, 0);
+	temp_next_ = mark;
 }
 
 void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand& out) {
@@ -4723,13 +4794,13 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 
 bool vm_compiler::lift_operand_shape(const expression* e) {
 	return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr ||
-	       fusable_subscript_operand(e) || (typed_lowering_ && fusable_index_expr(e)) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);   // a subscript only a temp carries needs the typed lowering (compile_subscript_into_temp)
+	       fusable_subscript_operand(e) || (typed_lowering_ && fusable_index_expr(e)) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e);   // a subscript only a temp carries needs the typed lowering (compile_subscript_into_temp)
 }
 
 // a subscript only a temp can carry (not a chain operand) or an intrinsic needs a partner that cannot raise first;
 // the rule holds at every node of the lifted tree, the outer one included
 bool vm_compiler::lift_temp_only(const expression* c) {
-	return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none || unary_temp_operand(c) || member_temp_operand(c);   // a member read lands in a temp: its partner must be quiet or lifted
+	return (fusable_index_expr(c) && !fusable_subscript_operand(c)) || math_temp_operand(c) != detail::math_fn::none || unary_temp_operand(c) || member_temp_operand(c) || ternary_temp_operand(c);   // a member read or a ternary lands in a temp: its partner must be quiet or lifted
 }
 
 // a partner that is itself a value binary is quiet here: the lift computes it into its temp in operand order,
@@ -4771,9 +4842,9 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (b->op.type == token_type::left_bracket || b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return false;
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
-	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e); };
+	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
-	const bool rsub = (hoists(b->right.get()) && quiet_partner(b->left.get())) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));
+	const bool rsub = (hoists(b->right.get()) && quiet_partner(b->left.get())) || (ternary_temp_operand(b->right.get()) && env_identifier(b->left.get())) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name left of a ternary reads into a temp first
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
 	if (binary_shape(b) != binary_shape_none) return true;
 	const int ln = lift_fusible_nodes(b->left.get());
@@ -4842,9 +4913,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
-		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e); };
+		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get()));
-		const bool rsub = (hoists(expr->right.get()) && quiet_partner(expr->left.get())) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
+		const bool rsub = (hoists(expr->right.get()) && quiet_partner(expr->left.get())) || (ternary_temp_operand(expr->right.get()) && env_identifier(expr->left.get())) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind
@@ -4856,6 +4927,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				if (math_temp_operand(side.get()) != detail::math_fn::none) { compile_math_into_temp(side, out); }
 				else if (unary_temp_operand(side.get())) { compile_unary_into_temp(side, out); }
 				else if (member_temp_operand(side.get())) { compile_member_into_temp(side, out); }
+				else if (ternary_temp_operand(side.get())) { compile_ternary_into_temp(side, out); }
 				else if (call_temp_operand(side.get())) { compile_call_into_temp(side, out); }
 				else { compile_subscript_into_temp(side, expect_of(side), out); }
 			};
@@ -4945,6 +5017,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, o); return o; }   // partners_ok admitted it
 				if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, o); return o; }
 				if (member_temp_operand(e.get())) { compile_member_into_temp(e, o); return o; }   // a member read lands in a temp in operand order (partners_ok admitted it)
+				if (ternary_temp_operand(e.get())) { compile_ternary_into_temp(e, o); return o; }
 				if (call_temp_operand(e.get()) && call_partner_ok(partner, e.get())) { compile_call_into_temp(e, o); return o; }   // a call ahead of a partner it cannot change
 				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner))) {
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));

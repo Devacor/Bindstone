@@ -16,6 +16,12 @@
 
 namespace jai::vm {
 
+// what a body may call besides math:: intrinsics: the registered stdlib aliases, and (one level down) a leaf that grafts itself
+struct land_ctx {
+	const engine* eng = nullptr;
+	std::function<bool(const call_expr*)> nested;
+};
+
 namespace {
 
 constexpr size_t k_inline_max_nodes = 512;   // the cloned body and the cloned statement together
@@ -36,7 +42,7 @@ struct inline_context {
 	bool writes_member = false;
 	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
 	bool reads_env = false;                                        // the body names an environment value (a global, a stdlib alias)
-	const engine* eng = nullptr;                                   // the stdlib math aliases a body may call
+	struct land_ctx lc;                                            // the stdlib aliases and the nested leaves a body may call
 	std::vector<std::shared_ptr<ast_node>> pins;
 	std::vector<uint64_t> declared_names;                          // the callee's locals: declared in the caller for the graft's compile
 	const call_expr* replace = nullptr;                            // the statement's clone: this call becomes the result temp
@@ -70,6 +76,7 @@ bool math_call(const call_expr* ce) {
 	return ce->callee && ce->callee->get_type() == node_type::member_expr && detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) != detail::math_fn::none;
 }
 // `sqrt(x)` naming a registered stdlib math alias from outside the frame: the math temp's guarded form (the real call on a miss)
+bool nested_call(const call_expr* ce, const land_ctx* lc) { return lc && lc->nested && lc->nested(ce); }
 bool alias_call(const call_expr* ce, const engine* eng) {
 	if (!eng || !ce->callee || ce->callee->get_type() != node_type::identifier_expr || ce->arguments.size() != 1) return false;
 	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
@@ -79,35 +86,49 @@ bool logical_op(token_type t) { return t == token_type::ampersand_ampersand || t
 bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_type::minus_minus; }
 
 // an expression whose value lands in a slot by a block instruction (the typed declaration rows, the fused binary, the proven element
-// read, the math row): a slot identifier or a literal; arithmetic, a comparison, a shift or a unary of those; an element read of a
-// proven kind over a named container; a math intrinsic of those. A bare global read, a member read, a cast, a ternary, a store or
-// any other call lands on the general form, which a block does not run.
-bool landable(const expression* e, const engine* eng);
+// read, the math row): an identifier (a slot, or a global through the move's environment operand; `::name` stays general) or a
+// literal; arithmetic, a comparison, a shift or a unary of those; an element read of a proven kind over a named container; a math
+// intrinsic of those; a ternary as a whole value or as an operand lifted into a temp. A cast, a store or any other call lands on the
+// general form, which a block does not run.
+bool landable(const expression* e, const land_ctx* eng);
 // an operand of a block instruction: a landable value, or a global read (the fused binary's environment rows)
-bool block_operand(const expression* e, const engine* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
-bool landable(const expression* e, const engine* eng) {
+bool block_operand(const expression* e, const land_ctx* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
+// an operand inside an operation: a ternary lands only as a whole declaration or store (or an arm of one), never as an operand
+bool inner_operand(const expression* e, const land_ctx* eng) { return e && e->get_type() != node_type::ternary_expr && block_operand(e, eng); }
+bool landable(const expression* e, const land_ctx* eng) {
 	if (!e) return false;
 	switch (e->get_type()) {
 	case node_type::literal_expr: return true;
-	case node_type::identifier_expr: return static_cast<const identifier_expr*>(e)->slot_index != SIZE_MAX;
+	case node_type::identifier_expr: return !static_cast<const identifier_expr*>(e)->global_qualified;
 	case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); return !m->is_static && m->object && m->object->get_type() == node_type::identifier_expr; }   // a member site over a named instance
 	case node_type::binary_expr: {
 		auto* b = static_cast<const binary_expr*>(e);
 		if (b->op.type == token_type::left_bracket) {
 			const uint8_t cls = b->static_operand_class;
-			return (cls == operand_class_int_int || cls == operand_class_float_float) && b->left && b->left->get_type() == node_type::identifier_expr && block_operand(b->right.get(), eng);
+			return (cls == operand_class_int_int || cls == operand_class_float_float) && b->left && b->left->get_type() == node_type::identifier_expr && inner_operand(b->right.get(), eng);
 		}
-		return block_operand(b->left.get(), eng) && block_operand(b->right.get(), eng);
+		// a ternary operand lands in a temp ahead of the operation when its partner cannot observe the order: a literal, a name (an environment
+		// name on its left reads into a temp first), a value binary or another ternary, as vm_compiler::compile_binary lifts it
+		auto ternary_side = [&](const expression* x, const expression* partner) {
+			if (!landable(x, eng)) return false;
+			if (partner->get_type() == node_type::literal_expr || partner->get_type() == node_type::binary_expr || partner->get_type() == node_type::ternary_expr) return true;
+			if (partner->get_type() != node_type::identifier_expr) return false;
+			auto* id = static_cast<const identifier_expr*>(partner);
+			return !id->global_qualified;
+		};
+		const bool lt = b->left && b->left->get_type() == node_type::ternary_expr, rt = b->right && b->right->get_type() == node_type::ternary_expr;
+		return (lt ? ternary_side(b->left.get(), b->right.get()) : inner_operand(b->left.get(), eng)) &&
+		       (rt ? ternary_side(b->right.get(), b->left.get()) : inner_operand(b->right.get(), eng));
 	}
-	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && block_operand(u->operand.get(), eng); }
+	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && inner_operand(u->operand.get(), eng); }
 	case node_type::ternary_expr: {   // the condition's jumps and one landing per arm: a declaration or a slot store from it is a block's
 		auto* x = static_cast<const ternary_expr*>(e);
-		return block_operand(x->condition.get(), eng) && block_operand(x->then_expression.get(), eng) && block_operand(x->else_expression.get(), eng);
+		return inner_operand(x->condition.get(), eng) && block_operand(x->then_expression.get(), eng) && block_operand(x->else_expression.get(), eng);
 	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
-		if (!math_call(ce) && !alias_call(ce, eng)) return false;
-		for (const auto& a : ce->arguments) { if (!block_operand(a.get(), eng)) return false; }
+		if (!math_call(ce) && !alias_call(ce, eng ? eng->eng : nullptr) && !nested_call(ce, eng)) return false;
+		for (const auto& a : ce->arguments) { if (!inner_operand(a.get(), eng)) return false; }
 		return true;
 	}
 	default: return false;
@@ -115,7 +136,7 @@ bool landable(const expression* e, const engine* eng) {
 }
 // a body statement a block runs: a store of a landable value into a slot, a renamed slot, a global, a field or an element; an increment
 // of a slot identifier
-bool landable_stmt(const expression* e, const engine* eng) {
+bool landable_stmt(const expression* e, const land_ctx* eng) {
 	if (!e) return false;
 	switch (e->get_type()) {
 	case node_type::assignment_expr: {
@@ -237,9 +258,9 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
 		if (!c.replace && !math_call(ce)) {
-			if (!alias_call(ce, c.eng)) { c.fail("a call in the body"); return nullptr; }
-			// the alias makes the real call when its name binds anything else: that callee may write anything, so nothing the statement
-			// reads before the graft stays in place behind it
+			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.fail("a call in the body"); return nullptr; }
+			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails: that callee may write
+			// anything, so nothing the statement reads before the graft stays in place behind it
 			c.writes_global = c.writes_member = c.writes_ref = true;
 		}   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
 		std::vector<expression_ptr> args;
@@ -312,7 +333,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (c.in_loop && !proven_return) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
-			if (c.in_loop && !landable(v.get(), c.eng)) { c.fail("a return the block cannot land"); return nullptr; }
+			if (c.in_loop && !landable(v.get(), &c.lc)) { c.fail("a return the block cannot land"); return nullptr; }
 			auto rd = c.make<variable_decl>(r->location, c.result_type, c.result->name, c.result->symbol_id, v);   // `T __h = e;`: this path's definition of the result
 			rd->slot_index = c.result->slot_index;
 			if (proven_return) { rd->static_init_proof = proof_same_type; }
@@ -330,7 +351,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		auto* es = static_cast<const expression_stmt*>(s.get());
 		auto e = clone_expr(es->expression, c);
 		if (!c.ok) return nullptr;
-		if (c.in_loop && !landable_stmt(e.get(), c.eng)) { c.fail("a statement the block cannot land"); return nullptr; }
+		if (c.in_loop && !landable_stmt(e.get(), &c.lc)) { c.fail("a statement the block cannot land"); return nullptr; }
 		std::vector<declaration_ptr> ds; ds.push_back(c.make<expression_decl>(es->location, e, false));
 		return c.make<block_stmt>(es->location, std::move(ds));
 	}
@@ -343,8 +364,8 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (one.size() != 1) { c.fail("a loop the graft does not take"); return nullptr; }
 			init = one[0];
 		}
-		if (c.in_loop && fs->condition && !landable(fs->condition.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
-		if (c.in_loop && fs->update && !landable_stmt(fs->update.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && fs->condition && !landable(fs->condition.get(), &c.lc)) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && fs->update && !landable_stmt(fs->update.get(), &c.lc)) { c.fail("a loop the block cannot land"); return nullptr; }
 		auto cond = fs->condition ? clone_expr(fs->condition, c) : nullptr;
 		auto upd = fs->update ? clone_expr(fs->update, c) : nullptr;
 		++c.loop_depth;
@@ -355,7 +376,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 	}
 	case node_type::while_stmt: {
 		auto* ws = static_cast<const while_stmt*>(s.get());
-		if (c.in_loop && !landable(ws->condition.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && !landable(ws->condition.get(), &c.lc)) { c.fail("a loop the block cannot land"); return nullptr; }
 		auto cond = clone_expr(ws->condition, c);
 		++c.loop_depth;
 		statement_ptr body = clone_stmt(ws->body, c, false);
@@ -382,7 +403,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			auto* v = static_cast<const variable_decl*>(d.get());
 			if (v->slot_index == SIZE_MAX || v->is_static || v->ref_escaping || v->function_spelling) { c.fail("a declaration the graft does not take"); return out; }
 			if (v->type && v->type->is_reference()) { c.fail("a reference declaration"); return out; }
-			if (c.in_loop && v->initializer && !landable(v->initializer.get(), c.eng)) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
+			if (c.in_loop && v->initializer && !landable(v->initializer.get(), &c.lc)) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
 			expression_ptr init = v->initializer ? clone_expr(v->initializer, c) : nullptr;
 			if (!c.ok) return out;
 			auto n = c.make<variable_decl>(v->location, v->type, v->name, v->name_id, init);
@@ -396,7 +417,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 		case node_type::expression_decl: {
 			auto* ed = static_cast<const expression_decl*>(d.get());
 			if (ed->implicit_return) { c.fail("an implicit return"); return out; }
-			if (c.in_loop && !landable_stmt(ed->expression.get(), c.eng)) { c.fail("a statement the block cannot land"); return out; }
+			if (c.in_loop && !landable_stmt(ed->expression.get(), &c.lc)) { c.fail("a statement the block cannot land"); return out; }
 			auto e = clone_expr(ed->expression, c);
 			if (!c.ok) return out;
 			out.push_back(c.make<expression_decl>(ed->location, e, false));
@@ -505,7 +526,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
 	if (fn->is_coroutine || fn->is_static) return "a coroutine or a static callee";
-	if (fn->body.get() == callable_body_) return "a recursive call";
+	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
@@ -545,6 +566,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 // it a literal, an identifier the body leaves alone, or a stamped subtree that spills into a typed temp. Any other first call ends
 // the statement's hoisting: a call after it would run behind an effect.
 bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out) {
+	land_ctx plain; plain.eng = engine_;
 	std::vector<std::shared_ptr<call_expr>> events; bool unsupported = false;
 	call_events(root, events, unsupported);
 	if (events.empty()) return false;
@@ -573,9 +595,9 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	bool in_loop = false;
 	for (const loop_context& lc : loops_) { if (lc.kind == region_kind::loop || lc.kind == region_kind::range_for) { in_loop = true; break; } }
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
-		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), engine_)) { out.why = "an argument the block cannot land"; return false; } }
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), &plain)) { out.why = "an argument the block cannot land"; return false; } }
 	}
-	inline_context probe; probe.eng = engine_; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
+	inline_context probe; probe.lc = graft_land_ctx(fn.get()); probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
 	probe.ref_slots.assign(fn->local_count, 0);
@@ -619,7 +641,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::identifier_expr: { free_identifier = true; if (static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX) { free_global = true; } break; }
 		default: {
 			const script_value_type kind = spill_kind(p.get());
-			if (kind == script_value_type::jai_null_type || !landable(p.get(), engine_)) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
+			if (kind == script_value_type::jai_null_type || !landable(p.get(), &plain)) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
 			out.spills.emplace_back(p, kind);
 			break;
 		}
@@ -630,6 +652,36 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (out.receiver && free_identifier && probe.writes_member) { out.why = "a name before the call a method may write"; return false; }   // an identifier before the call may alias the receiver's instance
 	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
 	return true;
+}
+
+// what fn's body may call when fn grafts: the stdlib aliases, and (fn's graft being outermost) a plain leaf the graft's compile grafts in turn:
+// eligible by itself, never fn or an enclosing graft, its guard and fallback inside fn's graft
+land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
+	land_ctx lc;
+	lc.eng = engine_;
+	if (graft_bodies_.empty()) {
+		lc.nested = [this, fn](const call_expr* ce) {
+			if (!ce->callee || ce->callee->get_type() != node_type::identifier_expr || !ever_stamped(ce->proven_callee_decl)) return false;
+			const std::shared_ptr<const function_decl> inner = ce->proven_callee_decl.lock();
+			if (!inner || !inner->body || inner->body.get() == fn->body.get()) return false;
+			graft_bodies_.push_back(fn->body.get());
+			bool ok = inline_eligible(ce, inner.get()) == nullptr;
+			if (ok) {
+				// the body the inner graft will clone, held to the block's landing rules: a leaf that stays a call inside the graft would only
+				// widen the caller's frame
+				inline_context probe; probe.lc = graft_land_ctx(inner.get()); probe.renames.assign(inner->local_count, nullptr); probe.result_type = graft_result_type(inner.get());
+				probe.callee_name = inner->name; probe.in_loop = true; probe.returns_proven = inner->graft_return_kind != 0;
+				probe.ref_slots.assign(inner->local_count, 0);
+				for (const parameter& p : inner->parameters) { if (p.is_reference && p.slot_index < inner->local_count) { probe.ref_slots[p.slot_index] = 1; } }
+				if (!void_type(inner->return_type.get())) { auto r = std::make_shared<identifier_expr>(inner->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
+				(void)clone_body(inner->body->declarations, probe, true);
+				ok = probe.ok;
+			}
+			graft_bodies_.pop_back();
+			return ok;
+		};
+	}
+	return lc;
 }
 
 // the graft's result type: the declared one, or for an untyped lambda the kind the checker proved its returns yield
@@ -697,7 +749,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	temp_next_ += fn->local_count;   // the callee's slots
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	inline_context ctx;
-	ctx.eng = engine_;
+	ctx.lc = graft_land_ctx(fn);
 	ctx.slot_offset = base;
 	ctx.renames.assign(fn->local_count, nullptr);
 	ctx.ref_slots.assign(fn->local_count, 0);
@@ -736,7 +788,11 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.back().kind = region_kind::graft;
 	loops_.back().scope_depth = scope_depth_;
 	for (const auto& d : params) { compile_variable_decl(d); }
+	graft_bodies_.push_back(fn->body.get());
+	inlining_off_ = graft_bodies_.size() > 1;   // a leaf the body calls grafts here, one level down
 	for (const auto& d : body) { compile_declaration(d, false); }
+	inlining_off_ = true;
+	graft_bodies_.pop_back();
 	current_stmt_ = site.call_stmt;   // the fallback and the rest of the statement are the caller's
 	std::vector<size_t> exits = std::move(loops_.back().break_patches);
 	loops_.pop_back();

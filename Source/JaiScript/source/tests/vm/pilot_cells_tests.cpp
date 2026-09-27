@@ -3553,16 +3553,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(!trace.empty() && trace.front().function == "f", "the trace names the callee first: " + (trace.empty() ? std::string("<empty>") : trace.front().function));
 		});
 		test("a_global_read_before_a_writing_callee_is_not_hoisted", [this]() {
-			// row 152: `s + G + bump()` reads G before the call on both backends; a body that writes a global keeps a statement that reads
-			// one before it on the general form (no graft), so the order holds
+			// row 152: `s + G + bump()` reads G before the call on both backends (the operand spills into a temp ahead of the graft); a bare
+			// global before the call of a body that writes one keeps the statement on the general form (no graft), so the order holds
 			const std::string prelude =
 				"int G = 1;\n"
 				"int bump() { G = G + 1; return G; }\n"
 				"int pure(int a) { return a + 1; }\n"
-				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + bump(); s = s + G + pure(i); } return s; };\n";
+				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + bump(); s = G + bump() + s; s = s + G + pure(i); } return s; };\n";
 			both(prelude + "run(8);", "", "a global read before a writing callee");
 			const std::string l = listing_run(prelude + "run(8);");
-			check_true(l.find("-- inlined bump") == std::string::npos, "bump is not inlined after a global read: " + l);
+			check_true(l.find("a global before the call the body writes") != std::string::npos, "bump is kept after a bare global read: " + l);
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure is inlined after a global read: " + l);
 		});
 		test("string_and_var_parameters_at_the_grafts_edge", [this]() {
@@ -4206,6 +4206,92 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
 			const std::string l = listing_run(src);
 			check_true(l.find("CALL_TYPED") != std::string::npos, "the calls land typed: " + l.substr(0, 2000));
+		});
+		// row 198: a graft's parameter, local or result is a compiler value under its declared type: a block lands it by the declaration's
+		// conversion (an int into a float local widens), never the source's raw kind under the cell's float contract
+		test("graft_locals_convert_by_their_declared_type_in_a_block", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function f1(int a, int b) -> float { float top = a < b ? a : b; float x = top * 2.0; return x; }\n"
+				"function f2(int a) -> float { float t = a; return t * 0.5; }\n"
+				"function f3(float v) -> int { int k = v; return k + 1; }\n"
+				"function f4(int a) -> bool { float top = a; if (top < 50.0) { return true; } return false; }\n"
+				"function f5(int a) -> float { return a; }\n"
+				"function run() -> string { float acc = 0.0; int ic = 0; int i = 0;\n"
+				"  while (i < 12) { int a = i * 13 % 100; int b = (i * 7 + 30) % 100;\n"
+				"    float r1 = f1(a, b); float r2 = f2(a); int r3 = f3(a * 0.75); bool r4 = f4(a); float r5 = f5(a);\n"
+				"    acc = acc + r1 * 3.0 + r2 * 5.0 + r5 * 7.0; ic = ic + r3 * 11; if (r4) { ic = ic + 1; } i = i + 1; }\n"
+				"  return to_string(acc) + \" \" + to_string(ic); }\n"
+				"run();";
+			both(src, "", "declared-type landings in a block");
+			both(src, "", "declared-type landings in a block, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== run ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- inlined f1") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "the leaves graft into the block: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 5; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// row 198: a ternary operand lands in a compiler temp ahead of the operation (each arm by one move), so the binary around it keeps a
+		// direct operand and a block takes it: an absolute value, a clamp, int and float arms, nested ternaries, environment partners
+		test("ternary_operands_lift_into_temps", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat G = 0.25; int GI = 3;\n"
+				"function run(int n) -> string { float t = 0.0; int s = 0;\n"
+				"  for (int i = 0; i < n; ++i) { float x = i * 0.5 - 3.0;\n"
+				"    float a = (x < 0.0 ? -x : x) - G; float b = G * (x > 1.0 ? x : 1.0); float c = (i % 2 == 0 ? 1 : 2.5) + (x < 0.0 ? x : 0);\n"
+				"    int d = (i < 3 ? i : 3) * 2 + (i > 5 ? i - 5 : 0); float e = (x < -1.0 ? (x < -2.0 ? -2.0 : x) : (x > 1.0 ? 1.0 : x)) * 0.5;\n"
+				"    float h = (x < 0.0 ? math::sqrt(-x) : math::floor(x)) + (GI > 2 ? G : 0.0);\n"
+				"    t += a + b + c + e + h; s += d; }\n"
+				"  return to_string(t) + \" \" + to_string(s); }\n"
+				"function world(float g) -> float { return ((g < 0.0 ? -g : g) - G) / (1.5 * (2.1 + G * 2.4)); }\n"
+				"function march(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += world(i * 0.25 - 2.0) * 0.1; } return t; }\n"
+				"function mixed(var v, int n) -> string { string out = \"\"; for (int i = 0; i < n; ++i) { var w = (i % 3 == 0 ? v : i) + (i < 2 ? 0.5 : 1); out += to_string(w) + \" \"; } return out; }\n"
+				"run(20) + \",\" + to_string(march(30)) + \",\" + mixed(4, 6) + \",\" + mixed(\"s\", 4);";
+			both(src, "", "lifted ternaries");
+			both(src, "", "lifted ternaries, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			for (const char* fn : { "== run ", "== march " }) {
+				const size_t fb = l.find(fn);
+				const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+				check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, std::string("the loop closes: ") + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 5; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// row 198: a leaf whose body calls another leaf grafts, the inner leaf grafted inside it (one level), each behind its own guard
+		test("nested_leaves_graft", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat S = 0.5;\n"
+				"function field(float x, float y) -> float { float s = sin(x * S); float c = cos(y); float r = s * c + x * y; return r; }\n"
+				"function world(float x, float y) -> float { float g = field(x, y); float r = (g < 0.0 ? -g : g) - 0.25; return r; }\n"
+				"function march(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float d = world(i * 0.5, t); t += d * 0.1; } return t; }\n"
+				"function one(float a) -> float { float w = world(a, a) + 1.0; return w; }\n"
+				"function ping(int n) -> int { if (n < 1) { return 0; } int r = pong(n - 1); return r + 1; }\n"
+				"function pong(int n) -> int { int r = ping(n); return r; }\n"
+				"string out = to_string(march(30)) + \",\" + to_string(one(2.0)) + \",\" + to_string(ping(5));\n"
+				"field = function(float x, float y) { return x - y; };\n"
+				"out += \",\" + to_string(march(30)) + \",\" + to_string(one(2.0));\n"
+				"world = function(float x, float y) { return 0.5; };\n"
+				"out + \",\" + to_string(march(30)) + \",\" + to_string(one(2.0));";
+			both(src, "", "nested leaves");
+			both(src, "", "nested leaves, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t mb = l.find("== march ");
+			const std::string ml = mb == std::string::npos ? l : l.substr(mb, l.find("\n== ", mb + 1) - mb);
+			check_true(ml.find("-- inlined world") != std::string::npos && ml.find("-- inlined field") != std::string::npos && ml.find("open loop") == std::string::npos, "both leaves graft into the closed loop: " + ml);
 		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"

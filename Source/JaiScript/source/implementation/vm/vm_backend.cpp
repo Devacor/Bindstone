@@ -4883,6 +4883,7 @@ op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 		const script_value* s = direct_operand(f, f.code->fused_binary_protos[ins.a].left);
 		if (!s || s->raw_storage_index() != script_value::TYPEID_REFERENCE || ref_plain_cell(*s)) return {};
 	}
+	if (const uint32_t ci = f.code->fused_binary_protos[ins.a].left.const_index; ci != k_invalid_u32) { frame_slot_set(f, ins.b, materialize_constant(*f.code, ci)); return {}; }   // a ternary arm's literal
 	std::optional<script_value> scratch;
 	const script_value* v = fused_subscript_value(f, f.code->fused_binary_protos[ins.a].left, scratch, f.ip * 3);
 	if (!v) return op_status::failed;
@@ -8339,6 +8340,16 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		} else {
 			return false;   // an int slot fed a float without a declared int stamp: the general form's conversion
 		}
+	} else if (loop.cells[dk].temp && contract != 0 && kind != contract) {
+		// a compiler value under a declared type (a graft's parameter, local or result): the declaration's conversion, as a local's; the
+		// copy's operations read the cell by its contract, so a kind the contract does not hold never lands
+		if (contract == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = contract; }
+		else if (contract == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
+			const script_float d = cell_float_of_bits(bits);
+			if (!detail::float_fits_script_int(d)) return false;
+			bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = contract;
+		}
+		else return false;
 	}
 	if (have == 0 && contract != 0 && kind != contract && !loop.cells[dk].temp) return false;   // the first write of a body-declared local under its contract
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);

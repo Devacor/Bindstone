@@ -117,6 +117,7 @@ public:
 		namespace_forms();
 		exceptions_more();
 		closures();
+		diagnostic_texts();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1064,6 +1065,131 @@ private:
 		test("utf8_erase_counts_characters", [this]() {
 			const std::string src = "utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u.erase(1, 2); string s = u; s;";
 			expect("utf8 erase", src, "ab");
+		});
+	}
+
+	// docs/diagnostics.md: the texts a script catch sees, one per row; `setup` runs first, the failing statement in a try
+	struct diag_row { const char* label; const char* setup; const char* failing; const char* expected; check_mode mode; };
+	void expect_texts(const std::vector<diag_row>& rows) {
+		for (const auto& r : rows) {
+			const std::string src = std::string(r.setup) + "\nstring __r = \"no error\";\ntry { " + r.failing + " } catch (__e) { __r = __e; }\n__r;";
+			expect(r.label, src, r.expected, r.mode);
+		}
+	}
+
+	void diagnostic_texts() {
+		test("family_a_null_receiver_texts", [this]() {
+			expect_texts({
+				{"call result access", "function f() { return null; }", "var z = f().x;", "Cannot access 'x' on null ('f(...)' returned null)", check_mode::off},
+				{"call result call", "function f() { return null; }", "f().go();", "Cannot call 'go' on null ('f(...)' returned null)", check_mode::off},
+				{"unnamed access", "var a = [null];", "var z = a[0].x;", "Cannot access 'x' on null", check_mode::off},
+				{"unnamed ternary access", "var a = [null];", "var z = (true ? a[0] : a[0]).x;", "Cannot access 'x' on null", check_mode::off},
+				{"unnamed call", "var a = [null];", "a[0].go();", "Cannot call 'go' on null", check_mode::off},
+				{"named call", "var v8 = null;", "v8.push(1);", "Cannot call 'push' on null ('v8' is null)", check_mode::off},
+				{"named access", "var v8 = null;", "var z = v8.x;", "Cannot access 'x' on null ('v8' is null)", check_mode::off},
+			});
+		});
+		test("family_b_no_member_and_not_a_function_texts", [this]() {
+			expect_texts({
+				{"coroutine handle", "coroutine int g() { yield 1; } var h = g();", "var z = h.nosuch;", "coroutine_handle has no member 'nosuch'", check_mode::off},
+				{"string", "var s = \"s\";", "s.foo();", "string has no member 'foo'", check_mode::off},
+				{"array", "var a = [1];", "a.foo();", "array has no member 'foo'", check_mode::off},
+				{"map", "var m = {\"a\": 1};", "m.foo();", "map has no member or key 'foo'", check_mode::off},
+				{"object", "class Vec2 { int y = 0; } var v = Vec2();", "v.nosuch();", "Vec2 has no member 'nosuch'", check_mode::off},
+				{"int", "var i = 1;", "var z = i.nosuch;", "int has no member 'nosuch'", check_mode::off},
+				{"static", "class C { static int s = 0; }", "var z = C::nope;", "class C has no static member 'nope'", check_mode::off},
+				{"call an instance", "class Vec2 { int y = 0; } var v = Vec2();", "v();", "Cannot call 'v': it is a Vec2, not a function", check_mode::off},
+				{"call a string", "var s = \"x\";", "s();", "Cannot call 's': it is a string, not a function", check_mode::off},
+				{"call an int member", "class H { int x = 1; } var h = H();", "h.x(1);", "Cannot call 'x': it is an int, not a function", check_mode::off},
+				{"call null", "var f = null;", "f();", "Cannot call 'f': it is null, not a function", check_mode::off},
+				{"call a computed null", "var fs = [null];", "fs[0]();", "Cannot call null: it is not a function", check_mode::off},
+				{"call a computed int", "var fs = [5];", "fs[0](1);", "Cannot call a value of type int: it is not a function", check_mode::off},
+			});
+		});
+		test("family_c_arity_and_overload_texts", [this]() {
+			expect_texts({
+				{"method arity", "class V { int dot(int a) { return a; } }", "V().dot();", "'dot' expects 1 argument, got 0", check_mode::off},
+				{"function arity", "function fib(int n) { return n; }", "fib(1, 2);", "'fib' expects 1 argument, got 2", check_mode::off},
+				{"lambda arity", "var l = [](int a) { return a; };", "l();", "lambda expects 1 argument, got 0", check_mode::off},
+				{"overload list", "class V { int dot(int a) { return a; } int dot(int a, int b) { return a + b; } }", "V().dot(V(), null, [1], {\"k\": 1});", "No overload of 'dot' takes (V, null, array, map)", check_mode::off},
+				{"overload list cap", "class M { int m(int a) { return a; } int m(int a, int b) { return b; } }", "M().m(1, 2, 3, 4, 5, 6, 7);", "No overload of 'm' takes (int, int, int, int, int, int, ...)", check_mode::off},
+				{"namespace overloads", "namespace ns { function f(int a, int b) { return 1; } function f(string s) { return 2; } }", "ns::f(1, 2, 3);", "No overload of 'f' takes (int, int, int)", check_mode::off},
+				{"constructor overloads", "class Vec2 { Vec2(int x) {} Vec2(int x, int y) {} }", "Vec2(\"s\", 1, 2);", "No constructor of 'Vec2' takes (string, int, int)", check_mode::off},
+				{"direct super", "class Base { Base(int x) {} } class D : Base { D() : super(\"s\", 2) {} }", "D();", "No matching parent constructor found for super()", check_mode::off},
+				{"ancestor initializer", "class A { A(int x) {} } class B : A { B(int y) : super(\"s\", 1) {} } class C : B { C() : super(1) {} }", "C();", "No constructor of 'A' takes (string, int)", check_mode::off},
+				{"delegation", "class Vec2 { Vec2(int x) {} Vec2() : this(\"s\", 1) {} }", "Vec2();", "No constructor of 'Vec2' takes (string, int)", check_mode::off},
+				{"builtin push", "var a = [];", "a.push();", "push() takes exactly one argument", check_mode::off},
+				{"builtin size", "var a = [];", "a.size(1);", "size() takes no arguments", check_mode::off},
+				{"math pow", "", "math::pow(2);", "math::pow expects 2 arguments", check_mode::off},
+			});
+		});
+		test("family_d_typed_boundary_texts", [this]() {
+			expect_texts({
+				{"lambda parameter", "var l = [](int n) { return n; }; var s = \"x\";", "l(s);", "Cannot pass string to parameter 'n' of lambda (declared int)", check_mode::strict},
+				{"function parameter", "function fib(int n) { return n; } var s = \"x\";", "fib(s);", "Cannot pass string to parameter 'n' of 'fib' (declared int)", check_mode::strict},
+				{"typed return", "function f() -> int { var s = \"x\"; return s; }", "f();", "Cannot return string from 'f' (declared -> int)", check_mode::strict},
+				{"assignment", "int x = 0; var s = \"s\";", "x = s;", "Cannot assign string to 'x' (declared int)", check_mode::strict},
+				{"declaration", "var s = \"s\";", "int x = s;", "Cannot initialize 'x' (declared int) with string", check_mode::strict},
+				{"field", "class Vec2 { int s = 0; } var v = Vec2(); var str = \"q\";", "v.s = str;", "Cannot assign string to field 's' of Vec2 (declared int)", check_mode::strict},
+				{"static", "class C { static int s = 0; } var str = \"q\";", "C::s = str;", "Cannot assign string to static 's' of C (declared int)", check_mode::strict},
+				{"class into class", "class A { int a = 0; } class B { int b = 0; } A x = A(); var b = B();", "x = b;", "Cannot assign B to 'x' (declared A)", check_mode::strict},
+				{"weak handle declaration", "class Foo { int v = 0; } var f = Foo();", "weak_ptr<Foo> w = f;", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo", check_mode::off},
+				{"weak handle assignment", "class Foo { int v = 0; } var f = Foo(); weak_ptr<Foo> w;", "w = f;", "Cannot assign Foo to 'w' (declared weak_ptr<Foo>)", check_mode::off},
+				{"shared handle assignment", "class Foo { int v = 0; } shared_ptr<Foo> p = new Foo(); var s = \"x\";", "p = s;", "Cannot assign string to 'p' (declared shared_ptr<Foo>)", check_mode::off},
+				{"class conversion", "class A { A(int x) {} } class B { int b = 0; } function f(A a) { return 1; } var b = B();", "f(b);", "Cannot convert B to A (no suitable single-argument constructor)", check_mode::off},
+			});
+		});
+		test("checked_float_to_int_texts_leave_the_destination_unwritten", [this]() {
+			const std::string text = "Cannot convert float to integer: non-finite or out of range";
+			expect_texts({
+				{"assignment", "var f = 1e100; int x = 0;", "x = f;", text.c_str(), check_mode::strict},
+				{"itrunc", "var f = 1e100;", "var z = math::itrunc(f);", text.c_str(), check_mode::strict},
+				{"ifloor", "var f = -1e100;", "var z = math::ifloor(f);", text.c_str(), check_mode::strict},
+				{"cast", "var f = 1e100;", "var z = cast<int>(f);", text.c_str(), check_mode::strict},
+			});
+			expect("unwritten", "var f = 1e100; int x = 7; try { x = f; } catch (e) { } \"\" + x;", "7");
+		});
+		test("untouched_family_texts", [this]() {
+			expect_texts({
+				{"integer overflow in division", "var a = -9223372036854775807 - 1; var b = -1;", "var z = a / b;", "Integer overflow in '/'", check_mode::off},
+				{"invalid plus", "var m = {}; var a = [1];", "var z = a + m;", "Invalid operands for + operator", check_mode::off},
+				{"unary minus", "var s = \"x\";", "var z = -s;", "Unary minus requires numeric operand", check_mode::off},
+				{"array index type", "var a = [1];", "var z = a[\"k\"];", "Array index must be an integer", check_mode::off},
+				{"subscript on int", "var n = 5;", "var z = n[0];", "Subscript can only be used on arrays, maps, or types with [] operator", check_mode::off},
+				{"pop empty", "var a = [];", "a.pop();", "Cannot pop from empty array", check_mode::off},
+				{"front empty", "var a = [];", "var z = a.front();", "Cannot get front of empty array", check_mode::off},
+				{"sort comparator", "var a = [2, 1];", "a.sort(5);", "sort() comparator must be a function", check_mode::off},
+				{"pad_left fill", "var s = \"x\";", "var z = s.pad_left(3, \"\");", "pad_left() padding character cannot be empty", check_mode::off},
+				{"to_int base", "var s = \"1\";", "var z = s.to_int(0, 1);", "to_int() base must be 0 or between 2 and 36", check_mode::off},
+				{"code", "var s = \"\";", "var z = s.code();", "code() needs a string of exactly one UTF-8 character", check_mode::off},
+				{"partition", "var s = \"a\";", "var z = s.partition(\"\");", "partition() separator cannot be empty", check_mode::off},
+				{"split count", "var s = \"a\";", "var z = s.split(\",\", \"x\");", "split() second argument must be an integer", check_mode::off},
+				{"from_code", "", "var z = string::from_code(-1);", "string::from_code expects a Unicode code point (0 to 0x10FFFF, no surrogate)", check_mode::off},
+				{"join", "", "var z = string::join([1]);", "string::join expects an array of strings", check_mode::off},
+				{"repeat", "", "var z = string::repeat(\"a\", -1);", "string::repeat count cannot be negative", check_mode::off},
+				{"namespace pad_left", "", "var z = string::pad_left(\"a\", 3, \"\");", "string::pad_left fill must be a char or a non-empty string", check_mode::off},
+				{"unknown namespace member", "", "var z = string::zzz_nope;", "Undefined variable 'string::zzz_nope'", check_mode::off},
+				{"super without base", "class A { A() { super(); } }", "var z = A();", "Cannot call super() - class has no base class", check_mode::off},
+				{"iterate int", "", "for (auto x : 5) { }", "Cannot iterate int: not an array, map, string or coroutine", check_mode::off},
+				{"iterate null", "var n = null;", "for (auto x : n) { }", "Cannot iterate null: not an array, map, string or coroutine", check_mode::off},
+				{"auto array homogeneity", "var s = \"x\";", "auto a = [1, 2, 3, s];", "Array 'auto' requires homogeneous elements - type mismatch at index 3", check_mode::off},
+				{"reference uninitialized", "", "int& r;", "Reference variable must be initialized", check_mode::off},
+				{"this at top level", "", "var z = this;", "'this' can only be used inside methods", check_mode::off},
+			});
+		});
+		test("host_configuration_and_uncaught_suffix_texts", [this]() {
+			every_config("host texts", "max_call_depth must be between 1 and INT_MAX|Maximum recursion depth exceeded - possible infinite recursion: Maximum environment recursion depth exceeded|Cannot access 'x' on null ('v8' is null): Member access on null value", [](engine& e) {
+				std::string out;
+				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
+				out += "|";
+				e.static_checking(check_mode::off);
+				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/diagnostics.md)
+				e.execution_budget(0);
+				try { e.execute("function r() { return r() + 1; } r();"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
+				out += "|";
+				try { e.execute("var v8 = null; v8.x;"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
+				return out;
+			});
 		});
 	}
 

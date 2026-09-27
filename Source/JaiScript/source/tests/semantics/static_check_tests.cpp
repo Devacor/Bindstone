@@ -1633,6 +1633,39 @@ public:
             std::filesystem::remove_all(dir);
         });
 
+        test("program_closure_unit_parse_error_is_reported_first_and_alone", [this]() {
+            auto dir = closure_dir("parse_err");
+            write_unit(dir, "pe_b.jai", "void f(int var) {}\n");
+            write_unit(dir, "pe_mid.jai", "import \"pe_b.jai\";\nfunction g() -> int { f(1); return 2; }\n");
+            const std::string root = "import \"pe_mid.jai\";\nf(1);\ng();\n";
+            auto e = program_engine(dir);
+            std::string what;
+            bool as_parse_error = false;
+            try { e->execute(root); }
+            catch (const parse_error& ex) { what = ex.what(); as_parse_error = true; }
+            catch (const std::exception& ex) { what = ex.what(); }
+            check_true(as_parse_error, "the unit's parse failure fails the root as a parse error");
+            check_true(what.find("pe_b.jai:1:12: 'var' is a type keyword") != std::string::npos, what);
+            check_true(what.find("undeclared identifier") == std::string::npos, "no cascade from the unit's missing names");
+            check_false(e->has_function("g"), "nothing ran");
+            auto r = e->check(root);
+            check_eq((size_t)1, r.diagnostics.size());
+            check_eq((size_t)1, error_count(r));
+            check_true(r.diagnostics[0].message.find("pe_b.jai:1:12:") != std::string::npos, r.diagnostics[0].message);
+            // warn mode reports it alone as well, and the import raises it when it runs
+            auto w = program_engine(dir);
+            w->static_checking(check_mode::warn);
+            std::string wwhat;
+            try { w->execute(root); } catch (const std::exception& ex) { wwhat = ex.what(); }
+            check_true(wwhat.find("pe_b.jai:1:12:") != std::string::npos, wwhat);
+            check_eq((size_t)1, w->last_check_diagnostics().diagnostics.size());
+            check_true(w->last_check_diagnostics().diagnostics[0].message.find("pe_b.jai:1:12:") != std::string::npos);
+            // the fix is seen on the next run
+            write_unit(dir, "pe_b.jai", "void f(int v) {}\n");
+            check_eq((int64_t)2, e->execute(root).as_int());
+            std::filesystem::remove_all(dir);
+        });
+
         test("program_closure_survives_leaf_hot_edit", [this]() {
             auto dir = closure_dir("hot_edit");
             write_unit(dir, "hot_a.jai", "function read_g() -> int { return G.v; }\n");

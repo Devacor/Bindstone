@@ -111,6 +111,7 @@ print(&quot;damage = {}&quot;, damage(3));</code></pre></div>
 scripts/rules.jai:1:50: error: use of undeclared identifier &#x27;BASE_DAMGE&#x27;
     function damage(int hits) -&gt; int { return hits * BASE_DAMGE; }
                                                      ^</code></pre></div>
+<p>A file that does not parse stops the program at that file: the load fails with its parse error, named by its path, line and column exactly as running the file directly reports it, and nothing is checked until it parses (the names it would declare are unknown, so checking the other files would only call them undeclared).</p>
 <p>Class knowledge crosses files the same way: a subclass whose parent lives in another unit resolves inherited fields and methods, and a typed mismatch against a cross-file field is the same error the same-file case reports.</p>
 <h3 id="three-escape-valves">Three escape valves<a class="hlink" href="#three-escape-valves" aria-label="link">&#8203;</a></h3>
 <p>Sometimes a name genuinely is not in the program. It comes from the host, from a file whose path is computed at run time, or from a module only some programs import. Three spellings tell the checker so, each as narrow as its case:</p>

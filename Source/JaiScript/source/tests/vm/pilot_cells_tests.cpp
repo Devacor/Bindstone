@@ -3110,6 +3110,68 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
 		});
+		test("a_string_call_result_lands_in_its_temp_and_concatenates", [this]() {
+			// blit_half's shape (`out += vid_row_half(cy) + "\n"`): a string result lands in its compiler temp, whose slot holds it as
+			// op_call_temp leaves it, and string + string lands there too; the landing still misses for a reference result, the
+			// concatenation for an int partner (the general conversion) and under the memory cap (the general text); a later miss reads
+			// the temp's slot; a no-result store lands the string by the store's rule; both backends, proofs on and off, and under an
+			// injected miss
+			const std::string prelude =
+				"array<int> PIX = [0, 1, 2, 3, 3, 2, 1, 0]; array<string> PAL = [\"a\", \"b\", \"c\", \"d\"]; string G = \"g\";\n"
+				"function row(int cy) -> string { string r = \"\"; for (int x = 0; x < 4; ++x) { r += PAL[PIX[cy * 4 + x]]; } return r + \"|\"; }\n"
+				"function sep(int i) -> string { if (i % 2 == 0) { return \",\"; } return \";\"; }\n"
+				"function pick(int i) -> string& { return G; }\n"
+				"function big(int i) -> string { return \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"; }\n"
+				"var blit = function(int n) { string out = \"\"; for (int cy = 0; cy < n; ++cy) { out += row(cy % 2) + \"\\n\"; } return out; };\n"
+				"var lead = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += \"[\" + sep(i); } return out; };\n"
+				"var counted = function(int n) { int acc = 0; string out = \"\"; for (int i = 0; i < n; ++i) { acc = acc + i; out += sep(i) + \".\"; } return to_string(acc) + out; };\n"
+				"var intpartner = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += sep(i) + 5; } return out; };\n"
+				"var refs = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += pick(i) + \".\"; if (i == 1) { G = \"h\"; } } return out; };\n"
+				"var capped = function(int n) { string out = \"\"; try { for (int i = 0; i < n; ++i) { out += big(i) + \"\\n\"; } } catch (e) { return \"caught|\" + e; } return \"no cap\"; };\n";
+			const std::string body =
+				"string run() { return blit(4) + \"#\" + lead(3) + \"#\" + counted(4) + \"#\" + intpartner(3) + \"#\" + refs(4) + \"#\" + G; }\n"
+				"run();";
+			both(prelude + body, "abcd|\ndcba|\nabcd|\ndcba|\n#[,[;[,#6,.;.,.;.#,5;5,5#g.g.h.h.#h", "string results");
+			both(prelude + body, "", "string results, proofs off", false);
+			// a no-result store takes a string where it converts nothing: a string local as it is, a var local (one holding an int before, one
+			// the body declares) under the var's stamp; an int local misses onto the general store, which raises its text
+			const std::string stores = "[[warn_mode]]\n" + prelude +
+				"function anyv(int i) { if (i == 2) { return \"s\"; } return i; }\n"
+				"var stored = function(int n) { string s = \"\"; var v = 0; int acc = 0; for (int i = 0; i < n; ++i) { s = sep(i); v = anyv(i); acc = acc + i; } return s + \"|\" + to_string(v) + \"|\" + type_of(v) + \"|\" + to_string(acc); };\n"
+				"var last = function(int n) { var v = 0; for (int i = 0; i < n; ++i) { v = anyv(i); } return to_string(v) + \"|\" + type_of(v); };\n"
+				"var body_decl = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { var t = 0; t = sep(i); out += t; } return out; };\n"
+				"var typed_int = function(int n) { int k = 0; try { for (int i = 0; i < n; ++i) { k = anyv(i); } } catch (e) { return to_string(k) + \"|\" + e; } return to_string(k); };\n"
+				"string runs() { return stored(4) + \"#\" + last(3) + \"#\" + body_decl(3) + \"#\" + typed_int(4); }\n"
+				"runs();";
+			both(stores, "", "string stores");
+			both(stores, "", "string stores, proofs off", false);
+			const std::string sv = run_on(true, stores);
+			check_true(sv.rfind(";|3|int|6#s|string#,;,#1|", 0) == 0 && sv.size() > 25, "the stores ran and the int local raised: " + sv);
+			auto capped = [&](bool vm) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				e->memory_cap(65536);
+				try { return e->execute(prelude + "capped(100000);").as_string(); }
+				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string ci = capped(false), cv = capped(true);
+			check_eq(ci, cv, "the memory cap inside the loop: both backends");
+			check(ci.rfind("caught|", 0) == 0, "the cap raised inside the loop and was caught: " + ci);
+			const std::string l = listing_of(prelude);
+			const size_t fb = l.find("C_LAND");
+			check_true(fb != std::string::npos && l.find("C_ARITH_ANY", fb) != std::string::npos && l.find("C_APPEND", fb) != std::string::npos, "the loops close with the landing, the concatenation and the append: " + l);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string vm = run_on(true, prelude + body);
+			auto injected = [&](const std::string& src, uint32_t every) -> std::string {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				check_eq(vm, injected(prelude + body, every), "string results under an injected miss at every " + std::to_string(every));
+				check_eq(sv, injected(stores, every), "string stores under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("a_member_read_of_a_frame_slot_instance_is_a_block_site", [this]() {
 			// row 147a: `p.x` inside a loop and inside a span is a load site: the field resolved once at entry, C_MLOAD lands its kind; a
 			// string field, a user accessor and a null base keep the general form (the entry refuses); a callee that rewrites the field

@@ -1952,6 +1952,38 @@ public:
                 check_eq((int64_t)1, cpp->lam_writes, tag + "one setter call");
             }
         });
+        test("compound_assignment_mismatch_names_the_operator_and_both_types", [this]() {
+            // docs/diagnostics.md: every compound site raises the same catchable text on both backends (the runtime text is under
+            // test, so the checker is off); a float target with a non-numeric operand used to escape the try as a C++ exception
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                e->type_proofs(proofs);
+                e->static_checking(check_mode::off);
+                auto caught = [&](const std::string& src) { return e->execute("var m = \"none\";\n" + src + "\nm;").to_string(); };
+                check_eq(std::string("Cannot apply '+=' to string and int"), caught("string s = \"x\"; try { s += 5; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to string and int"), caught("string z = \"\"; try { z += to_char(1) + to_char(2); } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '-=' to string and string"), caught("string s = \"x\"; try { s -= \"a\"; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '*=' to string and int"), caught("string s = \"x\"; try { s *= 2; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to int and string"), caught("int i = 1; try { i += \"x\"; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to float and string"), caught("float f = 1.0; try { f += \"x\"; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '/=' to float and array"), caught("float f = 1.0; try { f /= [1]; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to bool and int"), caught("bool b = true; try { b += 1; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to array and array"), caught("var q = [1]; try { q += [2]; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to string and int"), caught("class C1 { string s = \"\"; } C1 c = C1(); try { c.s += 5; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to string and int"), caught("class D1 { string s = \"\"; void add() { s += 5; } } D1 d = D1(); try { d.add(); } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '+=' to string and int"), caught("string g = \"x\"; function ff() { g += 5; } try { ff(); } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '++' to string"), caught("string s = \"x\"; try { s++; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '--' to string"), caught("string s = \"x\"; try { --s; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '++' to string"), caught("class C2 { string s = \"\"; } C2 c = C2(); try { c.s++; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '--' to bool"), caught("array<bool> flags = [true]; try { flags[0]--; } catch (err) { m = err; }"));
+                check_eq(std::string("Cannot apply '++' to string"), caught("class D2 { string s = \"\"; void bump() { s++; } } D2 d = D2(); try { d.bump(); } catch (err) { m = err; }"));
+                std::string what;
+                try { e->execute("string u = \"x\"; u += 5;"); } catch (const std::exception& ex) { what = ex.what(); }
+                check_eq(std::string("Cannot apply '+=' to string and int: Type mismatch"), what);
+            }
+        });
+
         test("member_compound_order_pinned", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
                 int boom() { log += "R"; throw "boom"; }
@@ -1984,7 +2016,7 @@ public:
                 string caught = "none";
                 try { pk().v += "s"; } catch (e) { caught = e; }
                 log + "|" + caught + ":" + ("" + shared.v);
-            )").c_str(), "A|Invalid operands for +=:10", "operand mismatch after the receiver ran once", check_mode::off);   // the checker rejects int += string at load; the RUNTIME text is under test
+            )").c_str(), "A|Cannot apply '+=' to int and string:10", "operand mismatch after the receiver ran once", check_mode::off);   // the checker rejects int += string at load; the RUNTIME text is under test
         });
         test("subscript_compound_rvalue_base_once", [this, expect_order]() {
             expect_order(R"(

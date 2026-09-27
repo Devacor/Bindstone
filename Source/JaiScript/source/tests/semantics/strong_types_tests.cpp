@@ -2421,7 +2421,7 @@ public:
             check_quad(q("auto o = C(); o.bumpQ() + \" \" + C::bumpS() + \" \" + to_string(C::i)").c_str(), "5 9 9", "bare compound and ++ in instance and static methods");
             check_quad(q("for (int k = 0; k < 1000; k++) { C::i += 1; } to_string(C::i)").c_str(), "1001", "1000 compound stores at one site");
             check_quad("class K { int x = 1; K(int v) { x = v; } function operator+(int n) -> K { return K(x + n); } } class H { static K k = K(1); } H::k += 5; to_string(H::k.x)", "6", "object static compound dispatches operator+");
-            check_quad(q("string r = \"ok\"; try { C::i += L(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Invalid operands for += 1", "+= string into an int static raises the compound text, static untouched");
+            check_quad(q("string r = \"ok\"; try { C::i += L(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Cannot apply '+=' to int and string 1", "+= string into an int static raises the compound text, static untouched");
             check_quad(q("string r = \"ok\"; try { C::i /= L(0); } catch (err) { r = err; } r").c_str(), "Division by zero", "/= 0");
             check_quad(q("string r = \"ok\"; try { C::i %= L(0); } catch (err) { r = err; } r").c_str(), "Modulo by zero", "%= 0");
             check_quad(q("C::i = 9223372036854775807; string r = \"ok\"; try { C::i++; } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Integer overflow in '+=' 9223372036854775807", "++ overflow raises, static untouched");

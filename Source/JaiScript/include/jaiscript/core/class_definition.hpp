@@ -2876,6 +2876,29 @@ inline error_propagator typed_slot_rejection(const script_value& source, const t
     return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), source_id, target.id};
 }
 
+// A compound assignment whose operator does not take its operands (docs/diagnostics.md, compound assignment): op 0..4 is
+// += -= *= /= %=, {0} = the target's type, {1} = the operand's. Every spelling is already interned (see above).
+inline constexpr std::string_view compound_mismatch_texts[5] = {
+    "Cannot apply '+=' to {0} and {1}", "Cannot apply '-=' to {0} and {1}", "Cannot apply '*=' to {0} and {1}",
+    "Cannot apply '/=' to {0} and {1}", "Cannot apply '%=' to {0} and {1}"};
+
+inline error_propagator compound_mismatch(size_t op, const script_value& target, const script_value& operand, engine* eng) {
+    const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
+    const std::string_view text = compound_mismatch_texts[op < 5 ? op : 0];
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    if (!symbols) { return {ec, text}; }
+    return {ec, text, symbols->intern(slot_source_type_name(target, eng)), symbols->intern(slot_source_type_name(operand, eng))};
+}
+
+// ++/-- on a target that is not a number: {0} = the target's type
+inline error_propagator incdec_mismatch(bool increment, const script_value& target, engine* eng) {
+    const std::error_code ec = make_error_code(runtime_error_code::invalid_numeric_operand);
+    const std::string_view text = increment ? "Cannot apply '++' to {0}" : "Cannot apply '--' to {0}";
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    if (!symbols) { return {ec, text}; }
+    return {ec, text, symbols->intern(slot_source_type_name(target, eng))};
+}
+
 // The same text as one string (host-side throws)
 inline std::string typed_slot_rejection_text(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
     const std::string src = slot_source_type_name(source, eng);

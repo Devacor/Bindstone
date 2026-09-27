@@ -243,6 +243,7 @@ function start_new_game(var species_row, var class_row, string hero_name) -> voi
 	G.player.inventory.push(ration);
 	log_msg(`${G.player.name} the ${species_name(G.player.species_id)} ${class_name(G.player.class_id)} steps into GRUBWELL.`);
 	log_msg(col("90", "(? for help. w walks, a/d turn you. m maps - up there, keys walk by compass.)"));
+	log_msg(col("90", "(v: the forward view alone, or with your left, right and behind around it.)"));
 	enter_floor();
 }
 
@@ -401,6 +402,7 @@ function handle_key(string key) -> bool {
 		case ">": return try_descend();
 		case "m": { G.show_map = !G.show_map; return false; }
 		case "M": { G.show_map = !G.show_map; return false; }
+		case "v": { cycle_layout(); return false; }
 		case "c": character_screen(); return false;
 		case "?": help_screen(); return false;
 		case "S": {

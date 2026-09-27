@@ -1,6 +1,7 @@
 // Frame composition and modal screens for the first-person crawler. The 3D
-// viewport comes from view.jai; this file wraps it in the Moraff-style chrome:
-// stats panel with a compass, the message log, the minimap, and the modals.
+// panes come from view.jai; this file wraps them in the Moraff-style chrome:
+// stats panel with a compass, the message log, the minimap, the modals, and
+// the sizing that picks the layout for the console.
 // Every line ends with ESC[K so frames overdraw each other without a clear.
 
 var PANEL_W = 15;
@@ -38,7 +39,7 @@ function frame_lines(var view_lines) -> var {
 	var lines = [];
 	lines.push(title_line());
 	var panel = build_panel();
-	for (int y = 0; y < VIEW_H; ++y) {
+	for (int y = 0; y < view_lines.size(); ++y) {
 		var side = y < panel.size() ? panel[y] : "";
 		lines.push(view_lines[y] + MAP_DIVIDER + side);
 	}
@@ -51,7 +52,57 @@ function frame_lines(var view_lines) -> var {
 
 function compose_frame(var view_lines) -> void { present(frame_lines(view_lines)); }
 
+// ---------------------------------------------------------------- sizing ---
+// The console size when the host can tell (the runner shim measures it); 0 =
+// unknown, and the view keeps the size it was given. The frame is the title,
+// the canvas with the panel beside it, and five log lines.
+int SCREEN_COLS = 0;
+int SCREEN_ROWS = 0;
+int VIEW_ROWS_FIXED = 0;    // the host asked for this many forward rows: layouts keep them
+int VIEW_ROWS_MAX = 48;
+
+function set_view_rows(int rows) -> void {
+	VIEW_H = rows;
+	VIEW_W = rows * 16 / 5;
+}
+
+function layout_fits(int mode, int rows) -> bool {
+	layout_panes(mode, rows * 16 / 5, rows);
+	LAYOUT_KEY = -1;
+	return CANVAS_W + 18 <= SCREEN_COLS && CANVAS_H + 8 <= SCREEN_ROWS;
+}
+
+// the tallest forward view (20 to 48 rows) whose frame fits the console, 0 if none
+function fit_rows(int mode) -> int {
+	for (int rows = VIEW_ROWS_MAX; rows >= 20; --rows) {
+		if (layout_fits(mode, rows)) { return rows; }
+	}
+	return 0;
+}
+
+// The multi-view whenever it fits with a forward view of at least 20 rows,
+// else the forward view alone, as large as the console allows.
+function fit_screen() -> void {
+	if (SCREEN_COLS <= 0) { return; }
+	if (VIEW_ROWS_FIXED > 0) {
+		set_view_rows(VIEW_ROWS_FIXED);
+		VIEW_LAYOUT = layout_fits(LAYOUT_MULTI, VIEW_ROWS_FIXED) ? LAYOUT_MULTI : LAYOUT_SINGLE;
+		return;
+	}
+	int rows = fit_rows(LAYOUT_MULTI);
+	VIEW_LAYOUT = rows > 0 ? LAYOUT_MULTI : LAYOUT_SINGLE;
+	if (rows == 0) { rows = imax(20, fit_rows(LAYOUT_SINGLE)); }
+	set_view_rows(rows);
+}
+
+// v: forward view alone <-> multi-view; a measured console re-fits the forward view
+function cycle_layout() -> void {
+	VIEW_LAYOUT = VIEW_LAYOUT == LAYOUT_SINGLE ? LAYOUT_MULTI : LAYOUT_SINGLE;
+	if (SCREEN_COLS > 0 && VIEW_ROWS_FIXED == 0) { set_view_rows(imax(20, fit_rows(VIEW_LAYOUT))); }
+}
+
 function game_view_lines() -> var {
+	if (LAYOUT_KEY != layout_key()) { build_layout(); }
 	if (G.show_map) { return minimap_lines(); }
 	return render_view(FACE_DX[G.facing], FACE_DY[G.facing]);
 }
@@ -100,9 +151,12 @@ function minimap_lines() -> var {
 		else { overlay[idx(m.x, m.y)] = [m.glyph, m.color]; }
 	}
 	var player_cell = col("93", FACE_ARROW[G.facing]);
+	int left = imax(0, CANVAS_W - MAP_W) / 2;
+	string blank = " ".repeat(imax(CANVAS_W, MAP_W));
 	var lines = [];
+	for (int y = 0; y < imax(0, CANVAS_H - MAP_H) / 2; ++y) { lines.push(blank); }
 	for (int y = 0; y < MAP_H; ++y) {
-		var row = "";
+		var row = " ".repeat(left);
 		for (int x = 0; x < MAP_W; ++x) {
 			var i = idx(x, y);
 			// hoisted: a BARE element read as an if condition is always truthy
@@ -122,9 +176,9 @@ function minimap_lines() -> var {
 				row = row + CELL_UNSEEN;
 			}
 		}
-		lines.push(row + " ".repeat(imax(0, VIEW_W - MAP_W)));
+		lines.push(row + " ".repeat(imax(0, CANVAS_W - MAP_W - left)));
 	}
-	while (lines.size() < VIEW_H) { lines.push(" ".repeat(imax(VIEW_W, MAP_W))); }
+	while (lines.size() < CANVAS_H) { lines.push(blank); }
 	return lines;
 }
 
@@ -199,6 +253,7 @@ function help_screen() -> void {
 	lines.push("  sidestep      q / e");
 	lines.push("  wait          .");
 	lines.push("  minimap       m   (explored tiles + facing arrow)");
+	lines.push("  views         v   (forward alone / forward + left, right, behind)");
 	lines.push("  on the map    wasd / hjkl / arrows step by compass (no turning;");
 	lines.push("                facing follows your step back into first person)");
 	lines.push("  pick up       g");

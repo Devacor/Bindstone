@@ -7133,7 +7133,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 		const counted_for_proto& p = f.code->counted_for_protos[pi];
 		if (original_ip >= p.body_ip && original_ip < p.exit_ip) { cfor_state_push(f, p); }
 	}
-	f.ip = original_ip;
+	f.ip = loop.straight && original_ip == loop.head ? loop.trampoline : original_ip;   // a region's first instruction is the trampoline's
 }
 // the frame's ip written for the flush's liveness row and a miss's resume point, read back after a miss (the block loop's ip is a register)
 JAI_FORCEINLINE void vm_backend::cells_miss_ip(frame& f, size_t& ip, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
@@ -7186,6 +7186,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 
 // the original back edge: budget poll, then the entry guards on the live-in slots and the unboxing
 op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
+	if (ins.op == opcode::op_cells_enter) return exec_cells_enter(f, ins);
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
@@ -7193,6 +7194,20 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
 	// rebound to its own area at every push, so a reused record never aliases another frame's cells
 	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = loop.head; return {}; }
+	cell_state& cs = *f.cells;
+	cs.loop = ins.a;
+	cs.dirty.reset();
+	JAI_CELLS_COUNT(0);
+	f.ip = loop.copy_head;
+	return cells_run(f, loop);
+}
+
+// a straight-line region's entry (its first instruction): the live-in guards and the unboxing, then the copy; a refusal runs the replaced
+// instruction at the trampoline
+op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
+	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
+	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = ins.b; return {}; }
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty.reset();
@@ -7215,7 +7230,7 @@ static opcode cell_first_op(opcode op) {
 	default: return op;
 	}
 }
-const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin) {
+const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site) {
 	pin = nullptr;
 	const script_value* base = frame_slot(f, container.slot);
 	if (!base) return nullptr;
@@ -7234,7 +7249,17 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
 	auto* expr = static_cast<member_expr*>(f.code->nodes[container.member_node].get());
-	const uint32_t slot = member_read_slot_probe(cd, expr);
+	uint32_t slot;
+	if (cached_global_env_) {
+		// the site's own member_ic row (a copy ip is never a GET_MEMBER ip): the probe once per class and method epoch, as the field-read IC has it
+		chunk& code = *f.code;
+		if (code.member_ic.size() < code.code.size()) { code.member_ic.resize(code.code.size()); }
+		chunk::member_ic_entry& entry = code.member_ic[site];
+		if (entry.cd == cd && entry.epoch == cd->method_epoch()) { slot = entry.slot; }
+		else { slot = member_read_slot_probe(cd, expr); entry.cd = cd; entry.epoch = cd->method_epoch(); entry.slot = slot; }
+	} else {
+		slot = member_read_slot_probe(cd, expr);
+	}
 	if (slot == UINT32_MAX) return nullptr;
 	script_value* v = inst->field_slot_value(slot);
 	return v ? &v->deref() : nullptr;
@@ -7329,7 +7354,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
 			fused_operand lc; lc.slot = ci.c; lc.member_node = ci.b; lc.direct = true;
 			const script_array* member_pin = nullptr;
-			const script_value* fv = cells_member_container(f, lc, member_pin);
+			const script_value* fv = cells_member_container(f, lc, member_pin, ip);
 			if (!fv) return refuse_site(ip, "a member read whose base is not an instance with that plain field");
 			const size_t fk = fv->raw_storage_index();
 			if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return refuse_site(ip, "a member read of a field that is not a scalar");
@@ -7359,7 +7384,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			const fused_operand& lc = f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container;
 			const bool member_site = lc.member_node != k_invalid_u32;   // resolved through the field once; the hold check after a call asks for this resolution again
 			const script_array* member_pin = nullptr;
-			const script_value* cp = member_site ? cells_member_container(f, lc, member_pin)
+			const script_value* cp = member_site ? cells_member_container(f, lc, member_pin, ip)
 				: site.cont_slot != k_invalid_u32 ? frame_slot(f, site.cont_slot)
 				: fused_cmp_operand(f, lc, cache_slot);
 			if (member_pin && !pin(member_pin)) return refuse_site(ip, "more than eight pinned tables");
@@ -7410,7 +7435,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 			const bool member_site = p.container.member_node != k_invalid_u32;
 			const script_array* member_pin = nullptr;
-			const script_value* cp = member_site ? cells_member_container(f, p.container, member_pin) : fast_operand(f, p.container, cache_slot);
+			const script_value* cp = member_site ? cells_member_container(f, p.container, member_pin, ip) : fast_operand(f, p.container, cache_slot);
 			if (member_pin && !pin(member_pin)) return refuse_site(ip, "more than eight pinned tables");
 			if (member_site) {} else if (p.container.const_index == k_invalid_u32 && p.container.direct) { cs.site_slot[k] = p.container.slot; } else if (p.container.const_index == k_invalid_u32) { cs.site_env[k] = env_binding(cp, cache_slot); }
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }
@@ -7538,7 +7563,7 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 			const vm_instruction& mi = f.code->code[loop.sites[k]];
 			fused_operand lc; lc.slot = mi.c; lc.member_node = mi.b; lc.direct = true;
 			const script_array* member_pin = nullptr;
-			if (cells_member_container(f, lc, member_pin) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
+			if (cells_member_container(f, lc, member_pin, loop.sites[k]) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
 			continue;
 		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
@@ -7772,7 +7797,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
 	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
-	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
+	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = loop.straight && ci.a == loop.head ? loop.trampoline : ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only); materialize before handing f.ip back
 	}
 }
@@ -17783,6 +17808,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// a block that made a call: the callee runs here with the caller parked on the call's copy (land_call_result steps it to
 			// the landing, whose case resumes the block); a callee that raised ahead of its frame unwinds from here
 			case opcode::op_cells_back:
+			case opcode::op_cells_enter:
 				VM_TRY_OP_SHARED(exec_cells_back(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }

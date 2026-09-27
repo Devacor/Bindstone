@@ -1662,6 +1662,7 @@ namespace jai::vm {
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
         op_status exec_math_alias(frame& f, const vm_instruction& ins);
         op_status exec_math_guard(frame& f, const vm_instruction& ins);
+        op_status exec_cells_enter(frame& f, const vm_instruction& ins);
         int math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot);   // 1 builtin, 0 parked, -1 raised
         op_status park_callee(frame& f, const call_site& site, size_t argc, const script_value& callee_value);
         op_status exec_unary_temp(frame& f, const vm_instruction& ins);
@@ -1778,7 +1779,7 @@ namespace jai::vm {
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
-        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin);
+        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site);
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again

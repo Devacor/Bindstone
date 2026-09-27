@@ -843,7 +843,10 @@ bool vm_compiler::try_inline_return(const statement_ptr& stmt) {
 	auto nr = std::make_shared<return_stmt>(rs->location, h);
 	nr->static_return_proof = rs->static_return_proof; nr->return_operand_class = rs->return_operand_class;
 	chunk_->nodes.push_back(nr);
+	const size_t from = chunk_->stmt_nodes.size();
 	compile_statement(nr);
+	for (size_t k = from; k < chunk_->stmt_nodes.size(); ++k) { if (chunk_->stmt_nodes[k] == nr.get()) { chunk_->stmt_nodes[k] = stmt.get(); } }   // one statement with its grafts: a block exit or bail at the return holds their results
+	current_stmt_ = stmt.get();
 	temp_next_ = mark;
 	return true;
 }

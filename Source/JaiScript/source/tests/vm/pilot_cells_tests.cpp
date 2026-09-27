@@ -924,7 +924,10 @@ public:
 			jai::vm::vm_compiler compiler(symbolizer);
 			const std::string listing = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
 			size_t maths = 0, temps = 0;
-			for (size_t at = listing.find("MATH"); at != std::string::npos; at = listing.find("MATH", at + 4)) { ++maths; if (listing.compare(at, 9, "MATH_TEMP") == 0) { ++temps; } }
+			for (size_t at = listing.find("MATH"); at != std::string::npos; at = listing.find("MATH", at + 4)) {
+				if (at >= 2 && listing.compare(at - 2, 2, "C_") == 0) continue;   // a region's copy
+				++maths; if (listing.compare(at, 9, "MATH_TEMP") == 0) { ++temps; }
+			}
 			check_true(maths == 3 && temps == 3, "every intrinsic lands in a temp: " + listing);
 			check_true(listing.find("T_AND_II") != std::string::npos && listing.find("T_SHL_II") != std::string::npos && listing.find("T_ADD_II") != std::string::npos, "the binaries around them take the int rows: " + listing);
 		});
@@ -4217,6 +4220,113 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, src);
 			const size_t c = vm.find(',');
 			check_true(c != std::string::npos && vm.substr(0, vm.find('=')) == vm.substr(vm.find('=') + 1, c - vm.find('=') - 1), "serial and parallel agree: " + vm);
+		});
+		// row 197: a straight-line span of typed statements outside every closed loop runs as a region: entered at its first instruction,
+		// left at its end; a refusal or a miss at the first instruction runs the trampoline's copy of it
+		test("straight_line_regions", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function shade(float x, float y, float z) -> float {\n"
+				"  float a = x * 1.5 + y * 2.5; float b = a * a - z * 0.25; float c = b / (a + 1.0);\n"
+				"  float d = c * c + a * b - x; float e = d * 0.5 + c * 0.25 + b * 0.125; float f = e - d * 0.75 + a;\n"
+				"  return f * 2.0 + e; }\n"
+				"function mix(int p, int q) -> int {\n"
+				"  int r = p * 3 + q; int s = r * r - p; int t = s % 7 + r / 3; int u = t * t + s - r; int v = u + p * q - t; int w = v % 11 + u * 2 - s; int z = w * 3 + v - t;\n"
+				"  return z + u * 2; }\n"
+				"function run() -> string { var sh = shade; var mx = mix; float t = 0.0; int it = 0; for (int i = 0; i < 60; ++i) { t = t + sh(i * 0.5, 1.25, i * 0.125); it = it + mx(i, 7); } return to_string(t) + \" \" + to_string(it); }\n"
+				"run();";
+			both(src, "", "straight regions");
+			both(src, "", "straight regions, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			for (const char* fn : { "== shade ", "== mix " }) {
+				const size_t fb = l.find(fn);
+				const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+				check_true(fl.find("-- cell region") != std::string::npos && fl.find("CELLS_ENTER") != std::string::npos, std::string("a region: ") + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 7; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a return whose expression is a graft: the graft's result lands before the return's own instructions, where the block exits, so the
+		// exit flushes it (a region's last statement, and a return inside a closed loop)
+		test("exit_after_a_graft_flushes_its_result", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function mul3(int a, int b) -> int { return a * b + 3; }\n"
+				"function tailcall(int x) -> int { int v = x * 7 + 1; int w = v * v - x; int y = w % 13 + v * 3; int z = y * y - w + v; int q = z + x * 2; int r = q * 3 - z + y; return mul3(r, 5); }\n"
+				"function loopret(int n) -> int { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc * 3 + i; if (acc > 1000) { return mul3(acc, 2); } } return acc; }\n"
+				"class R { int s = 5; int raw() { int v = s; v = v ^ (v >> 3); v = v ^ (v << 5); v = v ^ (v >> 7); v = v * 3 + 1; s = v & 65535; return mul3(v & 255, 7); } }\n"
+				"function early(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += i * 0.5; if (t > 5.0) { return sqrt(t) + 1.0; } } return t; }\n"
+				"function rowr(int i) -> float { float x0 = i * 0.5; float y = x0 * x0 + 1.0; float z = y * 0.5 - x0; float w = z * z + y * 0.25; float x = w - z * 0.125 + y * 0.01; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
+				"function run() -> string { string out = \"\"; for (int i = 0; i < 4; ++i) { out += to_string(tailcall(i)) + \" \" + to_string(loopret(i * 4)) + \" \"; } R r = R(); for (int i = 0; i < 4; ++i) { out += to_string(r.raw()) + \" \"; }\n"
+				"  var ea = early; var rw = rowr; for (int i = 0; i < 8; ++i) { out += to_string(ea(i)) + \" \" + to_string(rw(i)) + \" \"; } return out; }\n"
+				"string first = run(); sqrt = function(float v) { return v * 2.0; }; first + \",\" + run();";
+			both(src, "", "exit after a graft");
+			both(src, "", "exit after a graft, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			for (const char* fn : { "== tailcall ", "== rowr " }) {
+				const size_t fb = l.find(fn);
+				const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+				check_true(fl.find("-- cell region") != std::string::npos, std::string("a region: ") + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 4; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("straight_line_region_kinds_exits_and_errors", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat G = 0.5; int GI = 3;\n"
+				"function kinds(var a, var b) -> string {\n"
+				"  var x = a * 2 + b; var y = x * x - a; var z = y / 2 + x * 3; var w = z - y * 2 + x; var q = w * w + z - y; var k = q - w * 3 + z * 2;\n"
+				"  return to_string(x) + \" \" + to_string(y) + \" \" + to_string(z) + \" \" + to_string(w) + \" \" + to_string(q) + \" \" + to_string(k) + \" \" + type_of(q); }\n"
+				"function exits(int n, float f) -> float {\n"
+				"  float a = f * 2.0 + n; float b = a * a - f; float a2 = a * 0.5 + b * 0.25; float b2 = a2 * a2 - b;\n"
+				"  if (n > 5) { return a + b + b2; }\n"
+				"  float c = b * 0.5 + a * 0.25; float d = c * c - b + a; G = G + d * 0.001; GI = GI + n * 2;\n"
+				"  float e = d > 10.0 ? d * 0.5 : d * 2.0; float h = e * e - c * 0.5 + d * 0.25 - a2;\n"
+				"  return e + c + h; }\n"
+				"function divs(int a, int b) -> int {\n"
+				"  int x = a * 3 + b; int y = x * x - a; int z = y / b + x % b; int w = z * 2 + y - x; int v = w + a * b - z; int k = v * 5 - w + y % b;\n"
+				"  return k + w * 2; }\n"
+				"function ovf(int a) -> int { int x = a * a + 1; int y = x * x + 2; int z = y * y + 3; int w = z * z + 4; int v = w * w + 5; int u = v - w * 2 + z; int s = u * 3 + v - x; int q = s - u + 1; return q; }\n"
+				"function openloop(int n) -> string { string s = \"\"; float t = 0.0;\n"
+				"  for (int i = 0; i < n; ++i) { float a = i * 0.5 + t; float b = a * a - i; float c = b * 0.25 + a; float d = c * c - b * 0.5; float e = d * 0.5 + c - a; float g = e * e - b; t = d * 0.001 + c * 0.01 + g * 0.0001; s += to_string(i); }\n"
+				"  return s + \" \" + to_string(t); }\n"
+				"function nulls(int n) -> string { var r; float a = n * 1.5; float b = a * a + 2.0; r = a * b + 1.0; float c = r * 2.0 + a; float d = c * c - b; float e = d * 0.5 + c; float f2 = e * e - d + c; float g2 = f2 * 0.5 + e * 0.25; return to_string(r) + \" \" + to_string(g2); }\n"
+				"class P { float x = 1.0; float y = 2.0; float vx = 0.5; float vy = 0.25;\n"
+				"  float step(float dt) { float nx = x + vx * dt; float ny = y + vy * dt; float ax = nx * 0.5 - ny * 0.25; float ay = ny * 0.5 + nx * 0.125; x = nx + ax * dt; y = ny + ay * dt; return x * y; } }\n"
+				"function guarded(int a, int b) -> string { try { return to_string(divs(a, b)); } catch (e) { return \"E:\" + e; } }\n"
+				"function guarded2(int a) -> string { try { return to_string(ovf(a)); } catch (e) { return \"E:\" + e; } }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  out += kinds(1, 2) + \",\" + kinds(1.5, 2) + \",\" + kinds(3, 0.25) + \",\" + kinds(7, 2) + \",\";\n"
+				"  for (int i = 0; i < 9; ++i) { out += to_string(exits(i, i * 0.75)) + \" \"; }\n"
+				"  out += \",\" + guarded(5, 3) + \",\" + guarded(5, 0) + \",\" + guarded(-9, 4) + \",\" + guarded2(3) + \",\" + guarded2(100000) + \",\";\n"
+				"  out += openloop(12) + \",\" + nulls(3) + \",\" + nulls(4) + \",\";\n"
+				"  P p = P(); float ps = 0.0; for (int i = 0; i < 6; ++i) { ps += p.step(0.1); } out += to_string(ps) + \",\" + to_string(G) + \",\" + to_string(GI);\n"
+				"  return out; }\n"
+				"run();";
+			both(src, "", "region kinds, exits and errors");
+			both(src, "", "region kinds, exits and errors, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			check_true(l.find("-- cell region") != std::string::npos, "regions form: " + l.substr(0, 3000));
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 7; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
 		});
 	}
 };

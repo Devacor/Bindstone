@@ -20,7 +20,7 @@ region_cfg control_flow(const region_ir& r) {
 		default: g.succ[k][0] = k + 1; break;
 		}
 	}
-	g.succ[g.back_node][0] = 0;
+	g.succ[g.back_node][0] = r.straight ? g.exit_node : 0;
 	g.preds.assign(n_ops + 1, {});
 	for (size_t k = 0; k <= n_ops; ++k) { for (size_t s : g.succ[k]) { if (s <= n_ops && s != 0) { g.preds[s].push_back(k); } } }
 	return g;

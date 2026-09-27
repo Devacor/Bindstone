@@ -55,6 +55,7 @@ namespace jai::vm {
 	struct region_ir {
 		std::vector<ir_op> ops;
 		uint32_t head = 0, first = 0, back = 0;
+		bool straight = false;   // a straight-line region: the end leaves (no back edge re-enters the first operation)
 	};
 
 	// the region's control flow graph: an operation's successors are the next operation, a compare's target (the

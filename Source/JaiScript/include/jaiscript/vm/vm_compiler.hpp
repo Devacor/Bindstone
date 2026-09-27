@@ -85,6 +85,7 @@ namespace jai::vm {
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
         bool ir_passes_ = true;
+        static constexpr size_t k_region_min_work = 16;   // a straight-line region's least number of operations it runs in place of dispatches (its entry and flush cost about ten)
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init);

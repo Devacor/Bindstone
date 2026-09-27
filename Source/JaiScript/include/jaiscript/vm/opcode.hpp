@@ -222,6 +222,8 @@ namespace jai::vm {
         // closed typed loops as cell blocks (docs/typed_regions_design.md): the cell-form copy of a closed typed loop
         op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
                             // unboxing, then the copy's head (or the general head when a guard refuses)
+        op_cells_enter,     // a = cell region index, b = its trampoline: a straight-line region's first instruction; the live-in guards and
+                            // the unboxing, then the copy; a refusal runs the replaced instruction at the trampoline (it jumps back to the next)
         op_c_mload,         // a = dst cell, b = member_expr node, c = the base slot: a member read site, the field's value pointer resolved
                             // at entry (cell_state::site_member), its kind and payload landed in the cell
         op_c_mstore,        // a = value (a cell, or k_typed_const_bit | constant), b = member_expr node, c = the base slot: a member store site,
@@ -387,6 +389,7 @@ namespace jai::vm {
             case opcode::op_jump_if_true: return "JUMP_IF_TRUE";
             case opcode::op_loop_back: return "LOOP_BACK";
             case opcode::op_cells_back: return "CELLS_BACK";
+            case opcode::op_cells_enter: return "CELLS_ENTER";
             case opcode::op_c_mload: return "C_MLOAD";
             case opcode::op_c_mstore: return "C_MSTORE";
             case opcode::op_set_member_value: return "SET_MEMBER_VALUE";

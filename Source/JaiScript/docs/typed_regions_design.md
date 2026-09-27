@@ -670,6 +670,27 @@ bases (`G.player`) follow in their row. An element alias passed as a call argume
 flushes the alias (the reference its declaration binds, built into the slot) and pushes the slot's value as the general LOAD does,
 so a loop whose body calls a function on each element (`for (auto& p : pool) { step(p); }`) closes and lands without a miss.
 
+### Straight-line regions
+
+A span of scalar statements outside every closed loop runs as a cell block of its own, a region with no back edge. The span
+holds typed arithmetic and compares, fused binaries, typed declarations and stores, unaries, math intrinsics and stdlib
+aliases, branches (an if, a ternary, a return inside one) and grafts (the fallback's instructions are skipped, as the copy
+never runs them); an element or member site, a push or a call ends the span, since a region is entered once per pass and a
+site's resolution or a call's landing costs about what the general form's instruction does. A span starts and ends at a
+caller's statement boundary (a graft's statements and a recompiled return are the caller's statement), starts on an
+instruction whose general form looks at nothing after it, and forms a region only with at least sixteen operations
+(`vm_compiler::k_region_min_work`): an entry's guards and unboxing and its flush of the declarations cost about ten. The
+translation is the loops' (the `region_ir` with `straight` set, whose last node leaves), and a refusal splits the span around
+the refusing statement.
+
+The region's first instruction becomes `op_cells_enter` (a = the region's `cell_loops` index, b = its trampoline): the entry's
+guards and unboxing, then the copy. The trampoline, appended after the copies, holds the replaced instruction (its typed
+site, statement and identifier rows copied) and a jump to the next one; a refused entry, a miss at the first instruction and
+an exit whose target is the first instruction continue there, so the general form never re-enters the region it just left.
+The copy ends with an exit to the span's end; a return's exit, a forward jump past the end and every miss flush as a loop's
+do. An exit holds the compiler values its caller's statement defined ahead of it (a graft's result before a return's own
+instructions), since the general continuation reads them; a bail holds the same set.
+
 ### The region IR module
 
 The canonical operations of a closed loop and the analyses over them live in `include/jaiscript/vm/region_ir.hpp`

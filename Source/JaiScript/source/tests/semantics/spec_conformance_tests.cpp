@@ -1759,7 +1759,21 @@ private:
 		});
 	}
 
+	void known_bugs_range_for() {
+		test("a_typed_range_for_variable_converts_each_element_like_a_declaration", [this]() {
+			// CLAUDE.md "One conversion table for every typed slot" (a declaration); C++: for (int v : floats) converts each element.
+			// Today the loop binds the element unconverted (int v holds 1.5, string s holds 1) on both backends
+			expect("typed range-for", R"(
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
+				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
+				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; });
+			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string", check_mode::warn);
+		});
+	}
+
 	void known_bugs() {
+		known_bugs_range_for();
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding
 			expect("top block", R"(

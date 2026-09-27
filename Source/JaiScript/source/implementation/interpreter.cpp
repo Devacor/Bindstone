@@ -12611,9 +12611,16 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
 
     // Execute the included file. Pass the resolved path so every node in the included
     // unit is stamped with its real filename (stack traces / breakpoints name the file).
+    std::string scope;
+    if (!call_stack_.empty()) {
+        const std::string_view fn = call_stack_.back().function_name;
+        scope = fn.empty() || fn.front() == '<' ? std::string("a lambda") : "function '" + std::string(fn) + "'";
+    } else if (environment_ != get_global_environment()) {
+        scope = "a block";
+    }
     nested_failure_.parked = false;
     try {
-        push_value(engine_ptr->execute_include_source(resolved_path, content));
+        push_value(engine_ptr->execute_include_source(resolved_path, content, scope));
     } catch (const std::exception& e) {
         return raise_nested_failure(e);
     }

@@ -53,6 +53,10 @@ compiled once per unit, so no compiled code ever runs under two units. An `impor
 own, and a top-level declaration only: inside a function, a block, a class or a namespace it is a parse error, since
 an import runs once and takes no scope.
 
+An `enum` follows the same scoping: declared inside a function or a block (written there, or brought
+there by an include) it is local to that scope, so an enum of the same name at program scope keeps its
+values; the checker warns when such a declaration names a program-scope enum (`docs/static_checking.md`).
+
 A by-reference argument is the caller's code: it binds the cell the caller's unit resolves, and the
 callee's unit governs only the callee's own code (its default arguments and its body).
 

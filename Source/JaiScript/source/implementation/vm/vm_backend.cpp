@@ -16303,9 +16303,16 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any
 	// running-coroutine state. An error in the included file surfaces as unwinding.
 	// Pass the resolved path so included nodes carry their real filename.
+	std::string scope;
+	if (!f.top_level) {
+		const std::string& fn = f.code->function_name;
+		scope = fn.empty() || fn.front() == '<' ? std::string("a lambda") : "function '" + fn + "'";
+	} else if (environment_ != engine_->get_global_environment()) {
+		scope = "a block";
+	}
 	nested_failure_.parked = false;
 	try {
-		script_value result = engine_->execute_include_source(resolved_path, content);
+		script_value result = engine_->execute_include_source(resolved_path, content, scope);
 		stack_.push_back(std::move(result));
 	} catch (const std::exception& e) {
 		return raise_nested_failure(e);

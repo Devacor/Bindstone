@@ -64,6 +64,7 @@ namespace jai::vm {
         void dump_coarse_profile() const;
         uint64_t coarse_total_ = 0, coarse_blocks_ = 0, coarse_block_runs_ = 0, coarse_push_ = 0, coarse_pushes_ = 0, coarse_pop_ = 0, coarse_pops_ = 0, coarse_method_ = 0, coarse_methods_ = 0;
         uint32_t coarse_depth_ = 0;
+        uint64_t coarse_ecells_ = 0, coarse_esites_ = 0, coarse_eguards_ = 0, coarse_ncells_ = 0, coarse_nenv_ = 0, coarse_nsites_ = 0, coarse_unused_ = 0;
         uint64_t coarse_enter_ = 0, coarse_enters_ = 0, coarse_flush_ = 0, coarse_flushes_ = 0, coarse_miss_ = 0, coarse_misses_ = 0, coarse_land_ = 0, coarse_lands_ = 0;   // inside the block bucket
 #endif
 #ifdef JAISCRIPT_VM_PROFILE

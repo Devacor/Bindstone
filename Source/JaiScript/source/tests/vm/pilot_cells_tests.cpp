@@ -4147,6 +4147,25 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "", "alias grafts under rebinding, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
 		});
+		// row 191: the entry reads an environment container through its armed lookup; a field of the name, a rebound or replaced global,
+		// and a reference binding keep the full resolution
+		test("block_entry_environment_containers", [this]() {
+			const std::string src = "[[warn_mode]]\narray<float> A = [1.0, 2.0, 3.0, 4.0];\narray<float> B = [0.5, 0.5, 0.5, 0.5];\n"
+				"function sum(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += A[i & 3] * B[i & 3]; } return t; }\n"
+				"class K { array<float> A = [10.0, 20.0, 30.0, 40.0]; float s(int n) { float t = 0.0; for (int i = 0; i < n; ++i) { t += A[i & 3] * B[i & 3]; } return t; } }\n"
+				"function outer() -> string { string out = \"\"; for (int r = 0; r < 4; ++r) { out += to_string(sum(9)) + \" \"; if (r == 1) { A = [5.0, 6.0, 7.0, 8.0]; } if (r == 2) { B[1] = 9.0; } } return out; }\n"
+				"string res = outer() + \",\" + to_string(K().s(9)); A = [1.0]; res + \",\" + (function() -> string { try { return to_string(sum(3)); } catch (e) { return \"E:\" + e; } })();";
+			both(src, "", "environment containers at the entry");
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

@@ -7296,11 +7296,25 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
 		return e.fast_ptr == v && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() ? v : nullptr;
 	};
+	// an environment container answered by its armed lookup-cache entry while nothing ahead of the environment (a member scope) can take the name:
+	// fused_cmp_operand's own answer, read once
+	bool env_head = cached_global_env_ != nullptr;
+	if (env_head && f.locals && !f.top_level) { ensure_frame_member_scope(f, environment_.get()); env_head = !frame_scope_active(f); }
+	const environment* env_now = environment_.get();
+	const uint64_t epoch_now = env_symbolizer_->env_epoch();
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
 		const uint32_t ip = loop.sites[k];
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
+		if (env_head && loop.site_env_cache[k] < f.code->env_lookup_cache.size()) {
+			const env_lookup_cache_entry& e = f.code->env_lookup_cache[loop.site_env_cache[k]];
+			if (e.fast_ptr && e.fast_env == env_now && e.fast_serial == epoch_now && e.fast_ptr->raw_storage_index() == script_value::TYPEID_ARRAY) {
+				cs.site_env[k] = e.fast_ptr; cs.site_value[k] = e.fast_ptr;
+				cs.site_node[ip - loop.copy_head] = e.fast_ptr->unchecked_array_node();
+				if (cs.site_node[ip - loop.copy_head]) continue;
+			}
+		}
 		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; cs.site_member[ip - loop.copy_head] = nullptr; cs.site_member_class[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_size) {
 			// a size site: the receiver slot's array node (a plain cell reference passes through), read live by C_SIZE
@@ -7563,10 +7577,17 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 #endif
 	}
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL), kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+	uint64_t ct0 = __rdtsc();
+	coarse_ncells_ += loop.cells.size(); coarse_nenv_ += loop.env_operands.size(); coarse_nsites_ += loop.sites.size();
+#endif
 	// one walk: every cell's guard, then its unboxing (a refusal leaves partial cell state behind, which nothing reads: the loop stays unentered).
 	// Every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's canonical stamp and engine: the general
-	// form's first iteration established it, and a landing whose slot holds another kind (a declared-type conversion on a store) stays general
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
+	// form's first iteration established it, and a landing whose slot holds another kind (a declared-type conversion on a store) stays general.
+	// A temp or a body-declared local enters empty: its slot may hold another statement's value, or a placeholder
+	std::fill_n(cs.kind.begin(), loop.cells.size(), uint8_t{0});
+	std::fill_n(cs.stamp.begin(), loop.cells.size(), nullptr);
+	for (const uint32_t k : loop.entry_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		if (cl.env_operand != k_invalid_u32) {
 			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
@@ -7588,8 +7609,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			cs.kind[k] = vk; cs.stamp[k] = const_cast<type_info*>(v->type_info_raw());   // the landing rule for a write judges against the stamp read here
 			continue;
 		}
-		if (cl.iter_index) { cs.kind[k] = kint; cs.payload[k] = static_cast<int64_t>(iter_states_.back().index); cs.stamp[k] = nullptr; continue; }   // a range-for's index: the next element's, as the general ITER_NEXT would read it
-		if (cl.temp || cl.first_decl) { cs.kind[k] = 0; cs.stamp[k] = nullptr; continue; }   // a temp or a body-declared local: empty until the body writes it (its slot may hold another statement's value, or a placeholder)
+		if (cl.iter_index) { cs.kind[k] = kint; cs.payload[k] = static_cast<int64_t>(iter_states_.back().index); continue; }   // a range-for's index: the next element's, as the general ITER_NEXT would read it
 		const script_value* s = frame_slot(f, cl.slot);
 		// an adopted kind (0): the slot's current kind, int or float, the general form's first iteration having landed it
 		const uint8_t want = cl.kind != 0 ? cl.kind : (s ? static_cast<uint8_t>(s->raw_storage_index()) : 0);
@@ -7615,7 +7635,14 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		cs.stamp[k] = cl.kind != 0 ? nullptr : const_cast<type_info*>(st);   // restored by the flush when recorded
 		JAI_CELLS_COUNT(3);
 	}
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+	{ const uint64_t t1 = __rdtsc(); coarse_ecells_ += t1 - ct0; ct0 = t1; }
+#endif
 	if (!loop.sites.empty() && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
+#ifdef JAISCRIPT_VM_COARSE_PROFILE
+	{ const uint64_t t1 = __rdtsc(); coarse_esites_ += t1 - ct0; ct0 = t1; }
+	struct guard_span { uint64_t& acc; uint64_t t0; ~guard_span() { acc += __rdtsc() - t0; } } guard_span_{coarse_eguards_, ct0};
+#endif
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	return true;
@@ -16405,6 +16432,9 @@ void vm_backend::dump_coarse_profile() const {
 		pct(coarse_miss_), (unsigned long long)coarse_misses_, avg(coarse_miss_, coarse_misses_),
 		pct(coarse_land_), (unsigned long long)coarse_lands_, avg(coarse_land_, coarse_lands_),
 		coarse_blocks_ >= coarse_enter_ + coarse_flush_ + coarse_miss_ + coarse_land_ ? pct(coarse_blocks_ - coarse_enter_ - coarse_flush_ - coarse_miss_ - coarse_land_) : 0.0);
+	fprintf(stderr, "[vm-coarse] entry split: cells %.0f | sites %.0f | guards %.0f avg ticks; per entry %.1f cells, %.1f env operands, %.1f sites\n",
+		avg(coarse_ecells_, coarse_enters_), avg(coarse_esites_, coarse_enters_), avg(coarse_eguards_, coarse_enters_),
+		avg(coarse_ncells_, coarse_enters_), avg(coarse_nenv_, coarse_enters_), avg(coarse_nsites_, coarse_enters_));
 }
 #endif
 

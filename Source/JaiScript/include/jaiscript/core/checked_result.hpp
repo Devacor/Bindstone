@@ -454,6 +454,11 @@ inline std::string format_error(const checked_result<T>& result, Symbolizer& sym
         return {};  // No error
     }
 
+    // An error raised without its own text reads as its code's message, the text the host boundary shows
+    if (result.message().empty()) {
+        return result.error().message();
+    }
+
     // If there are symbol IDs, resolve them and format
     if (result.symbol_id() != 0 || result.symbol_id2() != 0) {
         return format_error_message(
@@ -471,6 +476,9 @@ inline std::string format_error(const checked_result<T>& result, Symbolizer& sym
  */
 template<typename Symbolizer>
 inline std::string format_error(const error_propagator& err, Symbolizer& symbolizer) {
+    if (err.static_msg.empty()) {
+        return err.ec.message();
+    }
     if (err.symbol_id != 0 || err.symbol_id2 != 0) {
         return format_error_message(
             err.static_msg,

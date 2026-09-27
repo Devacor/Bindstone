@@ -3212,13 +3212,25 @@ traditional_for:
     // Init — the loop variable's slot stops resolving after the loop closes
     block_scope_guard loop_var_scope(*this);
     declaration_ptr init = nullptr;
+    // An identifier starts a declaration only when a type spelling is followed by a name (C++: whatever can be a
+    // declaration is one); `i = 0`, `o[0] = 1`, `j += 1` are expression initializers
+    bool identifier_declares = false;
+    if (check(token_type::identifier)) {
+        const size_t type_start = current_;
+        auto type_probe = parse_type();
+        if (type_probe) {
+            match(token_type::ampersand);
+            identifier_declares = check(token_type::identifier);
+        }
+        current_ = type_start;
+    }
     if (match(token_type::semicolon)) {
         // No init
     } else if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
                check(token_type::int_keyword) || check(token_type::float_keyword) ||
                check(token_type::string_keyword) || check(token_type::bool_keyword) ||
                check(token_type::char_keyword) || check(token_type::array_keyword) ||
-               check(token_type::map_keyword) || check(token_type::identifier)) {
+               check(token_type::map_keyword) || identifier_declares) {
         // Parse variable declaration without consuming the semicolon
         // (the for loop will handle it)
         JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());
@@ -3248,9 +3260,7 @@ traditional_for:
         init = var_init;
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
-        // Expression-only init (e.g., function call side effect) — wrap in expression_decl
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after for loop initializer"));
         init = std::make_shared<expression_decl>(expr->location, std::move(expr));
     }
 

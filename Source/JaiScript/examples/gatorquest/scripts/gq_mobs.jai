@@ -354,6 +354,22 @@ int nearest_player(int w, int x, int y, int r) {
 	return best;
 }
 
+// nearest tile of the walk classes in `mask` that nobody stands on
+array<int> find_free_spot(int w, int x0, int y0, int maxr, int mask) {
+	for (int r = 0; r <= maxr; ++r) {
+		for (int dy = -r; dy <= r; ++dy) {
+			for (int dx = -r; dx <= r; ++dx) {
+				if (iabs(dx) != r && iabs(dy) != r) { continue; }
+				int x = x0 + dx;
+				int y = y0 + dy;
+				if (!in_world(w, x, y) || OCC[occ_index(w, x, y)] != 0) { continue; }
+				if (((1 << walk_at(w, x, y)) & mask) != 0) { return [x, y]; }
+			}
+		}
+	}
+	return find_spot(w, x0, y0, maxr, mask);
+}
+
 bool player_near(int w, int x, int y, int r) {
 	if (CAMERA_W == w && cheb(x, y, CAMERA_X, CAMERA_Y) <= r) { return true; }
 	return nearest_player(w, x, y, r) >= 0;

@@ -66,7 +66,7 @@ int player_create(int slot, string name, int hue) {
 // put the character's gator into the world at its home
 void player_spawn(int slot) {
 	Character& c = CHARS[slot];
-	array<int> p = find_spot(c.home_world, c.home_x, c.home_y, 8, LAND_MASK);
+	array<int> p = find_free_spot(c.home_world, c.home_x, c.home_y, 8, LAND_MASK);
 	int m = mob_spawn(M_GATOR_NPC, c.home_world, p[0], p[1]);
 	MOB_PLAYER[m] = slot;
 	MOB_FLAGS[m] = 0;
@@ -91,11 +91,11 @@ void player_leave(int slot) {
 		MOB_PLAYER[m] = -1;
 		mob_free(m);
 	}
-	// parties forget the leaver
+	// parties forget the leaver (a party of one dissolves)
 	for (int s = 0; s < CHARS.size(); ++s) {
 		if (CHARS[s].invite == slot) { CHARS[s].invite = -1; }
 	}
-	c.party = -1;
+	party_leave(slot);
 	c.mob = -1;
 	c.active = false;
 	c.connected = false;

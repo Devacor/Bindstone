@@ -18,6 +18,7 @@ namespace jai {
 namespace jai::detail { enum class math_fn : uint8_t; }
 
 namespace jai::vm {
+    struct land_ctx;
 
     class vm_compiler {
     public:
@@ -114,6 +115,10 @@ namespace jai::vm {
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);
         bool unary_temp_operand(const expression* e);
         void compile_unary_into_temp(const expression_ptr& e, fused_operand& out);
+        bool ternary_temp_operand(const expression* e);
+        void compile_ternary_into_temp(const expression_ptr& e, fused_operand& out);
+        void land_ternary_in_temp(const ternary_expr* t, uint32_t dst);
+        void land_arm_in_temp(const expression_ptr& arm, uint32_t dst);
         bool env_identifier(const expression* e);
         bool value_temp_operand(const expression* e);
         bool compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
@@ -150,6 +155,7 @@ namespace jai::vm {
         // inlined leaves (vm_inline.cpp): the callable's own body (no recursion), the graft's own compile (no inlining inside a graft or its
         // fallback) and the result slot's name
         const block_stmt* callable_body_ = nullptr;
+        std::vector<const block_stmt*> graft_bodies_;   // the grafts being compiled, outermost first: a leaf inside one grafts too (one level), never one of them again
         bool inlining_off_ = false;
         uint64_t inline_symbol_ = 0;
         struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
@@ -157,6 +163,7 @@ namespace jai::vm {
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
         type_info_ptr inline_type(script_value_type kind);
         type_info_ptr graft_result_type(const function_decl* fn);
+        struct land_ctx graft_land_ctx(const function_decl* fn);
         std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);
         expression_ptr compile_hoist(const hoist_plan& plan, const expression_ptr& root);
         expression_ptr hoist_leaf_calls(const expression_ptr& e, bool statement_position, bool& changed);

@@ -5028,6 +5028,31 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a literal on the left of a block's comparison or of a computed call argument: the pinned cell forms read their left operand as a cell,
+		// so the emission mirrors a comparison and a commutative operator, and keeps any other operator on the any-kind form
+		test("literal_left_operands_in_blocks", [this]() {
+			const std::string src =
+				"int g(int x) { if (x > 100) { return g(x - 1); } return x; }\n"
+				"float gf(float x) { if (x > 100.0) { return gf(x - 1.0); } return x; }\n"
+				"function a1() -> int { int s = 0; for (int i = 0; i < 5; ++i) { s = s + g(10 - i); } return s; }\n"
+				"function a2() -> int { int s = 0; for (int i = 1; i < 6; ++i) { s = s + g(60 / i) + g(7 * i); } return s; }\n"
+				"function a3() -> float { float s = 0.0; for (int i = 0; i < 6; ++i) { float x = i * 0.5; s = s + gf(3.0 - x) + gf(2.0 * x); } return s; }\n"
+				"function c1() -> int { int s = 0; int z = 100; for (int i = 0; i < 10; ++i) { if (5 < i || i == 0) { s = s + 1; } } return s; }\n"
+				"function c2() -> int { int s = 0; for (int i = 0; i < 10; ++i) { int k = 7; if (6 < i || k == 0) { s = s + i; } } return s; }\n"
+				"function c3() -> int { int s = 0; for (int i = 0; i < 10; ++i) { if (3 >= i && 1 != i) { s = s + 10; } } return s; }\n"
+				"function c4() -> int { int s = 0; for (int i = 0; i < 8; ++i) { float f = i * 0.25; if (1.0 <= f || 0.5 == f) { s = s + i; } } return s; }\n"
+				"to_string(a1()) + \" \" + to_string(a2()) + \" \" + to_string(a3()) + \" \" + to_string(c1()) + \" \" + to_string(c2()) + \" \" + to_string(c3()) + \" \" + to_string(c4());";
+			both(src, "40 242 25.5 5 24 30 24", "literal left operands");
+			both(src, "40 242 25.5 5 24 30 24", "literal left operands, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

@@ -2285,6 +2285,41 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return false;
 		}
 	};
+	// the cell emission's operand normalization: a comparison with a literal on the left is its mirror (never its negation: a NaN fails both
+	// orders), a commutative typed operator swaps, and the token of a typed operator for the any-kind form
+	auto mirror_tok = [&](uint8_t t) -> uint8_t { return static_cast<uint8_t>(mirrored(static_cast<token_type>(t))); };
+	auto mirror_fast = [](opcode o) -> opcode {
+		switch (o) {
+		case opcode::op_t_jlt_ii: return opcode::op_t_jgt_ii; case opcode::op_t_jgt_ii: return opcode::op_t_jlt_ii;
+		case opcode::op_t_jle_ii: return opcode::op_t_jge_ii; case opcode::op_t_jge_ii: return opcode::op_t_jle_ii;
+		case opcode::op_t_jlt_ff: return opcode::op_t_jgt_ff; case opcode::op_t_jgt_ff: return opcode::op_t_jlt_ff;
+		case opcode::op_t_jle_ff: return opcode::op_t_jge_ff; case opcode::op_t_jge_ff: return opcode::op_t_jle_ff;
+		default: return o;
+		}
+	};
+	auto commutative_fast = [](opcode o) {
+		switch (o) {
+		case opcode::op_t_add_ii: case opcode::op_t_mul_ii: case opcode::op_t_and_ii: case opcode::op_t_or_ii: case opcode::op_t_xor_ii:
+		case opcode::op_t_add_ff: case opcode::op_t_mul_ff:
+			return true;
+		default: return false;
+		}
+	};
+	auto arith_token_of = [](opcode o) -> uint8_t {
+		switch (o) {
+		case opcode::op_t_add_ii: case opcode::op_t_add_ff: return static_cast<uint8_t>(token_type::plus);
+		case opcode::op_t_sub_ii: case opcode::op_t_sub_ff: return static_cast<uint8_t>(token_type::minus);
+		case opcode::op_t_mul_ii: case opcode::op_t_mul_ff: return static_cast<uint8_t>(token_type::star);
+		case opcode::op_t_div_ii: case opcode::op_t_div_ff: return static_cast<uint8_t>(token_type::slash);
+		case opcode::op_t_mod_ii: case opcode::op_t_mod_ff: return static_cast<uint8_t>(token_type::percent);
+		case opcode::op_t_and_ii: return static_cast<uint8_t>(token_type::ampersand);
+		case opcode::op_t_or_ii: return static_cast<uint8_t>(token_type::pipe);
+		case opcode::op_t_xor_ii: return static_cast<uint8_t>(token_type::caret);
+		case opcode::op_t_shl_ii: return static_cast<uint8_t>(token_type::left_shift);
+		case opcode::op_t_shr_ii: return static_cast<uint8_t>(token_type::right_shift);
+		default: return 0;
+		}
+	};
 	// left slot + right (slot or constant of the class); a literal left swaps when the op allows; an arithmetic row also takes
 	// an environment value on either side, read through the replaced instruction's cache slot for that side
 	auto operands = [&](const fused_binary_proto& bp, token_type& op, uint32_t& left, uint32_t& right, bool env_ok) -> bool {
@@ -3577,6 +3612,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		break;
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
+		for (size_t k = 0; refusal == chunk::cell_refusal_none && k < ops.size(); ++k) {
+			// the cell forms read a comparison's left operand and a math argument as cells: a literal on the left mirrors at the emission, two
+			// literals or a literal argument have no encoding
+			const ir_op& o = ops[k];
+			if ((o.kind == ir::cmp && (o.a & k_typed_const_bit) && (o.b & k_typed_const_bit)) || (o.kind == ir::cmpval && (o.b & k_typed_const_bit) && (o.c & k_typed_const_bit)) ||
+			    (o.kind == ir::math && (o.b & k_typed_const_bit))) { refuse(chunk::cell_refusal_translation, first + k); }
+		}
 		if (line && refusal == chunk::cell_refusal_none && !ops.empty() && ops[0].kind == ir::exit) { continue; }   // a region that leaves at its first operation runs nothing
 		for (const uint32_t si : loop_inline_sites) {   // a method graft's guard runs at the entry and after each call: its receiver stays put for the block
 			const chunk::inline_site& s = c.inline_sites[si];
@@ -3690,26 +3732,37 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			pending_def = next_def < defs.size() && defs[next_def].first == ip ? defs[next_def].second : k_invalid_u32;
 			if (op.poll) { append(vm_instruction{opcode::op_c_jump, static_cast<uint32_t>(code.size() + 1), 0, 1}, ip); }   // the poll ahead of an inner counted step: a continue lands here too (copy_at names it)
 			switch (op.kind) {
-			case ir::arith:
-				if (op.fast != opcode::op_halt) {
-					const uint8_t k = op.fast <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-					const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
-					append(vm_instruction{pinned_operand(b2, k) && pinned_operand(c2, k) ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+			case ir::arith: {
+				uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
+				opcode fast = op.fast;
+				if (fast != opcode::op_halt && (b2 & k_typed_const_bit)) {
+					// a literal on the left: the pinned forms read their left operand as a cell, so a commutative operator swaps and any
+					// other takes the any-kind form, which reads a constant on either side
+					if (commutative_fast(fast) && !(c2 & k_typed_const_bit)) { std::swap(b2, c2); }
+					else { fast = opcode::op_halt; }
 				}
-				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); }
+				if (fast != opcode::op_halt) {
+					const uint8_t k = fast <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+					append(vm_instruction{pinned_operand(b2, k) && pinned_operand(c2, k) ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+				}
+				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok != 0 ? op.tok : arith_token_of(op.fast)) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
 				break;
+			}
 			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), op.tok}, ip); break;
 			case ir::cmp: {
 				const uint32_t bits = op.sense ? 0x80000000u : 0u;
 				if (!op.head) { fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 1, op.target, bits }); }   // an interior target: patched to its copy position
 				const uint32_t target = op.head ? op.target : bits;
-				if (op.fast != opcode::op_halt) {
-					const uint8_t k = op.fast <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-					const uint32_t a2 = cell_of(op.a), b2 = cell_of(op.b);
+				uint32_t a2 = cell_of(op.a), b2 = cell_of(op.b);
+				opcode fast = op.fast;
+				uint8_t tok = op.tok;
+				if (a2 & k_typed_const_bit) { std::swap(a2, b2); fast = mirror_fast(fast); tok = mirror_tok(tok); }   // a literal on the left: the mirrored comparison (the translation refuses two literals)
+				if (fast != opcode::op_halt) {
+					const uint8_t k = fast <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 					const bool p = pinned_operand(a2, k) && pinned_operand(b2, k);
-					append(vm_instruction{op.head ? (p ? opcode::op_c_cmp_p : opcode::op_c_cmp) : (p ? opcode::op_c_jcmp_p : opcode::op_c_jcmp), (static_cast<uint32_t>(op.fast) << k_cell_op_shift) | a2, b2, target}, ip);
+					append(vm_instruction{op.head ? (p ? opcode::op_c_cmp_p : opcode::op_c_cmp) : (p ? opcode::op_c_jcmp_p : opcode::op_c_jcmp), (static_cast<uint32_t>(fast) << k_cell_op_shift) | a2, b2, target}, ip);
 				}
-				else { append(vm_instruction{op.head ? opcode::op_c_cmp_any : opcode::op_c_jcmp_any, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | cell_of(op.a), cell_of(op.b), target}, ip); }
+				else { append(vm_instruction{op.head ? opcode::op_c_cmp_any : opcode::op_c_jcmp_any, (static_cast<uint32_t>(tok) << k_cell_op_shift) | a2, b2, target}, ip); }
 				break;
 			}
 			case ir::load: {
@@ -3879,7 +3932,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::lnot: append(vm_instruction{opcode::op_c_lnot, dst_of(op.a), cell_of(op.b), 0}, ip); break;
-			case ir::cmpval: append(vm_instruction{opcode::op_c_cmpval, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), cell_of(op.c)}, ip); break;
+			case ir::cmpval: {
+				uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
+				uint8_t tok = op.tok;
+				if (b2 & k_typed_const_bit) { std::swap(b2, c2); tok = mirror_tok(tok); }   // a literal on the left: the mirrored comparison
+				append(vm_instruction{opcode::op_c_cmpval, (static_cast<uint32_t>(tok) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+				break;
+			}
 			}
 			while (next_def < defs.size() && defs[next_def].first == ip) { current[cells[defs[next_def].second].slot] = defs[next_def].second; ++next_def; }   // the definition takes effect after its instruction
 		};

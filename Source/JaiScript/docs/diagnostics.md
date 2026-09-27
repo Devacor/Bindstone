@@ -154,6 +154,26 @@ Hot-reload migration never raises (an unconvertible value falls back to the new 
 no text there. `value.cpp`'s two `Type mismatch in assignment` throws are unreachable defensive
 walls behind typed-buffer references and stay.
 
+## Compound assignment (`type_mismatch`, kernel `class_definition.hpp` `detail::compound_mismatch`)
+
+`Cannot apply '+=' to {0} and {1}` (likewise `'-='`, `'*='`, `'/='`, `'%='`)
+
+`{0}` is the target's type and `{1}` the operand's, spelled like family D's source (the
+payload's own type: a class name for an object, `null`, `array`, `map`, the primitives). Every
+compound site raises it when the operator does not take the operands: a local or a global, a
+field through a receiver (`c.s += 5`) or bare in a method, a static (`C::i += "x"`), a bound C++
+variable. `string s; s += 5` is `Cannot apply '+=' to string and int` (a string target appends
+text only - a string, a char, a utf8_string; `string += int` raises by design, unlike binary
+`+`), `float f; f += "x"` is `Cannot apply '+=' to float and string`. Catchable, identical on
+both backends; uncaught, `what()` appends `: Type mismatch`. `++`/`--` on a target that is not a
+number (any spelling: a variable, a member, an element, a bare field) is `Cannot apply '++' to
+string` / `Cannot apply '--' to bool` (`invalid_numeric_operand`, `detail::incdec_mismatch`),
+which a `catch` used to see as an empty string. An element or map entry target
+(`names[i] += 5`) evaluates `names[i] + 5` and stores it, so a string element concatenates.
+Before: the variable and static sites raised a bare `Type mismatch` (a `catch` saw an empty
+string), the member sites `Invalid operands for +=`, and a float target with a non-numeric
+operand escaped every `try` as a C++ exception (`script_value is not a float or integer`).
+
 ## Checked float-to-integer conversion (`invalid_numeric_operand`)
 
 `Cannot convert float to integer: non-finite or out of range`

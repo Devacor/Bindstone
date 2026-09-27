@@ -4085,7 +4085,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                             push_value(make_value(expr->is_postfix ? oldVal : newVal));
                             return {};
                         }
-                        return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                        return detail::incdec_mismatch(isIncrement, target, engine_);
                     }
                     switch (target.type()) {
                         case script_value_type::jai_int_type: {
@@ -4118,7 +4118,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                             return {};
                         }
                         default:
-                            return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                            return detail::incdec_mismatch(isIncrement, target, engine_);
                     }
                 } else {
                     // ::name targets never reach the implicit this.member fallback
@@ -4178,7 +4178,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
                                 return {};
                             } else {
-                                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                                return detail::incdec_mismatch(isIncrement, currentVal, engine_);
                             }
                         }
                     }
@@ -4541,10 +4541,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 } else if (rIdx == script_value::TYPEID_FLOAT) {
                                     target.assign_through(make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()));
                                 } else {
-                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                    return detail::compound_mismatch(0, target, derefRight, engine_);
                                 }
                             } else if (target.is_float()) {
-                                target.assign_through(make_value(target.unchecked_as_float() + derefRight.as_float()));
+                                const auto rf = derefRight.checked_as_float();
+                                if (!rf) { return detail::compound_mismatch(0, target, derefRight, engine_); }
+                                target.assign_through(make_value(target.unchecked_as_float() + rf.value()));
                             } else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
                                 // engine::memory_cap chokepoint: deny the append before it exists
                                 if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
@@ -4552,7 +4554,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 }
                                 target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
                             } else {
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                return detail::compound_mismatch(0, target, derefRight, engine_);
                             }
                             break;
                         }
@@ -4565,12 +4567,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 } else if (rIdx == script_value::TYPEID_FLOAT) {
                                     target.assign_through(make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()));
                                 } else {
-                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                    return detail::compound_mismatch(1, target, derefRight, engine_);
                                 }
                             } else if (target.is_float()) {
-                                target.assign_through(make_value(target.unchecked_as_float() - derefRight.as_float()));
+                                const auto rf = derefRight.checked_as_float();
+                                if (!rf) { return detail::compound_mismatch(1, target, derefRight, engine_); }
+                                target.assign_through(make_value(target.unchecked_as_float() - rf.value()));
                             } else {
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                return detail::compound_mismatch(1, target, derefRight, engine_);
                             }
                             break;
                         }
@@ -4583,12 +4587,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 } else if (rIdx == script_value::TYPEID_FLOAT) {
                                     target.assign_through(make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()));
                                 } else {
-                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                    return detail::compound_mismatch(2, target, derefRight, engine_);
                                 }
                             } else if (target.is_float()) {
-                                target.assign_through(make_value(target.unchecked_as_float() * derefRight.as_float()));
+                                const auto rf = derefRight.checked_as_float();
+                                if (!rf) { return detail::compound_mismatch(2, target, derefRight, engine_); }
+                                target.assign_through(make_value(target.unchecked_as_float() * rf.value()));
                             } else {
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                return detail::compound_mismatch(2, target, derefRight, engine_);
                             }
                             break;
                         }
@@ -4607,12 +4613,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 } else if (rIdx == script_value::TYPEID_FLOAT) {
                                     target.assign_through(make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()));
                                 } else {
-                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                    return detail::compound_mismatch(3, target, derefRight, engine_);
                                 }
                             } else if (target.is_float()) {
-                                target.assign_through(make_value(target.unchecked_as_float() / derefRight.as_float()));
+                                const auto rf = derefRight.checked_as_float();
+                                if (!rf) { return detail::compound_mismatch(3, target, derefRight, engine_); }
+                                target.assign_through(make_value(target.unchecked_as_float() / rf.value()));
                             } else {
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                return detail::compound_mismatch(3, target, derefRight, engine_);
                             }
                             break;
                         }
@@ -4656,7 +4664,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!ints::try_add(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='");
                             tref = rr;
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            target.unchecked_as_float_ref() += derefRight.as_float();
+                            const auto rf = derefRight.checked_as_float();
+                            if (!rf) { return detail::compound_mismatch(0, target, derefRight, engine_); }
+                            target.unchecked_as_float_ref() += rf.value();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()), identifier->name));
                         } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
@@ -4674,7 +4684,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             JAISCRIPT_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
                             JAISCRIPT_TRY(compound_typed_store_back(target, std::move(joined), identifier->name));
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(0, target, derefRight, engine_);
                         }
                         break;
                     }
@@ -4686,11 +4696,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!ints::try_sub(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='");
                             tref = rr;
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            target.unchecked_as_float_ref() -= derefRight.as_float();
+                            const auto rf = derefRight.checked_as_float();
+                            if (!rf) { return detail::compound_mismatch(1, target, derefRight, engine_); }
+                            target.unchecked_as_float_ref() -= rf.value();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()), identifier->name));
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(1, target, derefRight, engine_);
                         }
                         break;
                     }
@@ -4702,11 +4714,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!ints::try_mul(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='");
                             tref = rr;
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            target.unchecked_as_float_ref() *= derefRight.as_float();
+                            const auto rf = derefRight.checked_as_float();
+                            if (!rf) { return detail::compound_mismatch(2, target, derefRight, engine_); }
+                            target.unchecked_as_float_ref() *= rf.value();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()), identifier->name));
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(2, target, derefRight, engine_);
                         }
                         break;
                     }
@@ -4725,11 +4739,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!ints::try_div(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '/='");
                             tref = rr;
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            target.unchecked_as_float_ref() /= derefRight.as_float();
+                            const auto rf = derefRight.checked_as_float();
+                            if (!rf) { return detail::compound_mismatch(3, target, derefRight, engine_); }
+                            target.unchecked_as_float_ref() /= rf.value();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()), identifier->name));
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(3, target, derefRight, engine_);
                         }
                         break;
                     }
@@ -4861,7 +4877,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             }
                             resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(0, currentValue, rightValue, engine_);
                         }
                         break;
                     case token_type::minus_equal:
@@ -4873,7 +4889,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                             resultValue = make_value(cf - rf);
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(1, currentValue, rightValue, engine_);
                         }
                         break;
                     case token_type::star_equal:
@@ -4885,7 +4901,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                             resultValue = make_value(cf * rf);
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(2, currentValue, rightValue, engine_);
                         }
                         break;
                     case token_type::slash_equal:
@@ -4898,7 +4914,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                             resultValue = make_value(cf / rf);
                         } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            return detail::compound_mismatch(3, currentValue, rightValue, engine_);
                         }
                         break;
                     case token_type::percent_equal: {
@@ -4982,7 +4998,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             if (expr->incdec_desugar) {
                 const size_t ci = currentValue.raw_storage_index();
                 if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                    return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue, engine_);
                 }
             }
 
@@ -5070,8 +5086,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                         resultValue = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Invalid operands for +=");
+                        return detail::compound_mismatch(0, currentValue, rightValue, engine_);
                     }
                     break;
                 }
@@ -5084,8 +5099,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                         resultValue = make_value(cf - rf);
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Invalid operands for -=");
+                        return detail::compound_mismatch(1, currentValue, rightValue, engine_);
                     }
                     break;
                 }
@@ -5098,8 +5112,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                         resultValue = make_value(cf * rf);
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Invalid operands for *=");
+                        return detail::compound_mismatch(2, currentValue, rightValue, engine_);
                     }
                     break;
                 }
@@ -5117,8 +5130,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                         resultValue = make_value(cf / rf);
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Invalid operands for /=");
+                        return detail::compound_mismatch(3, currentValue, rightValue, engine_);
                     }
                     break;
                 }
@@ -5288,7 +5300,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // ++/-- gate: numeric targets only, the identifier path's exact error
                 const size_t ci = currentValue.deref().raw_storage_index();
                 if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                    return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue.deref(), engine_);
                 }
             }
 

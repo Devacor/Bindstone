@@ -69,6 +69,7 @@ array<float> SK_GZ = [];
 array<float> SK_GR = [];
 int SK_NG = 0;
 int SK_NSOCK = 3;
+bool SK_EYE_INSIDE = false;
 int SK_W = 0;
 int SK_H = 0;
 int SK_WORLD = 0;
@@ -359,8 +360,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		glow = tc < 0.0 ? 9.0 : sqrt(perp < 0.0 ? 0.0 : perp) - 0.55;
 	}
 	bool hit = false;
-	float g0 = sk_field(ox, oy, oz);
-	bool inside = sk_shell(g0) < 0.0;
+	bool inside = SK_EYE_INSIDE;
 	// the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
 	float lip = (groups & 2) != 0 ? 1.2 : 1.0;
 	float ds_last = 0.0;
@@ -575,7 +575,8 @@ function sk_row(int y) -> array<int> {
 		float dy = SK_FY + SK_RY * u + SK_UY * v;
 		float dz = SK_FZ + SK_RZ * u + SK_UZ * v;
 		float il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
-		out.push(sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow));
+		int v = sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow);
+		out.push(v);
 	}
 	return out;
 }
@@ -1090,6 +1091,8 @@ class Ossuary : Scene {
 		SK_GAX = rx * cos(spin) + fx * sin(spin); SK_GAY = ry * cos(spin) + fy * sin(spin); SK_GAZ = rz * cos(spin) + fz * sin(spin);
 		SK_GBX = fx * cos(spin) - rx * sin(spin); SK_GBY = fy * cos(spin) - ry * sin(spin); SK_GBZ = fz * cos(spin) - rz * sin(spin);
 		SK_EX = ex; SK_EY = ey; SK_EZ = ez;
+		float ge = sk_field(ex, ey, ez);
+		SK_EYE_INSIDE = sk_shell(ge) < 0.0;
 		float lx = cx + fx * 0.3 + ux * 0.25 - ex;
 		float ly = cy + fy * 0.3 + uy * 0.25 - ey;
 		float lz = cz + fz * 0.3 + uz * 0.25 - ez;

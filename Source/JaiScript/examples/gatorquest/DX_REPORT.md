@@ -11,7 +11,29 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 
 | # | date | what | status |
 |---|------|------|--------|
-| 1 | 09-27 | VM reports a run-time error inside an imported file at the importing file's `import` line; the interpreter names the real file and line | worked around (use `--backend=interp` to locate errors) |
+| 1 | 09-27 | VM reports a run-time error raised while an imported file's top level runs (a global initializer) at the importing file's `import` line; the interpreter names the real file and line | worked around (rerun on `--backend=interp` to locate) |
+| 2 | 09-27 | A parse error in an imported file is not reported when the root loads; the checker instead lists every name that file declares as "use of undeclared identifier" in the other files | worked around (run the imported file directly to see its parse error) |
+
+## Summary so far (milestone a: first playable single player)
+
+What it is like: productive. ~8,000 lines across 27 files in one working session, zero checker warnings, identical
+STATE_HASH on both backends from the first run of the full sim. The C++-shaped syntax, typed classes with defaults,
+typed arrays, reference declarations on container elements and template strings with format specs carry a game
+like this without fighting the language. Performance is predictable and comfortably sufficient (VM: 1.5 ms per
+10 Hz sim tick with ~520 mobiles; ~5 ms per 162x110-pixel lit frame; interpreter about 6x slower and still playable).
+
+Top friction points, most costly first:
+
+1. **Errors that surface far from their cause** (bugs 1 and 2): an imported file's parse error shows up as a cascade
+   of "undeclared identifier" errors elsewhere; a run-time error in an imported file's top level points at the
+   `import` line on the VM. Each cost a detour. This is the single biggest DX tax in a multi-file project.
+2. **The checker misses certain, local type errors**: a literal passed to a `&` parameter, `string += char + char`
+   (which is `string += int` by the documented char promotion), `string::repeat(char, n)`. All three failed only at
+   run time, one with the bare message "Type mismatch" that names neither the operator nor the types.
+3. **Hot reload of free functions needs a hand-rolled rebind stub** (see the first entry): classes reload
+   beautifully, but a script cannot re-run a file at global scope.
+4. **Value semantics as a silent cost**: `SpellDef s = SPELLS[i];` deep-copies a record with arrays on every call.
+   Correct and documented, but easy to write in a hot path; `SpellDef& s = ...` is the fix.
 
 ## Journal
 
@@ -70,3 +92,62 @@ Suggestion: a script-level `reload(path)` / `execute_file(path)` that runs a fil
 (same unit identity as its original import, so "a reloaded file writes in place" applies). That would make
 in-game hot reload a one-liner and match what the docs promise hosts. Rating: okay (it works, but only with
 a generated stub and a naming convention that keeps state out of reloaded files).
+
+### 2026-09-27: the sim core, bots, the client
+
+**Good: the sim came up deterministic on both backends on its first real run.** Eight generated realms, 185
+spawners, ~520 mobiles, combat, loot, skills, quests, crafting and two autopilot players: `STATE_HASH` identical on
+`--backend=vm` and `--backend=interp` (2,000 ticks: 3596128203 on both). Nothing in the language had to be avoided to
+get there; the only discipline was mine (one seeded RNG, no clock in the sim). Rating: good.
+
+**Good: references into containers of class values.** `Character& c = CHARS[slot];`, `array<Item>& pack =
+CHARS[slot].pack;`, `c.pack[i].qty -= 1;`, `c.worn[s] = Item();` all mutate in place, on both backends, and read
+exactly like C++. This is what makes "flat arrays for hot data, classes for cold data" pleasant. Rating: good.
+
+**Good: template strings with format specs for HUD text.** `` `${SKILL_NAME[k]:<17}${tenths(s):>5}` `` and
+`` `${minute:02}` `` replaced a whole padding helper layer. Rating: good.
+
+**Good: error messages that tell you the fix.** `'var' is a type keyword and cannot be used as a parameter name -
+rename it (e.g. 'varname')`; `string::repeat expects a string first argument`; stack traces with file:line for
+every frame on the VM for errors inside functions. Rating: good.
+
+**Bad (bug 2): a parse error in an imported file is swallowed by the multi-file check.** Minimal repro:
+
+```jaiscript
+// b.jai
+void f(int var) {}
+// a.jai
+import "b.jai";
+f(1);
+```
+
+Running `a.jai` prints `error: use of undeclared identifier 'f'` (and, in the real project, 40 such errors across
+four files) and never mentions b.jai's parse error. Running `b.jai` directly shows the real message. Suggestion:
+when gathering the program, report an imported unit's parse errors first (and stop), naming the file.
+
+**Bad: char arithmetic ambushes byte-string building, and the checker lets it through.** Chars promote to int
+under `+` (documented), so
+
+```jaiscript
+string z = "";
+z += to_char(1) + to_char(2);   // run time: "Type mismatch"
+msg.push(to_char(0x90) + to_char(60) + to_char(96));   // pushes an int into array<string>: run time error
+```
+
+Both operand types are known to the checker; `string += int` and `array<string>.push(int)` are certain errors it
+could report at load. The run-time text "Type mismatch" should name the operator and both types (`cannot apply
+'+=' to string and int`). The idiom that works is `"" + to_char(a) + to_char(b)` (JaiDOOM does it everywhere, which
+is how I recognized it). Rating: okay (rule), bad (diagnostics).
+
+**Okay: checked integer overflow shapes hashing code.** xorshift, FNV and value noise all needed explicit
+`& 0xFFFFFFFF` lanes so products stay below 2^63. Fine once known; I only later learned `math::wrap_*` exists for
+deliberate wraparound. Suggestion: mention `math::wrap_*` in the operators chapter next to the overflow rule.
+
+**Okay: no file timestamps in the runner.** For dev-mode hot reload I have to read and compare whole files to detect a
+change. `file_mtime(path)` beside `file_exists` would make the watcher trivial. (Not a language issue.)
+
+**Performance, measured (Release runner, VM unless noted).** Data layer parse 40 ms (interp 90 ms). Worldgen of
+eight realms (55k tiles, noise, towns, roads) ~250 ms. Sim tick 1.2-1.5 ms with ~520 mobiles (interp ~8 ms).
+Render of a 162x110-pixel view with per-tile light interpolated per pixel and Bayer dither: 3.5 ms; composing the
+half-block frame plus a 38-column text pane: 1.2 ms (interp: 20 ms and 7.6 ms, still ~30 fps). The one hot spot
+I hit was my own (a 5,000-node BFS per tick per bot); caching the path fixed it. No language-level cliffs so far.

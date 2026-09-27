@@ -4849,7 +4849,7 @@ static bool lifted_partner(const expression* e) {
 
 bool vm_compiler::lift_partners_ok(const binary_expr* b) {
 	return !((lift_temp_only(b->left.get()) && !quiet_partner(b->right.get()) && !lifted_partner(b->right.get()) && !env_identifier(b->right.get())) ||
-	         (lift_temp_only(b->right.get()) && !quiet_partner(b->left.get()) && !lifted_partner(b->left.get())));
+	         (lift_temp_only(b->right.get()) && !quiet_partner(b->left.get()) && !lifted_partner(b->left.get()) && !env_identifier(b->left.get())));   // an environment name on the left reads into a temp first (sequence_left)
 }
 
 // Whole-tree classification: operands and pure value-op binaries all the way down. Returns the binary-node
@@ -4880,7 +4880,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
-	const bool rsub = (hoists(b->right.get()) && quiet_partner(b->left.get())) || (ternary_temp_operand(b->right.get()) && env_identifier(b->left.get())) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name left of a ternary reads into a temp first
+	const bool rsub = (hoists(b->right.get()) && (quiet_partner(b->left.get()) || env_identifier(b->left.get()))) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name on the left of a hoisted read reads into a temp first
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
 	if (binary_shape(b) != binary_shape_none) return true;
 	const int ln = lift_fusible_nodes(b->left.get());
@@ -4959,7 +4959,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get()));
-		const bool rsub = (hoists(expr->right.get()) && quiet_partner(expr->left.get())) || (ternary_temp_operand(expr->right.get()) && env_identifier(expr->left.get())) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
+		const bool rsub = (hoists(expr->right.get()) && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()))) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind
@@ -5063,7 +5063,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				if (member_temp_operand(e.get())) { compile_member_into_temp(e, o); return o; }   // a member read lands in a temp in operand order (partners_ok admitted it)
 				if (ternary_temp_operand(e.get())) { compile_ternary_into_temp(e, o); return o; }
 				if (call_temp_operand(e.get()) && call_partner_ok(partner, e.get())) { compile_call_into_temp(e, o); return o; }   // a call ahead of a partner it cannot change
-				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner))) {
+				if (fusable_index_expr(e.get()) && (quiet_partner(partner) || lifted_partner(partner) || env_identifier(partner))) {   // an environment partner on the left read into a temp first (sequence_left)
 					const uint8_t expect = operand_expect(b) != 0xFF ? operand_expect(b) : operand_expect(static_cast<const binary_expr*>(e.get()));
 					if (compile_subscript_into_temp(e, expect, o)) { return o; }
 				}

@@ -3869,7 +3869,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("the_listing_names_each_kept_call_with_its_rule", [this]() {
 			// row 154.0: a call the inliner keeps is named in the listing with the rule that kept it: a var local into an int parameter (an
-			// unproven argument), a leaf as a method call's argument, and a leaf returning a var element inside a loop (an unproven return)
+			// unproven argument), a leaf as a method call's argument, and a leaf returning a var element inside a loop (a return the block cannot
+			// land: the element's kind is unknown until run time)
 			const std::string l = listing_run(
 				"int add1(int a) { return a + 1; }\n"
 				"var G = [3, 4, 5];\n"
@@ -3878,7 +3879,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"run();");
 			check_true(l.find("-- call kept add1 line 4: an unproven argument") != std::string::npos, "an unproven argument keeps the call: " + l);
 			check_true(l.find("-- call kept add1 line 4: a method call's argument") != std::string::npos, "a method call's argument keeps the call: " + l);
-			check_true(l.find("-- call kept at line 4: an unproven return in a loop") != std::string::npos, "an unproven return in a loop keeps the call: " + l);
+			check_true(l.find("-- call kept at line 4: a return the block cannot land") != std::string::npos, "a return the block cannot land keeps the call: " + l);
 		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the
@@ -4328,6 +4329,68 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// row 199: an environment name ahead of a hoisted read (`q + A * sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
+		// return the checker cannot prove (`return sqrt(x) + 1.0`) grafts into a loop when its declared result is a scalar, the block landing it
+		// by that type
+		test("environment_partners_and_unproven_scalar_returns", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat A = 0.2; array<float> T = [1.0, 2.0, 3.0, 4.0];\n"
+				"function inner(float x) -> float { return sqrt(x) + 1.0; }\n"
+				"function half(int k) -> float { return k / 2; }\n"
+				"function g3(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.001; float w = q + A * sin(q * 1.3); float v = A * T[i & 3] + q; s = s + w + v; } return s; }\n"
+				"function g3i(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.001; float w = q + A * math::sin(q * 1.3); s = s + w; } return s; }\n"
+				"function g8(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float d = inner(i * 0.01); float h = half(i); s = s + d + h; } return s; }\n"
+				"string out = to_string(g3(50)) + \",\" + to_string(g3i(50)) + \",\" + to_string(g8(40));\n"
+				"sin = function(float v) { A = A + 0.5; return v; }; sqrt = function(float v) { return v * 3.0; };\n"
+				"out + \",\" + to_string(g3(5)) + \",\" + to_string(g8(5));";
+			both(src, "", "environment partners and unproven returns");
+			both(src, "", "environment partners and unproven returns, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			for (const char* fn : { "== g3 ", "== g3i ", "== g8 " }) {
+				const size_t fb = l.find(fn);
+				const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+				check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, std::string("the loop closes: ") + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 5; ++every) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a name left of a lifted ternary reads before the ternary's condition and arms run (a call there may rebind it), on both backends
+		test("a_name_left_of_a_lifted_ternary_reads_first", [this]() {
+			const std::string src = "[[warn_mode]]\nint G = 1;\n"
+				"function bumpg() -> bool { G = G + 10; return G > 15; }\n"
+				"function run(int n) -> string { string out = \"\"; for (int i = 0; i < n; ++i) { int a = G + (G * 2 + (bumpg() ? 1 : 2)); int b = G + (bumpg() ? 3 : 4); int c = (bumpg() ? 5 : 6) + G; out += to_string(a) + \" \" + to_string(b) + \" \" + to_string(c) + \";\"; } return out; }\n"
+				"run(4);";
+			both(src, "", "a name left of a lifted ternary");
+			both(src, "", "a name left of a lifted ternary, proofs off", false);
+		});
+		// a straight-line region in a method that writes globals through stdlib aliases (OSSUARY's set_world): every miss resumes the general
+		// form with the state it expects
+		test("region_misses_in_a_method_writing_globals_through_aliases", [this]() {
+			const std::string src =
+				"float SK_T = 0.0; float SK_S = 0.0; float SK_K = 0.0; float SK_TW = 0.0; float SK_WA = 0.0; float SK_MG = 0.0; float SK_MP = 0.0; float SK_MD = 0.0; float SK_CX = 0.0;\n"
+				"class Scene { float cxs = 0.1;\n"
+				"  void set_world(float t) { SK_T = t; SK_S = 0.8 + 0.07 * sin(t * 0.37); SK_K = 0.45 * sin(t * 0.21 + 0.6); SK_TW = 0.11 * sin(t * 0.29 + 1.3); SK_WA = 0.18 + 0.14 * sin(t * 0.33 + 2.0);\n"
+				"    float ph = t * 0.19; float a = 0.5 + 0.5 * cos(ph); float b = 0.5 + 0.5 * cos(ph - 2.0944); float c = 0.5 + 0.5 * cos(ph + 2.0944);\n"
+				"    a = a * a * a; b = b * b * b; c = c * c * c; float sum = a + b + c; SK_MG = a / sum; SK_MP = b / sum; SK_MD = c / sum; SK_CX = cxs; } }\n"
+				"Scene s = Scene(); float acc = 0.0;\n"
+				"for (int i = 0; i < 40; ++i) { s.set_world(i * 0.1); acc += SK_S + SK_K + SK_TW + SK_WA + SK_MG + SK_MP * 2.0 + SK_MD * 3.0 + SK_CX; }\n"
+				"to_string(acc);";
+			both(src, "", "a region in a method writing globals");
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every = 1; every <= 7; ++every) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }

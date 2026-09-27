@@ -37,6 +37,27 @@ ESC             clear target, then the menu (save, load, music, sound, zoom, qui
 In a list: up/down (or W/S) to choose, ENTER to act, ESC to close. In the backpack ENTER uses or equips and
 `D` drops. Shopkeepers offer Buy/Sell, healers heal (and resurrect ghosts for free), the banker keeps a box.
 
+## The shippable demo
+
+```
+powershell -File make_dist.ps1 [-Exe path\to\jaiscript.exe]
+```
+
+builds `dist\GatorQuest\` (gitignored): `jaiscript.exe` (statically linked: only Windows system DLLs), the scripts,
+`play.bat`, `host.bat`, `join.bat`, `serve.bat`, a player-facing `README.txt` (from `dist_readme.txt`) and the
+pre-synthesized audio cache, then checks the folder with a short headless smoke run by the copied exe. About 9 MB,
+93 files; zip it and it runs on any Windows 10+ machine with a truecolor terminal.
+
+## The road to Gator Avatar
+
+Quests from the Mayor, the Captain, the shopkeepers and the Oracle lead from sewer rats to the six realm tyrants.
+Each tyrant guards a Relic Scale: Big Mama Snapper in the Bayou, the Drowned King in Sogg, Count Crocula in Gloomfen,
+the Glacier Queen in Frostfang, Emberjaw the Wyrm on Mt. Scorchmaw (bring fire resistance, and friends) and the
+Thunder Roc on Cloudreach's far island. Bosses announce themselves, fill a health bar across the top of the view,
+call for help, rage at half health and telegraph a stomp. Bring all six scales to the Oracle at the Shrine of the Six.
+`-- endgame` plays the whole road with a scripted hero and reports each fight (time, deaths, potions); a hero with
+gear of the right tier finishes it with a handful of deaths in total.
+
 ## Multiplayer
 
 Up to 16 gators in one swamp over a LAN (or any network that reaches the host's port, 28777 by default):
@@ -101,6 +122,8 @@ jaiscript scripts/gatorquest.jai -- hotreload                    # edits five sc
 jaiscript --backend=interp scripts/gatorquest.jai -- hotreload interp
 jaiscript scripts/gatorquest.jai -- nettest                      # host + 17 client sessions over loopback, one process
 powershell -File nettest2.ps1 [-Backend interp]                  # a dedicated host and two clients as three processes
+jaiscript scripts/gatorquest.jai -- endgame                      # the six tyrants and the Six Scales, start to crown
+jaiscript scripts/gatorquest.jai -- tour [screen 200x56]         # captures of every realm, night, a boss fight, fishing
 jaiscript scripts/gatorquest.jai -- shot ticks 900 every 300     # frame captures (.ans, .txt sketch, .png)
 jaiscript scripts/gatorquest.jai -- demo frames 600              # the real play loop driven by a bot
 jaiscript scripts/gatorquest.jai -- sheet                        # every sprite and tile texture as a PNG

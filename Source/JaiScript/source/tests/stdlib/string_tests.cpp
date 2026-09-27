@@ -862,7 +862,7 @@ public:
             check_eq(std::string("String index 4 out of bounds for string of size 4"), es("string m = \"\"; try { utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u[4]; } catch (e) { m = e; } m;"));
             check_eq(std::string("Cannot iterate a utf8_string by reference: its characters are not lvalues (use for (auto c : s))"), es("string m = \"\"; try { utf8_string u = \"ab\"; for (auto& c : u) {} } catch (e) { m = e; } m;"));
             check_eq(std::string("Strings are read-only through subscript: use substr()/+ to build a new string"), es("string m = \"\"; try { utf8_string u = \"ab\"; u[0] = \"x\"; } catch (e) { m = e; } m;"));
-            check_eq(std::string("utf8_string has no member 'to_utf8'"), es("string m = \"\"; try { utf8_string u = \"ab\"; u.to_utf8(); } catch (e) { m = e; } m;"));
+            check_eq(std::string("utf8_string has no member 'to_utf8'"), es("string m = \"\"; try { var u = utf8_string(\"ab\"); u.to_utf8(); } catch (e) { m = e; } m;"));
         });
 
         test("utf8_string_positions_over_a_long_text", [this, ei]() {

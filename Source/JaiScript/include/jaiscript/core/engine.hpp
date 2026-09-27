@@ -1104,6 +1104,9 @@ namespace jai {
         const std::string* remembered_resolution(const std::string& key);
         void remember_resolution(const std::string& key, std::vector<std::string> misses, std::string candidate, std::string resolved);
         static std::string resolution_key(const std::string& path, const std::string& from_file);
+        // The builtin method names a receiver of a kind answers (0 array, 1 map, 2 string, 3 utf8_string): the one registry
+        // both backends dispatch through, read once (the static checker's member check on typed containers)
+        const std::unordered_set<uint64_t>& builtin_method_ids(int kind);
         // An import statement reached again with nothing to do: the name answered from the asking file's own folder (or an
         // absolute name) last time, the module ran, and one stat shows its stamp unchanged. false = take the full path
         bool import_is_idle(const std::string& path);

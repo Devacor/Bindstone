@@ -1760,6 +1760,58 @@ private:
                eng_.script_namespaces().count(eng_.symbolize(path)) != 0;
     }
 
+    // A method call on a declared container or string: the name must be one the builtin registry dispatches (the runtime's
+    // family-B text otherwise). A map answers a missing method through its key instead - `m.f(x)` calls the value stored
+    // at "f" - so a map is certain only when that value cannot be called (its declared value type is a primitive, a string
+    // or a container)
+    void check_builtin_member(const ctype& recv, const member_expr* m) {
+        int kind = -1;
+        switch (recv.kind) {
+            case ctype::array_k: kind = 0; break;
+            case ctype::map_k: kind = 1; break;
+            case ctype::string_k: kind = 2; break;
+            case ctype::utf8_k: kind = 3; break;
+            default: return;
+        }
+        if (kind == 1) {
+            const type_info* value = recv.ti ? recv.ti->value_type().get() : nullptr;
+            if (!value) { return; }
+            switch (value->base_type) {
+                case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+                case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+                case script_value_type::jai_array_type: case script_value_type::jai_map_type:
+                    break;
+                default:
+                    return;
+            }
+        }
+        const auto& ids = eng_.builtin_method_ids(kind);
+        if (ids.count(eng_.symbolize(m->member))) { return; }
+        std::string best;
+        size_t best_distance = 3;
+        for (const uint64_t id : ids) {
+            const std::string_view name = eng_.get_symbolizer()->get_string(id);
+            const size_t d = edit_distance(m->member, name);
+            if (d < best_distance || (d == best_distance && !best.empty() && name < best)) { best_distance = d; best = std::string(name); }
+        }
+        diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
+             (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
+    }
+    static size_t edit_distance(std::string_view a, std::string_view b) {
+        std::vector<size_t> row(b.size() + 1);
+        for (size_t j = 0; j <= b.size(); ++j) { row[j] = j; }
+        for (size_t i = 1; i <= a.size(); ++i) {
+            size_t diagonal = row[0];
+            row[0] = i;
+            for (size_t j = 1; j <= b.size(); ++j) {
+                const size_t up = row[j];
+                row[j] = std::min({row[j] + 1, row[j - 1] + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1)});
+                diagonal = up;
+            }
+        }
+        return row[b.size()];
+    }
+
     // Handle builtins every object value answers (shared_ptr registry + the universal
     // same_as): a class method of the same name wins first, so this runs on misses only.
     static bool handle_builtin_result(std::string_view member, ctype& out) {
@@ -2454,6 +2506,7 @@ private:
 			if (!recv.tentative || recv.element_proof) {
 				proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
 			}
+			if (!recv.tentative && !m->is_static) { check_builtin_member(recv, m); }
 			stamp(c->builtin_receiver, proven, uint8_t(0));
 			if (proven && c->arguments.empty() && (m->member == "size" || m->member == "length")) { return ctype::make(ctype::int_k); }   // every kind's size is its count
 			if (proven) {

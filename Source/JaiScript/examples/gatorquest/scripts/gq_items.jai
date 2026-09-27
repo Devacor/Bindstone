@@ -222,7 +222,7 @@ void player_refresh(int slot) {
 	Character& c = CHARS[slot];
 	int m = c.mob;
 	if (!mob_live(m)) { return; }
-	int hpmax = 30 + player_str(slot) * 3 / 4 + player_bonus(slot, 10);
+	int hpmax = 40 + player_str(slot) + player_bonus(slot, 10);
 	int mpmax = player_int(slot) + player_bonus(slot, 11);
 	MOB_HPMAX[m] = imax(10, hpmax);
 	MOB_MPMAX[m] = imax(0, mpmax);
@@ -306,6 +306,13 @@ void ground_tick() {
 
 // drop near (x, y): the tile itself, else a free neighbour (loot pops outward)
 void drop_near(Item it, int w, int x, int y, int owner, int ttl) {
+	// loot never lands where nobody can stand: open sky, walls, lava
+	int k0 = walk_at(w, x, y);
+	if (k0 == 0 || k0 == 3 || k0 == 5) {
+		array<int> safe = find_spot(w, x, y, 8, LAND_MASK + 4);
+		x = safe[0];
+		y = safe[1];
+	}
 	int best_x = x;
 	int best_y = y;
 	int least = gi_count_at(w, x, y);
@@ -314,7 +321,7 @@ void drop_near(Item it, int w, int x, int y, int owner, int ttl) {
 		int ny = y + DY[(d + rnd(8)) % 8];
 		if (!in_world(w, nx, ny)) { continue; }
 		int k = walk_at(w, nx, ny);
-		if (k == 0 || k == 3) { continue; }
+		if (k == 0 || k == 3 || k == 5) { continue; }
 		int n = gi_count_at(w, nx, ny);
 		if (n < least) { least = n; best_x = nx; best_y = ny; }
 	}

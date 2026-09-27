@@ -97,10 +97,62 @@ string snapshot_for(int slot) {
 	return snapshot_view(slot, MOB_WORLD[me], MOB_X[me], MOB_Y[me]);
 }
 
+// a player's delta memory: cleared on join so its first snapshot is full
+void snap_reset(int slot) {
+	while (SNAP_MOBS.size() <= slot) { SNAP_MOBS.push({}); SNAP_ITEMS.push({}); SNAP_WORLD.push(-1); }
+	SNAP_MOBS[slot] = {};
+	SNAP_ITEMS[slot] = {};
+	SNAP_WORLD[slot] = -1;
+}
+
+// the visible records, full or as changes against what this player already has.
+// kind "M" mobiles, "I" items; removals are "X|ser" and "Z|ser"
+string snap_records(int slot, array<int>& sers, array<string>& recs, bool delta, bool mobs) {
+	string out = "";
+	if (!delta) {
+		for (int i = 0; i < recs.size(); ++i) { out += recs[i]; }
+		if (slot >= 0) {
+			map<int, string> fresh;
+			for (int i = 0; i < recs.size(); ++i) { fresh[sers[i]] = recs[i]; }
+			if (mobs) { SNAP_MOBS[slot] = fresh; } else { SNAP_ITEMS[slot] = fresh; }
+		}
+		return out;
+	}
+	if (mobs) { return snap_delta(SNAP_MOBS[slot], sers, recs, "X|"); }
+	return snap_delta(SNAP_ITEMS[slot], sers, recs, "Z|");
+}
+
+string snap_delta(map<int, string>& last, array<int>& sers, array<string>& recs, string removal) {
+	string out = "";
+	map<int, int> seen;
+	for (int i = 0; i < recs.size(); ++i) {
+		int ser = sers[i];
+		seen[ser] = 1;
+		if (last.get(ser, "") != recs[i]) {
+			out += recs[i];
+			last[ser] = recs[i];
+		}
+	}
+	array<int> known = last.keys();
+	for (int k = 0; k < known.size(); ++k) {
+		if (!seen.has(known[k])) {
+			out += removal + to_string(known[k]) + "\n";
+			last.erase(known[k]);
+		}
+	}
+	return out;
+}
+
 // what a camera at (w, x, y) sees; slot < 0 = a spectator (title screen) with no sheet or vitals
 string snapshot_view(int slot, int w, int x, int y) {
 	int me = slot >= 0 ? CHARS[slot].mob : -1;
-	string out = `S|${TICK}|${w}|${me >= 0 ? MOB_SER[me] : -1}|${W_WEATHER[w]}|${time_of_day()}|${day_number()}\n`;
+	bool delta = false;
+	if (slot >= 0) {
+		while (SNAP_MOBS.size() <= slot) { SNAP_MOBS.push({}); SNAP_ITEMS.push({}); SNAP_WORLD.push(-1); }
+		delta = SNAP_DELTAS && SNAP_WORLD[slot] == w;
+		SNAP_WORLD[slot] = w;
+	}
+	string out = `S|${TICK}|${w}|${me >= 0 ? MOB_SER[me] : -1}|${W_WEATHER[w]}|${time_of_day()}|${day_number()}|${delta ? 1 : 0}\n`;
 	if (me >= 0) {
 		Character& c = CHARS[slot];
 		int target = MOB_TARGET[me];
@@ -114,35 +166,35 @@ string snapshot_view(int slot, int w, int x, int y) {
 	int x1 = imin(ww - 1, x + VIEW_R);
 	int y0 = imax(0, y - VIEW_R);
 	int y1 = imin(wh - 1, y + VIEW_R);
+	array<int> msers;
+	array<string> mrecs;
 	for (int ty = y0; ty <= y1; ++ty) {
 		int row = W_OFF[w] + ty * ww;
 		for (int tx = x0; tx <= x1; ++tx) {
 			int m = OCC[row + tx] - 1;
 			if (m < 0) { continue; }
-			out += mob_record(m, slot);
+			string rec = mob_record(m, slot);
+			if (rec != "") { msers.push(MOB_SER[m]); mrecs.push(rec); }
 		}
 	}
 	// ghosts do not occupy tiles; players who died still show
 	for (int s = 0; s < CHARS.size(); ++s) {
 		int pm = CHARS[s].mob;
 		if (s == slot || !CHARS[s].active || !mob_live(pm) || !mob_ghost(pm) || MOB_WORLD[pm] != w) { continue; }
-		if (cheb(MOB_X[pm], MOB_Y[pm], x, y) <= VIEW_R) { out += mob_record(pm, slot); }
+		if (cheb(MOB_X[pm], MOB_Y[pm], x, y) <= VIEW_R) { msers.push(MOB_SER[pm]); mrecs.push(mob_record(pm, slot)); }
 	}
-	if (me >= 0 && mob_ghost(me)) { out += mob_record(me, slot); }
-	if (slot < 0) {
-		for (int i = 0; i < GI_ITEM.size(); ++i) {
-			if (GI_ITEM[i].base >= 0 && GI_W[i] == w && cheb(GI_X[i], GI_Y[i], x, y) <= VIEW_R) {
-				out += `I|${GI_SER[i]}|${GI_ITEM[i].base}|${GI_ITEM[i].rarity}|${GI_X[i]}|${GI_Y[i]}|${GI_ITEM[i].qty}\n`;
-			}
-		}
-		return out;
-	}
-	Character& c = CHARS[slot];
+	if (me >= 0 && mob_ghost(me)) { msers.push(MOB_SER[me]); mrecs.push(mob_record(me, slot)); }
+	array<int> isers;
+	array<string> irecs;
 	for (int i = 0; i < GI_ITEM.size(); ++i) {
 		if (GI_ITEM[i].base < 0 || GI_W[i] != w || cheb(GI_X[i], GI_Y[i], x, y) > VIEW_R) { continue; }
-		Item it = GI_ITEM[i];
-		out += `I|${GI_SER[i]}|${it.base}|${it.rarity}|${GI_X[i]}|${GI_Y[i]}|${it.qty}\n`;
+		isers.push(GI_SER[i]);
+		irecs.push(`I|${GI_SER[i]}|${GI_ITEM[i].base}|${GI_ITEM[i].rarity}|${GI_X[i]}|${GI_Y[i]}|${GI_ITEM[i].qty}\n`);
 	}
+	out += snap_records(slot, msers, mrecs, delta, true);
+	out += snap_records(slot, isers, irecs, delta, false);
+	if (slot < 0) { return out; }
+	Character& c = CHARS[slot];
 	if (TICK % 10 == 0 || c.version != NET_SHEET_SENT[slot]) {
 		out += "TC\n";
 		for (int ty = y0; ty <= y1; ++ty) {
@@ -226,7 +278,8 @@ void cv_apply(ClientView& v, string snap) {
 			v.tod = f[5].to_int(0);
 			v.day = f[6].to_int(1);
 			v.snaps = v.snaps + 1;
-			// mobiles and items are a full picture each snapshot
+			// a delta snapshot changes the picture we have; a full one replaces it
+			if (f.size() >= 8 && f[7] == "1") { continue; }
 			v.m_ser = [];
 			v.m_kind = [];
 			v.m_x = [];
@@ -259,30 +312,65 @@ void cv_apply(ClientView& v, string snap) {
 			v.action_left = f[7].to_int(0);
 			v.ghost = f[8].to_int(0);
 		} else if (k == "M" && f.size() >= 16) {
-			v.m_ser.push(f[1].to_int(0));
-			v.m_kind.push(iclamp(f[2].to_int(0), 0, MONS.size() - 1));
-			v.m_x.push(f[3].to_int(0));
-			v.m_y.push(f[4].to_int(0));
-			v.m_px.push(f[5].to_int(0));
-			v.m_py.push(f[6].to_int(0));
-			v.m_mt.push(f[7].to_int(0));
-			v.m_md.push(imax(1, f[8].to_int(1)));
-			v.m_dir.push(f[9].to_int(4));
-			v.m_hp.push(f[10].to_int(100));
-			v.m_flags.push(f[11].to_int(0));
-			v.m_role.push(f[12].to_int(-1));
-			v.m_slot.push(f[13].to_int(-1));
-			v.m_hue.push(f[14].to_int(0));
-			v.m_name.push(f[15]);
+			int ser = f[1].to_int(0);
+			int i = cv_find(v, ser);
+			if (i < 0) {
+				i = v.m_ser.size();
+				v.m_ser.push(ser);
+				v.m_kind.push(0);
+				v.m_x.push(0);
+				v.m_y.push(0);
+				v.m_px.push(0);
+				v.m_py.push(0);
+				v.m_mt.push(0);
+				v.m_md.push(1);
+				v.m_dir.push(4);
+				v.m_hp.push(100);
+				v.m_flags.push(0);
+				v.m_role.push(-1);
+				v.m_slot.push(-1);
+				v.m_hue.push(0);
+				v.m_name.push("");
+			}
+			v.m_kind[i] = iclamp(f[2].to_int(0), 0, MONS.size() - 1);
+			v.m_x[i] = f[3].to_int(0);
+			v.m_y[i] = f[4].to_int(0);
+			v.m_px[i] = f[5].to_int(0);
+			v.m_py[i] = f[6].to_int(0);
+			v.m_mt[i] = f[7].to_int(0);
+			v.m_md[i] = imax(1, f[8].to_int(1));
+			v.m_dir[i] = f[9].to_int(4);
+			v.m_hp[i] = f[10].to_int(100);
+			v.m_flags[i] = f[11].to_int(0);
+			v.m_role[i] = f[12].to_int(-1);
+			v.m_slot[i] = f[13].to_int(-1);
+			v.m_hue[i] = f[14].to_int(0);
+			v.m_name[i] = f[15];
+		} else if (k == "X" && f.size() >= 2) {
+			int i = cv_find(v, f[1].to_int(0));
+			if (i >= 0) { cv_remove_mob(v, i); }
 		} else if (k == "I" && f.size() >= 7) {
 			int base = f[2].to_int(-1);
 			if (base < 0 || base >= ITEMS.size()) { continue; }
-			v.i_ser.push(f[1].to_int(0));
-			v.i_base.push(base);
-			v.i_rar.push(f[3].to_int(0));
-			v.i_x.push(f[4].to_int(0));
-			v.i_y.push(f[5].to_int(0));
-			v.i_qty.push(f[6].to_int(1));
+			int ser = f[1].to_int(0);
+			int i = cv_find_item(v, ser);
+			if (i < 0) {
+				i = v.i_ser.size();
+				v.i_ser.push(ser);
+				v.i_base.push(0);
+				v.i_rar.push(0);
+				v.i_x.push(0);
+				v.i_y.push(0);
+				v.i_qty.push(1);
+			}
+			v.i_base[i] = base;
+			v.i_rar[i] = f[3].to_int(0);
+			v.i_x[i] = f[4].to_int(0);
+			v.i_y[i] = f[5].to_int(0);
+			v.i_qty[i] = f[6].to_int(1);
+		} else if (k == "Z" && f.size() >= 2) {
+			int i = cv_find_item(v, f[1].to_int(0));
+			if (i >= 0) { cv_remove_item(v, i); }
 		} else if (k == "TC") {
 			v.tover = {};
 		} else if (k == "T" && f.size() >= 3) {
@@ -357,6 +445,40 @@ int cv_find(ClientView& v, int ser) {
 }
 
 int cv_me(ClientView& v) { return cv_find(v, v.my_ser); }
+
+int cv_find_item(ClientView& v, int ser) {
+	for (int i = 0; i < v.i_ser.size(); ++i) {
+		if (v.i_ser[i] == ser) { return i; }
+	}
+	return -1;
+}
+
+void cv_remove_mob(ClientView& v, int i) {
+	v.m_ser.remove(i);
+	v.m_kind.remove(i);
+	v.m_x.remove(i);
+	v.m_y.remove(i);
+	v.m_px.remove(i);
+	v.m_py.remove(i);
+	v.m_mt.remove(i);
+	v.m_md.remove(i);
+	v.m_dir.remove(i);
+	v.m_hp.remove(i);
+	v.m_flags.remove(i);
+	v.m_role.remove(i);
+	v.m_slot.remove(i);
+	v.m_hue.remove(i);
+	v.m_name.remove(i);
+}
+
+void cv_remove_item(ClientView& v, int i) {
+	v.i_ser.remove(i);
+	v.i_base.remove(i);
+	v.i_rar.remove(i);
+	v.i_x.remove(i);
+	v.i_y.remove(i);
+	v.i_qty.remove(i);
+}
 
 // terrain as this client knows it
 int cv_tile(ClientView& v, int x, int y) {

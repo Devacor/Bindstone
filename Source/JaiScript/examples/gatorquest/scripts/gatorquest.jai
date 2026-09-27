@@ -40,6 +40,7 @@ import "gq_png.jai";
 import "gq_dev.jai";
 import "gq_tests.jai";
 import "gq_serve.jai";
+import "gq_endgame.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -235,7 +236,26 @@ int run_sheet() {
 	return 0;
 }
 
+// build the audio cache (every effect and every theme) so a fresh install starts without the wait
+int run_prepare() {
+	int t0 = clock_ms();
+	string dir = data_root() + "/cache";
+	if (!audio_prepare(dir)) {
+		print("prepare: " + dir + " is not writable");
+		return 1;
+	}
+	int themes = 0;
+	for (int theme = 0; theme < THEME_TEMPO.size(); ++theme) {
+		string p = dir + "/theme" + to_string(theme) + ".mid";
+		if (!file_exists(p)) { write_file(p, midi_theme(theme)); }
+		if (file_exists(p)) { themes = themes + 1; }
+	}
+	print(`prepare: ${SFX_PATH.size()} sound effects and ${themes} music themes in ${dir} (${clock_ms() - t0} ms)`);
+	return 0;
+}
+
 int main() {
+	if (arg_flag("nodelta")) { SNAP_DELTAS = false; }
 	if (arg_flag("sheet")) { return run_sheet(); }
 	if (arg_flag("smoke")) { return run_smoke(); }
 	if (arg_flag("shot")) { return run_shots(); }
@@ -244,6 +264,9 @@ int main() {
 	if (arg_flag("savetest")) { return run_savetest(tests); }
 	if (arg_flag("hotreload")) { return run_hotreload(tests, !arg_flag("interp")); }
 	if (arg_flag("nettest")) { return run_nettest(tests, arg_value("port", "28911").to_int(28911)); }
+	if (arg_flag("prepare")) { return run_prepare(); }
+	if (arg_flag("endgame")) { return run_endgame(); }
+	if (arg_flag("tour")) { return run_tour(); }
 	if (arg_flag("serve")) { return run_serve(); }
 	if (arg_flag("client")) { return run_client(); }
 	return run_play();

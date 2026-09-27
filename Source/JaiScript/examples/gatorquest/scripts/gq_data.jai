@@ -647,7 +647,7 @@ array<string> MON_SRC = [
 	"Merrow Spearman|hp=60|dmg=8-14|armor=3|spd=2|aspd=8|ai=pack|move=3|tier=3|fame=20|gold=10-30|drop=Kelp:600,Black Pearl:300|spr=merrow|col=teal",
 	"Sea Witch|hp=55|dmg=3-6|spd=3|aspd=10|ai=caster|move=3|spell=Frost Bolt|tier=3|fame=24|gold=20-50|drop=Black Pearl:800,Scroll of Frost Bolt:80|spr=witch|col=teal|quip=Such pretty scales. MINE.",
 	"Angler Lurker|hp=70|dmg=10-18|spd=3|aspd=9|ai=ambush|move=2|tier=3|fame=26|light=3|drop=Pearl Necklace:40|spr=angler|col=navy",
-	"The Drowned King|hp=720|dmg=16-28|armor=8|spd=3|aspd=8|ai=boss|move=3|spell=Frost Bolt|tier=4|fame=500|gold=300-600|boss|summon=Drowned Sailor|drop=Pearl Relic Scale:1000,Trident of the Drowned King:1000|spr=drownking|col=pearl|light=3|quip=KNEEL BEFORE THE TIDE!",
+	"The Drowned King|hp=720|dmg=14-24|armor=8|spd=3|aspd=8|ai=boss|move=3|spell=Frost Bolt|tier=4|fame=500|gold=300-600|boss|summon=Drowned Sailor|drop=Pearl Relic Scale:1000,Trident of the Drowned King:1000|spr=drownking|col=pearl|light=3|quip=KNEEL BEFORE THE TIDE!",
 	// -- Gloomfen, the haunted swamp (tier 3)
 	"Will-o'-Wisp|hp=30|dmg=3-6|spd=2|aspd=10|ai=coward|move=4|spell=Magic Arrow|tier=3|fame=16|light=4|drop=Ectoplasm:400|spr=wisp|col=wisp|quip=This way... this way...",
 	"Swamp Zombie|hp=55|dmg=8-13|spd=5|aspd=10|ai=pack|move=3|tier=3|fame=14|undead|drop=Bone:600|spr=zombie|col=gray|snd=groan",
@@ -661,20 +661,20 @@ array<string> MON_SRC = [
 	"Frost Wisp|hp=45|dmg=4-8|spd=2|aspd=10|ai=caster|move=4|spell=Frost Bolt|tier=4|fame=26|frostproof|light=2|drop=Frost Shard:500|spr=wisp|col=ice",
 	"Penguin Mercenary|hp=50|dmg=9-14|armor=3|spd=2|aspd=7|ai=pack|move=3|tier=4|fame=22|frostproof|gold=15-40|drop=Raw Fish:800|spr=penguin|col=black|quip=Noot noot!",
 	"Snow Troll|hp=140|dmg=14-24|armor=4|spd=4|aspd=10|ai=melee|tier=4|fame=45|frostproof|regen=2|drop=Hide:800|spr=troll|col=snow",
-	"The Glacier Queen|hp=1100|dmg=20-34|armor=10|spd=3|aspd=8|ai=boss|move=1|spell=Frost Bolt|tier=5|fame=800|gold=500-900|boss|frostproof|summon=Frost Wisp|drop=Frost Relic Scale:1000,Glacier Queen's Tiara:1000|spr=glacierqueen|col=ice|light=4|quip=Your blood will make a lovely sorbet.",
+	"The Glacier Queen|hp=1100|dmg=15-26|armor=10|spd=3|aspd=8|ai=boss|move=1|spell=Frost Bolt|tier=5|fame=800|gold=500-900|boss|frostproof|summon=Frost Wisp|drop=Frost Relic Scale:1000,Glacier Queen's Tiara:1000|spr=glacierqueen|col=ice|light=4|quip=Your blood will make a lovely sorbet.",
 	// -- Mt. Scorchmaw (tier 5)
 	"Fire Imp|hp=55|dmg=4-8|spd=2|aspd=10|ai=coward|spell=Fireball|tier=5|fame=26|fireproof|light=2|drop=Sulfurous Ash:900|spr=imp|col=lava|quip=Hehehehe, crispy!",
 	"Salamander|hp=80|dmg=12-20|spd=2|aspd=8|ai=melee|tier=5|fame=34|fireproof|light=2|drop=Magma Core:120|spr=salamander|col=orange",
 	"Magma Golem|hp=200|dmg=18-30|armor=12|spd=6|aspd=12|ai=melee|tier=5|fame=60|fireproof|light=3|drop=Magma Core:500,Iron Ore:900|spr=golem|col=lava|snd=rumble",
 	"Ash Bat|hp=40|dmg=8-14|spd=1|aspd=6|ai=pack|move=4|tier=5|fame=16|fireproof|spr=bat|col=char|snd=screech",
 	"Cinder Cultist|hp=90|dmg=6-10|spd=3|aspd=10|ai=caster|spell=Flamestrike|tier=5|fame=40|fireproof|gold=30-80|drop=Scroll of Flamestrike:60,Sulfurous Ash:900|spr=cultist|col=crimson|quip=The mountain hungers!",
-	"Emberjaw the Wyrm|hp=1500|dmg=24-40|armor=12|spd=3|aspd=8|ai=boss|spell=Fireball|tier=6|fame=1200|gold=800-1500|boss|fireproof|summon=Fire Imp|drop=Ember Relic Scale:1000,Emberjaw's Fang:1000|spr=emberjaw|col=lava|light=5|quip=A GATOR? I EAT GATORS FOR BRUNCH.",
+	"Emberjaw the Wyrm|hp=1500|dmg=18-30|armor=12|spd=3|aspd=8|ai=boss|spell=Fireball|tier=6|fame=1200|gold=800-1500|boss|fireproof|summon=Fire Imp|drop=Ember Relic Scale:1000,Emberjaw's Fang:1000|spr=emberjaw|col=lava|light=5|quip=A GATOR? I EAT GATORS FOR BRUNCH.",
 	// -- Cloudreach (tier 5)
 	"Harpy|hp=70|dmg=10-16|spd=2|aspd=9|ai=ranged|rng=6|move=4|tier=5|fame=28|drop=Feather:900|spr=harpy|col=tan|quip=SKREEEE!",
 	"Storm Elemental|hp=120|dmg=8-14|spd=2|aspd=11|ai=caster|move=4|spell=Lightning|tier=5|fame=44|light=3|drop=Storm Essence:400|spr=stormel|col=cyan|snd=thunder",
 	"Griffon|hp=160|dmg=18-28|armor=4|spd=2|aspd=8|ai=melee|move=4|tier=5|fame=50|drop=Feather:1000|spr=griffon|col=gold",
 	"Sky Pirate|hp=110|dmg=14-22|spd=3|aspd=10|ai=ranged|rng=7|tier=5|fame=40|gold=40-100|drop=Arrow:800,Crossbow:60|spr=pirate|col=navy|quip=Yarr, fall off my island!",
-	"The Thunder Roc|hp=1800|dmg=26-44|armor=10|spd=2|aspd=8|ai=boss|move=4|spell=Chain Lightning|tier=6|fame=1500|gold=900-1800|boss|summon=Harpy|drop=Storm Relic Scale:1000,Stormcaller:1000|spr=roc|col=gold|light=3|quip=SKRAAAAAAWK!",
+	"The Thunder Roc|hp=1800|dmg=19-32|armor=10|spd=2|aspd=8|ai=boss|move=4|spell=Chain Lightning|tier=6|fame=1500|gold=900-1800|boss|summon=Harpy|drop=Storm Relic Scale:1000,Stormcaller:1000|spr=roc|col=gold|light=3|quip=SKRAAAAAAWK!",
 	// -- summons
 	"Frog Familiar|hp=60|dmg=6-12|spd=2|aspd=7|ai=summon|fac=player|move=3|tier=1|spr=frog_big|col=gold|quip=Ribbit! (determined)"
 ];

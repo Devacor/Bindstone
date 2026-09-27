@@ -653,6 +653,13 @@ void use_item(int slot, int index) {
 	int w = MOB_WORLD[m];
 	if (item_equippable(it)) { equip_from_pack(slot, index); return; }
 	string eff = EFF_NAME[d.eff];
+	if (d.kind == Kind.potion && eff != "bomb") {
+		if (TICK < c.potion_t) {
+			say_to(slot, `You must wait ${(c.potion_t - TICK + 9) / 10}s before drinking another potion.`, C_GRAY);
+			return;
+		}
+		c.potion_t = TICK + 30;
+	}
 	if (eff == "heal") {
 		pack_take_at(slot, index, 1);
 		heal_mob(m, d.pow, m);
@@ -808,10 +815,28 @@ void pick_up(int slot) {
 	}
 	int w = MOB_WORLD[m];
 	int got = 0;
+	// what is in reach, most important first: quest items, gold, then by rarity
+	array<int> reach;
+	array<int> rank;
 	for (int i = 0; i < GI_ITEM.size(); ++i) {
 		if (GI_ITEM[i].base < 0 || GI_W[i] != w || cheb(GI_X[i], GI_Y[i], MOB_X[m], MOB_Y[m]) > 1) { continue; }
 		if (GI_OWNER[i] >= 0 && GI_OWNER[i] != slot) { continue; }
 		if (mob_ghost(m) && GI_OWNER[i] != slot) { continue; }
+		int kind = ITEMS[GI_ITEM[i].base].kind;
+		int r = kind == Kind.quest ? 100 : (kind == Kind.gold ? 90 : GI_ITEM[i].rarity * 10);
+		int at = reach.size();
+		while (at > 0 && rank[at - 1] < r) { at = at - 1; }
+		reach.push(0);
+		rank.push(0);
+		for (int k = reach.size() - 1; k > at; --k) {
+			reach[k] = reach[k - 1];
+			rank[k] = rank[k - 1];
+		}
+		reach[at] = i;
+		rank[at] = r;
+	}
+	for (int ri = 0; ri < reach.size(); ++ri) {
+		int i = reach[ri];
 		Item it = GI_ITEM[i];
 		if (!pack_add(slot, it)) { say_to(slot, "Your backpack is full.", C_RED); break; }
 		ev(Ev.pickup, w, GI_X[i], GI_Y[i], GI_SER[i], it.base, 0, -1, "");

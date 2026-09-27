@@ -36,9 +36,9 @@ int ambient_level(ClientView& v) {
 		int hour = (v.tod * 24 / DAY_TICKS + 7) % 24;
 		int minute = (v.tod * 24 * 60 / DAY_TICKS) % 60;
 		if (hour >= 8 && hour < 18) { lvl = 15; }
-		else if (hour >= 20 || hour < 5) { lvl = 4; }
-		else if (hour >= 18) { lvl = 15 - ((hour - 18) * 60 + minute) * 11 / 120; }
-		else { lvl = 4 + ((hour - 5) * 60 + minute) * 11 / 180; }
+		else if (hour >= 20 || hour < 5) { lvl = 2; }
+		else if (hour >= 18) { lvl = 15 - ((hour - 18) * 60 + minute) * 13 / 120; }
+		else { lvl = 2 + ((hour - 5) * 60 + minute) * 13 / 180; }
 	}
 	if (v.weather == 3) { lvl = lvl - 3; }
 	else if (v.weather == 4) { lvl = lvl - 2; }
@@ -810,6 +810,120 @@ void process_events(ClientView& v) {
 	v.e_text = [];
 }
 
+// ----------------------------------------------------------------- juice ---
+// footsteps: dust on dry ground, splashes in water, for every player that moved since the last frame
+void step_particles(ClientView& v) {
+	for (int i = 0; i < v.m_ser.size(); ++i) {
+		if (v.m_slot[i] < 0 || (v.m_flags[i] & MF_GHOST) != 0) { continue; }
+		int ser = v.m_ser[i];
+		float was_x = VIS_X.get(ser, -1.0);
+		float was_y = VIS_Y.get(ser, -1.0);
+		float now_x = v.m_x[i] * 1.0;
+		float now_y = v.m_y[i] * 1.0;
+		VIS_X[ser] = now_x;
+		VIS_Y[ser] = now_y;
+		if (was_x < 0.0 || (was_x == now_x && was_y == now_y)) { continue; }
+		int t = cv_tile(v, math::itrunc(was_x), math::itrunc(was_y));
+		int k = T_WALK[t];
+		float fx = was_x + 0.5;
+		float fy = was_y + 0.9;
+		if (k == 2 || t == T_SHALLOW || t == T_SWAMP || t == T_BOG || t == T_MUD) {
+			for (int n = 0; n < 4; ++n) { particle(fx + (prandf() - 0.5) * 0.6, fy - 0.2, (prandf() - 0.5) * 0.05, -0.05 - prandf() * 0.05, 10 + prand(8), prand(2) == 0 ? rgb(200, 230, 255) : rgb(110, 170, 220), 2); }
+		} else if (t == T_SNOW || t == T_ICE) {
+			for (int n = 0; n < 3; ++n) { particle(fx + (prandf() - 0.5) * 0.6, fy, (prandf() - 0.5) * 0.03, -0.02, 14, rgb(240, 245, 255), 4); }
+		} else if (t == T_DIRT || t == T_SAND || t == T_ROAD || t == T_ASH || t == T_CAVEFLOOR) {
+			int c = t == T_SAND ? rgb(230, 210, 160) : (t == T_ASH ? rgb(120, 110, 110) : rgb(160, 130, 95));
+			for (int n = 0; n < 2; ++n) { particle(fx + (prandf() - 0.5) * 0.5, fy, (prandf() - 0.5) * 0.03, -0.015, 12 + prand(6), c, 4); }
+		}
+	}
+}
+
+// what the local player is busy with, animated: a bobbing float, pick sparks, wood chips, anvil sparks
+void action_juice(ClientView& v, int camx, int camy) {
+	int me = cv_me(v);
+	if (me < 0 || v.action == 0) { return; }
+	int S = TS;
+	float vt = view_tick(v);
+	int dir = v.m_dir[me];
+	float tx = mob_vx(v, me, vt) + DX[dir];
+	float ty = mob_vy(v, me, vt) + DY[dir];
+	if (v.action == 1) {
+		int sx = math::itrunc((tx + 0.5) * S) - camx + VW / 2;
+		int sy = math::itrunc((ty + 0.5) * S) - camy + VH / 2 + ((FRAME / 6) % 2);
+		bool bite = v.action_left <= 4 && v.action_left > 0;
+		if (bite) { sy = sy + 1; }
+		pset(sx, sy - 1, rgb(250, 250, 250));
+		pset(sx, sy, rgb(230, 40, 40));
+		if (FRAME % 20 == 0 || (bite && FRAME % 4 == 0)) { particle(tx + 0.5, ty + 0.5, 0.0, 0.0, 12, rgb(200, 230, 255), 4); }
+		if (bite && FRAME % 3 == 0) { particle(tx + 0.5, ty + 0.5, (prandf() - 0.5) * 0.08, -0.08, 10, rgb(220, 240, 255), 2); }
+		// the line, from the gator's snout to the float
+		int gx = math::itrunc((mob_vx(v, me, vt) + 0.5 + DX[dir] * 0.4) * S) - camx + VW / 2;
+		int gy = math::itrunc((mob_vy(v, me, vt) + 0.3) * S) - camy + VH / 2;
+		if (FRAME % 2 == 0) { draw_line_px(gx, gy, sx, sy - 1, rgb(200, 200, 190)); }
+	} else if ((v.action == 2 || v.action == 3) && FRAME % 5 == 0) {
+		int c = v.action == 2 ? (prand(2) == 0 ? rgb(255, 240, 160) : rgb(200, 200, 210)) : (prand(2) == 0 ? rgb(170, 120, 70) : rgb(120, 170, 70));
+		for (int n = 0; n < 3; ++n) { particle(tx + 0.5, ty + 0.5, (prandf() - 0.5) * 0.1, -0.06 - prandf() * 0.05, 8 + prand(6), c, v.action == 2 ? 3 : 2); }
+		if (FRAME % 10 == 0) { sfx(v.action == 2 ? "clink" : "chop"); }
+	} else if (v.action == 5 && FRAME % 6 == 0) {
+		burst(Fx.sparks, mob_vx(v, me, vt) + 0.5, mob_vy(v, me, vt) + 0.4, 3);
+		if (FRAME % 12 == 0) { sfx("hammer"); }
+	} else if (v.action == 4 && FRAME % 8 == 0) {
+		burst(Fx.heal, mob_vx(v, me, vt) + 0.5, mob_vy(v, me, vt) + 0.5, 2);
+	}
+}
+
+// a boss in view gets a health bar across the top
+void boss_bar(ClientView& v) {
+	for (int i = 0; i < v.m_ser.size(); ++i) {
+		if ((v.m_flags[i] & MF_BOSS) == 0) { continue; }
+		string name = MONS[v.m_kind[i]].name;
+		int bw = imax(40, VW * 3 / 5);
+		int bx = (VW - bw) / 2;
+		int by = 9;
+		int filled = bw * v.m_hp[i] / 100;
+		bool hurt = FLASH.has(v.m_ser[i]) && FLASH[v.m_ser[i]] > FRAME;
+		for (int x = -1; x <= bw; ++x) {
+			pset(bx + x, by - 1, rgb(30, 10, 10));
+			pset(bx + x, by + 3, rgb(30, 10, 10));
+		}
+		for (int y = 0; y < 3; ++y) {
+			pset(bx - 1, by + y, rgb(30, 10, 10));
+			pset(bx + bw, by + y, rgb(30, 10, 10));
+			for (int x = 0; x < bw; ++x) {
+				int c = x < filled ? (hurt ? rgb(255, 255, 255) : (y == 0 ? rgb(255, 110, 90) : rgb(200, 30, 30))) : rgb(70, 20, 20);
+				pset(bx + x, by + y, c);
+			}
+		}
+		draw_text_px(string::to_upper(name), (VW - text_px_width(name, 1)) / 2, 2, rgb(255, 220, 120), COL_BLACK, 1);
+		return;
+	}
+}
+
+// low health: the edges of the view pulse red, with a heartbeat
+void low_health(ClientView& v) {
+	if (v.ghost != 0 || v.hpmax <= 0 || v.hp * 100 / v.hpmax >= 30 || v.hp <= 0) { return; }
+	int phase = FRAME % 24;
+	int strength = phase < 4 ? 3 : (phase < 8 ? 2 : 1);
+	if (phase == 0) { sfx("heartbeat"); }
+	int c = rgb(200, 20, 30);
+	int c2 = rgb(120, 10, 20);
+	for (int d = 0; d < strength * 2; ++d) {
+		int col = d < strength ? c : c2;
+		for (int x = d; x < VW - d; ++x) {
+			if ((x + d + FRAME) % (d + 1) == 0) {
+				pset(x, d, col);
+				pset(x, VH - 1 - d, col);
+			}
+		}
+		for (int y = d; y < VH - d; ++y) {
+			if ((y + d + FRAME) % (d + 1) == 0) {
+				pset(d, y, col);
+				pset(VW - 1 - d, y, col);
+			}
+		}
+	}
+}
+
 // ------------------------------------------------------------- the frame ---
 void render_world(ClientView& v) {
 	ensure_shade(v);
@@ -823,6 +937,9 @@ void render_world(ClientView& v) {
 	}
 	float want_x = tx * TS + TS / 2.0;
 	float want_y = ty * TS + TS / 2.0;
+	float gap_x = want_x - CAM_X;
+	float gap_y = want_y - CAM_Y;
+	if (gap_x * gap_x + gap_y * gap_y > (VW * VW * 1.0)) { CAM_SNAP = true; }
 	if (CAM_SNAP) {
 		CAM_X = want_x;
 		CAM_Y = want_y;
@@ -838,13 +955,17 @@ void render_world(ClientView& v) {
 		camy = camy + prand(SHAKE_P * 2 + 1) - SHAKE_P;
 	}
 	int amb = ambient_level(v);
+	step_particles(v);
 	draw_tiles(v, camx, camy, amb);
 	draw_items(v, camx, camy);
 	draw_mobiles(v, camx, camy);
+	action_juice(v, camx, camy);
 	draw_projectiles(camx, camy);
 	draw_particles(camx, camy);
 	draw_weather(v);
 	draw_float_text(camx, camy);
+	boss_bar(v);
+	low_health(v);
 	draw_banner();
 	if (v.ghost != 0 && FRAME % 60 < 30) { draw_text_px("GHOST", 2, 2, rgb(200, 220, 255), COL_BLACK, 1); }
 }

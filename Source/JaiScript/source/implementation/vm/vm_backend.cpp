@@ -10813,7 +10813,8 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			VM_TRY(detail::enforce_member_access(parent_def.get(), member_id, frame_access_context(f)));
 		}
 		try {
-			if (parent_def->get_method(member_id).is_null()) {
+			const script_value parent_method = parent_def->get_method(member_id, false);
+			if (parent_method.is_invalid() || parent_method.is_null()) {
 				return raise_(make_error_code(runtime_error_code::member_not_found),
 					"parent class {0} has no member '{1}'", parent_def->get_type_id(), member_id);
 			}
@@ -12135,13 +12136,13 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 		script_value method = make_null();
 		try {
-			method = parent_def->get_method(expr->member_id);
+			method = parent_def->get_method(expr->member_id, false);
 		} catch (const runtime_error& e) {
 			raise_script_exception(e.what(), expr->location);
 			out = make_null();
 			return {};
 		}
-		if (method.is_null()) {
+		if (method.is_invalid() || method.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"parent class {0} has no member '{1}'", parent_def->get_type_id(), expr->member_id);
 		}

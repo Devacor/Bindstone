@@ -13,6 +13,7 @@
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
+#include <jaiscript/detail/builtin_methods.hpp>
 #include <charconv>
 #include <iostream>
 #include <fstream>
@@ -670,6 +671,7 @@ struct engine::implementation {
         std::string resolved;              // its canonical spelling
     };
     std::unordered_map<std::string, resolution_entry> resolution_memo_;
+    std::optional<std::array<std::unordered_set<uint64_t>, 4>> builtin_method_ids_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
 
     // Source-string execution cache: re-executing identical source skips lex/parse
@@ -3858,6 +3860,19 @@ const std::string* engine::remembered_resolution(const std::string& key) {
     for (size_t i = 0; valid && i < it->second.misses.size(); ++i) { valid = !implementation::stat_entry(it->second.misses[i], st); }
     if (!valid) { impl->resolution_memo_.erase(it); return nullptr; }
     return &it->second.resolved;
+}
+
+const std::unordered_set<uint64_t>& engine::builtin_method_ids(int kind) {
+    if (!impl->builtin_method_ids_) {
+        builtin_method_registries registries;
+        init_builtin_method_registries(&impl->string_symbolizer_, registries);
+        auto& ids = impl->builtin_method_ids_.emplace();
+        for (const auto& [id, fn] : registries.array_methods) { ids[0].insert(id); }
+        for (const auto& [id, fn] : registries.map_methods) { ids[1].insert(id); }
+        for (const auto& [id, fn] : registries.string_methods) { ids[2].insert(id); }
+        for (const auto& [id, fn] : registries.utf8_methods) { ids[3].insert(id); }
+    }
+    return (*impl->builtin_method_ids_)[kind >= 0 && kind < 4 ? kind : 0];
 }
 
 std::string engine::resolution_key(const std::string& path, const std::string& from_file) {

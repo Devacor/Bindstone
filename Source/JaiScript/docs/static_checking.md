@@ -203,8 +203,15 @@ same-named script field, a registered subclass owning a `_set_ro` (a writable
 re-registration, an override, a shadowing field) or a `var` receiver all stay lenient. Static fields are typed like instance fields: `C::s`, a bare `s` inside the class and the
 compound forms check the store against the static's declared type (the runtime enforces the same
 table on every spelling). Any unresolvable ancestor opens the class: silence.
-Builtin container/string/map methods, subscripts, enum values (existence IS checked:
-`Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
+A method called on a declared container or string (`array<T>`, `string`, `utf8_string`, a `map<K,V>`
+whose values cannot be called: V a primitive, a string or a container) must be one the builtin
+registry dispatches (`detail/builtin_methods.hpp`, the one list both backends use):
+`array<string> a; a.insert(0, "y")` is `no member 'insert' on 'array<string>'`, with the closest
+registry name when one is within two edits (`no member 'pusj' on 'array<int>' (did you mean
+'push'?)`); the runtime raises family B's `array has no member 'insert'`. A map whose values may be
+callable answers other names through its keys (`m.f(x)` calls the value at "f") and stays lenient,
+as do `var` receivers and element reads. The builtin methods' arguments and results, subscripts,
+enum values (existence IS checked: `Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
 (`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
 object receiver; a class method of the same name wins first.
 

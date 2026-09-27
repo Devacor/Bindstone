@@ -4973,6 +4973,18 @@ public:
             expect(ga + "coroutine function cr(int& a) { yield a; } var h = cr(GA[1]); GA[1] = 100; to_string(h.resume())", "100", "a reference parameter still aliases");
         });
 
+        test("a_grafted_call_keeps_the_arguments_ahead_of_it", [expect]() {
+            // a leaf the VM grafts into its caller: a name ahead of it that the outer call copies or binds by reference is the name itself,
+            // whichever callee the guard finds at run time
+            const std::string defs = "[[warn_mode]] var ARR = [1, 2, 3]; function k(int i) -> int { return i & 1; } function sz(a, int b) -> int { return a.size() + b; }"
+                                     " function run() -> int { int acc = 0; for (int i = 0; i < 2; ++i) { acc = acc + sz(ARR, k(i)); } return acc; } ";
+            expect(defs + "var before = run(); k = [](int i) -> int { ARR.push(9); return 0; }; to_string(before) + \" \" + to_string(run())", "7 7", "the fallback after the callee is rebound");
+            expect("var PX = [1, 2, 3]; function g(int i) -> int { return i & 1; } function rebind(var& a, int b) -> int { a = [9]; return b; }"
+                   " function run() -> int { int acc = 0; for (int i = 0; i < 2; ++i) { acc = acc + rebind(PX, g(i)); } return PX.size(); } to_string(run())", "1", "a reference parameter ahead of the call");
+            expect("var GX = 3; function g(int i) -> int { return i & 1; } function add2(int a, int b) -> int { return a + b; }"
+                   " function run() -> int { int acc = 0; for (int i = 0; i < 2; ++i) { acc = acc + add2(GX, g(i)); } return acc; } to_string(run())", "7", "a scalar parameter ahead of the call");
+        });
+
         test("a_binding_conversion_runs_after_every_argument_is_taken", [expect]() {
             expect("var GK = [1, 2, 3]; class Conv { var v = 0; Conv(int x) { v = x; GK[1] = 900; } } function takes(Conv c, b) { return c.v + b; } to_string(takes(5, GK[1]))", "7", "a converting constructor");
         });

@@ -300,6 +300,10 @@ box), so the value is taken explicitly, and only where a later argument may run 
 - A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, in both
   binders; a coroutine captures its arguments in `coroutine_handle::set_function`, since it binds them at the first
   resume.
+- A VM graft rewrites the operands ahead of the grafted call into compiler temps (`plan_hoist`), and a temp holds a
+  name's value only as a scalar: a name that an outer call's parameter copies or binds by reference (anything but a
+  proven by-value int, float or bool parameter, or a `math::` intrinsic operand) refuses the graft, so that call keeps
+  its capture and its reference binding on both paths (the graft and the guard's fallback).
 
 A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's
 evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument

@@ -4131,7 +4131,7 @@ bool vm_compiler::quiet_index(const expression* e) {
 // a subtree with a hoisted read that may run user code: the operands the language reads before it must not stay in place
 bool vm_compiler::observing_hoist_in(const expression* e) {
 	if (!e) return false;
-	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e)) return !quiet_read(e);
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e)) return !quiet_read(e);   // a ternary is never quiet: its condition may call
 	if (e->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(e);
 	return observing_hoist_in(b->left.get()) || observing_hoist_in(b->right.get());
@@ -4148,7 +4148,7 @@ bool vm_compiler::env_reference_candidate(const expression* e) {
 // a subtree with a hoisted read, intrinsic or unary of any quietness: it runs ahead of the operation's own operands
 bool vm_compiler::hoist_in(const expression* e) {
 	if (!e) return false;
-	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e)) return true;
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e)) return true;
 	if (e->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(e);
 	return hoist_in(b->left.get()) || hoist_in(b->right.get());
@@ -4375,6 +4375,8 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 		compile_unary_into_temp(arg, p.left);
 	} else if (member_temp_operand(arg.get())) {
 		compile_member_into_temp(arg, p.left);
+	} else if (ternary_temp_operand(arg.get())) {
+		compile_ternary_into_temp(arg, p.left);
 	} else if (!(fusable_index_expr(arg.get()) && compile_subscript_into_temp(arg, 0xFF, p.left))) {
 		// a binary argument that lands as one fused binary computes into a temp instead of the stack
 		const bool lands = arg->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(arg.get()));

@@ -4475,6 +4475,48 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// G7b: a ternary as a math intrinsic's or a stdlib alias's argument lands in a compiler temp (the call takes a direct operand and the
+		// loop closes); a ternary whose condition runs user code reads its neighbours as the interpreter does
+		test("ternary_math_arguments_land_in_compiler_temps", [this]() {
+			const std::string src = "int K = 1000;\n"
+				"array<float> A = [0.5, -1.5, 2.5, -3.5, 4.5, -5.5, 6.5, -7.5];\n"
+				"function run(int n) -> float { float s = 0.0; int acc = 0;\n"
+				"  for (int i = 0; i < n; ++i) { int j1 = (i + 1) & 7; int j2 = (i + 2) & 7; float a = A[i & 7]; float b = A[j1]; float c = A[j2]; int f = i % 13 - 2;\n"
+				"    int facet = (a > 0.0 ? 1 : 0) + (b > 0.0 ? 2 : 0) + (c > 0.0 ? 4 : 0);\n"
+				"    float lit = 0.25 + a * b * 0.6 + (c > 0.85 ? 0.6 : 0.0);\n"
+				"    float g = sqrt(a < 0.0 ? 0.0 : a) - 0.55; float h = math::floor(b > c ? b : (c > 1.0 ? c : -c)) + 1.0;\n"
+				"    float z = c + (i > 2 ? 1 : 0.5);\n"
+				"    acc += (f < 0 ? 0 : (f > 9 ? 9 : f)) + facet + K;\n"
+				"    s += lit + g + h + z + (f != 3 ? a : b) * 0.5; }\n"
+				"  return s + acc; }\n"
+				"to_string(run(64)) + \",\" + to_string(run(3));";
+			both(src, "", "ternary math arguments");
+			both(src, "", "ternary math arguments, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("OPERAND_TEMP") != std::string::npos && fl.find("BINARY op=") == std::string::npos, "the loop closes over the ternaries: " + fl);
+			const std::string order = "int G = 1; float H = 2.0;\n"
+				"function bumpg() -> bool { G = 100; return true; }\n"
+				"function seth(float v) -> bool { H = v; return v > 0.0; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) { G = 1; int r = G + (bumpg() ? 1 : 2); int r2 = G; G = 1; r2 += G + (G * 2 + (bumpg() ? 1 : 2)); out += to_string(r) + \" \" + to_string(r2) + \" \"; }\n"
+				"  H = 2.0; float q = H * (H + (seth(5.0) ? H : 0.0)); H = 2.0; float q2 = sqrt(seth(9.0) ? H : 0.0) + H; H = 2.0; float q3 = H + sqrt(seth(16.0) ? H : 0.0);\n"
+				"  H = 2.0; float q4 = H + math::floor(seth(3.5) ? H : 0.0); out += to_string(q) + \" \" + to_string(q2) + \" \" + to_string(q3) + \" \" + to_string(q4);\n"
+				"  return out; }\n"
+				"run();";
+			both(order, "", "a ternary that runs user code keeps the backends in step");
+			both(order, "", "a ternary that runs user code keeps the backends in step, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

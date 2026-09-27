@@ -34,8 +34,9 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="tour">The Ten-Minute Tour<a class="hlink" href="#tour" aria-label="link">&#8203;</a></h1>
 <p class="lead">One small game, built a piece at a time. Every block of code on this page was run through two independent engines, a tree-walking interpreter and a bytecode VM, and the output under it is what both of them printed.</p>
 <h2 id="reads-like-cpp">It reads like the C++ you already write<a class="hlink" href="#reads-like-cpp" aria-label="link">&#8203;</a></h2>
-<p>Classes with typed fields, constructors, methods, operator overloading. Strings that splice values in and format them on the way. If you have written a game in C++, you can read this without a manual.</p>
+<p>Classes with access labels, typed fields, constructors, methods, operator overloading. Strings that splice values in and format them on the way. If you have written a game in C++, you can read this without a manual.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 {
+public:
     float x = 0.0; float y = 0.0;
     Vec2(float px, float py) { x = px; y = py; }
     Vec2 operator+(Vec2 o) { return Vec2(x + o.x, y + o.y); }
@@ -71,33 +72,6 @@ s.hull = &quot;full&quot;;   // a string into an int field: caught before anythi
     s.hull = &quot;full&quot;;   // a string into an int field: caught before anything runs
             ^</code></pre></div>
 <p>Nothing ran. No half-initialized level, no bug report three hours into a playtest. When you genuinely want a dynamic value, <code>var</code> is the escape hatch, and the checker lets it through. The types you do write also make the code faster: the runtime trusts what the checker proved.</p>
-<h2 id="private-when-you-mean-it">Private when you mean it<a class="hlink" href="#private-when-you-mean-it" aria-label="link">&#8203;</a></h2>
-<p>Classes are open by default, which suits most script code. When a class has something to keep to itself, there are two levels and no more: <code>public:</code> for everyone, <code>private:</code> for the class and the classes derived from it.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Wallet {
-public:
-    int balance() { return coins; }
-    void earn(int n) { coins += n; }
-private:
-    int coins = 0;
-    string pin = &quot;1234&quot;;
-}
-
-class Vault : Wallet {
-public:
-    void deposit(int n) { coins += n * 2; }   // a subclass shares its base&#x27;s private members
-}
-
-Vault v;
-v.earn(10);
-v.deposit(5);
-print(&quot;balance {}&quot;, v.balance());
-
-try { print(v.coins); } catch (e) { print(e); }
-try { print(v.pin); } catch (e) { print(e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">balance 20
-Cannot access private member &#x27;coins&#x27; of class &#x27;Wallet&#x27;
-Cannot access private member &#x27;pin&#x27; of class &#x27;Wallet&#x27;</code></pre></div>
-<p>Reads, writes and calls are all checked, and the error names the member and the class that declared it. A family of classes shares its internals; everything else goes through the public door.</p>
 <h2 id="a-swarm">A swarm in twenty lines<a class="hlink" href="#a-swarm" aria-label="link">&#8203;</a></h2>
 <p>Arrays of class instances, loops that edit them in place through <code>auto&amp;</code>, methods, and nothing you have to free.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy {

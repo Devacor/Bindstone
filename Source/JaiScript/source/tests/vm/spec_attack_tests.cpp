@@ -441,22 +441,6 @@ private:
 				check_eq(size_t(5), lines.size(), std::string("hits [") + c.label + "]");
 			}
 		});
-	}
-
-	void known_bugs() {
-		test("an_element_alias_whose_element_a_callee_removed_raises_the_removed_element_text", [this]() {
-			// docs/reference_model.md ELEMENT: a shrink under the reference raises "Reference to a removed array element"; the guide
-			// (ch. 3) makes it stop the script; docs/diagnostics.md: one text on both backends
-			every_config("removed alias", "Reference to a removed array element", [](engine& e) {
-				e.execute(R"(
-					var T = [[1, 2], [3, 4], [5, 6]];
-					function drop(int i) { if (i == 1) { T.pop(); T.pop(); } }
-					function run() -> int { int acc = 0; for (int i = 0; i < 2; i++) { var& r = T[i]; drop(i); acc = acc + r[0]; } return acc; }
-				)");
-				try { e.execute("run();"); } catch (const std::exception& ex) { return std::string(ex.what()).substr(0, 36); }
-				return std::string("no error");
-			});
-		});
 		test("a_breakpoint_armed_by_a_host_callback_mid_loop_fires_before_the_loop_ends", [this]() {
 			// the session is noticed at the next debug sync point; a loop of 20000 iterations passes many of them
 			for (const auto& c : attack::configs()) {
@@ -482,6 +466,22 @@ private:
 				check_eq(1, stops, std::string("stops [") + c.label + "]");
 				check_eq(5, stop_line, std::string("line [") + c.label + "]");
 			}
+		});
+	}
+
+	void known_bugs() {
+		test("an_element_alias_whose_element_a_callee_removed_raises_the_removed_element_text", [this]() {
+			// docs/reference_model.md ELEMENT: a shrink under the reference raises "Reference to a removed array element"; the guide
+			// (ch. 3) makes it stop the script; docs/diagnostics.md: one text on both backends
+			every_config("removed alias", "Reference to a removed array element", [](engine& e) {
+				e.execute(R"(
+					var T = [[1, 2], [3, 4], [5, 6]];
+					function drop(int i) { if (i == 1) { T.pop(); T.pop(); } }
+					function run() -> int { int acc = 0; for (int i = 0; i < 2; i++) { var& r = T[i]; drop(i); acc = acc + r[0]; } return acc; }
+				)");
+				try { e.execute("run();"); } catch (const std::exception& ex) { return std::string(ex.what()).substr(0, 36); }
+				return std::string("no error");
+			});
 		});
 	}
 

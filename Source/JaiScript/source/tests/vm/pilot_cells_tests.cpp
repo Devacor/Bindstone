@@ -4923,6 +4923,33 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "2 " + expected, "a reference result ahead of a writing sibling");
 			both(src, "2 " + expected, "a reference result ahead of a writing sibling, proofs off", false);
 		});
+		// an element read passed to a reference parameter is an lvalue: a block's call door whose parked callee takes that argument by
+		// reference misses onto the general form, which pushes the element's reference (the ordering fuzz band's metamorphic variant, seeds
+		// 68, 288, 384)
+		test("an_element_argument_a_reference_parameter_binds_stays_an_lvalue_in_a_block", [this]() {
+			const std::string src = "array<int> A = [2, 6, 6, -2];\n"
+				"function rec(int n) -> int { if (n <= 0) { return 0; } return rec(n - 1); }\n"
+				"function r8(int& x) -> int { rec(1); x = x + 5; return 4; }\n"
+				"function v8(int x) -> int { rec(1); return x * 2; }\n"
+				"function run() -> string { string out = \"\"; int s = 0;\n"
+				"  int i = 0;\n"
+				"  while (i < 3) { var a = r8(A[i % 4]); int b = v8(A[i % 4]); s = s + a + b; i = i + 1; }\n"
+				"  for (int k = 0; k < 4; k++) { int c = r8(A[k]); s = s + c; }\n"
+				"  out = to_string(s) + \" \" + to_json(A);\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "86 [12,16,16,3]";
+			both(src, expected, "an element argument bound by reference in a block");
+			both(src, expected, "an element argument bound by reference in a block, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

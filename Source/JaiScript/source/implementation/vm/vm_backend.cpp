@@ -7847,12 +7847,19 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+	const script_defined_function* callee = pending_callees_.empty() ? nullptr : pending_callees_.back().fn;
 	for (size_t i = 0; i < cc.args.size(); ++i) {
 		const chunk::cell_loop::call_arg& a = cc.args[i];
 		if (a.kind == 1) {
 			const uint32_t k = a.v;
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			const uint8_t kind = cs.kind[k];
+			if (callee && i < callee->parameters().size() && callee->parameters()[i].is_reference && a.ip < f.code->code.size() && f.code->code[a.ip].op == opcode::op_index_fused) [[unlikely]] {
+				// an element read the callee binds by reference is the element, never its value: the general form pushes the reference
+				stack_.truncate(stack_.size() - i);
+				cells_miss(f, loop, cc.probe_ip + 1, 4);
+				return {};
+			}
 			if (kind == static_cast<uint8_t>(script_value::TYPEID_REFERENCE)) {
 				// an element alias (`for (auto& p : pool) { step(p); }`): the element reference its declaration binds, built into the slot when the
 				// rebind left the cell dirty, pushed as the general LOAD of the alias pushes it; the callee binds through it as on the general form

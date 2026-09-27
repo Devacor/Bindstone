@@ -72,20 +72,19 @@ s.hull = &quot;full&quot;;   // a string into an int field: caught before anythi
             ^</code></pre></div>
 <p>Nothing ran. No half-initialized level, no bug report three hours into a playtest. When you genuinely want a dynamic value, <code>var</code> is the escape hatch, and the checker lets it through. The types you do write also make the code faster: the runtime trusts what the checker proved.</p>
 <h2 id="private-when-you-mean-it">Private when you mean it<a class="hlink" href="#private-when-you-mean-it" aria-label="link">&#8203;</a></h2>
-<p>Classes are open by default, which suits most script code. When a class has something to protect, the labels mean what they mean in C++: <code>public:</code> for everyone, <code>protected:</code> for the class and its subclasses, <code>private:</code> for the class&#x27;s own code.</p>
+<p>Classes are open by default, which suits most script code. When a class has something to keep to itself, there are two levels and no more: <code>public:</code> for everyone, <code>private:</code> for the class and the classes derived from it.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Wallet {
 public:
     int balance() { return coins; }
     void earn(int n) { coins += n; }
-protected:
-    int coins = 0;
 private:
+    int coins = 0;
     string pin = &quot;1234&quot;;
 }
 
 class Vault : Wallet {
 public:
-    void deposit(int n) { coins += n * 2; }   // a subclass sees protected members
+    void deposit(int n) { coins += n * 2; }   // a subclass shares its base&#x27;s private members
 }
 
 Vault v;
@@ -96,9 +95,9 @@ print(&quot;balance {}&quot;, v.balance());
 try { print(v.coins); } catch (e) { print(e); }
 try { print(v.pin); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">balance 20
-Cannot access protected member &#x27;coins&#x27; of class &#x27;Wallet&#x27;
+Cannot access private member &#x27;coins&#x27; of class &#x27;Wallet&#x27;
 Cannot access private member &#x27;pin&#x27; of class &#x27;Wallet&#x27;</code></pre></div>
-<p>Reads, writes and calls are all checked, and the error names the member and the class that declared it. A game&#x27;s save file can hand out a balance without handing out the pin.</p>
+<p>Reads, writes and calls are all checked, and the error names the member and the class that declared it. A family of classes shares its internals; everything else goes through the public door.</p>
 <h2 id="a-swarm">A swarm in twenty lines<a class="hlink" href="#a-swarm" aria-label="link">&#8203;</a></h2>
 <p>Arrays of class instances, loops that edit them in place through <code>auto&amp;</code>, methods, and nothing you have to free.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy {

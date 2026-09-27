@@ -218,9 +218,9 @@ function sk_gem(float x, float y, float z) -> float {
 	return (a + b * 0.62 + c - 0.075) * 0.54;
 }
 
-// the creature along one ray: only the parts the ray passes near (groups: 1 body, 2 head; cand: capsule indices, glows as 100 + index).
-// A part the ray never enters changes the step lengths, never a hit.
-function sk_spider(float x, float y, float z, int groups, array<int>& cand, int nc) -> float {
+// the creature along one ray is only the parts the ray passes near: its groups (1 body, 2 head), then its candidate parts (see
+// sk_candidates). A part the ray never enters changes the step lengths, never a hit.
+function sk_groups(float x, float y, float z, int groups) -> float {
 	float d = 99.0;
 	if ((groups & 1) != 0) { d = sk_body(x, y, z); }
 	if ((groups & 2) != 0) {
@@ -235,6 +235,11 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 		float dg = sk_gem(x, y, z);
 		d = d < dg ? d : dg;
 	}
+	return d;
+}
+
+// the ray's candidate parts against best: capsule indices, glows as 100 + index
+function sk_candidates(float x, float y, float z, array<int>& cand, int nc, float d) -> float {
 	for (int k = 0; k < nc; ++k) {
 		int c = cand[k];
 		if (c >= 100) {
@@ -266,6 +271,11 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 		}
 	}
 	return d;
+}
+
+function sk_spider(float x, float y, float z, int groups, array<int>& cand, int nc) -> float {
+	float d = sk_groups(x, y, z, groups);
+	return sk_candidates(x, y, z, cand, nc, d);
 }
 
 // does the ray (origin o, unit direction d) pass within r of c ahead of the origin
@@ -376,7 +386,8 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 			// can change neither the step nor the aura
 			float bound = ds_last - (t - t_last) * 1.2 - 0.001;
 			if (bound < dw || (bound < glow && bound < 0.5)) {
-				float ds = sk_spider(x, y, z, groups, cand, nc);
+				float ds = sk_groups(x, y, z, groups);
+				ds = sk_candidates(x, y, z, cand, nc, ds);
 				glow = ds < glow ? ds : glow;
 				d = dw < ds ? dw : ds;
 				ds_last = ds;

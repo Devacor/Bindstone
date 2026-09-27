@@ -7,6 +7,7 @@ local sin, cos, sqrt, floor = math.sin, math.cos, math.sqrt, math.floor
 
 local SK_T, SK_S, SK_K, SK_TW, SK_TH = 0.0, 0.8, 0.0, 0.0, 0.16
 local SK_MG, SK_MP, SK_MD, SK_WA = 1.0, 0.0, 0.0, 0.0
+local SK_SHELL = 1.68
 local SK_CX, SK_CY, SK_CZ = 0.0, 0.0, 0.0
 local SK_EX, SK_EY, SK_EZ = 0.0, 0.0, 0.0
 local SK_FX, SK_FY, SK_FZ = 0.0, 0.0, 1.0
@@ -65,7 +66,7 @@ end
 
 local function sk_world(x, y, z)
 	local g = sk_field(x, y, z)
-	return ((g < 0.0 and -g or g) - SK_TH) / (SK_S * (2.1 + SK_WA * 2.4))
+	return ((g < 0.0 and -g or g) - SK_TH) / SK_SHELL
 end
 
 -- capsules [first, last) against best: a capsule whose bounding sphere cannot beat best is skipped without a root
@@ -240,10 +241,10 @@ local function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r)
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r
 end
 
--- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule
--- run starts from the best so far, so a capsule that cannot win costs only its bounding test
-local function sk_material(x, y, z)
-	local best = sk_world(x, y, z)
+-- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point the wall is dw from: the nearest wins, ties to
+-- the earlier. Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test
+local function sk_material(x, y, z, dw)
+	local best = dw
 	local m = 0
 	local bone = sk_skull(x, y, z, best)
 	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone)
@@ -312,8 +313,11 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 	end
 	local hit = false
 	local inside = sk_world(ox, oy, oz) < 0.0
+	-- the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
+	local lip = (groups & 2) ~= 0 and 1.2 or 1.0
 	local ds_last = 0.0
 	local t_last = 0.0
+	local wall = 0.0
 	local i = 0
 	while i < 64 do
 		local x = ox + dx * t
@@ -334,9 +338,9 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 		if not cut then
 			local d = dw
 			if near then
-				-- the creature's distance is 1.18-Lipschitz: skipped while its last distance, less what the ray has closed
-				-- since, stays above the wall and above the glow so far or the aura's reach (0.5)
-				local bound = ds_last - (t - t_last) * 1.2 - 0.001
+				-- skipped while its last distance, less what the ray has closed since, stays above the wall and above
+				-- the glow so far or the aura's reach (0.5)
+				local bound = ds_last - (t - t_last) * lip - 0.001
 				if bound < dw or (bound < glow and bound < 0.5) then
 					local ds = sk_spider(x, y, z, groups, cand, nc)
 					glow = ds < glow and ds or glow
@@ -347,6 +351,7 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 			end
 			if d < 0.001 + t * 0.0015 then
 				hit = true
+				wall = dw
 				break
 			end
 			t = t + d * 0.85
@@ -366,7 +371,7 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 	local x = ox + dx * t
 	local y = oy + dy * t
 	local z = oz + dz * t
-	local m = sk_material(x, y, z)
+	local m = sk_material(x, y, z, wall)
 	local fog = 1.0 - t / 14.0
 	fog = fog < 0.0 and 0.0 or fog
 	local lx = SK_LX - x
@@ -654,6 +659,7 @@ function Ossuary:set_world(t)
 	SK_K = 0.45 * sin(t * 0.21 + 0.6)
 	SK_TW = 0.11 * sin(t * 0.29 + 1.3)
 	SK_WA = 0.18 + 0.14 * sin(t * 0.33 + 2.0)
+	SK_SHELL = SK_S * (2.1 + SK_WA * 2.4)
 	local ph = t * 0.19
 	local a = 0.5 + 0.5 * cos(ph)
 	local b = 0.5 + 0.5 * cos(ph - 2.0944)

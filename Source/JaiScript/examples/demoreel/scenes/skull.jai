@@ -21,6 +21,7 @@ float SK_MG = 1.0;
 float SK_MP = 0.0;
 float SK_MD = 0.0;
 float SK_WA = 0.0;
+float SK_SHELL = 1.68;
 float SK_CX = 0.0;
 float SK_CY = 0.0;
 float SK_CZ = 0.0;
@@ -110,7 +111,7 @@ function sk_field(float x, float y, float z) -> float {
 // the world's distance from a field value: the shell of half-thickness SK_TH about the level set, scaled to a safe step
 function sk_shell(float g) -> float {
 	float a = g < 0.0 ? -g : g;
-	return (a - SK_TH) / (SK_S * (2.1 + SK_WA * 2.4));
+	return (a - SK_TH) / SK_SHELL;
 }
 
 // capsules [first, last) against best: a capsule whose bounding sphere cannot beat best is skipped without a root
@@ -288,11 +289,10 @@ function sk_ray_near(float ox, float oy, float oz, float dx, float dy, float dz,
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
 }
 
-// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule run starts
-// from the best so far, so a capsule that cannot win costs only its bounding test
-function sk_material(float x, float y, float z) -> int {
-	float g = sk_field(x, y, z);
-	float best = sk_shell(g);
+// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point the wall is dw from: the nearest wins, ties to the earlier.
+// Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test
+function sk_material(float x, float y, float z, float dw) -> int {
+	float best = dw;
 	int m = 0;
 	float bone = sk_skull(x, y, z, best);
 	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone);
@@ -361,8 +361,11 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	bool hit = false;
 	float g0 = sk_field(ox, oy, oz);
 	bool inside = sk_shell(g0) < 0.0;
+	// the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
+	float lip = (groups & 2) != 0 ? 1.2 : 1.0;
 	float ds_last = 0.0;
 	float t_last = 0.0;
+	float wall = 0.0;
 	int i = 0;
 	while (i < 64) {
 		float x = ox + dx * t;
@@ -381,10 +384,9 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		}
 		float d = dw;
 		if (near) {
-			// the creature's distance is 1.18-Lipschitz (the skull's long axis): while its last distance, less what the ray
-			// has closed since, stays above the wall's distance and above the glow so far or the aura's reach (0.5), it
-			// can change neither the step nor the aura
-			float bound = ds_last - (t - t_last) * 1.2 - 0.001;
+			// while the creature's last distance, less what the ray has closed since, stays above the wall's distance and
+			// above the glow so far or the aura's reach (0.5), it can change neither the step nor the aura
+			float bound = ds_last - (t - t_last) * lip - 0.001;
 			if (bound < dw || (bound < glow && bound < 0.5)) {
 				float ds = sk_groups(x, y, z, groups);
 				ds = sk_candidates(x, y, z, cand, nc, ds);
@@ -396,6 +398,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		}
 		if (d < 0.001 + t * 0.0015) {
 			hit = true;
+			wall = dw;
 			break;
 		}
 		t += d * 0.85;
@@ -414,7 +417,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	float x = ox + dx * t;
 	float y = oy + dy * t;
 	float z = oz + dz * t;
-	int m = sk_material(x, y, z);
+	int m = sk_material(x, y, z, wall);
 	float fog = 1.0 - t / 14.0;
 	fog = fog < 0.0 ? 0.0 : fog;
 	float lx = SK_LX - x;
@@ -698,6 +701,7 @@ class Ossuary : Scene {
 		SK_K = 0.45 * sin(t * 0.21 + 0.6);
 		SK_TW = 0.11 * sin(t * 0.29 + 1.3);
 		SK_WA = 0.18 + 0.14 * sin(t * 0.33 + 2.0);
+		SK_SHELL = SK_S * (2.1 + SK_WA * 2.4);
 		float ph = t * 0.19;
 		float a = 0.5 + 0.5 * cos(ph);
 		float b = 0.5 + 0.5 * cos(ph - 2.0944);

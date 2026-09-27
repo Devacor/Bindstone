@@ -211,6 +211,23 @@ The host may register values/functions in these namespaces. Names that merely
 start with the same letters (`jailed`, `reflector`) and unrelated qualified names
 such as `outer::jai` are not reserved; `math` remains open to script extension.
 
+## Errors in script the runtime calls
+
+Script that a builtin, an operator or an archive runs on the program's behalf raises
+its own errors: a `sort` comparator, a `filter`/`remove_if` predicate, a
+`parallel_for` body, a user operator (`operator+`, `operator<`, `operator==`,
+`operator=`, compound forms), `to_bool()` under a condition or a `bool` slot,
+`to_string()` under string `+`, and a property accessor or `post_load` that the
+script declares, run by `to_json`, `to_binary`, `from_json` or `from_binary`. The
+error leaves the builtin or operator with its own text, catchable like any runtime
+error, and an uncaught one ends the program with the callback's frames in the trace
+(`at inner`, `at <lambda>`, `at <script>`). The builtin makes no further calls after
+the first failure, and `sort` leaves the array as it was. Truthiness has no error
+value, so a `to_bool()` error travels as the script exception its text would throw.
+An archive tolerates only a store the member itself refuses: a read-only host
+property, or a value the synthesized field store rejects, leaves the member at its
+constructed value.
+
 ## Call-depth limits (`max_recursion_depth`)
 
 `Maximum recursion depth exceeded - possible infinite recursion`

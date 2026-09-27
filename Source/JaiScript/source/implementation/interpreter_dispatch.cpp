@@ -74,12 +74,7 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
             return make_float_fast(lf + rf);
         }
         if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-            script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
-            // engine::memory_cap chokepoint: deny the concat result before it exists
-            if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
-                return detail::raise_memory_cap(*limits_);
-            }
-            return make_value(std::move(joined));
+            return concat_with_methods(left, right);
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
     }
@@ -108,12 +103,7 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 
     // String concatenation - check for to_string() method on objects
     if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-        script_string joined = value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right);
-        // engine::memory_cap chokepoint: deny the concat result before it exists
-        if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
-            return detail::raise_memory_cap(*limits_);
-        }
-        return make_value(std::move(joined));
+        return concat_with_methods(unwrapped_left, unwrapped_right);
     }
 
     // Check for custom operator+ method on objects (using original values for method lookup)
@@ -435,7 +425,8 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
     // Check for custom operator< method on objects
     auto custom_result = object_comparison_via_method(left, right, op_less_id_);
     if (custom_result.has_value()) {
-        return make_value(custom_result.value());
+        if (!*custom_result) { return custom_result->error_value(); }
+        return make_value(custom_result->value());
     }
     // A script throw inside the operator method is in flight: don't replace it with
     // the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -500,7 +491,8 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
     // Check for custom operator<= method on objects
     auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
     if (custom_result.has_value()) {
-        return make_value(custom_result.value());
+        if (!*custom_result) { return custom_result->error_value(); }
+        return make_value(custom_result->value());
     }
     // A script throw inside the operator method is in flight: don't replace it with
     // the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -565,7 +557,8 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
     // Check for custom operator> method on objects
     auto custom_result = object_comparison_via_method(left, right, op_greater_id_);
     if (custom_result.has_value()) {
-        return make_value(custom_result.value());
+        if (!*custom_result) { return custom_result->error_value(); }
+        return make_value(custom_result->value());
     }
     // A script throw inside the operator method is in flight: don't replace it with
     // the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -630,7 +623,8 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
     // Check for custom operator>= method on objects
     auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
     if (custom_result.has_value()) {
-        return make_value(custom_result.value());
+        if (!*custom_result) { return custom_result->error_value(); }
+        return make_value(custom_result->value());
     }
     // A script throw inside the operator method is in flight: don't replace it with
     // the invalid-operands error (== parity; the value is discarded while unwinding)
@@ -737,7 +731,8 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
     }
     auto custom_result = object_equality_via_method(left, right);
     if (custom_result.has_value()) {
-        return make_value(custom_result.value());
+        if (!*custom_result) { return custom_result->error_value(); }
+        return make_value(custom_result->value());
     }
 
     // Script class instances: same class, fieldwise (a user operator== was consulted above)

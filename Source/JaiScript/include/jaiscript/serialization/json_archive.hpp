@@ -281,9 +281,13 @@ public:
                     break;
                 }
 
-                // Try to serialize as class_instance
+                std::shared_ptr<class_instance> instance;
                 try {
-                    auto instance = value.as<std::shared_ptr<class_instance>>();
+                    instance = value.as<std::shared_ptr<class_instance>>();
+                } catch (...) {
+                    // not a class_instance: the fallback below
+                }
+                {
                     if (instance) {
                         auto class_def = instance->get_class_definition();
 
@@ -308,18 +312,21 @@ public:
                                 uint64_t getter_id = eng->symbolize("_get_" + prop_name);
                                 auto getter = class_def->get_method(getter_id);
                                 if (getter.type() == script_value_type::jai_function_type) {
-                                    try {
-                                        std::vector<script_value> args = {value};
-                                        auto result = getter.as_function()(args);
-                                        if (result) {
-                                            if (!first) oss_ << ',';
-                                            first = false;
-                                            oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
-                                            write_value(std::move(result.value()));
+                                    std::vector<script_value> args = {value};
+                                    auto result = getter.as_function()(args);
+                                    if (!result) {
+                                        if (class_def->script_declares_user_accessor(getter_id)) {
+                                            throw runtime_error(eng->format_error(result));
                                         }
-                                    } catch (...) {
-                                        // Skip properties that fail to get
+                                        continue;   // a host property that cannot read stays out of the payload
                                     }
+                                    if (auto* backend = eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                        return;   // the getter threw: the in-flight exception leaves to_json
+                                    }
+                                    if (!first) oss_ << ',';
+                                    first = false;
+                                    oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
+                                    write_value(std::move(result.value()));
                                 }
                             }
                         } else {
@@ -339,8 +346,6 @@ public:
                         oss_ << '}';
                         break;
                     }
-                } catch (...) {
-                    // Not a class_instance - fall through to default
                 }
 
                 // Fallback for other object types

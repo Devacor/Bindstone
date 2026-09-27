@@ -299,36 +299,38 @@ public:
                 std::vector<std::string> property_names;
                 std::vector<script_value> property_values;
                 
-                // Try to serialize as class_instance
+                std::shared_ptr<class_instance> instance;
                 try {
-                    auto instance = value.as<std::shared_ptr<class_instance>>();
-                    if (instance) {
-                        auto class_def = instance->get_class_definition();
-                        if (class_def) {
-                            auto eng = class_def->get_engine();
-                            if (eng) {
-                                for (const auto& prop_name : class_def->get_property_names()) {
-                                    uint64_t getter_id = eng->symbolize("_get_" + prop_name);
-                                    auto getter = class_def->get_method(getter_id);
-                                    if (getter.type() == script_value_type::jai_function_type) {
-                                        try {
-                                            std::vector<script_value> args = {value};
-                                            auto result = getter.as_function()(args);
-                                            if (result) {
-                                                property_names.push_back(prop_name);
-                                                property_values.push_back(std::move(result.value()));
-                                            }
-                                            // Skip properties that fail (result has error)
-                                        } catch (...) {
-                                            // Skip properties that fail
+                    instance = value.as<std::shared_ptr<class_instance>>();
+                } catch (...) {
+                    // not a class_instance: an empty object
+                }
+                if (instance) {
+                    auto class_def = instance->get_class_definition();
+                    if (class_def) {
+                        auto eng = class_def->get_engine();
+                        if (eng) {
+                            for (const auto& prop_name : class_def->get_property_names()) {
+                                uint64_t getter_id = eng->symbolize("_get_" + prop_name);
+                                auto getter = class_def->get_method(getter_id);
+                                if (getter.type() == script_value_type::jai_function_type) {
+                                    std::vector<script_value> args = {value};
+                                    auto result = getter.as_function()(args);
+                                    if (!result) {
+                                        if (class_def->script_declares_user_accessor(getter_id)) {
+                                            throw runtime_error(eng->format_error(result));
                                         }
+                                        continue;   // a host property that cannot read stays out of the payload
                                     }
+                                    if (auto* backend = eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                        return;   // the getter threw: the in-flight exception leaves to_binary
+                                    }
+                                    property_names.push_back(prop_name);
+                                    property_values.push_back(std::move(result.value()));
                                 }
                             }
                         }
                     }
-                } catch (...) {
-                    // Not a class_instance, empty object
                 }
                 
                 // Write property count
@@ -1002,10 +1004,13 @@ private:
                                     uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
                                     auto setter = class_def->get_method(setter_id);
                                     if (setter.type() == script_value_type::jai_function_type) {
-                                        try {
-                                            std::vector<script_value> args = {constructed_obj, prop_value};
-                                            (void)setter.as_function()(args);
-                                        } catch (...) {
+                                        std::vector<script_value> args = {constructed_obj, prop_value};
+                                        auto stored = setter.as_function()(args);
+                                        if (!stored && class_def->script_declares_user_accessor(setter_id)) {
+                                            throw runtime_error(class_eng->format_error(stored));
+                                        }
+                                        if (auto* backend = class_eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                            return constructed_obj;   // the setter threw: the in-flight exception leaves the load
                                         }
                                     }
                                 }
@@ -1013,13 +1018,13 @@ private:
                                 uint64_t post_load_id = class_eng->symbolize("post_load");
                                 auto post_load = class_def->get_method(post_load_id, false);
                                 if (post_load.type() == script_value_type::jai_function_type) {
-                                    try {
-                                        std::vector<script_value> args = {
-                                            constructed_obj,
-                                            script_value(static_cast<script_int>(version), class_eng)
-                                        };
-                                        (void)post_load.as_function()(args);
-                                    } catch (...) {
+                                    std::vector<script_value> args = {
+                                        constructed_obj,
+                                        script_value(static_cast<script_int>(version), class_eng)
+                                    };
+                                    auto loaded = post_load.as_function()(args);
+                                    if (!loaded) {
+                                        throw runtime_error(class_eng->format_error(loaded));
                                     }
                                 }
                             }

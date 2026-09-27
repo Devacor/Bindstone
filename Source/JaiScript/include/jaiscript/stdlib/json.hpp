@@ -474,11 +474,17 @@ namespace stdlib {
             const std::function<script_value(const script_value&)>& transform) {
         if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
 
+        script_value instance(std::monostate{}, eng);
+        std::shared_ptr<class_instance> inst;
         try {
-            script_value instance = eng->execute(type_name + "()");
-            auto inst = instance.as<std::shared_ptr<class_instance>>();
-            if (!inst) return script_value(std::monostate{}, eng);
-
+            instance = eng->execute(type_name + "()");
+            inst = instance.as<std::shared_ptr<class_instance>>();
+        } catch (...) {
+            return script_value(std::monostate{}, eng);  // construction failed -> raw map
+        }
+        if (!inst) return script_value(std::monostate{}, eng);
+        auto* backend = eng->get_execution_backend();
+        {
             for (const auto& [key, value] : map) {
                 if (!key.is_string()) continue;
                 const std::string prop_name = key.as_string();
@@ -495,8 +501,15 @@ namespace stdlib {
                 uint64_t setter_id = eng->symbolize("_set_" + prop_name);
                 script_value setter = inst->get_method(setter_id, false);
                 script_value v = transform ? transform(value) : value.clone();
-                if (!setter.is_null()) {
-                    (void)setter.as_function()({ instance, v });
+                if (setter.is_function()) {
+                    // a store the member refuses leaves its constructed value; a setter the
+                    // script declared fails the load with its own error
+                    auto stored = setter.as_function()({ instance, v });
+                    if (!stored && inst->get_class_definition() &&
+                        inst->get_class_definition()->script_declares_user_accessor(setter_id)) {
+                        throw runtime_error(eng->format_error(stored));
+                    }
+                    if (backend && backend->is_unwinding()) { return instance; }
                 } else if (inst->has_field(member_id)) {
                     inst->set_field(member_id, v);
                 }
@@ -514,13 +527,14 @@ namespace stdlib {
                             version = version_it->second.as<script_int>();
                         }
                         std::vector<script_value> args = { instance, script_value(version, eng) };
-                        (void)post_load.as_function()(args);
+                        auto loaded = post_load.as_function()(args);
+                        if (!loaded) {
+                            throw runtime_error(eng->format_error(loaded));
+                        }
                     }
                 }
             }
             return instance;
-        } catch (...) {
-            return script_value(std::monostate{}, eng);  // reconstruction failed -> raw map
         }
     }
 

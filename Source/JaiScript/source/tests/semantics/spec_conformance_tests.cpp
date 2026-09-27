@@ -118,6 +118,7 @@ public:
 		exceptions_more();
 		closures();
 		diagnostic_texts();
+		callback_errors();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1171,7 +1172,7 @@ private:
 				{"repeat", "", "var z = string::repeat(\"a\", -1);", "string::repeat count cannot be negative", check_mode::off},
 				{"namespace pad_left", "", "var z = string::pad_left(\"a\", 3, \"\");", "string::pad_left fill must be a char or a non-empty string", check_mode::off},
 				{"unknown namespace member", "", "var z = string::zzz_nope;", "Undefined variable 'string::zzz_nope'", check_mode::off},
-				{"super without base", "class A { A() { super(); } }", "var z = A();", "Cannot call super() - class has no base class", check_mode::off},
+				{"super without base", "class A { A() : super() {} }", "var z = A();", "Cannot call super() - class has no base class", check_mode::off},
 				{"iterate int", "", "for (auto x : 5) { }", "Cannot iterate int: not an array, map, string or coroutine", check_mode::off},
 				{"iterate null", "var n = null;", "for (auto x : n) { }", "Cannot iterate null: not an array, map, string or coroutine", check_mode::off},
 				{"auto array homogeneity", "var s = \"x\";", "auto a = [1, 2, 3, s];", "Array 'auto' requires homogeneous elements - type mismatch at index 3", check_mode::off},
@@ -1191,6 +1192,122 @@ private:
 				out += "|";
 				try { e.execute("var v8 = null; v8.x;"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
 				return out;
+			});
+		});
+	}
+
+	// An error raised by script a builtin or an operator runs on the program's behalf (a comparator, a predicate, a user
+	// operator, to_bool(), to_string(), an archive hook) is that script's error: it propagates with its own text, catchable,
+	// and the builtin stops calling back after it (docs/spec_conformance.md "Callback errors"; docs/diagnostics.md)
+	void callback_errors() {
+		test("a_sort_comparator_error_propagates_stops_the_calls_and_leaves_the_array", [this]() {
+			expect("sort error", R"(
+				int calls = 0;
+				function inner() { int z = 0; calls += 1; int q = 5 / z; }
+				array<int> v = [3, 1, 2];
+				string r = "no error";
+				try { v.sort([](int a, int b) { inner(); return a < b; }); } catch (e) { r = "caught:" + e; }
+				r + "|calls=" + calls + "|" + v[0] + v[1] + v[2];
+			)", "caught:Division by zero in integer operation|calls=1|312");
+			expect("sort throw", R"(
+				array<int> v = [3, 1, 2];
+				string r = "no error";
+				try { v.sort([](int a, int b) -> bool { if (a > -100) { throw "cmp"; } return a < b; }); } catch (e) { r = "caught:" + e; }
+				r + "|" + v[0] + v[1] + v[2];
+			)", "caught:cmp|312");
+		});
+		test("an_uncaught_comparator_error_ends_the_program_with_the_callbacks_trace", [this]() {
+			every_config("sort uncaught", "Division by zero in integer operation|at inner|at <lambda>", [](engine& e) {
+				try {
+					e.execute(R"(
+						int calls = 0;
+						void inner() { int z = 0; calls += 1; int q = 5 / z; }
+						array<int> v = [3, 1, 2];
+						v.sort([](int a, int b) { inner(); return a < b; });
+					)");
+				} catch (const std::exception& ex) {
+					const std::string w = ex.what();
+					const std::string trace = e.format_stack_trace();
+					std::string out = w.find("Division by zero in integer operation") != std::string::npos ? "Division by zero in integer operation" : w;
+					out += trace.find("at inner") != std::string::npos ? "|at inner" : "|no inner frame: " + trace;
+					out += trace.find("at <lambda>") != std::string::npos ? "|at <lambda>" : "|no lambda frame";
+					return out;
+				}
+				return std::string("no error");
+			});
+		});
+		test("user_operator_errors_propagate_with_their_own_text", [this]() {
+			const char* K = R"(
+				class K {
+					int x = 1;
+					K(int v) { x = v; }
+					function operator+(int n) -> K { int z = 0; return K(x / z); }
+					function operator<(K o) -> bool { int z = 0; return x / z < 1; }
+					function operator==(K o) -> bool { int z = 0; return x / z == 1; }
+				}
+				K k = K(4);
+				K k2 = K(5);
+			)";
+			const char* div = "Division by zero in integer operation";
+			const std::string KH = std::string(K) + "class H { K m = K(2); } H h = H();";
+			expect_texts({
+				{"operator+", K, "K k3 = k + 1;", div, check_mode::strict},
+				{"operator<", K, "bool b = k < k2;", div, check_mode::strict},
+				{"operator==", K, "bool b = k == k2;", div, check_mode::strict},
+				{"operator!= through ==", K, "bool b = k != k2;", div, check_mode::strict},
+				{"compound on a global", K, "k += 1;", div, check_mode::strict},
+				{"compound on a local", K, "function f() { K a = K(4); a += 1; } f();", div, check_mode::strict},
+				{"compound on a field", KH.c_str(), "h.m += 1;", div, check_mode::strict},
+			});
+		});
+		test("to_bool_and_to_string_errors_propagate", [this]() {
+			const char* Q = R"(
+				class Q { bool to_bool() { int z = 0; return 1 / z > 0; } }
+				class TS { string to_string() { int z = 0; return "t" + (1 / z); } }
+				auto q = Q();
+				auto ts = TS();
+			)";
+			const char* div = "Division by zero in integer operation";
+			expect_texts({
+				{"if (q)", Q, "if (q) { int w = 1; }", div, check_mode::strict},
+				{"!q", Q, "bool b = !q;", div, check_mode::strict},
+				{"q ? :", Q, "int w = q ? 1 : 2;", div, check_mode::strict},
+				{"bool slot", Q, "bool b = q;", div, check_mode::strict},
+				{"string + object", Q, "string s = \"x\" + ts;", div, check_mode::strict},
+				{"object + string", Q, "string s = ts + \"x\";", div, check_mode::strict},
+			});
+		});
+		test("archive_hooks_the_script_declares_propagate_their_errors", [this]() {
+			const char* H = R"(
+				class P { int v = 1; int _get_v() { int z = 0; return v / z; } }
+				class PT { int v = 1; int _get_v() { if (v > 0) { throw "getthrow"; } return v; } }
+				class L { int v = 1; void post_load(int version) { int z = 0; v = v / z; } }
+				class S { int v = 1; void _set_v(int x) { int z = 0; v = x / z; } }
+			)";
+			const char* div = "Division by zero in integer operation";
+			expect_texts({
+				{"to_json getter", H, "string s = to_json(P());", div, check_mode::strict},
+				{"to_json getter throw", H, "string s = to_json(PT());", "getthrow", check_mode::strict},
+				{"to_binary getter", H, "string s = to_binary(P());", div, check_mode::strict},
+				{"from_json post_load", H, "var o = from_json(\"{\\\"_type_\\\":\\\"L\\\",\\\"v\\\":3}\");", div, check_mode::strict},
+				{"from_json setter", H, "var o = from_json(\"{\\\"_type_\\\":\\\"S\\\",\\\"v\\\":3}\");", div, check_mode::strict},
+			});
+			expect("hooks that succeed", R"(
+				class L2 { int v = 1; void post_load(int version) { v = v + 10 * version; } }
+				class S2 { int v = 1; void _set_v(int x) { v = x * 2; } }
+				var a = from_json("{\"_type_\":\"L2\",\"v\":3}");
+				var b = from_json("{\"_type_\":\"S2\",\"v\":3}");
+				"" + a.v + "|" + b.v;
+			)", "13|6");
+		});
+		test("predicate_and_parallel_body_errors_propagate", [this]() {
+			const char* div = "Division by zero in integer operation";
+			expect_texts({
+				{"array filter", "", "var b = [1, 2].filter([](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
+				{"array remove_if", "var a = [1, 2];", "a.remove_if([](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
+				{"map filter", "var m = {\"a\": 1};", "var r = m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
+				{"map remove_if", "var m = {\"a\": 1};", "m.remove_if([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
+				{"parallel_for body", "array<int> xs = [1, 2, 3, 4];", "parallel_for (auto& x : xs) { int z = 0; x = x / z; }", div, check_mode::strict},
 			});
 		});
 	}

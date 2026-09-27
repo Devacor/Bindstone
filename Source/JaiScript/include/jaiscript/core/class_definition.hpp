@@ -445,6 +445,15 @@ public:
         const script_value* found = user_accessor(id);
         return found ? *found : script_value::make_invalid(engine_);
     }
+    // A user accessor the script chain declared, never a host .property() reached through the
+    // C++ base: the archive walks propagate its errors, which are the program's
+    bool script_declares_user_accessor(uint64_t id) const {
+        if (!is_script_class()) { return false; }
+        const script_value* found = user_accessor(id);
+        if (!found) { return false; }
+        auto cpp_base = find_cpp_base_class();
+        return !(cpp_base && cpp_base->user_accessor(id) == found);
+    }
 
     // No user accessor anywhere in the chain: the accessor for id (if any) is the synthesized
     // field accessor, whose body is verbatim get_field / enforce+set_field, so member-site

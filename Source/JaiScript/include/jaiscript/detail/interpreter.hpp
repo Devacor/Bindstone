@@ -1141,20 +1141,15 @@ namespace jai {
         // Type conversion helpers (inlined for performance)
         // Helper function for object to_bool() method lookup (defined in interpreter.cpp)
         bool object_to_bool_via_method(const script_value& value);
-        // Helper function to convert value to string, checking for to_string() method on objects
-        std::string value_to_string_with_method(const script_value& val);
-        // Helper function for object equality via operator== method (defined in interpreter.cpp)
-        // Returns: nullopt if no custom equality, true/false if method found and returned a result
+        // An operand's text for string +: an object's to_string() when it declares one (its error is the caller's)
+        checked_result<std::string> value_to_string_with_method(const script_value& val);
+        checked_result<script_value> concat_with_methods(const script_value& left, const script_value& right);
+        // User operator methods (==, <, <=, >, >=, + - * / %): nullopt when the operand defines none (or the method's result
+        // does not answer the question), else the method's result or the runtime error it raised
         bool object_defines_custom_equality(const script_value& v) const;
-        std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
-
-        // Generic helper for binary comparison operators (<, <=, >, >=) via custom methods
-        // Returns: nullopt if no custom method, true/false if method found and returned valid result
-        std::optional<bool> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-
-        // Generic helper for binary arithmetic operators (+, -, *, /, %) via custom methods
-        // Returns: nullopt if no custom method, result value if method found
-        std::optional<script_value> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
+        std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
 
         // One resolution for every shape a C++/script object reaches the interpreter in:
         // class_instance wrappers (make_object, script classes), cpp_bound non-owning

@@ -7072,7 +7072,13 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 			type_info_ptr ti = src->get_type_info();
 			type_info_ptr constraint = ti ? ti->element_type() : type_info_ptr{};
 			if (rb.iter && constraint && (ti->base_type != script_value_type::jai_array_type || constraint->base_type == script_value_type::jai_any_type || constraint->base_type == script_value_type::jai_null_type)) { constraint = nullptr; }   // the range-for's rule (KEEP BYTE-PARALLEL with exec_iter_next)
-			frame_slot_set(f, loop.cells[k].slot, script_value::make_element_reference(const_cast<script_value*>(src)->unchecked_get_array_storage(), static_cast<size_t>(cs.payload[k]), engine_, constraint));
+			const auto& table = const_cast<script_value*>(src)->unchecked_get_array_storage();
+			const size_t element = static_cast<size_t>(cs.payload[k]);
+			// a callee shrank the table past the aliased element: the general form's reference is still bound and raises
+			// "Reference to a removed array element" at its next touch
+			frame_slot_set(f, loop.cells[k].slot, element < table->size()
+				? script_value::make_element_reference(table, element, engine_, constraint)
+				: script_value::make_removed_element_reference(table, element, engine_, constraint));
 			break;
 		}
 		return;

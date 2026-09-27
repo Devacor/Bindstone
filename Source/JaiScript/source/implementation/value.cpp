@@ -561,6 +561,22 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     return v;
 }
 
+script_value script_value::make_removed_element_reference(const strong_ptr<script_array>& container, size_t index,
+                                                          engine* eng, type_info_ptr element_type) {
+    if (!container || !eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(element_type);
+    auto ref = acquire_reference_holder(eng);
+    ref->container_element_type = element_type;
+    ref->container = container;
+    ref->container_index = index;
+    ++container->live_elem_refs;
+    v.storage_ = ref;
+    return v;
+}
+
 script_value script_value::make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
                                                 engine* eng, type_info_ptr field_type) {
     if (!owner) {

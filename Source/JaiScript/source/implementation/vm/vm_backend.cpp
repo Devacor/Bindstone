@@ -7128,7 +7128,20 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 		if (original_ip == loop.head && f.cells->loop < 64) { f.cells->refused_loops |= uint64_t(1) << f.cells->loop; }
 	}
 	cells_flush(f, loop);
-	// a guarded stdlib alias re-runs reading its guard's mark: the block ran it as the builtin (its name held at the entry and the landings)
+	// a guarded stdlib alias the general form reaches without its guard (the resume point after the guard, at or before the alias) reads the
+	// guard's mark: the block ran it as the builtin (its name held at the entry and the landings); a region has no earlier general pass
+	// whose guard left one
+	for (const auto& ms : loop.math_alias_sites) {
+		if (ms.cache_slot % 3 != 0 || ms.cache_slot / 3 >= original_ip) continue;   // an unguarded alias resolves at its own op
+		const uint32_t guard_ip = ms.cache_slot / 3;
+		if (f.code->code[loop.straight && guard_ip == loop.head ? loop.trampoline : guard_ip].op != opcode::op_math_guard) continue;   // a region's first instruction lives in its trampoline
+		for (uint32_t ip2 = guard_ip + 1; ip2 < f.code->code.size(); ++ip2) {
+			const vm_instruction& oi = f.code->code[ip2];
+			if (oi.op != opcode::op_math_temp || oi.c <= 0xFF || !(oi.c & 0x80) || ((oi.c >> 8) - 1) != ms.site) continue;
+			if (original_ip <= ip2) { typed_land_float(f, oi.b | (k_typed_dst_temp << k_typed_dst_shift), 0.0); }
+			break;
+		}
+	}
 	if (const vm_instruction& oi = f.code->code[original_ip]; oi.op == opcode::op_math_temp && oi.c > 0xFF && (oi.c & 0x80)) { typed_land_float(f, oi.b | (k_typed_dst_temp << k_typed_dst_shift), 0.0); }
 	for (const uint32_t pi : loop.inner_counted) {   // outermost first: the general form resumes inside these loops with their states in place
 		const counted_for_proto& p = f.code->counted_for_protos[pi];

@@ -330,7 +330,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		} else {
 			if (!r->value || r->binds_reference) { c.fail("a return without a value or by reference"); return nullptr; }
 			const bool proven_return = r->static_return_proof == proof_same_type || c.returns_proven;
-			if (c.in_loop && !proven_return) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
+			if (c.in_loop && !proven_return && !scalar_type(c.result_type.get())) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven, or a scalar the block lands by its declared type (converting, or missing onto the return's own text)
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
 			if (c.in_loop && !landable(v.get(), &c.lc)) { c.fail("a return the block cannot land"); return nullptr; }

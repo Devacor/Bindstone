@@ -395,6 +395,10 @@ namespace jai::vm {
             // (the append pair); any other temp refuses a string element, since a miss at its consumer reads the temp's slot
             struct cell { uint32_t slot; uint8_t kind; uint8_t landing; bool live_in; bool defined; type_info* stamp; uint32_t env_operand = k_invalid_u32; bool temp = false; bool first_decl = false; type_info* decl_stamp = nullptr; bool string_borrow = false; bool iter_index = false; };   // iter_index: a range-for block's index, the iteration state's (never a slot's)
             uint32_t head, back, copy_head, copy_back, exit_ip;
+            // a straight-line region (no back edge): entered at head by op_cells_enter, left at back by the copy's last exit; the trampoline
+            // holds the instruction the entry replaced and a jump to head + 1, where a refusal or a miss at head resumes the general form
+            bool straight = false;
+            uint32_t trampoline = k_invalid_u32;
             // counted: the counted_for_protos index of a counted loop (its back edge is the entry and its cell back edge
             // steps and compares; the copy's head slot is a placeholder); k_invalid_u32 = a compare-headed loop
             uint32_t counted = k_invalid_u32;

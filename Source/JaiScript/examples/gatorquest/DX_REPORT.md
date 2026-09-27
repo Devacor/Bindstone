@@ -16,6 +16,42 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 | 3 | 09-27 | **Backend divergence.** On the interpreter, an error raised inside a file run by `include(path)` (a `throw`, a run-time error, or a static-check failure of the included file) escapes the `try` around the include and ends the program; the VM catches it. Repro below (milestone b entry). Also: the static-check listing of an included file says `script:L:C`, not the file's path | reported, not fixed (engine batch); the hot-reload test skips its two broken-edit steps on the interpreter |
 | 4 | 09-27 | A runtime `include` inside a function declares an `enum` only in that function's scope, silently: re-running `enum Color { red, green, blue }` leaves the global `Color` unchanged, with no warning | by design as far as I can tell (include is textual); worked around by keeping enums in a file that is never reloaded |
 
+## Final summary (milestone d: the shippable demo)
+
+**The project.** Gator Quest is ~12,200 lines of JaiScript in 33 files: a deterministic simulation of eight generated
+realms (159 items, 59 monster and npc types, 18 skills, 16 spells, 47 recipes, 10 quests, 7 bosses), a half-block
+truecolor renderer with lighting and particles, synthesized sound and composed music, versioned text saves, dev-mode
+hot reload, 16-player networking with delta snapshots, and a 9 MB self-contained demo folder built by
+`make_dist.ps1`. Every headless gate (smoke with a save round trip, savetest, hotreload, nettest, nettest2, endgame)
+gives identical results on the VM and the interpreter. Four engine issues were found and reported (bugs 1 to 4 below;
+bug 3 is a backend divergence); none needed a workaround that changed the game's design.
+
+**Ratings, judged as if the language were finished:**
+
+| area | rating | one line |
+|---|---|---|
+| expressiveness and readability | good | C++-shaped code that reads like C++ (typed classes with defaults, `T&`, typed arrays, template strings); little ceremony |
+| type system and strict checking | good | the biggest win over Lua: typos and type mistakes die at load across 33 files; a few certain errors slip to run time |
+| structuring a large codebase | good | import graph checked as one program, classes and flat arrays mix well; the state-file convention was mine to invent |
+| error messages and locations | okay | the messages are good and often suggest the fix; the locations of errors in imported files are wrong or missing (bugs 1-3) |
+| debugging | okay | stack traces, deterministic replays and the interpreter as a second opinion; I (headless) did not use the DAP debugger |
+| iteration speed | good | no build, ~1 s to load the game, hot reload in the running game |
+| hot reload in practice | okay | classes excellent; functions and constants needed a generated stub (being replaced by import-anywhere) |
+| performance predictability | good | the VM was fast enough everywhere without tuning; costs matched the code; copies are the one silent cost |
+| standard library | okay | strong strings (`lines`, `split`, `to_int(default)`, format specs); missing whitespace split, file mtime/rename, process spawn |
+| embedding and host API | good | the runner's networking, file IO and audio were enough for a shippable game; the exe is statically linked |
+| docs | okay | accurate where I checked; a few answers had to come from probes (ternary references, `lines()` visibility, include scoping) |
+
+**Top friction points at the end, most costly first:**
+
+1. **Error locations across files** (bugs 1, 2, the `script:L:C` half of 3). The only friction that repeatedly cost real
+   time.
+2. **Hot reload of code is hand-built** (the stub generator); queued to be replaced by import-anywhere with Dev's
+   re-run rule, which also turns my "initializer = constant, none = state" convention into the language rule.
+3. **Checker gaps for certain errors**: a literal to a `&` parameter, `string += char + char`, `string::repeat(char, n)`,
+   `::X = "wrong type"`.
+4. **Value semantics as a silent cost** in hot paths (`SpellDef s = SPELLS[i];` copies; `SpellDef&` does not).
+
 ## Summary at milestone c (multiplayer)
 
 New since milestone b: host/join for up to 16 players over the runner's NetServer/NetChannel on the snapshot
@@ -414,3 +450,41 @@ speed and embedding story, closer to C# and C++ in structure and safety because 
 checker, ahead of all three on hot reload of classes, and behind C# on tooling (language server, error locations). The
 two things that would move it furthest: correct error locations across files, and the import-anywhere reload already
 in flight.
+
+### 2026-09-27: the shippable demo
+
+**Good: shipping is a folder.** The runner is statically linked (`dumpbin /dependents` lists only Windows system DLLs:
+WINHTTP, WS2_32, KERNEL32, USER32, WINMM), so the game is `jaiscript.exe` plus the scripts plus four launchers:
+95 files, 8.79 MB, of which the exe is 8.5 MB, the scripts ~330 KB and the pre-synthesized audio ~200 KB.
+`make_dist.ps1` builds it from a checkout, fills the audio cache with the shipped exe itself (`-- prepare`, 46 effects
+and 10 themes in ~0.2 s) and checks the folder with a short smoke run. This is LÖVE-style distribution and it is a
+genuine strength. Missing: a zip writer in the runner (it has `zip_extract` but no creation), so zipping is left to the
+shell. Rating: good.
+
+**Good: balance work in the language, with numbers you can trust.** The endgame instrument (`-- endgame`, ~200 lines)
+plays the whole main quest with a scripted hero geared per tier and reports every boss fight. Because the simulation
+is deterministic, a balance change is a reproducible diff, and the report is identical on both backends
+(STATE_HASH 61631680). It found three game bugs on its first run, all mine: flying bosses dying over open sky dropped
+their relic where no one can stand, a full backpack could leave the relic behind (pick-up now takes quest items first),
+and bosses could hover out of reach. The first tuning pass took the late tyrants from 4-7 deaths per fight for a fully
+geared solo hero to 0-1 (Emberjaw stays the hard one). Rating: good.
+
+**Good: delta snapshots were short.** Per player, the host keeps `map<int, string>` of the last record sent per
+visible mobile and item (`array<map<int, string>> SNAP_MOBS`), sends only changed or new records plus removals, and
+the client upserts. At 16 players in town: 37,083 to 2,220 bytes per tick. Passing an element of an array of maps to a
+`map<int, string>&` parameter mutates the element in place, like C++. I avoided binding a reference to a ternary of two
+elements because the guide does not say what happens; a probe afterwards showed it binds a reference, like C++, on both
+backends. Suggestion: one sentence in the value-semantics chapter. Rating: good.
+
+**Good: juice is cheap to add in a pixel canvas.** A boss health bar, a pulsing low-health vignette with a synthesized
+heartbeat, footstep dust and splashes, a bobbing fishing float on its line, pick sparks and wood chips, deeper nights:
+~200 lines, all client-side, all reading only the `ClientView`. The render budget barely moved.
+
+**Okay: capturing frames needed my own PNG writer.** For the report and for checking the art I wrote a PNG encoder in
+script (stored deflate blocks, CRC-32, Adler-32; ~70 lines). Byte strings plus char promotion make that pleasant, but
+a `write_bmp`/`write_png` helper for an int palette canvas would help every terminal game in the repo.
+
+**A camera bug worth recording because it looked like an engine problem:** the first tour captures showed a boss health
+bar over an empty swamp. The camera eases toward the player once per rendered frame; the capture modes render only when
+they take a picture, so the camera lagged whole realms behind. The fix (snap when the target is more than a screen away)
+also helps a real player after a long same-realm recall.

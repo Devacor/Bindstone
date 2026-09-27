@@ -11,7 +11,7 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 
 | # | date | what | status |
 |---|------|------|--------|
-| 1 | 09-27 | VM reports a run-time error raised while an imported file's top level runs (a global initializer) at the importing file's `import` line; the interpreter names the real file and line | worked around (rerun on `--backend=interp` to locate) |
+| 1 | 09-27 | A run-time error raised while an imported file's top level runs loses its location. Repro: `c.jai`: `int boom() { array<int> a = [1]; return a[5]; }` / `int X = boom();`, `d.jai`: `import "c.jai";`. VM: `at <script> (d.jai:1)` (the import line); interpreter: `at <script> (c.jai:2)`. Neither shows the `boom` frame (c.jai:1). Errors inside functions called later have full traces on both | worked around (rerun on `--backend=interp` to locate) |
 | 2 | 09-27 | A parse error in an imported file is not reported when the root loads; the checker instead lists every name that file declares as "use of undeclared identifier" in the other files | worked around (run the imported file directly to see its parse error) |
 
 ## Summary so far (milestone a: first playable single player)

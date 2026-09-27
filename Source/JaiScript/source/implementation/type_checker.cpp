@@ -400,8 +400,34 @@ private:
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
         const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
+        const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
     };
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
+    std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
+
+    const enum_decl* find_enum(std::string_view name) {
+        for (size_t i = scopes_.size(); i-- > 0;) {
+            auto found = scopes_[i].find(name);
+            if (found != scopes_[i].end() && found->second.enum_def) { return found->second.enum_def; }
+        }
+        auto it = enums_.find(name);
+        return it != enums_.end() ? it->second : nullptr;
+    }
+
+    // An enum declared in a function or a block is local to that scope at run time (both backends): when the program
+    // scope already names it, the declaration leaves that enum unchanged - say so.
+    void warn_scoped_enum(const enum_decl* e) {
+        const std::string name(e->name);
+        auto top = enums_.find(e->name);
+        if (top == enums_.end() && !extra_globals_.count(name) && !eng_.has_variable(name)) { return; }
+        std::string where = "a block";
+        if (!fn_stack_.empty()) {
+            where = fn_stack_.back().name.empty() || fn_stack_.back().name == "<lambda>" ? std::string("a lambda") : "function '" + std::string(fn_stack_.back().name) + "'";
+        }
+        diag(diag_level::warning, e->location, "enum '" + name + "' declared in " + where +
+             " is local to it: the program-scope '" + name + "' keeps its values",
+             top != enums_.end() ? top->second->location.line : 0, top != enums_.end() ? top->second->location.column : 0);
+    }
 
     // Live lambda contexts: a bare [] lambda whose body reaches an enclosing-function local
     // captured it implicitly — warn once per lambda, nudging toward explicit [=]/[&].
@@ -2073,14 +2099,13 @@ private:
 		}
 		if (extended_members_.count(m->member)) { return {}; }
 		if (recv.kind == ctype::enum_ref_k) {
-			auto it = enums_.find(recv.cls);
-			if (it != enums_.end()) {
-				for (const auto& [vname, _] : it->second->values) {
+			if (const enum_decl* e = find_enum(recv.cls)) {
+				for (const auto& [vname, _] : e->values) {
 					if (vname == m->member) { return ctype::make(ctype::int_k); }
 				}
 				diag(diag_level::error, m->location, "no value '" + std::string(m->member) +
 					 "' in enum '" + std::string(recv.cls) + "'",
-					 it->second->location.line, it->second->location.column);
+					 e->location.line, e->location.column);
 			}
 			return {};
 		}
@@ -2693,7 +2718,9 @@ private:
             case node_type::namespace_decl: {
                 auto* n = static_cast<namespace_decl*>(d);
                 scopes_.emplace_back();
+                namespace_scopes_.push_back(scopes_.size() - 1);
                 for (auto& inner : n->declarations) { walk_decl(inner.get()); }
+                namespace_scopes_.pop_back();
                 scopes_.pop_back();
                 break;
             }
@@ -2745,8 +2772,19 @@ private:
                 }
                 break;
             }
-            case node_type::enum_decl:
+            case node_type::enum_decl: {
+                auto* e = static_cast<enum_decl*>(d);
+                if (scopes_.size() > 1 && (namespace_scopes_.empty() || namespace_scopes_.back() != scopes_.size() - 1)) {
+                    warn_scoped_enum(e);
+                    var_entry entry;
+                    entry.type = ctype{ctype::enum_ref_k, e->name};
+                    entry.enum_def = e;
+                    entry.line = e->location.line;
+                    entry.column = e->location.column;
+                    scopes_.back().insert_or_assign(e->name, std::move(entry));
+                }
                 break;
+            }
             default:
                 break;
         }

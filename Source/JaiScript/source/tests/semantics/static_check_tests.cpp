@@ -1633,6 +1633,30 @@ public:
             std::filesystem::remove_all(dir);
         });
 
+        test("an_enum_declared_in_a_function_is_local_and_warns_when_it_hides_a_program_enum", [this]() {
+            // the runtime scopes an enum written in a function or a block to that scope (both backends); the checker models it
+            // (no false 'no value' against the program-scope enum) and warns when the declaration names a program-scope enum
+            const std::string src = "enum Color { red, green, blue }\n"
+                                    "int f() { enum Color { cyan, magenta, yellow, key } return Color.yellow; }\n"
+                                    "int g() { enum Shade { dim, lit } return Shade.lit; }\n"
+                                    "int b = 0;\n"
+                                    "{ enum Color { one, two } b = Color.two; }\n"
+                                    "f() * 100 + g() * 10 + b + Color.blue * 1000;";
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                check_eq((int64_t)2211, e->execute(src).as_int());
+                const check_report& r = e->last_check_diagnostics();
+                check_eq((size_t)0, error_count(r));
+                check_eq((size_t)2, warning_count(r));
+                check_true(has_diag(r, dlevel::warning, "enum 'Color' declared in function 'f' is local to it: the program-scope 'Color' keeps its values"));
+                check_true(has_diag(r, dlevel::warning, "enum 'Color' declared in a block is local to it"));
+                check_false(has_diag(r, dlevel::warning, "enum 'Shade'"), "a local enum hiding nothing is silent");
+                auto bad = make_engine();
+                check_throws([&]() { bad->execute("enum Color { red }\nint f() { enum Color { cyan } return Color.red; }\nf();"); });
+            }
+        });
+
         test("program_closure_unit_parse_error_is_reported_first_and_alone", [this]() {
             auto dir = closure_dir("parse_err");
             write_unit(dir, "pe_b.jai", "void f(int var) {}\n");

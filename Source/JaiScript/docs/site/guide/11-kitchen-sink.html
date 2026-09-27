@@ -57,6 +57,7 @@ script:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (decl
     print(&quot;{}&quot;, Direction.zzz);
                           ^</code></pre></div>
 <p>Members are reached with a dot (<code>Direction.east</code>); the <code>::</code> spelling is for namespaces and statics, and does not resolve an enum value.</p>
+<p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum &#x27;Color&#x27; declared in function &#x27;reload&#x27; is local to it: the program-scope &#x27;Color&#x27; keeps its values</code>).</p>
 <h2 id="namespaces">Namespaces<a class="hlink" href="#namespaces" aria-label="link">&#8203;</a></h2>
 <p>Namespaces group functions, variables, and classes behind <code>::</code>. They are <strong>flat</strong>. <code>namespace my::nested::deep { }</code> is a single namespace whose name contains <code>::</code>, and &quot;nesting&quot; blocks composes the same way. Functions overload <strong>by arity</strong>; redefining an existing name+arity requires the <code>override</code> keyword (mirrors hot-reload discipline):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace utils {

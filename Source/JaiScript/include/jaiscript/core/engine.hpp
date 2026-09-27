@@ -221,8 +221,9 @@ namespace jai {
         // the path is a .jaibite itself.
         script_value execute_file_source(const std::string& resolvedPath, const std::string& content);
         // include: the file runs at the include site, in the current scope and under the running unit, so
-        // its declarations are the includer's (docs/global_shadowing.md)
-        script_value execute_include_source(const std::string& resolvedPath, const std::string& content);
+        // its declarations are the includer's (docs/global_shadowing.md). scope names the function or block the
+        // include runs in (empty at program scope): an enum the file declares there stays local to it.
+        script_value execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope = {});
 
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
@@ -1142,7 +1143,8 @@ namespace jai {
         script_value execute_source(const std::string& scriptContent,
                                     const instance_variables& instanceVars,
                                     const std::string& sourcePath,
-                                    bool textual = false);   // textual: an include, run where it is written
+                                    bool textual = false,   // textual: an include, run where it is written
+                                    std::string_view include_scope = {});
 
         // Lazily constructs + wires the selected backend on first use, so creating an
         // engine (or switching backend type) costs nothing until a script actually runs.

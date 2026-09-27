@@ -1005,6 +1005,21 @@ struct engine::implementation {
         }
     }
 
+    // An include that runs inside a function or a block runs there: an enum the file declares is local to that scope
+    // at run time, so one that names a program-scope enum leaves it unchanged (the checker's rule for an enum written in
+    // a function body, applied at the include site: the file's own check cannot see where it runs)
+    void warn_scoped_enums(engine& self, const script_cache_entry& entry, const std::string& path, std::string_view scope) {
+        for (const auto& d : entry.declarations) {
+            if (!d || d->get_type() != node_type::enum_decl) { continue; }
+            const auto* e = static_cast<const enum_decl*>(d.get());
+            const std::string name(e->name);
+            if (!self.has_variable(name) && !program_names_.count(name)) { continue; }
+            last_check_.diagnostics.push_back({check_diagnostic::level::warning, 0, 0,
+                path + ":" + std::to_string(e->location.line) + ":" + std::to_string(e->location.column) + ": enum '" + name +
+                "' declared in " + std::string(scope) + " is local to it: the program-scope '" + name + "' keeps its values"});
+        }
+    }
+
     // Per-call check with host instance variables: diagnostics only, never touches the
     // entry's stamps (proofs_t::leave).
     check_report check_with_instance_vars(engine& self, const script_cache_entry& entry, const instance_variables& instanceVars) {
@@ -1826,8 +1841,8 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
-script_value engine::execute_include_source(const std::string& resolvedPath, const std::string& content) {
-    return execute_source(content, instance_variables{}, resolvedPath, true);
+script_value engine::execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope) {
+    return execute_source(content, instance_variables{}, resolvedPath, true, scope);
 }
 
 script_value engine::execute(script_source source) {
@@ -1856,7 +1871,7 @@ script_value engine::execute(script_source source) {
     return result;
 }
 
-script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual) {
+script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
     impl->has_executed_ = true;
     impl->note_root_source(sourcePath);
     try {
@@ -1889,6 +1904,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
                 // names defined instead of caching a result that depends on them
                 impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent, listing_name);
             }
+            if (!include_scope.empty()) { impl->warn_scoped_enums(*this, *cached, sourcePath, include_scope); }
         }
 
         // Rewrite a missing/stale/rejected sibling AFTER the check hook so a clean check

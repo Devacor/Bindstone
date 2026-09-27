@@ -180,6 +180,16 @@ Builtin container/string/map methods, subscripts, enum values (existence IS chec
 (`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
 object receiver; a class method of the same name wins first.
 
+**Enums in a function or block** — an enum declared inside a function or a block is local to
+that scope, as at run time: its values resolve there (a program-scope enum of the same name is
+hidden, never checked against), and it vanishes with the scope. When the program scope already
+names the enum (the unit's own top level, another unit of the program, or the engine) the
+declaration leaves that enum unchanged, and the checker says so at warning severity:
+`enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its
+values` (`in a block`, `in a lambda`). A file run by an `include` inside a function or a block
+declares its enums there too; that include's report (`last_check_diagnostics()`) carries the same
+warning, path-qualified, for each enum the file declares under a program-scope name.
+
 **Map keys** — the pair variable of a range-for over a statically known map (`map<K,V> m`,
 an `auto` map literal; a `var` map is dynamic) carries a read-only `first` - C++
 `pair<const K, V>` - by value and by reference alike (`auto& kv` aliases the value AND the key;

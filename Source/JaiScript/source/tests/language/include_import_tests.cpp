@@ -944,6 +944,36 @@ public:
             for (const char* f : {"imp_err_c.jai", "imp_err_d.jai", "imp_err_t.jai", "imp_err_u.jai"}) { cleanup_temp_file((jai::foundry::test_temp_directory() / f).string()); }
         });
 
+        test("an_enum_in_a_file_included_inside_a_function_or_block_is_local_and_warns", [=, this]() {
+            // include is textual: the file's enum is declared where the include runs; inside a function or a block that is a
+            // local enum, so the program-scope enum keeps its values, and the include's report says so (both backends)
+            create_temp_file("enum_inc.jai", "enum Color { cyan, magenta, yellow, key }\nvar seen = Color.yellow;\n");
+            for (bool proofs : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                eng->add_include_path(jai::foundry::test_temp_directory().string());
+                check_eq((int64_t)2, eng->execute("enum Color { red, green, blue }\nvoid reload(string p) { include(p); }\nreload(\"enum_inc.jai\");\nColor.blue;").as_int());
+                const check_report& r = eng->last_check_diagnostics();
+                bool warned = false;
+                for (const auto& d : r.diagnostics) {
+                    if (d.severity == check_diagnostic::level::warning && d.message.find("enum_inc.jai:1:6: enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its values") != std::string::npos) { warned = true; }
+                }
+                check_true(warned, "the include's report names the enum and the function");
+                check_eq((int64_t)2, eng->execute("string q = \"enum_inc.jai\";\n{ include(q); }\nColor.blue;").as_int());
+                warned = false;
+                for (const auto& d : eng->last_check_diagnostics().diagnostics) {
+                    if (d.message.find("enum 'Color' declared in a block is local to it") != std::string::npos) { warned = true; }
+                }
+                check_true(warned, "a block include warns too");
+                eng->execute("string top = \"enum_inc.jai\";\ninclude(top);");
+                for (const auto& d : eng->last_check_diagnostics().diagnostics) {
+                    check_true(d.message.find("is local to it") == std::string::npos, "a program-scope include replaces nothing silently: it is the program scope");
+                }
+            }
+            cleanup_temp_file((jai::foundry::test_temp_directory() / "enum_inc.jai").string());
+        });
+
         test("an_error_in_an_included_file_is_caught_like_inline_code", [=, this]() {
             // include is textual: a throw keeps its value and type, a runtime error is caught with its text alone, a load failure
             // (static check, parse) is caught with its listing, which names the included file; both backends, proofs on and off

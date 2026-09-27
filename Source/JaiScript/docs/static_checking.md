@@ -282,8 +282,14 @@ checker cannot catch. The class table rides the engine the same way; a class re-
 a different shape replaces its entry at the next gather (the last unit gathered wins), and a
 unit's own declaration always wins over the table's.
 
-A unit the closure cannot resolve, read or parse contributes no names and is skipped; the
-runtime reports it exactly as before, when the unit executes. A **dynamic-path**
+A unit that fails to **parse** stops the program there: its parse error (the unit's path, line
+and column, exactly the text executing that file directly gives) is the whole report, and no
+unit is checked (the names it would declare are unknown, so any check would only list them as
+undeclared). Under strict the root's `execute()` throws that `parse_error` before any unit
+runs; under warn - and in `engine->check()` - the report holds the parse error alone, as an
+error diagnostic with the text as its message, and the import raises it when it executes. A
+fix to the file is seen on the next run. A unit the closure cannot resolve or read contributes
+no names and is skipped; the runtime reports it exactly as before, when the unit executes. A **dynamic-path**
 `import(expr)`/`include(expr)`, or an import below the top level, can define anything: that
 unit keeps warning severity for undeclared identifiers. Names the program never declares —
 a host global bound after load, a value injected at run time — are outside the closure by

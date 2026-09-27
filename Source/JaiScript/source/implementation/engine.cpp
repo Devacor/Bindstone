@@ -697,6 +697,7 @@ struct engine::implementation {
         std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite sibling
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
+        std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
     };
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
@@ -753,6 +754,7 @@ struct engine::implementation {
     // text and the diagnostics folded into the caller-visible report.
     std::string program_check_listing_;
     std::vector<check_diagnostic> program_check_diags_;
+    std::string program_parse_failures_;
 
     static void literal_unit_paths(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
         for (const auto& d : decls) {
@@ -799,11 +801,13 @@ struct engine::implementation {
         return cached;
     }
 
-    // Depth-first in source order; a unit the runtime cannot resolve, read or parse is
-    // skipped here and reported by the runtime exactly as before, when it executes. Every
+    // Depth-first in source order; a unit the runtime cannot resolve or read is skipped here
+    // and reported by the runtime exactly as before, when it executes. A unit that fails to
+    // parse is collected in parse_failures (its text, path and position included). Every
     // resolved unit leaves a stamp (taken before the read, so a later edit shows as newer).
     void collect_closure_units(engine& self, const std::vector<std::string>& paths, std::unordered_set<std::string>& visited,
-                               std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file) {
+                               std::vector<closure_unit>& out, std::vector<closure_stamp>& stamps, const std::string& from_file,
+                               std::string& parse_failures) {
         for (const auto& path : paths) {
             closure_unit unit;
             try {
@@ -821,6 +825,10 @@ struct engine::implementation {
                 std::filesystem::path sibling;
                 bool siblingFresh = false;
                 unit.entry = acquire_entry(self, unit.source, unit.path, sibling, siblingFresh);
+            } catch (const parse_error& e) {
+                parse_failures += e.what();
+                if (parse_failures.empty() || parse_failures.back() != '\n') { parse_failures += '\n'; }
+                continue;
             } catch (...) {
                 continue;
             }
@@ -832,7 +840,7 @@ struct engine::implementation {
             detail::collect_unit_globals(unit.entry->declarations, unit.path, program_globals_);
             std::string unit_path = unit.path;
             out.push_back(std::move(unit));
-            collect_closure_units(self, nested, visited, out, stamps, unit_path);
+            collect_closure_units(self, nested, visited, out, stamps, unit_path, parse_failures);
         }
     }
 
@@ -846,7 +854,7 @@ struct engine::implementation {
             static_cast<uint64_t>(privilege::filesystem)) != 0;
         if (entry.closure_filesystem != filesystem_allowed) { return true; }
         if (!filesystem_allowed) { return false; }
-        if (!entry.closure_listing.empty() || entry.check_result.has_errors()) { return true; }
+        if (!entry.closure_listing.empty() || !entry.closure_parse_failures.empty() || entry.check_result.has_errors()) { return true; }
         for (const auto& s : entry.closure_stamps) {
             uint64_t mtime = 0, size = 0;
             stat_mtime_size(s.path, mtime, size);
@@ -911,8 +919,10 @@ struct engine::implementation {
     // gathers its closure when due (names first, so the root's own check already knows
     // them; the root's verdict is re-derived because the union may have moved), then
     // checks every closure unit whose entry is stale so the unit's later execute through
-    // import finds it checked. The findings live on the root entry and are republished
-    // on every call, gathered or not.
+    // import finds it checked. A unit that fails to parse stops the program there: its
+    // parse error is the whole report (the names it would have declared are unknown, so
+    // any check would only cascade). The findings live on the root entry and are
+    // republished on every call, gathered or not.
     const check_report& checked_report(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         if (want_diagnostics && closure_due(entry)) {
             std::vector<std::string> roots;
@@ -921,6 +931,7 @@ struct engine::implementation {
             entry.closure_stamps.clear();
             entry.closure_listing.clear();
             entry.closure_diags.clear();
+            entry.closure_parse_failures.clear();
             std::vector<closure_unit> closure;
             if (entry.closure_root) {
                 detail::collect_unit_names(entry.declarations, program_names_);
@@ -928,12 +939,26 @@ struct engine::implementation {
                 detail::collect_unit_functions(entry.declarations, entry.source_path, program_functions_);
                 detail::collect_unit_globals(entry.declarations, entry.source_path, program_globals_);
                 std::unordered_set<std::string> visited;
-                collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path);
+                collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path, entry.closure_parse_failures);
                 entry.checked = false;
             }
             entry.closure_epoch = check_surface_epoch_;
             entry.closure_filesystem = self.is_enabled(privilege::filesystem);
-            check_entry(self, entry, true);
+            if (!entry.closure_parse_failures.empty()) {
+                entry.check_result = {};
+                check_entry(self, entry, false);
+                closure.clear();
+                size_t start = 0;
+                const std::string& failures = entry.closure_parse_failures;
+                while (start < failures.size()) {
+                    size_t end = failures.find('\n', start);
+                    if (end == std::string::npos) { end = failures.size(); }
+                    if (end > start) { entry.closure_diags.push_back({check_diagnostic::level::error, 0, 0, failures.substr(start, end - start)}); }
+                    start = end + 1;
+                }
+            } else {
+                check_entry(self, entry, true);
+            }
             for (const auto& unit : closure) {
                 check_entry(self, *unit.entry, true);
                 const check_report& r = unit.entry->check_result;
@@ -950,6 +975,7 @@ struct engine::implementation {
         }
         program_check_listing_ = entry.closure_listing;
         program_check_diags_ = entry.closure_diags;
+        program_parse_failures_ = entry.closure_parse_failures;
         return entry.check_result;
     }
 
@@ -967,9 +993,13 @@ struct engine::implementation {
     }
 
     // The tail every checked execute shares: publish last_check_, gate with the root listing
-    // followed by each closure unit's own.
+    // followed by each closure unit's own. A unit that failed to parse fails a strict load as
+    // the parse error itself (warn runs on, and the import raises it when it executes).
     void gate_checked(const check_report& root, std::string_view source) {
         last_check_ = program_report(root);
+        if (static_check_mode_ == check_mode::strict && !program_parse_failures_.empty()) {
+            throw parse_error(program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
+        }
         if (gates(last_check_)) {
             throw static_check_error("static check failed:\n" + root.format(source) + program_check_listing_);
         }

@@ -10,6 +10,7 @@
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
+#include <jaiscript/detail/arity_diagnostic.hpp>
 #include <set>
 #include <algorithm>
 #include <functional>
@@ -586,6 +587,7 @@ public:
     // paying a shared_ptr copy per call
     checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_ref(uint64_t name_id, const script_value* args, size_t argc) const;
     const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const;
+    error_propagator method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const;
 
     // Single-overload probe for inline-cache fill: the lone overload for name_id, or
     // nullptr when the name has zero or multiple overloads.
@@ -2806,6 +2808,17 @@ inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, cons
                 name_id, symbols->intern(argument_type_list(args, argc, eng))};
     }
     return {ec, constructor ? "No constructor of '{0}' matches this call" : "No overload of '{0}' matches this call", name_id, 0};
+}
+
+// A method with one declaration called with a count its parameters do not accept: the function's arity text, the method by
+// name (docs/diagnostics.md family C); a parallel worker's frozen symbolizer keeps the list-free overload shape
+inline error_propagator method_arity_miss(uint64_t name_id, size_t expected, size_t argc, engine* eng) {
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    const std::error_code ec = make_error_code(runtime_error_code::argument_count_mismatch);
+    if (symbols && !symbols->frozen()) {
+        return {ec, arity_named, name_id, symbols->intern(arity_detail(expected, argc))};
+    }
+    return {ec, "No overload of '{0}' matches this call", name_id, 0};
 }
 
 // Typed-boundary rejections (detail/slot_site.hpp): the site names its slot; the shape

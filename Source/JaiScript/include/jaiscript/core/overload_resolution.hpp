@@ -224,6 +224,14 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
     if (ec == make_error_code(runtime_error_code::member_not_found)) {
         return checked_result<const std::shared_ptr<function_decl>*>(ec, "No overload of '{0}' exists", name_id);
     }
+    return method_overload_miss(ec, name_id, args, argc);
+}
+
+inline error_propagator class_definition::method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const {
+    auto it = method_overloads_.find(name_id);
+    if (it != method_overloads_.end() && it->second.size() == 1 && !arity_accepts(it->second.front()->parameters, argc)) {
+        return detail::method_arity_miss(name_id, it->second.front()->parameters.size(), argc, get_engine());
+    }
     return detail::overload_miss(ec, name_id, args, argc, get_engine());
 }
 
@@ -237,7 +245,7 @@ inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_
     if (ec == make_error_code(runtime_error_code::member_not_found)) {
         return checked_result<std::shared_ptr<function_decl>>(ec, "No overload of '{0}' exists", name_id);
     }
-    return detail::overload_miss(ec, name_id, args, argc, get_engine());
+    return method_overload_miss(ec, name_id, args, argc);
 }
 
 inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_method_overload(

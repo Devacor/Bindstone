@@ -40,14 +40,16 @@ public:
     float x = 0.0; float y = 0.0;
     Vec2(float px, float py) { x = px; y = py; }
     Vec2 operator+(Vec2 o) { return Vec2(x + o.x, y + o.y); }
-    float length() { return math::sqrt(x * x + y * y); }
+    float length() { return math::sqrt(squared()); }
+private:
+    float squared() { return x * x + y * y; }
 }
 
 auto ship = Vec2(3.0, 4.0);
 auto next = ship + Vec2(1.0, -1.0);
 print(`ship is ${ship.length():.1f} from home, heading for (${next.x}, ${next.y})`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ship is 5.0 from home, heading for (4.0, 3.0)</code></pre></div>
-<p>No semicolon rituals you did not already have, no <code>self.</code> on every field, no metatables. <code>x</code> inside a method is the field. <code>`${expr:.1f}`</code> formats like you think it should.</p>
+<p>No semicolon rituals you did not already have, no <code>self.</code> on every field, no metatables. <code>x</code> inside a method is the field. <code>`${expr:.1f}`</code> formats like you think it should. And one thing simpler than C++: visibility starts public, so there is no class-versus-struct default to remember; <code>private:</code> members belong to the class and the classes derived from it.</p>
 <h2 id="a-copy-is-a-copy">A copy is a copy<a class="hlink" href="#a-copy-is-a-copy" aria-label="link">&#8203;</a></h2>
 <p>This is the one idea that makes JaiScript feel different from Lua, Python or JavaScript: <strong>objects are values</strong>, exactly as in C++. Assigning a ship gives you a second ship. When you want two names for one ship, you ask for a reference.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 0.0; float y = 0.0; }

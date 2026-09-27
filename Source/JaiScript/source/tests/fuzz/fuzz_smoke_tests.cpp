@@ -10,6 +10,7 @@
 #include "fuzz/fuzz_generator.hpp"
 #include "fuzz/fuzz_harness.hpp"
 #include "fuzz/fuzz_jaibite.hpp"
+#include "fuzz/fuzz_order_band.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -113,6 +114,19 @@ public:
 		test("fixed_seeds_no_new_divergence_no_proofs", [this]() {
 			// interp-vs-vm parity must hold in both proof states (docs/static_checking.md "Proofs")
 			run_seed_range(0, 40, false);
+		});
+		test("order_band_seeds_hold_three_oracles", [this]() {
+			// writing calls beside reads of what they write: the backends agree, the program agrees with its metamorphic variant, and
+			// the output is the spec model's (repro: jaiscript_fuzz --order-band --seed <N>)
+			int problems = 0;
+			std::string first;
+			for (uint64_t seed = 0; seed < 40; ++seed) {
+				const std::string p = fuzz::order::order_seed_problem(seed, 0.1);
+				if (p.empty()) continue;
+				++problems;
+				if (first.empty()) first = "order band seed " + std::to_string(seed) + "\n" + p;
+			}
+			check_eq(0, problems, first.empty() ? "no problems" : first);
 		});
 	}
 };

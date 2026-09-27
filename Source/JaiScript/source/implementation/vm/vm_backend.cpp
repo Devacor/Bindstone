@@ -12594,7 +12594,8 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
 			return raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
 		}
-		return raise_from(class_var_result);
+		// no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
+		return raise_(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
 	}
 	script_value class_var = std::move(class_var_result.value());
 

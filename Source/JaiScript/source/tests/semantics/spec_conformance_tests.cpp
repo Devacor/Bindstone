@@ -1152,6 +1152,7 @@ private:
 		});
 		test("untouched_family_texts", [this]() {
 			expect_texts({
+				{"class not found", "", "var z = Nope::x;", "Class 'Nope' not found", check_mode::off},
 				{"integer overflow in division", "var a = -9223372036854775807 - 1; var b = -1;", "var z = a / b;", "Integer overflow in '/'", check_mode::off},
 				{"invalid plus", "var m = {}; var a = [1];", "var z = a + m;", "Invalid operands for + operator", check_mode::off},
 				{"unary minus", "var s = \"x\";", "var z = -s;", "Unary minus requires numeric operand", check_mode::off},

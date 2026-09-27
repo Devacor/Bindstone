@@ -7958,7 +7958,8 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
             }
-            return class_var_result.error_value();
+            // no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
+            return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
         }
         script_value class_var = std::move(class_var_result.value());
 

@@ -245,7 +245,7 @@ print("after");                                                // interpreter: p
 ```
 
 **Class reload with instance migration is the standout.** Adding `int reload_marks = 7;` and a method to `Character`
-while four live characters sit in a typed `array<Character>`: every live instance gains the field with its
+while the live character sits in a typed `array<Character>` (and the view object behind a `shared_ptr`): the live instance gains the field with its
 initializer, existing fields keep their values, items already in backpacks (`array<Item>` inside each character)
 gain their new field too, new instances get the defaults, and a second edit that changes the method again keeps the
 field's live value (42). Zero work on my side, identical on both backends. The only friction: code already loaded

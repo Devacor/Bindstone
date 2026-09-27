@@ -16,6 +16,25 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 | 3 | 09-27 | **Backend divergence.** On the interpreter, an error raised inside a file run by `include(path)` (a `throw`, a run-time error, or a static-check failure of the included file) escapes the `try` around the include and ends the program; the VM catches it. Repro below (milestone b entry). Also: the static-check listing of an included file says `script:L:C`, not the file's path | reported, not fixed (engine batch); the hot-reload test skips its two broken-edit steps on the interpreter |
 | 4 | 09-27 | A runtime `include` inside a function declares an `enum` only in that function's scope, silently: re-running `enum Color { red, green, blue }` leaves the global `Color` unchanged, with no warning | by design as far as I can tell (include is textual); worked around by keeping enums in a file that is never reloaded |
 
+## Summary at milestone c (multiplayer)
+
+New since milestone b: host/join for up to 16 players over the runner's NetServer/NetChannel on the snapshot
+protocol the single-player client already used, host-side character files, chat, parties and PvP over the wire,
+graceful logout, dropped connections and host quit, a dedicated screenless host, a one-process net test (the real
+host and 17 client sessions over loopback, 31 checks) and a three-process test (a dedicated host and two scripted
+clients), all green on both backends. No new engine bugs. Ratings for this stretch: **networking good** (the
+runner's API plus classes and signals made it short), **the language's part in it good**, **testing multi-process
+setups okay** (a script cannot start a process, so the three-process test is a PowerShell script).
+
+Top friction points now, most costly first (unchanged in order; nothing new from networking made the list):
+
+1. Errors far from their cause (bugs 1, 2, the `script:L:C` half of 3).
+2. Hot reload of code is hand-built (queued to be replaced by import-anywhere with Dev's re-run rule).
+3. The checker misses certain local type errors (milestone a list plus the `::X =` gap).
+4. Value semantics as a silent cost in hot paths.
+
+A separate section below compares the same work in Lua, C# and C++.
+
 ## Summary at milestone b (saves + hot reload)
 
 New since milestone a: versioned plain-text saves with checksums and backups, a save/load round trip inside the
@@ -282,3 +301,114 @@ interpreter; savetest 16/16).
 text had no newline. It turned out a background batch of mine (with a PowerShell splatting mistake) was running a
 second copy of the test at the same time, and both processes edited the same copies folder. The test folders now take
 a `tag` suffix so parallel runs cannot collide.
+
+### 2026-09-27: multiplayer
+
+**Good: the networking came together quickly, because the single-player client already spoke the protocol.** From
+milestone a the renderer only ever read a `ClientView` filled from text snapshots, so networking was the transport
+(gq_net.jai, ~330 lines): HELLO/WELCOME/REFUSE, `M|dir` and `A|action` intents up, one `SNAP` per player per tick
+down, BYE. The host's own player still reads its snapshot locally. The design is mine, but two language properties
+paid for it: classes as values (a `ClientView` is a self-contained object, so seventeen of them can sit in one process
+for the test) and the signal/capture model below.
+
+**Good: host classes, signals and captures.** `shared_ptr<NetServer> NET_SRV = new NetServer();`, an
+`array<shared_ptr<NetChannel>>` of client sessions, and receivers with typed parameters that push into per-session
+inboxes by a captured index worked first time on both backends:
+
+```jaiscript
+int k = s;
+ch.on_packet.connect("gq", [k](string bytes) { NCS_INBOX[k].push(bytes); });
+NET_SRV.on_client_packet.connect("gq", [](int id, string bytes) { NH_KIND.push(1); NH_ID.push(id); NH_TXT.push(bytes); });
+```
+
+The capture contract (locals captured, globals read when the lambda runs) is exactly what a receiver that fires later
+from inside `pump()` wants. Rating: good.
+
+**Good: one-process network tests are cheap to write.** The net test drives the real host session and seventeen real
+client sessions over loopback in one engine: join order and slots, positions arriving in the other clients' views,
+open and party chat routing, party invites, PvP flags (an unflagged gator cannot be targeted, flagged ones can
+fight), logout and rejoin with the character restored from the host's file, an abrupt drop, a duplicate name, a wrong
+protocol version, sixteen players and a refused seventeenth, and the host's goodbye reaching everyone. It found two
+real game bugs on its first run (players spawning stacked on one tile, and a party of one not dissolving when the other
+member dropped). Rating: good.
+
+**Okay: multi-process tests need a shell script.** A script cannot start a process, so the three-process test
+(`nettest2.ps1`: a dedicated host and two scripted clients, 7 checks, both backends) lives in PowerShell. Three of my
+own mistakes there were PowerShell's, not JaiScript's (a one-element array splatted as characters, `Start-Process`
+splitting an argument on spaces, a still-running background job). Suggestion (runner): a small `spawn(args)` /
+`wait(pid)` pair would keep such tests in script.
+
+**Performance, measured (VM unless noted).** A snapshot is 1-3 KB of text; at 16 players the host sends ~37 KB per tick
+(~370 KB/s at 10 Hz), and building the 16 snapshots costs ~5.5 ms (~45 ms on the interpreter, under half the 100 ms
+tick). The dedicated host with two clients spends 1% of wall time working (6% on the interpreter). String building
+dominates; a delta encoding against the previous snapshot would cut both bytes and time and is the obvious next step
+if the player count or the link gets tighter.
+
+## Gator Quest in Lua, C# and C++: a comparison
+
+Calibrated against the same work: ~11,000 lines, a deterministic simulation, a pixel renderer in a terminal,
+procedural audio, saves, hot reload and networking. For Lua I assume plain Lua 5.4 embedded in a similar host (with
+LuaJIT noted where it changes the answer); for C#, .NET with a console host; for C++, a modern compiler and CMake.
+Where I did not measure something I say so.
+
+**Productivity (how fast the game got written).**
+
+- *JaiScript vs Lua*: about the same speed for the parts that are data and glue. Lua's table constructors would make
+  the content tables nicer than my one-line DSL (`{name="Swamp Rat", hp=10, dmg={1,4}}` instead of
+  `"Swamp Rat|hp=10|dmg=1-4"`), but a typo in a Lua field name is a silent `nil`, while here a typo in a lookup
+  (`iid("Garlc")`) throws at load and a typo in code (`MOB_HPP[m]`) fails the load with a file:line listing. Over
+  thirty files and many rarely-run paths (quest turn-ins, a boss enrage, the golden carp) that difference is the
+  single biggest productivity factor in JaiScript's favor: most mistakes died before the program ran.
+- *JaiScript vs C#*: C# would be faster to write in an IDE (completion, rename, find references, a richer standard
+  library: `StringBuilder`, LINQ, `File.Replace`, JSON). JaiScript has no language server that I used; I navigated with
+  grep. But there was no build step: the whole game loads in about a second and a change is on screen immediately.
+- *JaiScript vs C++*: the code would port almost line for line (typed classes with defaults, `T&` references,
+  `array<T>` for `std::vector<T>`, identical value semantics), so the writing speed would be similar, minus C++'s build
+  times and header upkeep. `Character& c = CHARS[slot]; c.pack[i].qty -= 1;` means the same thing in both.
+
+**Safety.**
+
+- Out-of-bounds, overflow, null and type errors are all caught with a clear message. My first render bug was
+  `Array index 10949 out of bounds for array of size 7104` with a full stack trace (draw_items, render_world,
+  render_frame); in C++ it would have been silent memory corruption, in Lua a `nil` arithmetic error somewhere later.
+- Checked integer overflow is safer than all three (Lua and C# wrap silently by default, C++ signed overflow is
+  undefined) but costs explicit masking in hash code: `h = ((h ^ (s[i] + 0)) * 16777619) & 0xFFFFFFFF;`.
+- Value semantics make whole categories of aliasing bugs impossible (a `ClientView` or an `Item` cannot change behind
+  your back) at the price of accidental copies (`SpellDef s = SPELLS[i];` copies arrays on every call). C# structs have
+  the same trap; Lua tables and C# classes have the opposite one (shared mutation).
+- Where JaiScript is weaker than C#: the error locations (bugs 1 to 3) and the checker gaps listed above.
+
+**Performance predictability.**
+
+- The VM was fast enough everywhere with no tuning: 1.2-1.5 ms per sim tick with ~540 mobiles, ~3.5 ms to render a lit
+  162x110-pixel view, ~1.2 ms to compose the frame, ~5.5 ms for sixteen network snapshots. The interpreter is about 6x
+  slower and still playable. Costs were predictable from the code; the only surprises were copies and my own
+  algorithms (a 5,000-node BFS per tick per bot). No GC pauses (reference counting).
+- C++ would be one to two orders of magnitude faster on the per-pixel loops; C# (JIT) several times faster, with GC
+  pauses to manage. Plain Lua I did not measure here (the repository's GLOOM and JaiDOOM ports carry Lua comparisons);
+  LuaJIT would likely beat this VM on the numeric loops.
+
+**Tooling.** C# is far ahead (IDE, debugger, profiler, refactoring). JaiScript gives a runner, a strict checker with
+good, compiler-shaped messages (`'var' is a type keyword and cannot be used as a parameter name - rename it`), stack
+traces, a DAP debugger (which I, as a headless agent, did not use: I debugged with prints, headless frame captures and
+tests) and a parse cache. What I missed: a language server, and correct locations for errors in imported files.
+
+**Iteration speed.** Better than C# and C++, on par with Lua: no build, about a second to load the whole game, hot
+reload in the running game. The frozen-harness workflow (never rebuilding the runner) meant every iteration was
+edit and run.
+
+**Hot reload.** Class reload with live instance migration is better than any of the three out of the box: C# Hot
+Reload refuses many edits to live types (adding a field to a class with live instances is not reliably supported), C++
+needs a third-party tool, and in Lua you patch metatables and migrate instances by hand. Functions and constants needed
+my stub generator (Lua does that part natively by re-running a module that assigns into a shared table); Dev's
+import-anywhere with the re-run rule should close that gap.
+
+**Debugging.** Fine for a game this size with prints, deterministic replays (STATE_HASH on both backends) and headless
+captures. The interpreter doubles as a second opinion that sometimes locates an error the VM places at an import line.
+Worse than C# and C++ with a real debugger attached; about Lua's level.
+
+**Overall.** For a mid-sized game written by one person, JaiScript sits between Lua and C#: close to Lua's iteration
+speed and embedding story, closer to C# and C++ in structure and safety because of the type system and the strict
+checker, ahead of all three on hot reload of classes, and behind C# on tooling (language server, error locations). The
+two things that would move it furthest: correct error locations across files, and the import-anywhere reload already
+in flight.

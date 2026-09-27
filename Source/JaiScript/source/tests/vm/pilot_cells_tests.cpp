@@ -5053,6 +5053,143 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// raw typed frames (docs/typed_regions_design.md "Raw typed frames"): a body whose parameters are by-value scalars and whose calls reach
+		// functions of the same shape is one frame program; a call between frame programs passes its arguments and its result raw
+		test("raw_frames_recursion_and_chains_land_the_same", [this]() {
+			const std::string src =
+				"int fib(int n) { if (n < 2) { return n; } return fib(n - 2) + fib(n - 1); }\n"
+				"float fsum(float x, int n) { if (n < 1) { return x; } return fsum(x * 0.5, n - 1) + 1.0; }\n"
+				"bool is_even(int n) { if (n == 0) { return true; } return is_odd(n - 1); }\n"
+				"bool is_odd(int n) { if (n == 0) { return false; } return is_even(n - 1); }\n"
+				"int seven() { return 7; }\n"
+				"int add3(int a, int b, int c) { return a + b + c; }\n"
+				"int nest(int n) { if (n < 1) { return seven(); } int k = n * 3; int r = nest(n - 1); return r + k; }\n"
+				"int mix(int n, float f, bool b) { if (n < 1) { if (b) { return 1; } return 2; } return mix(n - 1, f * 2.0, !b) + n; }\n"
+				"string out = to_string(fib(20)) + \" \" + to_string(fsum(3.0, 10)) + \" \" + to_string(is_even(31)) + \" \" + to_string(is_odd(31)) + \" \" + to_string(nest(12)) + \" \" + to_string(mix(9, 0.5, true)) + \" \" + to_string(add3(1, 2, 3) + fib(10));\n"
+				"int acc = 0; for (int i = 0; i < 15; ++i) { acc = acc + fib(i); } out + \" \" + to_string(acc);";
+			both(src, "6765 10.0029296875 false true 241 47 61 986", "recursion, chains and a program-scope loop");
+			both(src, "6765 10.0029296875 false true 241 47 61 986", "recursion, chains and a program-scope loop, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== fib ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- frame program") != std::string::npos && fl.find("(raw entry)") != std::string::npos && fl.find("raw 2") != std::string::npos, "fib is a raw-enterable frame program with two raw calls: " + fl);
+			check_true(fl.find("C_RET") != std::string::npos, "its returns are rets: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("raw_frames_nested_calls_in_raw_arguments_park_in_order", [this]() {
+			// a call inside a raw call's arguments (a raw one: Ackermann; a general leaf; a nested chain in a program-scope loop): the outer
+			// callee parks before the inner probe, so a miss anywhere in the arguments resumes the general form with the callees stacked in order
+			const std::string src =
+				"int ack(int m, int n) { if (m == 0) { return n + 1; } if (n == 0) { return ack(m - 1, 1); } return ack(m - 1, ack(m, n - 1)); }\n"
+				"int twice(int x) { return x * 2; }\n"
+				"int down(int n) { if (n < 1) { return 0; } return down(twice(n) - n - 1) + 1; }\n"
+				"int pair(int a, int b) { if (a < 1) { return b; } return pair(a - 1, pair(0, a) + b); }\n"
+				"int acc = 0; for (int i = 0; i < 6; ++i) { acc = acc + ack(1, ack(1, i)) + down(i); }\n"
+				"to_string(ack(2, 3)) + \" \" + to_string(ack(3, 3)) + \" \" + to_string(down(9)) + \" \" + to_string(pair(5, 2)) + \" \" + to_string(acc);";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("9 61 9 ") == 0, "the interpreter's answer: " + oracle);
+			both(src, oracle, "nested calls in raw arguments");
+			both(src, oracle, "nested calls in raw arguments, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 6u, 7u, 9u, 11u, 13u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("raw_frames_raise_the_general_texts", [this]() {
+			// an overflow deep in a raw chain, a division by zero, the depth limit, a raw callee reaching a general function: every raise happens on the
+			// general form after the frame leaves its cells, so the texts and the catching frame are the interpreter's
+			const std::string src =
+				"int big(int n) { if (n == 0) { return 9223372036854775807; } return big(n - 1) + 1; }\n"
+				"int divz(int n, int d) { if (n == 0) { return 10 / d; } return divz(n - 1, d) + 1; }\n"
+				"int deep(int n) { if (n == 0) { return 0; } return deep(n - 1) + 1; }\n"
+				"var LOG = [];\n"
+				"int note(var v) { LOG.push(v); return 1; }\n"
+				"int walk(int n) { if (n == 0) { return note(n); } return walk(n - 1) + note(n); }\n"
+				"string out = \"\";\n"
+				"try { out += to_string(big(5)); } catch (e) { out += \"A:\" + e + \" \"; }\n"
+				"try { out += to_string(divz(4, 0)); } catch (e) { out += \"B:\" + e + \" \"; }\n"
+				"try { out += to_string(deep(100000000)); } catch (e) { out += \"C:\" + e + \" \"; }\n"
+				"out += to_string(walk(6)) + \" \" + to_string(LOG.size()) + \" \" + to_string(deep(50));\n"
+				"out;";
+			both(src, "", "raises in raw chains");
+			both(src, "", "raises in raw chains, proofs off", false);
+			const std::string vm = run_on(true, src);
+			check_true(vm.find("A:") != std::string::npos && vm.find("B:") != std::string::npos && vm.find("C:") != std::string::npos && vm.find(" 7 7 50") != std::string::npos, "each raise caught, the walk ran whole: " + vm);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("raw_frames_follow_a_rebound_callee_and_a_converting_argument", [this]() {
+			// the raw call reads the callee's binding at every call: a reload that rebinds it (another body, another parameter kind) is the general
+			// call's; an argument of another kind than its parameter takes the binder's conversion on the general door
+			auto session = [](bool vm) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				std::string out;
+				try {
+					e->execute("int g(int x) { return x * 2; }\nint f(int n) { if (n < 1) { return 0; } return f(n - 1) + g(n); }\nfloat h(float x) { if (x < 1.0) { return x; } return h(x - 1.0) + 0.5; }\nfloat w(int n) { return h(n); }");
+					out += e->execute("to_string(f(5)) + \" \" + to_string(w(3));").as_string();
+					e->execute("float g(float x) { return x * 3.5; }");
+					out += " " + e->execute("to_string(f(5));").as_string();
+					e->execute("int g(int x) { return x + 100; }");
+					out += " " + e->execute("to_string(f(5));").as_string();
+				} catch (const std::exception& ex) { out += std::string(" throw:") + ex.what(); }
+				return out;
+			};
+			const std::string oracle = session(false);
+			check_eq(oracle, session(true), "a rebound callee and a converting argument, both backends");
+			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
+		});
+		test("raw_frames_inside_coroutines_and_around_yields", [this]() {
+			// a coroutine's body runs on its fiber frame (never a frame program); the raw chains it starts end before its yields
+			const std::string src =
+				"int fib(int n) { if (n < 2) { return n; } return fib(n - 2) + fib(n - 1); }\n"
+				"coroutine gen(int n) -> int { for (int i = 0; i < n; ++i) { int v = fib(i); yield v; } }\n"
+				"string out = \"\"; var a = gen(8); var b = gen(6);\n"
+				"for (int k = 0; k < 8; ++k) { out += to_string(a.resume()) + \",\"; if (!b.done()) { out += to_string(b.resume()) + \";\"; } }\n"
+				"for (int v : gen(5)) { out += to_string(v) + \" \"; }\n"
+				"out;";
+			both(src, "", "raw chains inside coroutines");
+			both(src, "", "raw chains inside coroutines, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+		});
+		test("raw_frames_leave_the_caller_consistent_after_a_general_call", [this]() {
+			// a raw callee that makes a general call (a var function writing a global the caller's block reads) re-validates its caller at the
+			// return; the caller's block, its globals and its container sites stay the general form's
+			const std::string src =
+				"int G = 1;\n"
+				"var bump = [](var x) { G = G + x; return 0; };\n"
+				"int leaf(int n) { if (n < 1) { return 0; } int t = bump(n); return leaf(n - 1) + n; }\n"
+				"array<int> A = [0, 0, 0, 0];\n"
+				"function run() -> string { int s = 0; for (int i = 0; i < 4; ++i) { int r = leaf(i); s = s + r + G; A[i] = G; } return to_string(s) + \" \" + to_string(G) + \" \" + to_string(A); }\n"
+				"run();";
+			both(src, "", "a general call inside a raw callee");
+			both(src, "", "a general call inside a raw callee, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

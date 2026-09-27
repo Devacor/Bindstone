@@ -374,6 +374,8 @@ namespace jai::vm {
             implicit_result_.reset();
             yielding_ = false;
             switch_to_ = nullptr;
+            raw_switch_ = nullptr;
+            cells_frame_ = nullptr;
             pending_site_ctx_ = {};
             external_site_stack_.clear();
             execution_budget_ = budget;
@@ -479,6 +481,7 @@ namespace jai::vm {
             size_t window_base = 0;
             uint32_t window_live = 0;
             bool window_backed = false;
+            bool raw = false;                          // raw-entered: its window is reserved and built when the general form first needs it
             // Debug statement-boundary edge state (touched only while a session is armed).
             // Stale values across record reuse are harmless: a fresh frame enters at ip 0,
             // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
@@ -494,8 +497,13 @@ namespace jai::vm {
             std::vector<uint8_t> kind;
             std::vector<type_info*> stamp;   // per cell: the slot's type stamp at entry (a local's declared type: int, float or any); null for temps and env values
             uint32_t loop = k_invalid_u32;
+            // a raw call in flight from this frame: 1 + the call index (its landing, if the callee comes back through the general return, binds
+            // nothing of this frame's by reference); and 1 + the call index whose probe found a raw callee without parking it (its arguments
+            // instruction enters it). A block's calls number below 65535 (the translation marks no raw site past that)
+            uint16_t raw_landing = 0;
+            uint16_t raw_call = 0;
             chunk::cell_mask dirty;
-            std::vector<const script_array*> site_node;   // per copy instruction: the load/store site's container node, resolved at entry
+            std::vector<const script_array*> site_node;  // per copy instruction: the load/store site's container node, resolved at entry
             std::vector<const script_array*> site_node2;  // per copy instruction: a push site's source container (an element push), resolved at entry
             std::vector<const script_value*> site_member;   // per copy instruction: a member read site's field value, resolved at entry (the instance's plain field)
             std::vector<class_definition*> site_member_class;   // per copy instruction: the class the member site's field slot was probed for (an alias site: per element; nullptr = probe)
@@ -733,6 +741,7 @@ namespace jai::vm {
             size_t iter_base = 0;
             size_t cfor_base = 0;
             size_t pending_base = 0;
+            uint64_t raw_mark = 0;     // a raw-entered record: door_calls_ at its entry (its raw return re-validates the caller when a general call ran since)
         };
         std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
         size_t call_records_top_ = 0;                  // records [0, top) are live
@@ -1813,7 +1822,22 @@ namespace jai::vm {
         op_status exec_c_args(frame& f, const vm_instruction& ins);
         op_status exec_c_call(frame& f, const vm_instruction& ins);
         op_status cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);
-        bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);   // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss
+        // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss. raw: the call entered a
+        // frame program raw (by-value scalar parameters bind nothing of the caller's, so the arguments' slots need no check)
+        bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw = false);
+        // raw typed frames (docs/typed_regions_design.md "Raw typed frames"): the arguments instruction of a raw call site enters the parked callee's
+        // frame program raw when it has one whose parameter kinds are the arguments' kinds (false: the general door runs); a frame program's return
+        // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
+        bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st);
+        bool raw_probe(frame& f, const chunk::cell_loop::cell_call& cc);          // the callee found through the site's cache: a raw-enterable frame program
+        void park_raw_callee(frame& f, const chunk::cell_loop& loop);             // a raw probe's callee parked as the general probe parks it (a miss before the arguments)
+        op_status exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        void materialize_raw_window(frame& f) { if (f.raw) [[unlikely]] { build_raw_window(f); } }   // a raw-entered frame's window, built when the general form first needs it
+        void build_raw_window(frame& f);
+        // one frame's block run; Raw: a frame program's, whose calls and returns are on the hot switch. A run that hands the block loop another
+        // frame (raw_switch_) returns, and the raw chain (cells_run_raw, which holds the C++ boundary) runs that frame next
+        template <bool Raw> op_status cells_run_frame(frame& f, const chunk::cell_loop& loop);
+        op_status cells_run_raw(frame& entry, op_status st, bool run_first);   // the raw chain from a block run (run_first false: the block already ran and switched)
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
@@ -2034,6 +2058,10 @@ namespace jai::vm {
         op_status exec_namespace_decl(frame& f, const vm_instruction& ins);
         op_status exec_enum_decl(frame& f, const vm_instruction& ins);
         op_status exec_extern_decl(frame& f, const vm_instruction& ins);
+
+        frame* raw_switch_ = nullptr;    // the frame a raw call or a raw return handed the block loop
+        frame* cells_frame_ = nullptr;   // the frame the innermost block loop runs (a C++ exception converts there)
+        uint64_t door_calls_ = 0;        // general calls made from blocks: a raw return re-validates its caller when one ran during the raw call
     };
 
 } // namespace jai::vm

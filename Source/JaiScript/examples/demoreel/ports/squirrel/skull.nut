@@ -11,6 +11,7 @@
 ::SK_MP <- 0.0;
 ::SK_MD <- 0.0;
 ::SK_WA <- 0.0;
+::SK_SHELL <- 1.68;
 ::SK_CX <- 0.0;
 ::SK_CY <- 0.0;
 ::SK_CZ <- 0.0;
@@ -100,7 +101,7 @@ function sk_field(x, y, z) {
 
 function sk_world(x, y, z) {
 	local g = ::sk_field(x, y, z);
-	return ((g < 0.0 ? -g : g) - ::SK_TH) / (::SK_S * (2.1 + ::SK_WA * 2.4));
+	return ((g < 0.0 ? -g : g) - ::SK_TH) / ::SK_SHELL;
 }
 
 // capsules [first, last) against best: a capsule whose bounding sphere cannot beat best is skipped without a root
@@ -275,10 +276,10 @@ function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
 }
 
-// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby: the nearest wins, ties to the earlier. Each capsule run starts
-// from the best so far, so a capsule that cannot win costs only its bounding test
-function sk_material(x, y, z) {
-	local best = ::sk_world(x, y, z);
+// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point the wall is dw from: the nearest wins, ties to the earlier.
+// Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test
+function sk_material(x, y, z, dw) {
+	local best = dw;
 	local m = 0;
 	local bone = ::sk_skull(x, y, z, best);
 	bone = ::sk_capsules(x, y, z, 0, ::SK_NBONE, bone);
@@ -346,8 +347,11 @@ function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 	}
 	local hit = false;
 	local inside = ::sk_world(ox, oy, oz) < 0.0;
+	// the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
+	local lip = (groups & 2) != 0 ? 1.2 : 1.0;
 	local ds_last = 0.0;
 	local t_last = 0.0;
+	local wall = 0.0;
 	local i = 0;
 	while (i < 64) {
 		local x = ox + dx * t;
@@ -365,9 +369,9 @@ function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 		}
 		local d = dw;
 		if (near) {
-			// the creature's distance is 1.18-Lipschitz: skipped while its last distance, less what the ray has closed
-			// since, stays above the wall and above the glow so far or the aura's reach (0.5)
-			local bound = ds_last - (t - t_last) * 1.2 - 0.001;
+			// skipped while its last distance, less what the ray has closed since, stays above the wall and above the glow
+			// so far or the aura's reach (0.5)
+			local bound = ds_last - (t - t_last) * lip - 0.001;
 			if (bound < dw || (bound < glow && bound < 0.5)) {
 				local ds = ::sk_spider(x, y, z, groups, cand, nc);
 				glow = ds < glow ? ds : glow;
@@ -378,6 +382,7 @@ function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 		}
 		if (d < 0.001 + t * 0.0015) {
 			hit = true;
+			wall = dw;
 			break;
 		}
 		t += d * 0.85;
@@ -396,7 +401,7 @@ function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 	local x = ox + dx * t;
 	local y = oy + dy * t;
 	local z = oz + dz * t;
-	local m = ::sk_material(x, y, z);
+	local m = ::sk_material(x, y, z, wall);
 	local fog = 1.0 - t / 14.0;
 	fog = fog < 0.0 ? 0.0 : fog;
 	local lx = ::SK_LX - x;
@@ -691,6 +696,7 @@ class Ossuary extends Scene {
 		::SK_K = 0.45 * ::sin(t * 0.21 + 0.6);
 		::SK_TW = 0.11 * ::sin(t * 0.29 + 1.3);
 		::SK_WA = 0.18 + 0.14 * ::sin(t * 0.33 + 2.0);
+		::SK_SHELL = ::SK_S * (2.1 + ::SK_WA * 2.4);
 		local ph = t * 0.19;
 		local a = 0.5 + 0.5 * ::cos(ph);
 		local b = 0.5 + 0.5 * ::cos(ph - 2.0944);

@@ -717,3 +717,12 @@ exact bits, the symbols by spelling, every proto table, the typed sites, each ce
 sites, calls and refusals, every nested chunk; no runtime cache or counter). A compiler change that claims unchanged
 output proves it by identical manifests over a corpus; a listing alone cannot tell two constants or two live masks
 apart.
+
+### Operand encodings
+
+The pinned and checked cell forms of an arithmetic or a comparison read their left operand as a cell and take a constant
+only on the right; the any-kind arithmetic reads a constant on either side; the any-kind comparison and the comparison
+value read their left operand as a cell. The emission normalizes: a comparison (a head, a body compare, a comparison value)
+with a literal on the left is emitted as its mirror (`5 < i` as `i > 5`, never the negation, since a NaN fails both orders), a
+commutative typed arithmetic swaps its operands, and any other arithmetic with a literal on the left takes the any-kind form.
+Two literals in a comparison and a literal argument of a math operation have no encoding, and the translation refuses them.

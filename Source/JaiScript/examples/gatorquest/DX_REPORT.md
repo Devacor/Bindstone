@@ -15,6 +15,38 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 | 2 | 09-27 | A parse error in an imported file is not reported when the root loads; the checker instead lists every name that file declares as "use of undeclared identifier" in the other files | worked around (run the imported file directly to see its parse error) |
 | 3 | 09-27 | **Backend divergence.** On the interpreter, an error raised inside a file run by `include(path)` (a `throw`, a run-time error, or a static-check failure of the included file) escapes the `try` around the include and ends the program; the VM catches it. Repro below (milestone b entry). Also: the static-check listing of an included file says `script:L:C`, not the file's path | reported, not fixed (engine batch); the hot-reload test skips its two broken-edit steps on the interpreter |
 | 4 | 09-27 | A runtime `include` inside a function declares an `enum` only in that function's scope, silently: re-running `enum Color { red, green, blue }` leaves the global `Color` unchanged, with no warning | by design as far as I can tell (include is textual); worked around by keeping enums in a file that is never reloaded |
+| 5 | 09-27 | **Runner:** `NetServer.listen` and `NetChannel.listen` set `SO_REUSEADDR`, which on Windows lets a second listener bind a port that is already listening: two hosts on one machine both "succeed" on 28777 and the OS picks which gets each connection. Found by the menu test's busy-port check | fixed in the runner (`SO_EXCLUSIVEADDRUSE` on Windows, POSIX unchanged), own commit |
+| 6 | 09-27 | **Checker gap:** an unknown method on a typed array passes the strict check and fails only when it runs: `array<string> a = ["x"]; a.insert(0, "y");` loads under `--check=strict` and raises `array has no member 'insert'` at run time | reported, not fixed (engine batch) |
+
+## Summary at milestone e (menus and movement prediction)
+
+New since milestone d: the title screen became the way into every mode (Single player, Host a game with the port and
+this machine's addresses, Join a game with address, port, the recent servers and the name last used on each, and a
+connecting state that ends joined or with the reason: NAME TAKEN, SERVER FULL, VERSION MISMATCH, UNREACHABLE); the ESC
+menu gained Host this game, Stop hosting and Leave to title, and sessions now end back at the title. The local gator is
+predicted: it moves on the key press, steps go to the host with sequence numbers, the host acknowledges them in every
+snapshot, and the client replays what is still in flight and glides the rare correction. Other gators and monsters are
+drawn ~100 ms behind a smoothed host clock. A network simulator (`lag`, `jitter`, `loss`) and two new headless tests
+(`predtest`, `menutest`, 37 checks) run green on both backends, with every earlier gate unchanged (smoke STATE_HASH
+3237070200, endgame 61631680).
+
+Corrections measured by `predtest` (64 s of walking per round trip, VM; the interpreter's run matches within one):
+
+| round trip | jitter | loss | steps | corrections | per minute | largest | snaps |
+|---|---|---|---|---|---|---|---|
+| 0 ms | 0 | 0% | 268 | 0 | 0.0 | 0 | 0 |
+| 60 ms | 10 ms | 0% | 275 | 0 | 0.0 | 0 | 0 |
+| 150 ms | 25 ms | 1% | 210 | 1 | 0.9 | 1 tile | 0 |
+| 300 ms | 50 ms | 1% | 255 | 3 | 2.8 | 2 tiles | 0 |
+
+Every free step was taken on the frame the key was held (0 misses in 1,008), the prediction matched the host at all 48
+stops, and the scripted rejected move (a monster the host spawned on the target tile) corrected once, by one tile,
+with the drawn gator never moving more than 0.10 tiles between two frames.
+
+Ratings for this stretch: **writing prediction and a menu state machine in JaiScript good** (nothing in the language
+got in the way; the hard parts were design), **testing it good** (a virtual clock was one global), **the runner
+okay** (it needed a builtin for the machine's addresses and had a Windows port-binding bug, bug 5). Two engine-side
+items: bug 6 (a checker gap) and bug 2 recurring once.
 
 ## Final summary (milestone d: the shippable demo)
 
@@ -488,3 +520,58 @@ a `write_bmp`/`write_png` helper for an int palette canvas would help every term
 bar over an empty swamp. The camera eases toward the player once per rendered frame; the capture modes render only when
 they take a picture, so the camera lagged whole realms behind. The fix (snap when the target is more than a screen away)
 also helps a real player after a long same-realm recall.
+
+### 2026-09-27: the host/join menu and movement prediction
+
+**Good: prediction was mostly reuse.** The client has only ever drawn from a `ClientView` filled by snapshots, and
+client and host are the same scripts, so the predictor (`gq_predict.jai`, ~260 lines) reads the same tile tables
+(`T_WALK`, `DX`/`DY`, `in_world`) the host's `player_move` does and mirrors its step-time rule (water, swimming skill,
+slows, ghosts). The host side is a per-player queue of `S|seq|dir` steps run at the gator's own pace (~40 lines) and
+two more fields in the player's `Y` record: the last step processed and where it left the gator. Reconciliation is
+the textbook loop: drop acknowledged steps, replay the rest from the host's position, glide the difference
+(`CORR_X *= 0.72` per frame), snap beyond three tiles. The details that took thought were all design, not language:
+what an acknowledgement means when a teleport flushes the queue (acknowledge everything queued), how a wall bump is
+sent (once per new direction, so facing still reaches the host), and how others are drawn (a smoothed copy of the
+host's tick, nudged 15% per frame toward the newest snapshot and held ~1 tick behind it, interpolating each mobile
+between its previous and current move). Rating: good.
+
+**Good: a virtual clock was one assignment.** Every time-dependent line in the client reads the global `NOW_MS`, so
+the prediction test sets `NOW_MS += 33` per frame and ticks the host every 100 ms of that clock, sleeping a
+millisecond between the two sides so the loopback sockets deliver. It goes through the same `pred_input` the keyboard
+calls, against the real host and real sockets. A minute of play takes 6 to 25 seconds of wall time, nearly all of it
+those sleeps: a 1 ms sleep measured 1.5 ms at one point, and the slow runs fit Windows' default 15.6 ms timer tick. The price of real sockets:
+which frame a message lands in varies, so the correction counts move by one between runs and are not
+hash-deterministic; a loopback transport inside the script would fix that if it ever mattered. Rating: good.
+
+**Good: the simulator is 40 lines.** Latency, jitter and TCP-style loss (a "lost" message arrives 250 ms late and holds
+the ones behind it, since TCP keeps order) are two timed queues per client session in front of the channel. My first
+version of one test check measured the wrong thing (the peak glide offset, which is small when the correction lands
+while the step is still being drawn); what a player sees as a jump is the largest frame-to-frame move of the drawn
+gator, and that is what the test now bounds.
+
+**Good: a menu is a state machine you can test.** The title's logic (`title_key(k)` and `title_update()`) never draws,
+so `menutest` drives it with key names against a real host in the same process: hosting, a busy port, a join, each
+refusal the host can send (a taken name, a full swamp, another protocol version, forced by swapping `NET_PROTO` around
+the hello), a port nobody listens on, a host name that does not resolve, cancelling, the recent list, the ESC menu
+entries, leaving to the title with the world saved, and a client dropped back to the title with the reason: 37 checks
+in 3.7 s. Editing a field through a `string&` parameter (`tm_edit_digits(TM_PORT, k)`) behaves like C++. The refusal
+reasons are plain text from the host (`REFUSE|a gator named X is already here`), mapped to titles by `contains`;
+fine for one codebase talking to itself, though a code field would be the robust choice across versions.
+
+**Okay: the runner needed two changes (the harness was rebuilt twice this milestone, both logged here).** First, a
+script cannot learn its own machine's addresses, which the host page must show, so the runner gained
+`net_host_name()` and `net_local_addresses()` (gethostname plus getaddrinfo, loopback left out; its own commit).
+Second, the menu test's busy-port check failed: the runner's listeners set `SO_REUSEADDR`, which on Windows lets a
+second listener take a busy port, so two hosts on one machine would both have started on 28777 (bug 5; fixed with
+`SO_EXCLUSIVEADDRUSE` on Windows, its own commit).
+
+**Okay: small gaps.** Arrays have no `insert(i, v)`; I rebuilt the recent list instead. The strict checker did not
+flag the call (bug 6), so it surfaced only when a join first succeeded. And bug 2 bit once more: a raw newline inside
+a string literal in `gq_title.jai` was reported as `script:145:2: error: use of undeclared identifier 'title_setup'`
+(and four more names) in `gatorquest.jai`; running the title file directly showed the real error in a second. About
+five minutes, the same shape as in milestone a.
+
+**Networking in JaiScript, in sum.** Easy: a text protocol with `split` and `to_int(default)`; per-session state in
+typed parallel arrays; receivers that push into inboxes by captured index; queues with `push`/`remove(0)`; the whole
+host/client/prediction stack is ~700 lines. Hard: nothing the language caused. What I would want next time: a
+loopback transport for deterministic tests, and the method-name check (bug 6).

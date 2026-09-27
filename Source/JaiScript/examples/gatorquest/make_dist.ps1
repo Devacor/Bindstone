@@ -23,19 +23,13 @@ rem Gator Quest: {0}
 cd /d "%~dp0"
 "%~dp0jaiscript.exe" --no-debug --no-pause "%~dp0scripts\gatorquest.jai" -- {1} %*
 '@
-Set-Content -Path (Join-Path $game "play.bat") -Value ($launch -f "single player", "") -Encoding ASCII
-Set-Content -Path (Join-Path $game "host.bat") -Value ($launch -f "play and host a multiplayer game (port 28777, or: host.bat port N)", "host") -Encoding ASCII
+Set-Content -Path (Join-Path $game "play.bat") -Value ($launch -f "the title screen: single player, host a game or join one", "") -Encoding ASCII
+Set-Content -Path (Join-Path $game "host.bat") -Value ($launch -f "host a multiplayer game: opens the host page (port 28777, or: host.bat port N)", "host") -Encoding ASCII
 $join = @'
 @echo off
-rem Gator Quest: join a game. Usage: join.bat <host address> [port N]
+rem Gator Quest: join a game. Usage: join.bat [host address] [port N] (no address: type it on the join page)
 cd /d "%~dp0"
-if "%~1"=="" (
-	set /p ADDR=Host address:
-) else (
-	set "ADDR=%~1"
-	shift
-)
-"%~dp0jaiscript.exe" --no-debug --no-pause "%~dp0scripts\gatorquest.jai" -- join %ADDR% %1 %2 %3 %4
+"%~dp0jaiscript.exe" --no-debug --no-pause "%~dp0scripts\gatorquest.jai" -- join %*
 '@
 Set-Content -Path (Join-Path $game "join.bat") -Value $join -Encoding ASCII
 Set-Content -Path (Join-Path $game "serve.bat") -Value ($launch -f "a dedicated host with no screen (port 28777, or: serve.bat port N)", "serve") -Encoding ASCII

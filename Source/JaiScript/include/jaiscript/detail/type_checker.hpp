@@ -173,6 +173,8 @@ namespace jai {
         // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
         void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
         void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out);
+        // Every literal import path below the unit's top level (an import runs at program scope wherever it is written)
+        void collect_unit_imports(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out);
 
         // AST-level static check against `eng`'s current registration surface.
         // extra_globals: names the host defines for this execution (instance variables).

@@ -745,6 +745,9 @@ namespace jai {
         // auto (parse_type maps `function` to auto, the same as a function-typed parameter);
         // the checker reads this to hold the slot to callables and null
         bool function_spelling = false;
+        // Declared without an initializer (`T x;`, `var x;`): the parser supplies the type's default, and a same-unit re-run
+        // of a program-scope declaration keeps the existing value (detail::redeclaration_keeps_value)
+        bool default_initialized = false;
         // Parser escape analysis: the variable may be bound by reference, so its
         // declaration boxes the value into a cell (storage IS the cell from birth)
         bool ref_escaping = false;

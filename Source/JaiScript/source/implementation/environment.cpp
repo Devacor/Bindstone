@@ -321,6 +321,20 @@ void environment::define_variable(uint64_t id, script_value&& value) {
     bump_env_epoch();
 }
 
+script_value* environment::same_unit_cell(uint64_t id) {
+    if (parent_ || local_ids_.count(id) == 0 || shared_placeholders_.count(id)) { return nullptr; }
+    const unit_stamp unit = symbolizer_->current_unit();
+    auto owner = unit_of_.find(id);
+    if (owner != unit_of_.end() && owner->second.id == unit.id) {
+        auto flat = flat_lookup_.find(id);
+        return flat != flat_lookup_.end() ? flat->second : nullptr;
+    }
+    if (auto versions = versions_.find(id); versions != versions_.end()) {
+        for (auto& v : versions->second) { if (v.unit.id == unit.id) { return v.cell; } }
+    }
+    return nullptr;
+}
+
 // The binding of a versioned name for the running code: its own unit's cell when that unit declared the
 // name, else the cell declared most recently among those declared no later than the code's execution
 // (top-level code: its current run; a function: the run that minted it), else the flat cell (a forward

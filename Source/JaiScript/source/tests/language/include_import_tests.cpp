@@ -846,32 +846,218 @@ public:
             }
         });
 
-        test("import_is_a_top_level_declaration_only", [=, this]() {
-            // Dev's ruling (2026-09-14): an import runs once and takes no scope, so it is written at the top level of a file
-            // only; inside a function, a block, a class or a namespace it is a parse error naming the rule, on both backends
+        test("import_is_a_statement_that_takes_no_scope", [=, this]() {
+            // Dev's ruling (2026-09-27): an import may stand wherever a statement may (a function, a block, a loop, a lambda) and
+            // always runs at program scope; directly in a class or a namespace body it is a parse error naming the rule
+            auto lib = create_temp_file("lib_anywhere.jai", "int lib_fn() { return 11; }\n");
             const char* nested[] = {
-                "int f() { import \"lib.jai\"; return 1; } f();",
-                "if (true) { import \"lib.jai\"; } 3;",
-                "class C { import \"lib.jai\"; int v = 0; } 4;",
-                "namespace ns { import \"lib.jai\"; int g() { return 2; } } ns::g();",
-                "var h = function() { import(\"lib.jai\"); return 5; }; h();",
+                "int f() { import \"lib_anywhere.jai\"; return lib_fn(); } f();",
+                "if (true) { import \"lib_anywhere.jai\"; } lib_fn();",
+                "if (true) import \"lib_anywhere.jai\"; lib_fn();",
+                "var h = function() { import(\"lib_anywhere.jai\"); return lib_fn(); }; h();",
+            };
+            const char* members[] = {
+                "class C { import \"lib_anywhere.jai\"; int v = 0; } 4;",
+                "namespace ns { import \"lib_anywhere.jai\"; int g() { return 2; } } ns::g();",
             };
             for (bool use_vm : {false, true}) {
                 for (const char* src : nested) {
                     auto eng = engine::make();
                     if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    eng->add_include_path(jai::foundry::test_temp_directory().string());
+                    check_eq((int64_t)11, eng->execute(src).as_int(), src);
+                }
+                for (const char* src : members) {
+                    auto eng = engine::make();
+                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                     std::string text;
                     try { (void)eng->execute(src); } catch (const std::exception& ex) { text = ex.what(); }
-                    check_true(text.find("import is allowed only at the top level") != std::string::npos, std::string("rejected with the rule: ") + src + " -> " + text);
+                    check_true(text.find("import is a statement, not a member: it is not allowed directly in a class or a namespace body") != std::string::npos, std::string("rejected with the rule: ") + src + " -> " + text);
                 }
-                auto src = create_temp_file("top_imp.jai", "var TOP_IMP = 11;");
+            }
+            cleanup_temp_file(lib);
+        });
+
+        test("an_import_anywhere_runs_its_module_at_program_scope_once_per_change", [=, this]() {
+            // wherever it is reached: the first reach runs the module as its own unit, a reach with the file's (mtime, size)
+            // stamp unchanged costs the stamp check only, a touched file re-runs in place (functions and classes replace, live
+            // instances migrate, initializers re-run); a re-run checks the module before any of it runs, and a failure is
+            // catchable and leaves the program as it was
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool proofs : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                eng->add_include_path(dir.string());
+                int runs = 0;
+                eng->add_function("module_ran", [&runs]() { ++runs; });
+                write_module("ia_mod.jai", "module_ran();\nint ia_value() { return 7; }\nint IA_LIMIT = 3;\n");
+                eng->execute("void load() { import \"ia_mod.jai\"; }\nload();\nload();");
+                check_eq(1, runs, "the first reach runs the module; an unchanged reach does not");
+                check_eq((int64_t)7, eng->execute("ia_value();").as_int(), "its declarations are at program scope");
+                check_eq((int64_t)3, eng->execute("IA_LIMIT;").as_int());
+                eng->execute("for (int i = 0; i < 5; i++) { if (i % 2 == 0) { import \"ia_mod.jai\"; } }");
+                check_eq(1, runs, "an if in a loop reaches it three times, the stamp holds");
+                write_module("ia_mod.jai", "module_ran();\nint ia_value() { return 8; }\nint IA_LIMIT = 9;\n");
+                eng->execute("for (int i = 0; i < 3; i++) { load(); }");
+                check_eq(2, runs, "a touched module re-runs once");
+                check_eq((int64_t)8, eng->execute("ia_value();").as_int(), "its function replaced in place");
+                check_eq((int64_t)9, eng->execute("IA_LIMIT;").as_int(), "its initializer re-ran");
+                write_module("ia_co.jai", "int ia_co_value() { return 21; }\n");
+                check_eq((int64_t)21, eng->execute("coroutine int ia_gen() { import \"ia_co.jai\"; yield ia_co_value(); }\nint got = 0;\nfor (auto v : ia_gen()) { got = v; }\ngot;").as_int(), "from a coroutine");
+                write_module("ia_lam.jai", "int ia_lam_value() { return 5; }\n");
+                check_eq((int64_t)5, eng->execute("var ia_lam = []() { import \"ia_lam.jai\"; return ia_lam_value(); };\nia_lam();").as_int(), "from a lambda");
+                write_module("ia_cls.jai", "class IaBox { int v = 1; int get() { return v; } }\n");
+                eng->execute("void load_cls() { import \"ia_cls.jai\"; }\nload_cls();\nIaBox box = IaBox();\nbox.v = 4;");
+                write_module("ia_cls.jai", "class IaBox { int v = 1; int extra = 5; int get() { return v * 100 + extra; } }\n");
+                check_eq((int64_t)405, eng->execute("load_cls();\nbox.get();").as_int(), "the live instance migrated: its field kept, the new field and method arrived");
+                write_module("ia_mod.jai", "module_ran();\nint ia_value() { return \"text\"; }\n");
+                const std::string checked = eng->execute("var m = \"\";\ntry { load(); } catch (e) { m = e; }\nm;").to_string();
+                check_true(checked.rfind("static check failed:\n", 0) == 0 && checked.find("ia_mod.jai:2:") != std::string::npos, checked);
+                check_eq(2, runs, "none of the failing module ran");
+                check_eq((int64_t)8, eng->execute("ia_value();").as_int(), "the program is unchanged");
+                write_module("ia_mod.jai", "module_ran();\nint ia_value() { return 10; }\nthrow \"module failed\";\n");
+                check_eq(std::string("module failed"), eng->execute("var m2 = \"\";\ntry { load(); } catch (e) { m2 = e; }\nm2;").to_string(), "a runtime error in the run is catchable");
+                check_eq(3, runs);
+                write_module("ia_mod.jai", "module_ran();\nint ia_value() { return 11; }\n");
+                eng->disable(jai::filesystem);
+                check_eq(std::string("Insufficient privilege: filesystem."), eng->execute("var m3 = \"\";\ntry { load(); } catch (e) { m3 = e; }\nm3;").to_string());
+                eng->enable(jai::filesystem);
+                eng->execute("load();");
+                check_eq(4, runs);
+                const std::string walled = eng->execute("array<int> xs = [1, 2, 3];\nvar m4 = \"\";\ntry { parallel_for (auto& x : xs) { import \"ia_mod.jai\"; x = x + 1; } } catch (e) { m4 = e; }\nm4;").to_string();
+                check_true(walled.find("include/import is not allowed in a parallel body") != std::string::npos, walled);
+                // the dev-reload idiom: a module list included from the loop's function; only a touched module re-runs, and a
+                // touched module that fails its check leaves everything as it was
+                int ran_a = 0, ran_b = 0;
+                eng->add_function("ran_a", [&ran_a]() { ++ran_a; });
+                eng->add_function("ran_b", [&ran_b]() { ++ran_b; });
+                write_module("ia_list_a.jai", "ran_a();\nint ia_a() { return 1; }\n");
+                write_module("ia_list_b.jai", "ran_b();\nint ia_b() { return 2; }\n");
+                write_module("ia_list.jai", "import \"ia_list_a.jai\";\nimport \"ia_list_b.jai\";\n");
+                eng->execute("void tick() { include \"ia_list.jai\"; }\nfor (int i = 0; i < 4; i++) { tick(); }");
+                check_eq(std::string("1 1"), std::to_string(ran_a) + " " + std::to_string(ran_b));
+                write_module("ia_list_a.jai", "ran_a();\nint ia_a() { return 10; }\n");
+                eng->execute("for (int i = 0; i < 4; i++) { tick(); }");
+                check_eq(std::string("2 1"), std::to_string(ran_a) + " " + std::to_string(ran_b), "only the touched module re-ran");
+                check_eq((int64_t)12, eng->execute("ia_a() + ia_b();").as_int());
+                write_module("ia_list_a.jai", "ran_a();\nint ia_a() { return 1.5 + \"x\"; }\nint ia_a2() { return 3; }\n");
+                const std::string list_fail = eng->execute("var lf = \"\";\nfor (int i = 0; i < 2; i++) { try { tick(); } catch (e) { lf = e; } }\nlf;").to_string();
+                check_true(list_fail.find("ia_list_a.jai:2:") != std::string::npos, list_fail);
+                check_eq(std::string("2 1"), std::to_string(ran_a) + " " + std::to_string(ran_b), "the failing module ran nothing");
+                check_eq((int64_t)12, eng->execute("ia_a() + ia_b();").as_int(), "the program kept the code it had");
+                // the checker gathers a nested literal import as a unit of the program
+                write_module("ia_seven.jai", "int ia_seven() { return 7; }\n");
+                auto strict = make_engine();
+                strict->type_proofs(proofs);
+                strict->add_include_path(dir.string());
+                check_eq((int64_t)7, strict->execute("void load_seven() { import \"ia_seven.jai\"; }\nload_seven();\nia_seven();").as_int());
+            }
+            for (const char* f : {"ia_mod.jai", "ia_co.jai", "ia_lam.jai", "ia_cls.jai", "ia_seven.jai", "ia_list.jai", "ia_list_a.jai", "ia_list_b.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
+        test("the_ladder_answers_exactly_while_it_remembers_its_answers", [=, this]() {
+            // resolution is remembered per asking folder, and a file appearing on an earlier rung or the answer disappearing
+            // is seen at once
+            const auto base = jai::foundry::test_temp_directory() / "ladder_memo";
+            const auto asking = base / "asking";
+            const auto lib = base / "lib";
+            std::filesystem::create_directories(asking);
+            std::filesystem::create_directories(lib);
+            { std::ofstream(lib / "lm.jai") << "1;"; }
+            std::filesystem::remove(asking / "lm.jai");
+            for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
-                eng->add_include_path(jai::foundry::test_temp_directory().string());
-                check_eq((int64_t)11, eng->execute("import \"top_imp.jai\"; TOP_IMP;").as_int(), "a top-level import still runs");
-                cleanup_temp_file(src);
+                eng->add_include_path(lib.string());
+                const std::string root = (asking / "root.jai").string();
+                auto ask = [&]() { return eng->execute_file_source(root, "resolve_path(\"lm.jai\");").to_string(); };
+                const std::string from_lib = ask();
+                check_true(from_lib.find("ladder_memo/lib/lm.jai") != std::string::npos, from_lib);
+                check_eq(from_lib, ask(), "remembered");
+                { std::ofstream(asking / "lm.jai") << "2;"; }
+                const std::string sibling = ask();
+                check_true(sibling.find("ladder_memo/asking/lm.jai") != std::string::npos, "an earlier rung's new file wins: " + sibling);
+                std::filesystem::remove(asking / "lm.jai");
+                check_eq(from_lib, ask(), "the vanished answer falls back down the ladder");
+                std::filesystem::remove(lib / "lm.jai");
+                check_eq(std::string(), ask(), "no rung holds it");
+                { std::ofstream(lib / "lm.jai") << "1;"; }
             }
+            std::filesystem::remove_all(base);
         });
+
+        test("a_module_rerun_keeps_a_variable_declared_without_an_initializer", [=, this]() {
+            // Dev's ruling (2026-09-27): a same-unit re-run resets a variable only when its declaration assigns; `T x;` keeps the
+            // value (the first run defaults it), unless its declared type changed, which resets it to the new type's default
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 100;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool proofs : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                eng->add_include_path(dir.string());
+                const std::string body = "int kills;\nint resets = 0;\narray<int> pack;\nclass KeepBox { int n = 0; }\nKeepBox held;\nvar loose;\n"
+                                         "void kill() { kills += 1; resets += 1; pack.push(kills); held.n = kills; loose = kills; }\n";
+                write_module("ia_state.jai", body);
+                eng->execute("void load_state() { import \"ia_state.jai\"; }\nload_state();");
+                check_eq(std::string("0 0 0 0 null"), eng->execute("to_string(kills) + \" \" + to_string(resets) + \" \" + to_string(pack.size()) + \" \" + to_string(held.n) + \" \" + to_string(loose);").to_string(), "the first run defaults");
+                eng->execute("kill(); kill(); kill();");
+                write_module("ia_state.jai", body + "// touched\n");
+                eng->execute("load_state();");
+                check_eq(std::string("3 0 3 3 3"), eng->execute("to_string(kills) + \" \" + to_string(resets) + \" \" + to_string(pack.size()) + \" \" + to_string(held.n) + \" \" + to_string(loose);").to_string(),
+                         "declarations without an initializer keep their values; the one that assigns resets");
+                write_module("ia_state.jai", "float kills;\nint resets = 0;\narray<int> pack;\nclass KeepBox { int n = 0; }\nKeepBox held;\nvar loose;\n");
+                eng->execute("load_state();");
+                check_eq(std::string("float 0.0 3"), eng->execute("type_of(kills) + \" \" + to_string(kills) + \" \" + to_string(pack.size());").to_string(), "a declared type change resets to the new default");
+                // the host's re-run of the same file is the same unit and keeps too
+                const std::string host_path = (dir / "ia_host_state.jai").string();
+                check_eq((int64_t)0, eng->execute_file_source(host_path, "int hp;\nhp;").as_int());
+                eng->execute("hp = 42;");
+                check_eq((int64_t)42, eng->execute_file_source(host_path, "int hp;\nhp;").as_int());
+                check_eq((int64_t)5, eng->execute_file_source(host_path, "int hp = 5;\nhp;").as_int());
+            }
+            cleanup_temp_file((dir / "ia_state.jai").string());
+        });
+
+        test("a_leaf_the_vm_inlines_is_replaced_by_its_modules_rerun_inside_the_hot_loop", [=, this]() {
+            // the loop's own import re-runs the touched module mid-loop: the call that was grafted sees the new body from the
+            // next iteration on, on both backends
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto path = dir / "ia_leaf.jai";
+            int tick = 200;
+            auto write_leaf = [&](const std::string& body) {
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool proofs : {true, false}) {
+                write_leaf("int ia_leaf(int x) { return x + 1; }\n");
+                auto eng = make_engine();
+                eng->type_proofs(proofs);
+                eng->add_include_path(dir.string());
+                eng->add_function("touch_leaf", [&]() { write_leaf("int ia_leaf(int x) { return x + 1000; }\n"); });
+                const auto total = eng->execute("import \"ia_leaf.jai\";\n"
+                                                "int run() { int total = 0; for (int i = 0; i < 2000; i++) { import \"ia_leaf.jai\"; total += ia_leaf(i); if (i == 999) { touch_leaf(); } } return total; }\n"
+                                                "run();").as_int();
+                check_eq((int64_t)3000000, total);
+            }
+            std::filesystem::remove(path);
+        });
+
         test("import_mtime_gate_sits_above_disk_cache", [=, this]() {
             // import's once-per-change gate decides IF the file runs at all; the disk
             // cache only decides parse-vs-load when it does (pin: hot-reload semantics).

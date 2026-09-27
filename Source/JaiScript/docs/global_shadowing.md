@@ -25,7 +25,11 @@ declaration) binds the name for the declaring unit:
 
 - A name no unit has declared gets a cell.
 - The same unit declaring the name again writes the existing cell in place: a file reloaded at its
-  path, a hook string executed every frame.
+  path, a module an import re-runs, a hook string executed every frame. A declaration that assigns
+  (`int kills = 0;`) runs its initializer again; one written without an initializer (`int kills;`,
+  `array<Item> pack;`, `var loose;`) keeps the value the variable holds, unless its declared type
+  changed, which resets it to the new type's default (the rule a class field follows on hot reload).
+  The first run of a declaration without an initializer takes its type's default.
 - A different unit declaring the name gets a new cell. The earlier cell stays the binding of its
   own unit's code and of code compiled before the new declaration.
 
@@ -49,9 +53,21 @@ function's environment and does not see the frame (its parameters and slot local
 names them undeclared. A function without an include pays nothing for this. An included file the VM
 compiles at run time belongs to the including unit:
 two units including the same file each get their own compiled program, and a function it defines is
-compiled once per unit, so no compiled code ever runs under two units. An `import` is a unit of its
-own, and a top-level declaration only: inside a function, a block, a class or a namespace it is a parse error, since
-an import runs once and takes no scope.
+compiled once per unit, so no compiled code ever runs under two units.
+
+An `import` is a unit of its own, keyed by the module's canonical path, and it takes no scope: it is a
+statement allowed wherever a statement is (a function or lambda body, a block, a loop, a conditional,
+a coroutine), and wherever it stands the module's declarations are program-scope declarations of the
+module's unit. Directly in a class or a namespace body it is a parse error (`import is a statement, not a
+member: it is not allowed directly in a class or a namespace body`), since there it would read as scoped.
+An import runs its module when first reached; reached again, it re-runs the module only when the file's
+(mtime, size) stamp moved, and an unchanged module costs the stamp check. A re-run is the same unit
+declaring again (above): functions and classes replace in place and live instances migrate. The module
+and the modules it imports are parsed and checked before any of it runs, so under strict a parse or
+check failure is a catchable error naming the file and line, and the program stays as it was; under the
+default `file_timestamp` behavior a failed re-run is attempted again once the file changes again. A run-time error during the run is catchable at the
+import. Code compiled against the old functions sees the replacements (the vm's inlined calls guard the
+callee's body at each call).
 
 An `enum` follows the same scoping: declared inside a function or a block (written there, or brought
 there by an include) it is local to that scope, so an enum of the same name at program scope keeps its

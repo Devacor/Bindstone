@@ -17,6 +17,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
+#include <jaiscript/detail/redeclaration.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/utf8_text.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -16348,6 +16349,10 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	if (!engine_) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
+	if (engine_->import_is_idle(path)) {   // the stamp check alone (KEEP BYTE-PARALLEL with interpreter::visit_import_decl)
+		stack_.push_back(make_null());
+		return {};
+	}
 
 	auto resolve_result = jai::resolve_include_path(path, engine_);
 	if (!resolve_result) {
@@ -16590,6 +16595,12 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_namespace_decl: return exec_namespace_decl(f, ins);
 		case opcode::op_enum_decl: return exec_enum_decl(f, ins);
 		case opcode::op_extern_decl: return exec_extern_decl(f, ins);
+		case opcode::op_decl_keep: {
+			auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
+			const script_value* cell = environment_->get_parent() ? nullptr : environment_->same_unit_cell(decl->name_id);
+			stack_.push_back(script_value(cell && detail::redeclaration_keeps_value(*decl, *cell), engine_));
+			return {};
+		}
 		case opcode::op_throw: return exec_throw(f, ins);
 		case opcode::op_try_push: return exec_try_push(f, ins);
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
@@ -17929,6 +17940,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_namespace_decl:
 			case opcode::op_enum_decl:
 			case opcode::op_extern_decl:
+			case opcode::op_decl_keep:
 			case opcode::op_throw:
 			case opcode::op_try_push:
 			case opcode::op_try_pop:

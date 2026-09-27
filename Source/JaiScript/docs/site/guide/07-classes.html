@@ -184,24 +184,38 @@ anything = free
 caught: Cannot assign string to field &#x27;hp&#x27; of Stats (declared int)
 == result: 3</code></pre></div>
 <p>Write the literal directly (<code>s.hp = &quot;not a number&quot;;</code>) and it is a load error instead: <code>error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)</code>, and the <code>try</code> never runs. Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips.</p>
-<h2 id="access-control">Access control: <code>private:</code> / <code>public:</code><a class="hlink" href="#access-control" aria-label="link">&#8203;</a></h2>
-<p>C++-style section labels control access. Fields and methods after a <code>private:</code> label are reachable from the class&#x27;s own methods but not from outside. The violation is a catchable run-time error, not a silent read:</p>
+<h2 id="access-control">Access control: <code>public:</code> / <code>private:</code><a class="hlink" href="#access-control" aria-label="link">&#8203;</a></h2>
+<p>Section labels control access, and there are two levels. Members start public: everyone reaches them. A member after a <code>private:</code> label is reachable from the class that declares it and from every class derived from it, by a bare name in a method, through <code>this.</code>, and through any object of that class family. <code>protected:</code> is accepted as a synonym of <code>private:</code>, so C++ habits compile and read the same. Code outside the family (a free function, top-level code, an unrelated class) gets <code>Cannot access private member &#x27;x&#x27; of class &#x27;C&#x27;</code> for every read, write, call, compound assignment and <code>++</code>/<code>--</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Chest {
 private:
     int gold = 250;
 public:
     int looted = 0;
-    auto peek() { return gold; }      // methods see private members
+    auto peek() { return gold; }              // the class&#x27;s own code sees private members
 }
-auto c = Chest();
-print(&quot;peek() = {}&quot;, c.peek());
+class Vault : Chest {
+    int double_gold() { return gold * 2; }    // so does every class derived from it
+}
+auto v = Vault();
+print(&quot;peek() = {}, double_gold() = {}&quot;, v.peek(), v.double_gold());
+var anyone = v;
 try {
-    c.gold;
+    anyone.gold;
 } catch (e) {
     print(&quot;caught: {}&quot;, e);
 }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">peek() = 250
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">peek() = 250, double_gold() = 500
 caught: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;</code></pre></div>
+<p>A <code>var</code> receiver is checked when the access runs, as above. When the receiver&#x27;s class is known at load, the strict checker reports the same text before anything runs (warn mode prints it and lets the run reach the raise):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Chest {
+private:
+    int gold = 250;
+}
+auto c = Chest();
+print(c.gold);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">script:6:9: error: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;
+    print(c.gold);
+            ^</code></pre></div>
 <h2 id="accessors-get-x-set-x">Accessors: <code>_get_x</code> / <code>_set_x</code><a class="hlink" href="#accessors-get-x-set-x" aria-label="link">&#8203;</a></h2>
 <p>Every field comes with synthesized accessors, which is why <code>obj.x</code> just works. Declare your own <code>_get_x()</code> / <code>_set_x(v)</code> and they win: <code>obj.x</code> reads through the getter, <code>obj.x = v</code> writes through the setter. Inside the class a bare <code>x</code> is still the backing field, so the accessors can use it without recursing:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Thermostat {

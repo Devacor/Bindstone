@@ -3114,6 +3114,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                  member_scope_.statics, expr->symbol_id, /*want_methods*/ true);
         if (member) {
+            JAISCRIPT_TRY(detail::bare_member_access(member, expr->symbol_id, environment_->find_access_context()));
             if (member.what == detail::member_probe_hit::kind::method) {
                 if (member.instance && member_scope_.this_storage) {
                     push_value(create_bound_method(*member_scope_.this_storage, member.method_value));
@@ -4181,6 +4182,9 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                         std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                         if (instance && instance->has_field(identifier->symbol_id)) {
+                            if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+                                JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
+                            }
                             // A hybrid's C++ property reads through its getter and stores through
                             // its setter (KEEP BYTE-PARALLEL with the VM exec_incdec this-tail)
                             const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
@@ -4857,6 +4861,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                         "Undefined variable '{0}' (not a field of 'this')", identifier->symbol_id);
+                }
+                if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+                    JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
                 }
 
                 // Get current field value. A hybrid's C++ property reads through its getter and
@@ -5647,9 +5654,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         return {};
                     }
                 }
-                member_wins = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
-                                                         member_scope_.statics, identifier->symbol_id,
-                                                         /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
+                const auto store_member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                                     member_scope_.statics, identifier->symbol_id, /*want_methods*/ false);
+                if (store_member) {
+                    JAISCRIPT_TRY(detail::bare_member_access(store_member, identifier->symbol_id, environment_->find_access_context()));
+                }
+                member_wins = store_member.what != detail::member_probe_hit::kind::miss ||
                               detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
                                                               member_scope_.statics, identifier->symbol_id);
             }
@@ -6644,6 +6654,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     define_variable(std::move(minted->value()));
                     return {};
                 }
+                JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
             }
             
@@ -9053,6 +9064,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         }
                     }
                     auto src = detail::resolve_capture_source(slot_val, environment_.get(), member_scope_, var_id);
+                    if (src.what == detail::capture_source::kind::denied) [[unlikely]] {
+                        return *src.access_error;
+                    }
                     if (src.cell) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_env_storage(*src.cell, engine_));
@@ -9712,6 +9726,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
             if (!targetPtr) {
                 auto minted = bind_bare_cpp_property_ref(targetSymbolId, ident->global_qualified);
                 if (!minted) {
+                    JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
                 }
                 if (!*minted) {
@@ -13666,6 +13681,10 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             auto member = detail::probe_member_scope(caller_state, caller_locals->scope_this,
                                                      caller_locals->scope_static, symbol_id,
                                                      /*want_methods*/ false);
+            if (member) {
+                JAISCRIPT_TRY(detail::bare_member_access(member, symbol_id,
+                                                         caller_env ? caller_env->find_access_context() : nullptr));
+            }
             if (member.value_ptr) {
                 return bind_reference_to_storage(*member.value_ptr, frame_index, param.slot_index);
             }

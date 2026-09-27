@@ -128,6 +128,7 @@ public:
 		guide_examples();
 		parallel_contracts();
 		native_exceptions();
+		access_control();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1634,6 +1635,112 @@ private:
 			every_config("host script_exception", "Random failure!", [](engine& e) {
 				e.add_function("raise_it", []() -> script_int { throw jai::script_exception("Random failure!"); });
 				return e.execute("var r = \"\"; try { raise_it(); } catch (x) { r = x; } r;").as_string();
+			});
+		});
+	}
+
+	// Access control (Dev ruling 2026-09-27, two levels as simple as possible): public: = everyone; private: = the declaring
+	// class and every class derived from it, by any spelling and through any receiver of the family; protected: is a synonym
+	// of private: (one message). Outside the family every read, write, call, compound and ++/-- raises
+	// "Cannot access private member 'x' of class 'C'"; the strict checker reports it at load when the receiver class is
+	// statically known (a warning in warn mode), with the same text
+	void access_control() {
+		const char* W = R"(
+			class Wallet {
+			private:
+				int secret = 42;
+				int hidden() { return 7; }
+				static int vault = 5;
+			protected:
+				int prot = 3;
+			public:
+				int own_other(Wallet w) { return w.secret; }
+				int peek_sub() { return tip; }
+			}
+			class Tipper : Wallet { private: int tip = 9; }
+			class Clip : Wallet { }
+			function bump(int& r) { r = r + 1; }
+			class Purse : Wallet {
+				int peek_secret() { return secret; }
+				int poke_secret() { secret = 9; return secret; }
+				int compound_secret() { secret += 1; return secret; }
+				int inc_secret() { secret++; return secret; }
+				int call_hidden() { return hidden() + super::hidden(); }
+				int ref_secret() { auto& r = secret; r = 50; return secret; }
+				int pass_ref() { bump(secret); return secret; }
+				int lambda_secret() { auto l = [=]() { return secret; }; return l(); }
+				int binary_secret() { return secret + 1; }
+				int this_secret() { return this.secret; }
+				int other(Wallet w) { return w.secret; }
+				int sibling(Clip c) { return c.secret; }
+				int statics() { return Wallet::vault; }
+				int prot_synonym() { prot += 1; return prot; }
+			}
+			class Thief { int steal(Wallet w) { return w.secret; } }
+			function t(function f) -> string {
+				string r = "";
+				try { r = "" + f(); }
+				catch (e) {
+					r = e == "Cannot access private member 'secret' of class 'Wallet'" ? "S"
+					  : e == "Cannot access private member 'hidden' of class 'Wallet'" ? "H"
+					  : e == "Cannot access private member 'vault' of class 'Wallet'" ? "V"
+					  : e == "Cannot access private member 'prot' of class 'Wallet'" ? "P" : e;
+				}
+				return r + ",";
+			}
+		)";
+		test("the_declaring_class_and_every_derived_class_reach_a_private_member_by_any_spelling", [this, W]() {
+			expect("family", std::string(W) + R"(
+				t([]() { return Purse().peek_secret(); }) + t([]() { return Purse().poke_secret(); }) +
+				t([]() { return Purse().compound_secret(); }) + t([]() { return Purse().inc_secret(); }) +
+				t([]() { return Purse().call_hidden(); }) + t([]() { return Purse().ref_secret(); }) +
+				t([]() { return Purse().pass_ref(); }) + t([]() { return Purse().lambda_secret(); }) +
+				t([]() { return Purse().binary_secret(); }) + t([]() { return Purse().this_secret(); }) +
+				t([]() { return Purse().other(Wallet()); }) + t([]() { return Purse().sibling(Clip()); }) +
+				t([]() { return Purse().statics(); }) + t([]() { return Purse().prot_synonym(); }) +
+				t([]() { return Wallet().own_other(Purse()); });
+			)", "42,9,43,43,14,50,43,42,43,42,42,42,5,4,42,", check_mode::off);
+		});
+		test("outside_the_family_every_spelling_raises_the_one_private_text", [this, W]() {
+			expect("outside", std::string(W) + R"(
+				t([]() { return Wallet().secret; }) + t([]() { Wallet w = Wallet(); w.secret = 1; return "w"; }) +
+				t([]() { Wallet w = Wallet(); w.secret += 1; return "c"; }) + t([]() { Wallet w = Wallet(); w.secret++; return "i"; }) +
+				t([]() { return Wallet().hidden(); }) + t([]() { return Wallet::vault; }) + t([]() { return Wallet().prot; }) +
+				t([]() { return Thief().steal(Wallet()); }) + t([]() { var v = Purse(); return v.secret; }) +
+				t([]() { return Tipper().peek_sub(); });
+			)", "S,S,S,S,H,V,P,S,S,Cannot access private member 'tip' of class 'Tipper',", check_mode::off);
+		});
+		test("the_strict_checker_reports_an_outside_access_at_load_with_the_runtime_text", [this]() {
+			every_config("checker", "1:Cannot access private member 'secret' of class 'Wallet'|0|0|0|1:Cannot access private member 'prot' of class 'Wallet'|"
+			             "1:Cannot access private member 'secret' of class 'Wallet'|1:Cannot access private member 'vault' of class 'Wallet'|0|0", [](engine& e) {
+				const std::string base = "class Wallet { private: int secret = 42; int hidden() { return 7; } static int vault = 5; protected: int prot = 3; } ";
+				auto one = [&](const std::string& src) {
+					const auto rep = e.check(base + src);
+					std::string first;
+					for (const auto& d : rep.diagnostics) { if (d.severity == check_diagnostic::level::error) { first = d.message; break; } }
+					return std::to_string(rep.error_count()) + (first.empty() ? "" : ":" + first);
+				};
+				return one("int peek(Wallet w) { return w.secret; }") + "|" +
+				       one("class Purse : Wallet { int peek() { return secret + hidden() + prot; } }") + "|" +
+				       one("class Purse : Wallet { int peek(Wallet w) { return w.secret + this.secret + Wallet::vault; } }") + "|" +
+				       one("class Purse : Wallet { } int f() { return 1; }") + "|" +
+				       one("int peek(Wallet w) { return w.prot; }") + "|" +
+				       one("class Thief { int steal(Wallet w) { return w.secret; } }") + "|" +
+				       one("int f() { return Wallet::vault; }") + "|" +
+				       one("int f() { var v = Wallet(); return v.secret; }") + "|" +
+				       one("class Other { int n = 1; } int g(Other o) { return o.n; }");
+			});
+		});
+		test("a_strict_load_with_an_outside_access_runs_nothing_and_warn_mode_runs_to_the_raise", [this]() {
+			every_config("modes", "raised|0|S", [](engine& e) {
+				e.add_global("ran", script_value(script_int(0), &e));
+				const std::string src = "class Wallet { private: int secret = 42; } ran = 1; int peek(Wallet w) { return w.secret; } ";
+				std::string out;
+				try { e.execute(src); out = "loaded"; } catch (const std::exception&) { out = "raised"; }
+				out += "|" + std::to_string(e.execute("ran").as_int());
+				e.static_checking(check_mode::warn);
+				out += "|" + e.execute(src + "string r = \"\"; try { peek(Wallet()); } catch (x) { r = x == \"Cannot access private member 'secret' of class 'Wallet'\" ? \"S\" : x; } r;").as_string();
+				return out;
 			});
 		});
 	}

@@ -1436,6 +1436,10 @@ namespace jai::vm {
             auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
                                                   f.locals->scope_static, symbol_id, /*want_methods*/ false);
             if (hit) {
+                if (hit.class_def && hit.class_def->chain_has_nonpublic() &&
+                    !detail::bare_member_access(hit, symbol_id, frame_access_context(f))) [[unlikely]] {
+                    return nullptr;   // out of reach: the value site raises the access text
+                }
                 return hit.value_ptr;   // a C++ property answers nullptr: a shadow, minted by value sites
             }
             if (detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
@@ -1595,6 +1599,10 @@ namespace jai::vm {
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto instance = this_val.get_class_instance();
             if (!instance) { return nullptr; }
+            if (const class_definition* def = instance->get_class_definition(); def && def->chain_has_nonpublic() &&
+                !detail::enforce_member_access(def, sym, frame_access_context(f))) [[unlikely]] {
+                return nullptr;   // out of reach: frame_bare_member_access names the text
+            }
             // A C++ property has no cell: the pointer form answers null (the ref arms mint instead)
             if (detail::cpp_property_getter_id(instance.get(), sym)) { return nullptr; }
             script_value& field_ref = instance->get_field(sym, false);
@@ -1603,6 +1611,15 @@ namespace jai::vm {
                 return class_def->get_static_field_ptr(sym);
             }
             return nullptr;
+        }
+        // A reference to a bare member out of reach names the access text, never the undefined one
+        checked_result<void> frame_bare_member_access(frame& f, uint64_t sym) {
+            if (!f.locals || f.top_level) { return {}; }
+            ensure_frame_member_scope(f, environment_.get());
+            if (!frame_scope_active(f)) { return {}; }
+            auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this, f.locals->scope_static, sym,
+                                                  /*want_methods*/ false);
+            return hit ? detail::bare_member_access(hit, sym, frame_access_context(f)) : checked_result<void>{};
         }
         op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out,
                                       bool as_callee = false);

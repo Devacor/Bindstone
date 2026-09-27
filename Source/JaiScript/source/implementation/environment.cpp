@@ -24,6 +24,16 @@
 #include <windows.h>
 #endif
 
+namespace {
+// The method-kind fallback reaches the receiver's members by bare name: access applies as at every bare-name site
+// (detail::bare_member_access's rule; ctx = the class whose method body runs)
+inline jai::checked_result<void> receiver_member_access(const jai::environment& env, const jai::class_instance& instance, uint64_t id) {
+    const jai::class_definition* def = instance.get_class_definition();
+    if (!def || !def->chain_has_nonpublic()) [[likely]] { return {}; }
+    return jai::detail::enforce_member_access(def, id, env.find_access_context());
+}
+}
+
 namespace jai {
 
 namespace detail {
@@ -209,6 +219,9 @@ checked_result<script_value> environment::get(uint64_t id) const {
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
+                if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
+                    return access.error_value();
+                }
                 // Try to get field first (non-throwing). A C++ property's placeholder is
                 // never an env cell: the this-tails read it through its getter
                 const script_value& field_ref = instance->get_field(id, false);
@@ -416,6 +429,9 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
+                if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
+                    return access.error_value();
+                }
                 // Try to get instance field first (return const reference)
                 const script_value& inst_field_ref = instance->get_field(id, false);
                 if (!inst_field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
@@ -492,6 +508,9 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
+                if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
+                    return access.error_value();
+                }
                 // Try to get instance field first (return non-const reference)
                 script_value& inst_field_ref = instance->get_field(id, false);
                 if (!inst_field_ref.is_invalid() && !detail::cpp_property_getter_id(instance.get(), id)) {
@@ -895,6 +914,9 @@ script_value* environment::get_value_ptr(uint64_t id) {
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
+                if (!receiver_member_access(*this, *instance, id)) [[unlikely]] {
+                    return nullptr;   // out of reach: the value site raises the access text
+                }
                 // Try to get instance field - get_field returns a reference. A C++ property's
                 // placeholder is never an env cell (contains/get_env_var_ptr/vm_storage_lookup
                 // walk through here): the this-tails read it through its getter

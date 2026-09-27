@@ -893,15 +893,17 @@ string healthLevel = health > 75 ? "healthy" :
     constructor delegation (the ONLY initializer-list forms).
 11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.
 12. **Visibility**: `public:`/`private:`/`protected:` labels are **enforced at member
-    access** on both backends: private = the declaring class's methods only; protected =
-    declaring class + subclasses; default is public. Lambdas defined inside a method
-    inherit that class's access; free functions and top-level code see public members
-    only. Violations raise a catchable error ("Cannot access private member 'x' of
-    class 'C'"). Scope notes: constructors are exempt (labels govern member access, not
-    construction); operator methods dispatch through operators regardless of labels;
-    unqualified self-field reads inside methods resolve through the instance scope and
-    are not re-checked (explicit `this.x` is); the host C++ API (`get_field`/`set_field`,
-    serialization, reflection) is deliberately unrestricted. Hot reload is permissive:
+    access** on both backends, in two levels (Dev ruling 2026-09-27): default and
+    `public:` = everyone; `private:` = the declaring class and every class derived from
+    it, by a bare name, `this.x` or any receiver of that family; `protected:` is a synonym
+    of `private:`. Lambdas defined inside a method inherit that class's access; free
+    functions, top-level code and unrelated classes see public members only. Violations
+    raise a catchable error ("Cannot access private member 'x' of class 'C'") on every
+    spelling (read, write, call, compound, `++`/`--`, reference, capture), and the strict
+    checker reports a violation whose receiver class it knows at load, with the same text.
+    Scope notes: constructors are exempt (labels govern member access, not construction);
+    operator methods dispatch through operators regardless of labels; the host C++ API
+    (`get_field`/`set_field`, serialization, reflection) is deliberately unrestricted. Hot reload is permissive:
     enforcement consults the class's CURRENT definition at access time. Enforcement
     costs one flag test on classes with no nonpublic members (measured: within
     benchmark noise), so there is no engine toggle.

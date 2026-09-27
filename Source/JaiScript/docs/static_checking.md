@@ -229,6 +229,15 @@ warning, path-qualified, for each enum the file declares under a program-scope n
 host's warning channel (`engine::report_script_warning`, stderr unless the host sets a handler),
 since a run-time include has no load listing to print.
 
+**Access** — two levels (Dev ruling 2026-09-27): a member after `private:` (or `protected:`,
+its synonym) is reachable from the declaring class and every class derived from it, by any
+spelling and through any receiver of that family. An access outside the family whose member
+the checker resolves - a receiver whose static class is certain (`w.secret` with `Wallet w`,
+`Wallet::vault`, `this`/bare names inside an unrelated class's method, a free function, top-level
+code) - is the error `Cannot access private member 'secret' of class 'Wallet'`, the runtime's
+text, and the member's field proof is withheld. A `var` receiver stays lenient and raises the
+same text when it runs.
+
 **Map keys** — the pair variable of a range-for over a statically known map (`map<K,V> m`,
 an `auto` map literal; a `var` map is dynamic) carries a read-only `first` - C++
 `pair<const K, V>` - by value and by reference alike (`auto& kv` aliases the value AND the key;

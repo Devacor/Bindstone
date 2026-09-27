@@ -377,6 +377,14 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
     return hit;
 }
 
+// Name lookup finds a bare member name first, then access applies (enforce_member_access: a private member is reachable
+// from its declaring class and every class derived from it). ctx = the class whose method body runs. KEEP the one check
+// for every bare-name member site of both backends (loads, stores, reference binding, captures).
+inline checked_result<void> bare_member_access(const member_probe_hit& hit, uint64_t sym, const class_definition* ctx) {
+    if (!hit.class_def || !hit.class_def->chain_has_nonpublic()) [[likely]] { return {}; }
+    return enforce_member_access(hit.class_def, sym, ctx);
+}
+
 // A name that could be a member METHOD under this scope (fields/statics answer via
 // pointer rungs). Pointer-only resolvers use this to bail to their minting path.
 inline bool member_scope_has_method(member_scope_state state,

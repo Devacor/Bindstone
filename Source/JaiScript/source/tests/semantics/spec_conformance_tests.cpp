@@ -238,6 +238,41 @@ private:
 				run();
 			)", "0||0|false|0.0|null");
 		});
+		test("bare_return_in_a_delegated_constructor_ends_only_that_body", [this]() {
+			// C++: a delegating constructor runs the whole target constructor (its base initializer included), then its own body
+			expect("delegation", R"(
+				class B { int b = 0; B(int x) { b = x; } }
+				class D : B {
+					int d = 0; string path = "";
+					D(int x) : super(x) { path += "I"; if (x < 0) { return; } d = x * 10; path += "J"; }
+					D() : this(-1) { path += "K"; d = 5; }
+					D(string s) : this(7) { if (s == "x") { return; } path += "L"; }
+				}
+				function show(D v) -> string { return "" + v.b + "," + v.d + "," + v.path; }
+				show(D()) + "|" + show(D(3)) + "|" + show(D("x")) + "|" + show(D("y"));
+			)", "-1,5,IK|3,30,IJ|7,70,IJ|7,70,IJL");
+		});
+		test("a_delegation_chain_runs_every_target_whole_and_a_cycle_raises", [this]() {
+			// C++: D() -> D(int) -> D(int, int) : super(a + b); field initializers run once, in the innermost target;
+			// a delegation cycle is ill-formed in C++ and raises the recursion text instead of recursing without end
+			expect("delegation chain", R"(
+				class B { int b = 0; string log = ""; B(int x) { b = x; log += "B"; } }
+				class D : B {
+					int d = 1;
+					D(int x, int y) : super(x + y) { log += "2"; d += 10; }
+					D(int x) : this(x, 100) { log += "1"; d += 100; }
+					D() : this(5) { log += "0"; d += 1000; }
+				}
+				class Loop { int v = 0; Loop() : this(1) { } Loop(int x) : this() { } }
+				function run() -> string {
+					D v = D();
+					string err = "";
+					try { var l = Loop(); } catch (e) { err = e; }
+					return "" + v.b + "," + v.d + "," + v.log + "|" + err;
+				}
+				run();
+			)", "105,1111,B210|Maximum recursion depth exceeded - possible infinite recursion");
+		});
 		test("a_throw_in_a_delegated_constructor_keeps_the_target_and_runs_no_destructor", [this]() {
 			expect("delegated throw", R"(
 				var LOG = [];
@@ -1016,20 +1051,6 @@ private:
 	}
 
 	void known_bugs() {
-		test("bare_return_in_a_delegated_constructor_ends_only_that_body", [this]() {
-			// C++: a delegating constructor runs the whole target constructor (its base initializer included), then its own body
-			expect("delegation", R"(
-				class B { int b = 0; B(int x) { b = x; } }
-				class D : B {
-					int d = 0; string path = "";
-					D(int x) : super(x) { path += "I"; if (x < 0) { return; } d = x * 10; path += "J"; }
-					D() : this(-1) { path += "K"; d = 5; }
-					D(string s) : this(7) { if (s == "x") { return; } path += "L"; }
-				}
-				function show(D v) -> string { return "" + v.b + "," + v.d + "," + v.path; }
-				show(D()) + "|" + show(D(3)) + "|" + show(D("x")) + "|" + show(D("y"));
-			)", "-1,5,IK|3,30,IJ|7,70,IJ|7,70,IJL");
-		});
 		test("rethrow_after_a_nested_try_inside_a_catch_rethrows_the_outer_exception", [this]() {
 			// docs/EXCEPTION_DESIGN.md addendum: a nested try inside a catch keeps the caught exception live for throw; (C++)
 			expect("rethrow", R"(

@@ -4476,9 +4476,9 @@ public:
         });
         test("ctor_super_and_delegation_compose", [this]() {
             auto e = make_engine();
-            // 43 = the pre-slice both-backend answer (pinned, not derived): the
-            // delegation runs the target's body, then the delegating body composes
-            check_eq((int64_t)43, e->execute(R"(
+            // C++ delegation runs the whole target constructor: super(3 * 2) sets b = 6, the target body d = 3, then the
+            // delegating body d = 43; b + d = 49
+            check_eq((int64_t)49, e->execute(R"(
                 class Base { int b = 0; Base(int v) { b = v; } }
                 class D : Base {
                     int d = 0;

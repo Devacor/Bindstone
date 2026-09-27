@@ -15251,105 +15251,18 @@ void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>&
 // the native path and the in-loop ctor-body entry. Success value = the new instance
 // ('this'); the picked overload rides the out-param. Extracted verbatim from
 // construct_instance - every error spelling unchanged.
-checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+checked_result<script_value> vm_backend::initialize_members(const std::shared_ptr<script_class_definition>& class_def,
                                                             const std::shared_ptr<environment>& definition_env,
+                                                            const std::shared_ptr<class_instance>& instance,
+                                                            const script_value& this_value,
+                                                            const std::shared_ptr<function_decl>& matching_ctor,
                                                             const std::vector<script_value>& args,
-                                                            std::shared_ptr<function_decl>& matching_ctor_out,
-                                                            std::vector<script_value>& captured_out) {
-	// This native phase owns the constructor depth only until a body takes over.
-	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
-		return detail::raise_call_depth();
+                                                            std::optional<detail::call_depth_guard>& initializer_depth,
+                                                            size_t delegation_depth,
+                                                            std::vector<script_value>* captured_out) {
+	if (delegation_depth > detail::k_max_constructor_delegation_depth || detail::native_stack_low()) {
+		return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
 	}
-	std::optional<detail::call_depth_guard> initializer_depth;
-	initializer_depth.emplace(current_call_depth_);
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c0 = __rdtsc();
-#endif
-	const auto& ctor_asts = class_def->get_constructor_asts();
-
-	// Trailing defaults open the arity window; within a tier the ctor using FEWER defaults wins
-	std::shared_ptr<function_decl> exact_match_ctor;
-	std::shared_ptr<function_decl> convertible_match_ctor;
-	std::shared_ptr<function_decl> arity_match_ctor;
-	size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
-
-	if (ctor_asts.size() == 1) {   // one constructor: the tiers all pick it once its arity accepts the call
-		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { arity_match_ctor = ctor_asts[0]; }
-	} else
-	for (const auto& ctor_ast : ctor_asts) {
-		if (!arity_accepts(ctor_ast->parameters, args.size())) {
-			continue;
-		}
-		const size_t defaults_used = ctor_ast->parameters.size() - args.size();
-
-		if (defaults_used < arity_defaults) {
-			arity_match_ctor = ctor_ast;
-			arity_defaults = defaults_used;
-		}
-
-		bool exact_match = true;
-		bool convertible_match = true;
-		for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
-			const auto& param = ctor_ast->parameters[i];
-			if (param.type && !param.type->type_name.empty()) {
-				auto arg_type = args[i].type();
-				if (arg_type == script_value_type::jai_object_type) {
-					auto resolved = resolve_member_target(args[i]);
-					if (resolved) {
-						if (resolved.class_name() != param.type->type_name) {
-							exact_match = false;
-							convertible_match = false;
-						}
-					} else {
-						exact_match = false;
-						convertible_match = false;
-					}
-				} else {
-					if (arg_type != param.type->base_type) {
-						exact_match = false;
-						bool is_numeric_conversion =
-							(arg_type == script_value_type::jai_int_type &&
-							 param.type->base_type == script_value_type::jai_float_type) ||
-							(arg_type == script_value_type::jai_float_type &&
-							 param.type->base_type == script_value_type::jai_int_type);
-						if (!is_numeric_conversion) {
-							convertible_match = false;
-						}
-					}
-				}
-			}
-		}
-
-		if (exact_match && defaults_used < exact_defaults) {
-			exact_match_ctor = ctor_ast;
-			exact_defaults = defaults_used;
-		}
-		if (convertible_match && defaults_used < convertible_defaults) {
-			convertible_match_ctor = ctor_ast;
-			convertible_defaults = defaults_used;
-		}
-	}
-
-	std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
-	if (!matching_ctor) {
-		matching_ctor = convertible_match_ctor;
-	}
-	if (!matching_ctor) {
-		matching_ctor = arity_match_ctor;
-	}
-
-	if (!matching_ctor) {
-		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-			class_def->get_type_id(), args.data(), args.size(), engine_, true);
-	}
-
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c1 = __rdtsc();
-#endif
-	auto instance = class_def->create_instance();
-
-	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-
 	// (binding evaluates trailing defaults for omitted args; omitted params are simply
 	// absent here, like C++ field-inits that can't see ctor params)
 	if (!arity_accepts(matching_ctor->parameters, args.size())) {
@@ -15365,14 +15278,14 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 		init_env->set_access_context(class_def.get());   // field initializers are class-body code
 	}
 	// the construction runs code ahead of the body: the call's arguments are taken first, as the body's parameters (KEEP
-	// BYTE-PARALLEL with interpreter::construct_instance)
+	// BYTE-PARALLEL with interpreter::initialize_members); a delegated-to constructor's arguments were taken as they evaluated
 	const std::vector<script_value>* argv = &args;
-	if (init_env && detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
-		captured_out = args;
-		for (size_t j = 0; j < captured_out.size(); ++j) {
-			detail::capture_argument(captured_out[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
+	if (captured_out && init_env && detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
+		*captured_out = args;
+		for (size_t j = 0; j < captured_out->size(); ++j) {
+			detail::capture_argument((*captured_out)[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
 		}
-		argv = &captured_out;
+		argv = captured_out;
 	}
 	for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
 		const auto& param = matching_ctor->parameters[i];
@@ -15385,9 +15298,6 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	// delegating ctor must not re-run field initializers afterward
 	bool delegated_to_this = false;
 
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c2 = __rdtsc();
-#endif
 	for (const auto& initializer : matching_ctor->initializers) {
 		if (initializer.target == "super") {
 			if (class_def->get_parent()) {
@@ -15618,9 +15528,11 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 					class_def->get_type_id(), init_args.data(), init_args.size(), engine_, true);
 			}
 
-			// Declared defaults BEFORE the delegated-to ctor body so the target can override
-			auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
-			if (!initialized) { return initialized.error_value(); }
+			// C++ delegation: the target constructor runs whole - its own initializer list (a base constructor or a further
+			// delegation), the members, then its body; the delegating constructor re-runs no field initializer afterward
+			auto target_members = initialize_members(class_def, definition_env, instance, this_value, target_ctor, init_args,
+			                                         initializer_depth, delegation_depth + 1, nullptr);   // init_args were taken as they evaluated
+			if (!target_members) { return target_members; }
 			delegated_to_this = true;
 
 			auto target_method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
@@ -15634,9 +15546,6 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 		}
 	}
 
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c3 = __rdtsc();
-#endif
 	if (!delegated_to_this) {
 		if (init_env) {
 			auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
@@ -15647,6 +15556,115 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 			stamp_literal_field_initializers(instance, class_def, handled_parent_init);
 		}
 	}
+
+	return this_value;
+}
+
+checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+                                                            const std::shared_ptr<environment>& definition_env,
+                                                            const std::vector<script_value>& args,
+                                                            std::shared_ptr<function_decl>& matching_ctor_out,
+                                                            std::vector<script_value>& captured_out) {
+	// This native phase owns the constructor depth only until a body takes over.
+	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+		return detail::raise_call_depth();
+	}
+	std::optional<detail::call_depth_guard> initializer_depth;
+	initializer_depth.emplace(current_call_depth_);
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c0 = __rdtsc();
+#endif
+	const auto& ctor_asts = class_def->get_constructor_asts();
+
+	// Trailing defaults open the arity window; within a tier the ctor using FEWER defaults wins
+	std::shared_ptr<function_decl> exact_match_ctor;
+	std::shared_ptr<function_decl> convertible_match_ctor;
+	std::shared_ptr<function_decl> arity_match_ctor;
+	size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
+
+	if (ctor_asts.size() == 1) {   // one constructor: the tiers all pick it once its arity accepts the call
+		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { arity_match_ctor = ctor_asts[0]; }
+	} else
+	for (const auto& ctor_ast : ctor_asts) {
+		if (!arity_accepts(ctor_ast->parameters, args.size())) {
+			continue;
+		}
+		const size_t defaults_used = ctor_ast->parameters.size() - args.size();
+
+		if (defaults_used < arity_defaults) {
+			arity_match_ctor = ctor_ast;
+			arity_defaults = defaults_used;
+		}
+
+		bool exact_match = true;
+		bool convertible_match = true;
+		for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
+			const auto& param = ctor_ast->parameters[i];
+			if (param.type && !param.type->type_name.empty()) {
+				auto arg_type = args[i].type();
+				if (arg_type == script_value_type::jai_object_type) {
+					auto resolved = resolve_member_target(args[i]);
+					if (resolved) {
+						if (resolved.class_name() != param.type->type_name) {
+							exact_match = false;
+							convertible_match = false;
+						}
+					} else {
+						exact_match = false;
+						convertible_match = false;
+					}
+				} else {
+					if (arg_type != param.type->base_type) {
+						exact_match = false;
+						bool is_numeric_conversion =
+							(arg_type == script_value_type::jai_int_type &&
+							 param.type->base_type == script_value_type::jai_float_type) ||
+							(arg_type == script_value_type::jai_float_type &&
+							 param.type->base_type == script_value_type::jai_int_type);
+						if (!is_numeric_conversion) {
+							convertible_match = false;
+						}
+					}
+				}
+			}
+		}
+
+		if (exact_match && defaults_used < exact_defaults) {
+			exact_match_ctor = ctor_ast;
+			exact_defaults = defaults_used;
+		}
+		if (convertible_match && defaults_used < convertible_defaults) {
+			convertible_match_ctor = ctor_ast;
+			convertible_defaults = defaults_used;
+		}
+	}
+
+	std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
+	if (!matching_ctor) {
+		matching_ctor = convertible_match_ctor;
+	}
+	if (!matching_ctor) {
+		matching_ctor = arity_match_ctor;
+	}
+
+	if (!matching_ctor) {
+		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+			class_def->get_type_id(), args.data(), args.size(), engine_, true);
+	}
+
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c1 = __rdtsc();
+#endif
+	auto instance = class_def->create_instance();
+
+	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+
+	auto members = initialize_members(class_def, definition_env, instance, this_value, matching_ctor, args, initializer_depth, 0, &captured_out);
+	if (!members) { return members; }
+#ifdef JAISCRIPT_VM_PROFILE
+	const uint64_t prof_c2 = __rdtsc();
+	const uint64_t prof_c3 = prof_c2;
+#endif
 
 #ifdef JAISCRIPT_VM_PROFILE
 	{

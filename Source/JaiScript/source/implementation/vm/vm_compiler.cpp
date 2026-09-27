@@ -4919,11 +4919,20 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
 }
 
-// an element read pushed as a reference whose consumer reads it only after a later operand that may run user code: its value is
-// taken now, as the interpreter reads an operand before evaluating the next
+// an element read or a call's reference result pushed as a reference whose consumer reads it only after a later operand that may run user
+// code: its value is taken now, as the interpreter reads an operand before evaluating the next
 void vm_compiler::deref_ahead_of(const expression* pushed, const expression* later) {
-	if (!pushed || pushed->get_type() != node_type::binary_expr || static_cast<const binary_expr*>(pushed)->op.type != token_type::left_bracket) return;
-	if (static_cast<const binary_expr*>(pushed)->transient_element_read || detail::transient_read_marker::callout_free(later)) return;
+	if (!pushed || detail::transient_read_marker::callout_free(later)) return;
+	if (pushed->get_type() == node_type::binary_expr) {
+		auto* b = static_cast<const binary_expr*>(pushed);
+		if (b->op.type != token_type::left_bracket || b->transient_element_read) return;
+	} else if (pushed->get_type() == node_type::call_expr) {
+		auto* c = static_cast<const call_expr*>(pushed);
+		if (c->callee && c->callee->get_type() == node_type::member_expr && detail::math_intrinsic_for_call(static_cast<const member_expr*>(c->callee.get())) != detail::math_fn::none) return;
+		if (auto fn = c->proven_callee_decl.lock(); fn && !(fn->return_type && fn->return_type->is_reference())) return;   // a value return
+	} else {
+		return;
+	}
 	emit(opcode::op_deref_top);
 }
 

@@ -4897,6 +4897,32 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a call's reference result is an operand the language reads where it stands: ahead of a later operand that may run user code (a
+		// binary's right side, a later container literal element) it is dereferenced first, as an element read is (row 203)
+		test("a_reference_result_is_read_ahead_of_a_writing_sibling", [this]() {
+			const std::string src = "int G = 1;\n"
+				"array<int> A = [1, 2];\n"
+				"class B { int f = 1; function fr() -> int& { return this.f; } }\n"
+				"B OB = B();\n"
+				"int& get() { return G; }\n"
+				"int& geta() { return A[1]; }\n"
+				"function w() -> int { G = G + 100; A[1] = A[1] + 100; OB.f = OB.f + 100; return 1; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    G = 1; int a = get() + w(); out += to_string(a) + \" \";\n"
+				"    G = 1; int b = get() + (w() > 0 ? 1 : 2); out += to_string(b) + \" \";\n"
+				"    G = 1; int c = get() - math::abs(w()); out += to_string(c) + \" \";\n"
+				"    A[1] = 2; int d = geta() + w(); out += to_string(d) + \" \";\n"
+				"    G = 1; var e = [get(), w()]; out += to_string(e[0]) + \" \";\n"
+				"    OB.f = 1; int g = OB.fr() * w(); out += to_string(g) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"string top = \"\"; G = 1; int t = get() + w(); top = to_string(t) + \" \";\n"
+				"top + run();";
+			const std::string expected = "2 2 0 3 1 1 | 2 2 0 3 1 1 | ";
+			both(src, "2 " + expected, "a reference result ahead of a writing sibling");
+			both(src, "2 " + expected, "a reference result ahead of a writing sibling, proofs off", false);
+		});
 	}
 };
 

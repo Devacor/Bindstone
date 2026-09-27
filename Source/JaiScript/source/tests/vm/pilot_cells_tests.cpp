@@ -4414,6 +4414,35 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// G7: a ternary store's computed arm (a unary, a math call, an element read, a member read) lands in a compiler temp and the
+		// typed move row stores it, so the loop around it closes; only the taken arm runs, and its errors keep their texts
+		test("ternary_store_arms_land_computed_values_through_the_move_row", [this]() {
+			const std::string src = "class B { float w = 0.75; }\n"
+				"array<float> A = [0.5, -1.5, 2.5, -3.5, 4.5, -5.5, 6.5, -7.5];\n"
+				"function run(int n) -> float { float s = 0.0; B b = B(); float m = 0.0; float qx = 0.0; float qy = 0.0; float e = 0.0;\n"
+				"  for (int i = 0; i < n; ++i) { qx = A[i & 7] * 1.5; qx = qx < 0.0 ? -qx : qx; int j = (i + 3) & 7; qy = A[j]; qy = qy > 0.0 ? qy : -qy;\n"
+				"    m = qx * 0.5; m = m > 1.0 ? math::sqrt(m) : m; e = i > 3 ? A[i & 7] : b.w; e = e < 0.0 ? b.w : e; s += qx + qy + m + e; }\n"
+				"  return s; }\n"
+				"function kint(int k) -> string { try { int r = 0; for (int i = 0; i < 3; ++i) { r = k < 0 ? -k : k; k = k + 1; } return to_string(r); } catch (err) { return \"E:\" + err; } }\n"
+				"function lazy(int n) -> string { array<int> t = [1, 2]; int v = 0; string out = \"\"; for (int i = 0; i < n; ++i) { v = i < 2 ? t[i] : -i; out += to_string(v); } try { for (int i = 0; i < n; ++i) { v = i < 3 ? t[i] : 0; } } catch (err) { out += \"|E:\" + err; } return out; }\n"
+				"to_string(run(64)) + \",\" + to_string(run(3)) + \",\" + kint(-5) + \",\" + kint(-9223372036854775807 - 1) + \",\" + lazy(5);";
+			both(src, "", "store arms");
+			both(src, "", "store arms, proofs off", false);
+			const std::string vm = run_on(true, src);
+			check_true(vm.find("throw:") == std::string::npos && vm.find(",3,E:") != std::string::npos && vm.find(",12-2-3-4|E:") != std::string::npos, "the arms run as the interpreter runs them: " + vm);
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("UNARY op=") == std::string::npos && fl.find("CELLS_") != std::string::npos, "the loop closes over the arms: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

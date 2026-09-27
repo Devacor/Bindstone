@@ -1664,6 +1664,25 @@ void vm_compiler::compile_ternary_store(identifier_expr* ident, assignment_expr*
 
 void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* assign, const expression_ptr& value) {
 	if (value->get_type() == node_type::ternary_expr) { compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(value)); return; }
+	if (value_temp_operand(value.get())) {
+		// `x = c ? -e : y;`: a unary, math, element or member arm lands in a compiler temp and the move row stores it, as the
+		// statement form does
+		const uint32_t dst = identifier_slot_operand(ident);
+		const size_t temp_mark = temp_next_;
+		fused_operand src;
+		if (dst < k_typed_slot_mask &&
+		    compile_value_into_temp(value, fusable_index_expr(value.get()) ? operand_expect(static_cast<const binary_expr*>(value.get())) : 0xFF, src)) {
+			const uint32_t flags = store_flag_no_result | store_flag_rhs_lvalue;
+			const size_t ip = chunk_->code.size();
+			chunk::typed_site& site = typed_site_at(ip);
+			site.orig = vm_instruction{opcode::op_load, src.slot, src.symbol, 0};
+			site.orig2 = vm_instruction{opcode::op_store, add_symbol(ident->symbol_id), dst, flags};
+			emit(opcode::op_t_store_mov, dst, src.slot, flags);
+			note_ident_node(ip, assign->target);
+			temp_next_ = temp_mark;
+			return;
+		}
+	}
 	compile_expression(value);
 	uint32_t flags = store_flag_no_result;
 	if (is_lvalue_shaped(value.get())) flags |= store_flag_rhs_lvalue;

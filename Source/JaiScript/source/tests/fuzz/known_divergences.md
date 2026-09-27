@@ -109,11 +109,10 @@ computes (`fuzz_order_band.hpp`; the model walks the generator's tree, it never 
   element's index ahead of it, while a name's and an element's value are read after it (docs/invariants.md 12);
   `auto x = y` takes the declared type y's value carries (a var's value makes x a var).
 - `--order-args` also puts a writing call beside a read in call arguments. The model captures each by-value
-  argument where it is evaluated (the call-site capture ruling); until that lands, a disagreement where the
-  backends agree with each other is reported as `known: call-site capture pending` and counted apart.
-  The backends split on one shape, `math::max(A[i], w())` with `w` writing `A[i]` (seeds 6809, 7284): the vm's
-  graft of `w` spills the element ahead of the call (the ruled order; the model and the variant agree) while the
-  interpreter and the vm's kept call read it after `w` returns. The ruling's implementation closes it.
+  argument where it is evaluated (the call-site capture ruling), and every oracle holds there as everywhere
+  else. Fixed by the ruling: seeds 67, 6006, 6461, 6702, 6763, 7126, 7152, 7165, 7289, 7398 (the backends agreed
+  with each other, not with the ruled order) and 6809, 7284 (`math::max(A[i], w())` with `w` writing `A[i]`: the
+  vm's graft captured the element, the interpreter and a kept call read it after `w` returned).
 - The model abstains (the run still holds the first two oracles) on an error, an overflow and on output past
   the harness's print cap.
 

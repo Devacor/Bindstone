@@ -499,6 +499,7 @@ namespace jai::vm {
             uint64_t member_id = 0;
             const class_definition* field_class = nullptr;   // the class of the bare fields the body names (the receiver's exact class); null: none
             std::vector<uint64_t> field_ids;
+            bool env_reads = false;                // a free function's body reads an environment name: the guard holds only where the caller has no member scope (a field would shadow it)
             mutable const class_definition* holds_cd = nullptr;   // the last class the guard validated, at its method epoch
             mutable uint64_t holds_epoch = 0;
         };

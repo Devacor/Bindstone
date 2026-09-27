@@ -4105,6 +4105,48 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function h(float x) -> float { float a = x * P; return a; }\nto_string(P) + \",\" + to_string(h(2.0));";
 			both(pre, "", "a global read ahead of its declaration");
 		});
+		// a free function grafted into a method reads its globals as the callee does: a field of the caller's class never shadows them
+		test("graft_in_a_method_reads_the_callee_globals", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat G = 1.5;\nfunction f(float x) -> float { return x * G; }\n"
+				"class C { float G = 10.0; float m(float y) { float r = f(y) + 1.0; return r; } float n(float y) { float t = 0.0; for (int i = 0; i < 6; ++i) { t += f(y + i); } return t; } }\n"
+				"function top(float y) -> float { float r = f(y) + 1.0; return r; }\n"
+				"var c = C(); to_string(c.m(2.0)) + \",\" + to_string(c.n(1.0)) + \",\" + to_string(top(2.0));";
+			both(src, "4.0,31.5,4.0", "a graft in a method");
+			both(src, "4.0,31.5,4.0", "a graft in a method, proofs off", false);
+		});
+		// row 190: a callee whose only calls are stdlib aliases or math:: intrinsics grafts; the alias keeps its guard inside the graft
+		test("stdlib_math_alias_callees_graft", [this]() {
+			const std::string src = "float K = 2.0;\n"
+				"function len3(float x, float y, float z) -> float { float d = sqrt(x * x + y * y + z * z); return d; }\n"
+				"function len3r(float x, float y, float z) -> float { return sqrt(x * x + y * y + z * z); }\n"
+				"function wav(float x) -> float { float s = sin(x * K); float c = cos(x); float r = s * c + floor(x) + math::sqrt(x * x + 1.0); return r; }\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += len3(x, 1.0, 2.0); float w = wav(x); t += w; } return t; }\n"
+				"function one(float a) -> float { float d = len3r(a, a, a) - 1.0; return d; }\n"
+				"to_string(run(40)) + \",\" + to_string(one(3.0));";
+			both(src, "", "alias callees");
+			both(src, "", "alias callees, proofs off", false);
+			const std::string l = listing_run(src);
+			check_true(l.find("-- inlined len3 ") != std::string::npos && l.find("-- inlined wav") != std::string::npos && l.find("-- inlined len3r") != std::string::npos, "the alias callees graft: " + l.substr(0, 3000));
+		});
+		test("stdlib_math_alias_graft_follows_rebinding_and_members", [this]() {
+			// the alias inside a graft rebound to a function that writes a global the statement reads; a caller method whose class has a
+			// member named like the alias; the alias's value on the stack (a return, an argument, a compound's right side)
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt;\nfloat G = 1.0;\n"
+				"function len2(float x, float y) -> float { float d = sqrt(x * x + y * y); return d; }\n"
+				"function st(float a) -> float { float r = G + len2(a, 1.0); return r; }\n"
+				"function lp() -> float { float t = 0.0; for (int i = 0; i < 5; ++i) { t += len2(i, 2.0); } return t; }\n"
+				"function stackers(float a) -> string { float s = 0.0; s += sqrt(a); return to_string(sqrt(a * 4.0)) + \" \" + to_string(max(sqrt(a), 0.5)) + \" \" + to_string(s); }\n"
+				"class M { float sqrt(float v) { return v * 100.0; } float m(float a) { float r = len2(a, 0.0) + 0.0; return r; } }\n"
+				"string out = to_string(st(3.0)) + \",\" + to_string(lp()) + \",\" + stackers(9.0) + \",\" + to_string(M().m(4.0));\n"
+				"sqrt = function(float v) { G = G + 10.0; return v; };\n"
+				"out += \",\" + to_string(st(3.0)) + \",\" + to_string(lp()) + \",\" + stackers(9.0) + \",\" + to_string(M().m(4.0)) + \",\" + to_string(G);\n"
+				"function nc() -> string { try { return to_string(len2(1.0, 1.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc2() -> string { try { return to_string(sqrt(4.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"out + \",\" + nc() + \",\" + nc2();";
+			both(src, "", "alias grafts under rebinding");
+			both(src, "", "alias grafts under rebinding, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

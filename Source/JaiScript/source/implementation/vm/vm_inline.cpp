@@ -9,6 +9,7 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/core/engine.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -34,6 +35,8 @@ struct inline_context {
 	bool writes_global = false;
 	bool writes_member = false;
 	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
+	bool reads_env = false;                                        // the body names an environment value (a global, a stdlib alias)
+	const engine* eng = nullptr;                                   // the stdlib math aliases a body may call
 	std::vector<std::shared_ptr<ast_node>> pins;
 	std::vector<uint64_t> declared_names;                          // the callee's locals: declared in the caller for the graft's compile
 	const call_expr* replace = nullptr;                            // the statement's clone: this call becomes the result temp
@@ -66,6 +69,12 @@ bool var_reference(const type_info* t) { return t && t->is_reference() && any_ty
 bool math_call(const call_expr* ce) {
 	return ce->callee && ce->callee->get_type() == node_type::member_expr && detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) != detail::math_fn::none;
 }
+// `sqrt(x)` naming a registered stdlib math alias from outside the frame: the math temp's guarded form (the real call on a miss)
+bool alias_call(const call_expr* ce, const engine* eng) {
+	if (!eng || !ce->callee || ce->callee->get_type() != node_type::identifier_expr || ce->arguments.size() != 1) return false;
+	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
+	return !id->global_qualified && id->slot_index == SIZE_MAX && eng->math_alias_fn(id->symbol_id) < engine::k_math_alias_rows;
+}
 bool logical_op(token_type t) { return t == token_type::ampersand_ampersand || t == token_type::pipe_pipe; }
 bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_type::minus_minus; }
 
@@ -73,10 +82,10 @@ bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_t
 // read, the math row): a slot identifier or a literal; arithmetic, a comparison, a shift or a unary of those; an element read of a
 // proven kind over a named container; a math intrinsic of those. A bare global read, a member read, a cast, a ternary, a store or
 // any other call lands on the general form, which a block does not run.
-bool landable(const expression* e);
+bool landable(const expression* e, const engine* eng);
 // an operand of a block instruction: a landable value, or a global read (the fused binary's environment rows)
-bool block_operand(const expression* e) { return e && (e->get_type() == node_type::identifier_expr || landable(e)); }
-bool landable(const expression* e) {
+bool block_operand(const expression* e, const engine* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
+bool landable(const expression* e, const engine* eng) {
 	if (!e) return false;
 	switch (e->get_type()) {
 	case node_type::literal_expr: return true;
@@ -86,19 +95,19 @@ bool landable(const expression* e) {
 		auto* b = static_cast<const binary_expr*>(e);
 		if (b->op.type == token_type::left_bracket) {
 			const uint8_t cls = b->static_operand_class;
-			return (cls == operand_class_int_int || cls == operand_class_float_float) && b->left && b->left->get_type() == node_type::identifier_expr && block_operand(b->right.get());
+			return (cls == operand_class_int_int || cls == operand_class_float_float) && b->left && b->left->get_type() == node_type::identifier_expr && block_operand(b->right.get(), eng);
 		}
-		return block_operand(b->left.get()) && block_operand(b->right.get());
+		return block_operand(b->left.get(), eng) && block_operand(b->right.get(), eng);
 	}
-	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && block_operand(u->operand.get()); }
+	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return !incdec_op(u->op.type) && block_operand(u->operand.get(), eng); }
 	case node_type::ternary_expr: {   // the condition's jumps and one landing per arm: a declaration or a slot store from it is a block's
 		auto* x = static_cast<const ternary_expr*>(e);
-		return block_operand(x->condition.get()) && block_operand(x->then_expression.get()) && block_operand(x->else_expression.get());
+		return block_operand(x->condition.get(), eng) && block_operand(x->then_expression.get(), eng) && block_operand(x->else_expression.get(), eng);
 	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
-		if (!math_call(ce)) return false;
-		for (const auto& a : ce->arguments) { if (!block_operand(a.get())) return false; }
+		if (!math_call(ce) && !alias_call(ce, eng)) return false;
+		for (const auto& a : ce->arguments) { if (!block_operand(a.get(), eng)) return false; }
 		return true;
 	}
 	default: return false;
@@ -106,16 +115,16 @@ bool landable(const expression* e) {
 }
 // a body statement a block runs: a store of a landable value into a slot, a renamed slot, a global, a field or an element; an increment
 // of a slot identifier
-bool landable_stmt(const expression* e) {
+bool landable_stmt(const expression* e, const engine* eng) {
 	if (!e) return false;
 	switch (e->get_type()) {
 	case node_type::assignment_expr: {
 		auto* a = static_cast<const assignment_expr*>(e);
 		const node_type tk = a->target->get_type();
-		if (tk == node_type::binary_expr) { auto* b = static_cast<const binary_expr*>(a->target.get()); if (b->op.type != token_type::left_bracket || !landable(b->right.get())) return false; }
+		if (tk == node_type::binary_expr) { auto* b = static_cast<const binary_expr*>(a->target.get()); if (b->op.type != token_type::left_bracket || !landable(b->right.get(), eng)) return false; }
 		else if (tk == node_type::member_expr) { auto* m = static_cast<const member_expr*>(a->target.get()); if (m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr) return false; }
 		else if (tk != node_type::identifier_expr) return false;
-		return block_operand(a->value.get());
+		return block_operand(a->value.get(), eng);
 	}
 	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return incdec_op(u->op.type) && u->operand && u->operand->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(u->operand.get())->slot_index != SIZE_MAX; }
 	default: return false;
@@ -169,6 +178,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			n->proven_class = id->proven_class; n->proven_slot = id->proven_slot; n->proven_epoch = id->proven_epoch; n->proven_field_type = id->proven_field_type; n->proven_field_write = id->proven_field_write;
 			return n;
 		}
+		if (id->slot_index == SIZE_MAX) { c.reads_env = true; }
 		return clone_identifier(id, c);
 	}
 	case node_type::this_expr:
@@ -226,7 +236,12 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
-		if (!c.replace && !math_call(ce)) { c.fail("a call in the body"); return nullptr; }   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
+		if (!c.replace && !math_call(ce)) {
+			if (!alias_call(ce, c.eng)) { c.fail("a call in the body"); return nullptr; }
+			// the alias makes the real call when its name binds anything else: that callee may write anything, so nothing the statement
+			// reads before the graft stays in place behind it
+			c.writes_global = c.writes_member = c.writes_ref = true;
+		}   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
 		std::vector<expression_ptr> args;
 		for (const auto& a : ce->arguments) { args.push_back(clone_expr(a, c)); }
 		auto callee = clone_expr(ce->callee, c);
@@ -297,7 +312,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (c.in_loop && !proven_return) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven and landable
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
-			if (c.in_loop && !landable(v.get())) { c.fail("a return the block cannot land"); return nullptr; }
+			if (c.in_loop && !landable(v.get(), c.eng)) { c.fail("a return the block cannot land"); return nullptr; }
 			auto rd = c.make<variable_decl>(r->location, c.result_type, c.result->name, c.result->symbol_id, v);   // `T __h = e;`: this path's definition of the result
 			rd->slot_index = c.result->slot_index;
 			if (proven_return) { rd->static_init_proof = proof_same_type; }
@@ -315,7 +330,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		auto* es = static_cast<const expression_stmt*>(s.get());
 		auto e = clone_expr(es->expression, c);
 		if (!c.ok) return nullptr;
-		if (c.in_loop && !landable_stmt(e.get())) { c.fail("a statement the block cannot land"); return nullptr; }
+		if (c.in_loop && !landable_stmt(e.get(), c.eng)) { c.fail("a statement the block cannot land"); return nullptr; }
 		std::vector<declaration_ptr> ds; ds.push_back(c.make<expression_decl>(es->location, e, false));
 		return c.make<block_stmt>(es->location, std::move(ds));
 	}
@@ -328,8 +343,8 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (one.size() != 1) { c.fail("a loop the graft does not take"); return nullptr; }
 			init = one[0];
 		}
-		if (c.in_loop && fs->condition && !landable(fs->condition.get())) { c.fail("a loop the block cannot land"); return nullptr; }
-		if (c.in_loop && fs->update && !landable_stmt(fs->update.get())) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && fs->condition && !landable(fs->condition.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && fs->update && !landable_stmt(fs->update.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
 		auto cond = fs->condition ? clone_expr(fs->condition, c) : nullptr;
 		auto upd = fs->update ? clone_expr(fs->update, c) : nullptr;
 		++c.loop_depth;
@@ -340,7 +355,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 	}
 	case node_type::while_stmt: {
 		auto* ws = static_cast<const while_stmt*>(s.get());
-		if (c.in_loop && !landable(ws->condition.get())) { c.fail("a loop the block cannot land"); return nullptr; }
+		if (c.in_loop && !landable(ws->condition.get(), c.eng)) { c.fail("a loop the block cannot land"); return nullptr; }
 		auto cond = clone_expr(ws->condition, c);
 		++c.loop_depth;
 		statement_ptr body = clone_stmt(ws->body, c, false);
@@ -367,7 +382,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			auto* v = static_cast<const variable_decl*>(d.get());
 			if (v->slot_index == SIZE_MAX || v->is_static || v->ref_escaping || v->function_spelling) { c.fail("a declaration the graft does not take"); return out; }
 			if (v->type && v->type->is_reference()) { c.fail("a reference declaration"); return out; }
-			if (c.in_loop && v->initializer && !landable(v->initializer.get())) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
+			if (c.in_loop && v->initializer && !landable(v->initializer.get(), c.eng)) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
 			expression_ptr init = v->initializer ? clone_expr(v->initializer, c) : nullptr;
 			if (!c.ok) return out;
 			auto n = c.make<variable_decl>(v->location, v->type, v->name, v->name_id, init);
@@ -381,7 +396,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 		case node_type::expression_decl: {
 			auto* ed = static_cast<const expression_decl*>(d.get());
 			if (ed->implicit_return) { c.fail("an implicit return"); return out; }
-			if (c.in_loop && !landable_stmt(ed->expression.get())) { c.fail("a statement the block cannot land"); return out; }
+			if (c.in_loop && !landable_stmt(ed->expression.get(), c.eng)) { c.fail("a statement the block cannot land"); return out; }
 			auto e = clone_expr(ed->expression, c);
 			if (!c.ok) return out;
 			out.push_back(c.make<expression_decl>(ed->location, e, false));
@@ -558,9 +573,9 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	bool in_loop = false;
 	for (const loop_context& lc : loops_) { if (lc.kind == region_kind::loop || lc.kind == region_kind::range_for) { in_loop = true; break; } }
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
-		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get())) { out.why = "an argument the block cannot land"; return false; } }
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), engine_)) { out.why = "an argument the block cannot land"; return false; } }
 	}
-	inline_context probe; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
+	inline_context probe; probe.eng = engine_; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
 	probe.ref_slots.assign(fn->local_count, 0);
@@ -604,7 +619,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::identifier_expr: { free_identifier = true; if (static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX) { free_global = true; } break; }
 		default: {
 			const script_value_type kind = spill_kind(p.get());
-			if (kind == script_value_type::jai_null_type || !landable(p.get())) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
+			if (kind == script_value_type::jai_null_type || !landable(p.get(), engine_)) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
 			out.spills.emplace_back(p, kind);
 			break;
 		}
@@ -682,6 +697,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	temp_next_ += fn->local_count;   // the callee's slots
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	inline_context ctx;
+	ctx.eng = engine_;
 	ctx.slot_offset = base;
 	ctx.renames.assign(fn->local_count, nullptr);
 	ctx.ref_slots.assign(fn->local_count, 0);
@@ -709,6 +725,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	std::vector<declaration_ptr> body = clone_body(fn->body->declarations, ctx, true);
 	chunk_->inline_sites[site_index].field_class = ctx.field_class;
 	chunk_->inline_sites[site_index].field_ids = ctx.field_ids;
+	chunk_->inline_sites[site_index].env_reads = ctx.reads_env && !plan.receiver;
 	// the callee's names count as declared while the graft compiles (a slot identifier compiles to its slot only under a declared
 	// name); the names the caller did not declare leave before the fallback, which compiles the call as the caller's
 	std::vector<uint64_t> added;

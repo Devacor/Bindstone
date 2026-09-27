@@ -87,14 +87,15 @@ function sk_field(float x, float y, float z) -> float {
 	float sa = sin(a);
 	float px = x - SK_CX;
 	float py = y - SK_CY;
-	float s = SK_S;
-	float qx = (px * ca - py * sa + SK_CX) * s;
-	float qy = (px * sa + py * ca + SK_CY) * s;
-	float qz = z * s;
-	float wa = SK_WA;
-	float wx = qx + wa * sin(qy * 1.3 + SK_T * 0.7);
-	float wy = qy + wa * sin(qz * 1.3 + SK_T * 0.6);
-	float wz = qz + wa * sin(qx * 1.3 + SK_T * 0.8);
+	float qx = (px * ca - py * sa + SK_CX) * SK_S;
+	float qy = (px * sa + py * ca + SK_CY) * SK_S;
+	float qz = z * SK_S;
+	float swx = sin(qy * 1.3 + SK_T * 0.7);
+	float swy = sin(qz * 1.3 + SK_T * 0.6);
+	float swz = sin(qx * 1.3 + SK_T * 0.8);
+	float wx = qx + SK_WA * swx;
+	float wy = qy + SK_WA * swy;
+	float wz = qz + SK_WA * swz;
 	float sx = sin(wx); float cx = cos(wx);
 	float sy = sin(wy); float cy = cos(wy);
 	float sz = sin(wz); float cz = cos(wz);
@@ -104,9 +105,10 @@ function sk_field(float x, float y, float z) -> float {
 	return g * SK_MG + p * SK_MP + d * SK_MD * 1.4 - SK_K;
 }
 
-function sk_world(float x, float y, float z) -> float {
-	float g = sk_field(x, y, z);
-	return ((g < 0.0 ? -g : g) - SK_TH) / (SK_S * (2.1 + SK_WA * 2.4));
+// the world's distance from a field value: the shell of half-thickness SK_TH about the level set, scaled to a safe step
+function sk_shell(float g) -> float {
+	float a = g < 0.0 ? -g : g;
+	return (a - SK_TH) / (SK_S * (2.1 + SK_WA * 2.4));
 }
 
 // capsules [first, last) against best: a capsule whose bounding sphere cannot beat best is skipped without a root
@@ -267,7 +269,8 @@ function sk_ray_near(float ox, float oy, float oz, float dx, float dy, float dz,
 
 // 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby
 function sk_material(float x, float y, float z) -> int {
-	float dw = sk_world(x, y, z);
+	float g = sk_field(x, y, z);
+	float dw = sk_shell(g);
 	float ds = sk_skull(x, y, z);
 	float dj = sk_capsules(x, y, z, 0, SK_NBONE, 99.0);
 	float bone = ds < dj ? ds : dj;
@@ -329,13 +332,15 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		glow = tc < 0.0 ? 9.0 : sqrt(perp < 0.0 ? 0.0 : perp) - 0.55;
 	}
 	bool hit = false;
-	bool inside = sk_world(ox, oy, oz) < 0.0;
+	float g0 = sk_field(ox, oy, oz);
+	bool inside = sk_shell(g0) < 0.0;
 	int i = 0;
 	while (i < 64) {
 		float x = ox + dx * t;
 		float y = oy + dy * t;
 		float z = oz + dz * t;
-		float dw = sk_world(x, y, z);
+		float g = sk_field(x, y, z);
+		float dw = sk_shell(g);
 		if (inside) {
 			// the camera sits inside a wall: the first slab along the ray is cut away
 			if (dw < 0.0) {
@@ -830,7 +835,8 @@ class Ossuary : Scene {
 		cdx /= want; cdy /= want; cdz /= want;
 		float reach = 1.5;
 		while (reach < want) {
-			float d = sk_world(hx + cdx * reach, hy + cdy * reach, hz + cdz * reach);
+			float g = sk_field(hx + cdx * reach, hy + cdy * reach, hz + cdz * reach);
+			float d = sk_shell(g);
 			if (d < 0.14) { break; }
 			reach += d * 0.8;
 		}
